@@ -1,0 +1,29 @@
+# Le projet n'est pas sous git aujourd'hui. Ce fichier existe pour que
+# le jour où tu voudras l'y mettre, tes clés ne partent jamais par
+# accident dans un dépôt — c'est l'erreur la plus courante et la plus
+# coûteuse quand on démarre.
+
+# SECRETS — ne jamais versionner
+.env
+.env.local
+.env*.local
+
+# Dépendances et compilation (se régénèrent avec `npm install` / `npm run build`)
+node_modules
+.next
+.turbo
+out
+
+# Vercel
+.vercel
+
+# Système
+.DS_Store
+Thumbs.db
+*.log
+
+.vercel
+
+# Réglages locaux de CETTE machine (permissions Claude Code) — chaque
+# ordinateur a les siens, ils ne voyagent pas.
+.claude/settings.local.json

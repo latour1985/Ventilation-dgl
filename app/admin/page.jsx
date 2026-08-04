@@ -1,0 +1,15930 @@
+"use client";
+
+import React, { useState, useMemo, useRef, useEffect, createContext, useContext } from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import {
+  FileText, Calendar, Bell, Plus, Trash2, ChevronDown, ChevronUp, ChevronLeft,
+  ChevronRight, MapPin, Mail, FileCheck2, Clock, Send, X, Check,
+  AlertCircle, Search, Users, UserPlus, RefreshCw, Phone, CreditCard,
+  Camera, ClipboardList, UserCog, KeyRound, ShieldCheck, Lock, Loader2, User, Pencil, Briefcase, Car,
+  Cloud, CheckCircle2, AlertTriangle, LayoutGrid, List, BarChart3, Menu, LogOut, Banknote, Copy, Settings, Package,
+} from "lucide-react";
+import TermesConditions from "@/components/TermesConditions";
+import ConnexionAdmin from "@/components/ConnexionAdmin";
+import { supabase } from "@/lib/supabase/client";
+import { permissionsEffectives, permissionsPour, ORDRE_SECTIONS, LIBELLES_SECTIONS, aAutorisation } from "@/lib/permissions";
+import GestionAcces from "@/components/GestionAcces";
+import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
+import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
+import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
+import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations } from "@/lib/supabase/tachesAssignees";
+import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
+import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee } from "@/lib/supabase/travauxEffectues";
+import { listerBonsTravail, sAbonnerBonsTravail } from "@/lib/supabase/bonsTravail";
+import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
+import { listerCamions, sauvegarderCamion } from "@/lib/supabase/camions";
+import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
+import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis } from "@/lib/supabase/devis";
+import { listerClients, sauvegarderClient, sAbonnerClients } from "@/lib/supabase/clients";
+import { listerProjets, sauvegarderProjet, sAbonnerProjets } from "@/lib/supabase/projets";
+import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbonnerTachesAttente } from "@/lib/supabase/taches";
+import { listerJournal, ajouterEntreeJournal } from "@/lib/supabase/journal";
+import { listerTaux, sauvegarderTaux } from "@/lib/supabase/tauxMetiers";
+import { listerDepots, creerDepot, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot } from "@/lib/supabase/depots";
+import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots } from "@/lib/supabase/prixDepots";
+import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
+import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
+import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
+import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
+import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
+import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
+import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
+import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
+import dynamic from "next/dynamic";
+
+// CONFIGURATION DE L'ENTREPRISE — disponible partout
+// ------------------------------------------------------------
+// Les coordonnées, numéros officiels, taux de taxes et règles de paie
+// étaient écrits en dur un peu partout dans ce fichier. Ils vivent
+// maintenant dans la table `entreprises` et circulent par le contexte
+// (lib/contexteEntreprise.js) : n'importe quel composant appelle
+// `useEntreprise()` sans qu'on ait à faire descendre l'information de
+// main en main sur des dizaines de niveaux.
+//
+// Repli sûr : tant que le snippet SQL 23 n'est pas exécuté, c'est
+// CONFIG_DEFAUT (les valeurs actuelles de DGL) qui s'applique — rien
+// ne casse.
+
+// CATALOGUE D'ITEMS — comme la configuration d'entreprise, il circule
+// par un contexte : il sert dans l'éditeur de devis ET dans la fenêtre
+// de facturation, deux endroits profondément imbriqués.
+const ContexteCatalogue = createContext([]);
+function useCatalogue() {
+  return useContext(ContexteCatalogue) || [];
+}
+
+// RÉPERTOIRE DES CLIENTS — même raison : les aperçus de documents ont
+// besoin de l'adresse de facturation, et ils sont trop imbriqués pour
+// la recevoir en propriété depuis l'App.
+const ContexteClients = createContext([]);
+function useClients() {
+  return useContext(ContexteClients) || [];
+}
+
+// LISTE DES DEVIS — la facture d'un devis doit pouvoir reprendre ses
+// lignes détaillées, sinon le client reçoit un montant sans explication.
+const ContexteDevis = createContext([]);
+function useDevis() {
+  return useContext(ContexteDevis) || [];
+}
+
+// Hauteur d'un champ de description pour qu'il montre TOUT son contenu
+// sans barre de défilement interne.
+//
+// Une description QuickBooks fait souvent 15 lignes (modèles, garantie,
+// numéros AHRI, subventions). Un champ plafonné à 6 lignes n'en montrait
+// qu'un tiers, et il fallait faire défiler dans une boîte minuscule pour
+// relire ce qu'on envoie au client — donc on ne le relisait pas.
+//
+// On compte les sauts de ligne ET les retours à la ligne automatiques
+// (une ligne longue occupe plusieurs rangées à l'écran).
+const LARGEUR_LIGNE_DESCRIPTION = 52; // caractères visibles par rangée
+function hauteurDescription(texte) {
+  const contenu = String(texte || "");
+  if (!contenu.trim()) return 2;
+  const rangees = contenu
+    .split("\n")
+    .reduce((total, ligne) => total + Math.max(1, Math.ceil(ligne.length / LARGEUR_LIGNE_DESCRIPTION)), 0);
+  // Plafond haut : au-delà, on garde une barre de défilement plutôt
+  // qu'un champ qui repousserait les totaux hors de l'écran.
+  return Math.min(30, Math.max(2, rangees));
+}
+
+// Affichage d'un taux : 9.975 → "9,975" (virgule décimale française).
+function tauxAffiche(t) {
+  return String(t ?? 0).replace(".", ",");
+}
+
+const BoutonPDF = dynamic(() => import("@/components/pdf/BoutonPDF"), {
+  ssr: false,
+  loading: () => (
+    <span className="mt-3 block text-center text-[11px] text-slate-400">Chargement du PDF…</span>
+  ),
+});
+
+// ============================================================
+// COMPOSANT BOUTON RÉUTILISABLE
+// Variantes : primary (noir plein — validation/création/soumission),
+// outline (bordure — action secondaire/filtre), danger (rouge —
+// suppression). Gère aussi l'état loading (spinner) et disabled.
+// En prod, ce composant vit dans components/ui/Button.jsx et est
+// importé — ici, dans cet artefact autonome, il est défini localement
+// dans chaque fichier (voir le fichier Button.jsx fourni séparément
+// pour la version destinée à un vrai projet Next.js).
+// ============================================================
+function Button({ variant = "primary", loading = false, loadingText = "Chargement...", disabled = false, className = "", children, ...props }) {
+  const base =
+    "inline-flex items-center justify-center gap-2 rounded-xl font-bold min-h-[44px] touch-manipulation transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 disabled:cursor-not-allowed";
+  const variantes = {
+    primary: "bg-black text-white hover:bg-zinc-800 active:bg-zinc-950 disabled:bg-zinc-300 disabled:text-zinc-500",
+    outline: "bg-white border border-zinc-300 text-zinc-900 hover:bg-zinc-100 active:bg-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400 disabled:border-zinc-200",
+    danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800 disabled:bg-zinc-300 disabled:text-zinc-500",
+  };
+  return (
+    <button disabled={disabled || loading} className={`${base} ${variantes[variant]} ${className}`} {...props}>
+      {loading ? (
+        <>
+          <Loader2 size={14} className="animate-spin" />
+          {loadingText}
+        </>
+      ) : (
+        children
+      )}
+    </button>
+  );
+}
+
+// ============================================================
+// SAISIE D'UN NOMBRE DÉCIMAL — préserve le texte exact tapé (ex:
+// "12." ou "12,5" en cours de frappe) au lieu de le faire
+// immédiatement passer par parseFloat() puis réafficher la version
+// arrondie, ce qui effaçait le point décimal dès qu'il était tapé et
+// rendait la saisie des centimes impossible au clavier. La valeur
+// NUMÉRIQUE remontée au parent via onChange reste toujours à jour ;
+// seul l'AFFICHAGE local garde le texte brut le temps de la frappe.
+// ============================================================
+// `onBlur` est extrait des props et ENCHAÎNÉ au comportement interne :
+// laissé dans {...props}, il écraserait la resynchronisation de
+// l'affichage et un « 12. » en cours de frappe resterait à l'écran.
+function InputNombreDecimal({ valeur, onChange, className, onBlur, ...props }) {
+  const [texte, setTexte] = useState(String(valeur));
+  const enFocus = useRef(false);
+
+  // Resynchronise l'affichage si la valeur change depuis l'EXTÉRIEUR
+  // du champ (ex: réinitialisation du formulaire) — MAIS jamais pendant
+  // que l'utilisateur tape (focus), sinon un champ vidé ou un "12." en
+  // cours de frappe serait immédiatement réécrit (« 0 ») et la saisie
+  // des décimales deviendrait impossible.
+  useEffect(() => {
+    if (!enFocus.current) setTexte(String(valeur));
+  }, [valeur]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={texte}
+      onFocus={() => { enFocus.current = true; }}
+      onBlur={(e) => { enFocus.current = false; setTexte(String(valeur)); onBlur?.(e); }}
+      onChange={(e) => {
+        const brut = e.target.value;
+        // N'accepte que ce qui ressemble à un nombre décimal en cours
+        // de frappe (chiffres, un seul point, signe optionnel) —
+        // bloque les autres caractères sans casser la saisie normale.
+        if (!/^-?\d*\.?\d*$/.test(brut)) return;
+        setTexte(brut);
+        const nombre = parseFloat(brut);
+        onChange(Number.isNaN(nombre) ? 0 : nombre);
+      }}
+      className={`${className || ""} focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100`}
+      {...props}
+    />
+  );
+}
+
+
+// ============================================================
+// DONNÉES SIMULÉES (à remplacer par Supabase + API QuickBooks)
+// Contrairement à l'app technicien, ici le prix_coutant EST
+// exposé : c'est l'écran admin.
+// ============================================================
+// Repli tant que le catalogue Supabase n.est pas chargé (snippet 26).
+// La vraie liste — 289 items importés de QuickBooks — vit maintenant
+// dans la table `catalogue_items`, voir lib/supabase/catalogue.js.
+const CATALOGUE_REPLI = [];
+
+const CLIENTS_INIT = [
+  {
+    id: "c1",
+    nom: "Toitures Lavallée inc.",
+    entreprise: "Toitures Lavallée inc.",
+    // Plusieurs courriels possibles pour un même client — utile pour
+    // une entreprise où la facturation, un chargé de projet et
+    // l'administration générale ont des adresses différentes.
+    courriels: [
+      { id: "cc1", label: "Administration générale", email: "info@toitureslavallee.com", defaut: true },
+      { id: "cc2", label: "Facturation / comptabilité", email: "facturation@toitureslavallee.com", defaut: false },
+    ],
+    telephone: "514-555-0142",
+    termeFacturation: "Net 30",
+    quickbooksCustomerId: "QBO-1001",
+    adresses: [
+      { id: "a1", nom: "Entrepôt principal", ligne1: "1450 rue Bélanger, Montréal, QC", codePostal: "H2G 1B4" },
+    ],
+  },
+  {
+    id: "c2",
+    nom: "Résidence Tremblay",
+    courriels: [{ id: "cc3", label: "Principal", email: "j.tremblay@courriel.com", defaut: true }],
+    telephone: "450-555-0198",
+    termeFacturation: "Comptant à la livraison",
+    quickbooksCustomerId: "QBO-1002",
+    adresses: [{ id: "a3", nom: "Domicile", ligne1: "22 rue des Érables, Longueuil, QC", codePostal: "J4K 3S1" }],
+  },
+];
+
+const TERMES_FACTURATION = ["Comptant à la livraison", "Net 15", "Net 30", "Net 45", "Net 60"];
+
+// Types d'accès des fiches — alignés sur les 4 rôles du système de
+// permissions (lib/permissions.js). « Administration bureau » regroupe le
+// personnel de bureau : son MÉTIER (adjointe, chargé de projet,
+// estimateur, répartiteur, directeur) sert de sous-catégorie et fixe ses
+// accès par défaut. Étiquette informative sur la fiche ; les VRAIS accès
+// se gèrent dans « Gestion des accès » (couche 3).
+const TYPES_ACCES = ["Admin principal", "Admin régulier", "Administration bureau", "Technicien"];
+
+// Métiers et niveaux (les frigoristes ont un Apprenti 4, pas les ferblantiers).
+// MÉTIERS DE TERRAIN (taux = grille CCQ selon niveau + prime horaire
+// individuelle éventuelle) et MÉTIERS DE BUREAU (taux horaire individuel
+// complet, saisi sur la fiche de chaque employé).
+const METIERS_TERRAIN = ["Frigoriste", "Ferblantier"];
+const METIERS_BUREAU = ["Adjointe administrative", "Chargé de projet", "Estimateur", "Répartiteur", "Directeur"];
+const METIERS = [...METIERS_TERRAIN, ...METIERS_BUREAU];
+const estMetierBureau = (m) => METIERS_BUREAU.includes(m);
+// Métiers permis selon le type d'accès : « Administration bureau » choisit
+// un métier de bureau (sa sous-catégorie d'accès), « Technicien » un métier
+// de terrain ; les administrateurs peuvent porter n'importe quel métier.
+// `tauxMetiers` (facultatif) apporte les métiers AJOUTÉS par l'admin —
+// sans lui, seuls les métiers fondateurs apparaissent.
+const metiersPourTypeAcces = (typeAcces, tauxMetiers) =>
+  typeAcces === "Administration bureau"
+    ? METIERS_BUREAU
+    : typeAcces === "Technicien"
+      ? metiersTerrainDe(tauxMetiers)
+      : [...metiersTerrainDe(tauxMetiers), ...METIERS_BUREAU];
+
+// Accès par défaut selon le type d'accès + métier (la sous-catégorie
+// d'« Administration bureau » est le métier de bureau).
+const accesParDefautPour = (typeAcces, metier) =>
+  permissionsPour(typeAcces, typeAcces === "Administration bureau" ? metier : undefined);
+
+// Grille des accès (cases à cocher) — intégrée aux fiches employés :
+// visible et modifiable directement à la création et dans « Modifier ».
+function GrilleAcces({ sections, onBasculer, desactive }) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-bold text-slate-500">Accès à l'application (coche / décoche librement)</label>
+      <div className="grid grid-cols-2 gap-1.5">
+        {ORDRE_SECTIONS.map((s) => (
+          <label
+            key={s}
+            className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold ${
+              sections.includes(s) ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-500"
+            } ${desactive ? "opacity-60" : ""}`}
+          >
+            <input
+              type="checkbox"
+              checked={sections.includes(s)}
+              disabled={desactive}
+              onChange={() => onBasculer(s)}
+              className="h-4 w-4 accent-[#131B2E]"
+            />
+            {LIBELLES_SECTIONS[s]}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+const NIVEAUX_PAR_METIER = {
+  Frigoriste: ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"],
+  Ferblantier: ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Compagnon"],
+  // Métiers de bureau : pas de niveaux CCQ — un seul « niveau » neutre.
+  "Adjointe administrative": ["—"],
+  "Chargé de projet": ["—"],
+  "Estimateur": ["—"],
+  "Répartiteur": ["—"],
+  "Directeur": ["—"],
+};
+// MÉTIERS AJOUTÉS PAR L'ADMIN (électricien, plombier…) — la grille des
+// taux est leur registre : tout métier qui y figure existe. Un métier
+// absent de la table ci-dessus reçoit la structure CCQ standard — jamais
+// de plantage sur un métier inconnu.
+const NIVEAUX_CCQ_DEFAUT = ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"];
+const niveauxPourMetier = (m) => NIVEAUX_PAR_METIER[m] || NIVEAUX_CCQ_DEFAUT;
+// Métiers de terrain effectifs = les deux fondateurs + ceux ajoutés dans
+// la grille des taux (Tarifs). Les métiers de bureau n'y sont jamais.
+const metiersTerrainDe = (tauxMetiers) =>
+  [...new Set([...METIERS_TERRAIN, ...Object.keys(tauxMetiers || {})])].filter((m) => !estMetierBureau(m));
+// Table centrale des taux horaires coûtants. Modifiée à un seul endroit
+// (onglet Utilisateurs) — appliquée automatiquement à chaque technicien
+// selon son métier + niveau, y compris lors des augmentations annuelles.
+// Taux laissés à 0 : à saisir par l'administrateur.
+const TAUX_METIERS_INIT = {
+  Frigoriste: { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
+  Ferblantier: { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
+};
+
+const COULEUR_TYPE_ACCES = {
+  "Admin principal": "bg-red-100 text-red-700",
+  "Admin régulier": "bg-orange-100 text-orange-700",
+  "Administration bureau": "bg-blue-100 text-blue-700",
+  "Technicien": "bg-slate-100 text-slate-600",
+  // Anciennes valeurs (fiches créées avant l'alignement sur les rôles) :
+  "Administrateur": "bg-red-100 text-red-700",
+  "Employé": "bg-slate-100 text-slate-600",
+  "Chargé de projet": "bg-blue-100 text-blue-700",
+  "Répartiteur": "bg-blue-100 text-blue-700",
+};
+
+// Comptes utilisateurs internes — en prod, ceci vit dans Supabase Auth
+// (jamais de mot de passe stocké en clair côté client ni dans cette
+// table ; ici c'est un booléen de démonstration seulement).
+const UTILISATEURS_INIT = [
+  { id: "u1", nom: "Marc Gagnon", telephone: "514-555-0111", courriel: "marc.gagnon@ventilationdgl.com", nomUtilisateur: "mgagnon", typeAcces: "Employé", motDePasseCree: true, poste: "Technicien senior", dateEmbauche: "", adresse: "", notesRH: "" },
+  { id: "u2", nom: "Sophie Roy", telephone: "514-555-0122", courriel: "sophie.roy@ventilationdgl.com", nomUtilisateur: "sroy", typeAcces: "Chargé de projet", motDePasseCree: true, poste: "", dateEmbauche: "", adresse: "", notesRH: "" },
+];
+
+// Historique des travaux par client — en prod, ceci vient d'une table
+// Supabase `travaux` (liée aux bons de travail complétés par les
+// techniciens et aux tâches planifiées dans l'agenda).
+const TRAVAUX_INIT = [
+  {
+    id: "tr1",
+    clientId: "c1",
+    projetId: "proj1",
+    heures: 32,
+    estTransport: false,
+    titre: "Réfection toiture — Entrepôt principal",
+    date: "2026-06-10",
+    statut: "complete",
+    montant: 4250.0,
+    envoyeA: new Date("2026-06-10T14:32:00").getTime(),
+    modifReactivee: false,
+    noteTerrain: "Remplacement complet de la membrane élastomère sur la section ouest. Drains nettoyés et solins remplacés. Aucun problème structural détecté.",
+    noteInterne: "Accès entrepôt par la porte arrière seulement — code de la barrière : demander au contremaître Marc.",
+    photos: ["Avant — vue générale", "Après — membrane installée", "Détail des solins"],
+  },
+  {
+    id: "tr1-transport-aller",
+    clientId: "c1",
+    projetId: "proj1",
+    heures: 0.75,
+    distanceKm: 16.1,
+    estTransport: true,
+    titre: "Transport — Début de journée (imputé automatiquement)",
+    date: "2026-06-10",
+    statut: "complete",
+    montant: null,
+    envoyeA: new Date("2026-06-10T08:15:00").getTime(),
+    modifReactivee: false,
+    noteTerrain: "",
+    noteInterne: "",
+    photos: [],
+  },
+  {
+    id: "tr1-transport-retour",
+    clientId: "c1",
+    projetId: "proj1",
+    heures: 0.75,
+    distanceKm: 15.8,
+    estTransport: true,
+    titre: "Transport — Fin de journée (imputé automatiquement)",
+    date: "2026-06-10",
+    statut: "complete",
+    montant: null,
+    envoyeA: new Date("2026-06-10T16:45:00").getTime(),
+    modifReactivee: false,
+    noteTerrain: "",
+    noteInterne: "",
+    photos: [],
+  },
+  {
+    id: "tr2",
+    clientId: "c1",
+    projetId: "proj1",
+    heures: 12,
+    estTransport: false,
+    titre: "Réparation toiture — Chantier Nord",
+    date: "2026-08-05",
+    statut: "a_venir",
+    montant: null,
+    modifReactivee: false,
+    noteTerrain: "",
+    noteInterne: "",
+    photos: [],
+  },
+  {
+    id: "tr3",
+    clientId: "c2",
+    projetId: null,
+    heures: 2,
+    estTransport: false,
+    titre: "Remplacement thermostat",
+    date: "2026-07-19",
+    statut: "complete",
+    montant: 284.5,
+    envoyeA: new Date("2026-07-19T10:20:00").getTime(),
+    modifReactivee: false,
+    noteTerrain: "Ancien thermostat non programmable remplacé par un modèle programmable. Client formé sur l'utilisation de base.",
+    noteInterne: "Client un peu pressé lors de la visite — prévoir un peu plus de temps la prochaine fois pour l'explication.",
+    photos: ["Avant", "Après installation"],
+  },
+  {
+    id: "tr4",
+    clientId: "c2",
+    projetId: null,
+    heures: 1,
+    estTransport: false,
+    titre: "Entretien filtre CVAC",
+    date: "2026-09-02",
+    statut: "a_venir",
+    montant: null,
+    modifReactivee: false,
+    noteTerrain: "",
+    noteInterne: "",
+    photos: [],
+  },
+];
+
+// Projets / chantiers au long cours — lient un client, des tâches de
+// terrain (via `travaux[].projetId`), des bons de commande fournisseur
+// et un budget, pour calculer la rentabilité réelle. En prod, ceci vit
+// dans une table Supabase `projets` avec des clés étrangères vers
+// `clients`, `travaux` et `bons_commande`.
+const STATUTS_PROJET = ["À planifier", "En cours", "Facturation d'acompte", "Terminé"];
+
+const PROJETS_INIT = [
+  {
+    id: "proj1",
+    nom: "Réfection toiture — Entrepôt & Chantier Nord",
+    clientId: "c1",
+    adresseTravaux: "Entrepôt principal — 1450 rue Bélanger, Montréal, QC",
+    dateDebut: "2026-06-01",
+    dateFin: "2026-09-30",
+    statut: "En cours",
+    budgetTotal: 18500.0,
+    tauxHoraireCoutant: 45.0,
+    bonsCommande: [
+      { id: "bc1", numeroBC: "BC-1001", fournisseur: "Toitures Bélanger (matériaux)", montantHT: 6200.0, statut: "Reçu", date: "2026-06-05" },
+      { id: "bc2", numeroBC: "BC-1002", fournisseur: "Location d'équipement Laval", montantHT: 850.0, statut: "En attente", date: "2026-06-08" },
+    ],
+  },
+];
+
+// Simule un ou des clients créés directement dans QuickBooks (pas via
+// notre appli) et récupérés au moment de la synchronisation.
+const NOUVEAUX_CLIENTS_QUICKBOOKS = [
+  {
+    id: "qb-import-1",
+    nom: "Construction Bouchard & Fils",
+    courriels: [{ id: "cc4", label: "Administration", email: "administration@constructionbouchard.com", defaut: true }],
+    telephone: "819-555-0177",
+    termeFacturation: "Net 30",
+    quickbooksCustomerId: "QBO-1003",
+    adresses: [],
+  },
+];
+
+
+const EMPLOYES = [
+  { id: "e1", nom: "Marc Gagnon" },
+  { id: "e2", nom: "Sophie Roy" },
+  { id: "e3", nom: "Éric Bouchard" },
+];
+
+// La grille couvre les 24h de la journée dans l'ordre chronologique
+// naturel (00:00 → 23:00). L'ouverture par défaut fait défiler la
+// vue Jour jusqu'à 7h00 (voir l'effet de scroll dans OngletAgenda),
+// mais l'admin peut toujours se déplacer librement vers la gauche
+// (heures plus tôt) ou la droite (heures plus tard) au besoin.
+const HEURES = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, "0")}:00`);
+
+// Génère une tâche de transport SYSTÈME (Début/Fin de journée). Ces
+// tâches sont recalculées automatiquement (voir recalculerTransports) et
+// ne doivent pas être supprimées à la main dans la grille.
+function tacheTransportSysteme(moment, employeId, dateISO, heure) {
+  return {
+    id: `transport-${moment}-${employeId}-${dateISO}`,
+    type: "transport",
+    momentTransport: moment,
+    titre: moment === "debut" ? "Transport — Début de journée" : "Transport — Fin de journée",
+    est_tache_systeme: true,
+    employeId,
+    heure,
+    heures: 1,
+    jours: 0,
+    statut: "planifiee",
+  };
+}
+
+// Recalcule les transports système pour TOUT le planning : pour chaque
+// (journée, technicien) ayant au moins une VRAIE tâche, place un Transport
+// Début juste avant la première et un Transport Fin juste après la
+// dernière ; retire les transports d'une journée qui n'a plus de vraie
+// tâche. Idempotent — à rappeler après chaque changement du planning.
+// Contenu d'une case du planning, TOUJOURS sous forme de liste : depuis
+// que plusieurs tâches peuvent partager la même plage horaire (elles
+// s'empilent à l'écran au lieu de s'écraser), chaque case contient un
+// tableau de tâches. Ce petit assistant tolère aussi l'ancien format
+// (une tâche seule) par prudence.
+function listeCellule(v) {
+  return Array.isArray(v) ? v : v ? [v] : [];
+}
+
+function recalculerTransports(planning) {
+  const resultat = {};
+  const groupes = {}; // `${date}|${employeId}` -> { date, employeId, indices: [] }
+  Object.entries(planning).forEach(([cle, valeur]) => {
+    // On retire les anciens transports système — ils seront replacés.
+    const reelles = listeCellule(valeur).filter((t) => !t?.est_tache_systeme);
+    if (reelles.length === 0) return;
+    resultat[cle] = reelles;
+    const [date, employeId, heure] = cle.split("|");
+    const g = `${date}|${employeId}`;
+    if (!groupes[g]) groupes[g] = { date, employeId, indices: [] };
+    const idx = HEURES.indexOf(heure);
+    if (idx >= 0) groupes[g].indices.push(idx);
+  });
+  Object.values(groupes).forEach(({ date, employeId, indices }) => {
+    if (indices.length === 0) return;
+    const idxDebut = Math.min(...indices) - 1; // la case juste avant la 1re tâche
+    const idxFin = Math.max(...indices) + 1; // la case juste après la dernière
+    if (idxDebut >= 0) {
+      const cle = `${date}|${employeId}|${HEURES[idxDebut]}`;
+      resultat[cle] = [...listeCellule(resultat[cle]), tacheTransportSysteme("debut", employeId, date, HEURES[idxDebut])];
+    }
+    if (idxFin < HEURES.length) {
+      const cle = `${date}|${employeId}|${HEURES[idxFin]}`;
+      resultat[cle] = [...listeCellule(resultat[cle]), tacheTransportSysteme("fin", employeId, date, HEURES[idxFin])];
+    }
+  });
+  return resultat;
+}
+// Heure de départ par défaut lors de la création/assignation d'une
+// tâche — on ne veut pas qu'une nouvelle tâche démarre par défaut à
+// minuit (HEURES[0]) : elle démarre à 7h du matin.
+const HEURE_PAR_DEFAUT = "07:00";
+
+const BONS_TRAVAIL_COMPLETES_INIT = [
+  { id: "bt1", client: "Toitures Lavallée inc.", projet: "Réfection toiture - Entrepôt", montant: 4250.0, description: "", date: "2026-07-18", prixNonListe: true, statutQb: "en_attente", type: "temps_materiel", adresseTravaux: null },
+  { id: "bt2", client: "Résidence Tremblay", projet: "Remplacement thermostat", montant: 284.5, date: "2026-07-19", prixNonListe: false, statutQb: "en_attente", type: "appel_service", adresseTravaux: null },
+  { id: "bt3", client: "Résidence Tremblay", projet: "Entretien filtre CVAC", montant: 34.5, date: "2026-07-20", prixNonListe: false, statutQb: "en_attente", type: "appel_service", adresseTravaux: null },
+  { id: "bt4", client: "Toitures Lavallée inc.", projet: "Réfection toiture — Chantier Sud", montant: 3100.0, date: "2026-07-21", prixNonListe: false, statutQb: "en_attente", type: "devis", devisNumero: "DEV-4821", adresseTravaux: "Chantier Sud — 88 boulevard des Laurentides, Laval, QC", facturesEmises: [] },
+  { id: "bt5", client: "Résidence Tremblay", projet: "Entretien annuel système CVAC", montant: 1200.0, date: "2026-07-22", prixNonListe: false, statutQb: "en_attente", type: "entretien_contrat", devisNumero: "DEV-3390", frequenceFacturationAnnuelle: 4, adresseTravaux: null, facturesEmises: [] },
+];
+
+// ============================================================
+// INTÉGRATION QUICKBOOKS ONLINE — FACTURES & DÉPENSES PAR PROJET
+// ------------------------------------------------------------
+// Service de synchronisation. En prod, `fetchQuickBooksTransactions`
+// ferait un appel réel à l'API QuickBooks Online (endpoints Invoice
+// et Purchase/Bill via /v3/company/{realmId}/query, authentifié en
+// OAuth2), idéalement depuis une fonction backend (Supabase Edge
+// Function) pour ne jamais exposer le jeton d'accès côté client.
+// Ici, la fonction est simulée pour la démo : elle retourne un jeu de
+// transactions fixe représentant ce que l'API renverrait.
+// ============================================================
+async function fetchQuickBooksTransactions() {
+  // Simule la latence réseau d'un vrai appel API.
+  //
+  // Convention de nommage pour éviter toute confusion :
+  // - `qbProjectRef` / `customerRefId` / `poNumber` = champs BRUTS tels
+  //   que reçus de l'API QuickBooks (ProjectRef, CustomerRef, PO Number).
+  // - `projectId` = champ ajouté par NOTRE app une fois la transaction
+  //   résolue vers un projet local (voir attribuerTransactionQuickBooks
+  //   plus bas). C'est LE SEUL champ utilisé pour filtrer les
+  //   transactions d'un projet dans calculerRentabiliteProjet — jamais
+  //   les champs bruts, qui ne sont que les entrées du mapping.
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  return [
+    // Facture de vente liée au client "Toitures Lavallée inc." via son
+    // CustomerRef QuickBooks (QBO-1001) — correspondance Règle 1.
+    { quickbooksId: "QBO-INV-501", type: "INVOICE", customerRefId: "QBO-1001", qbProjectRef: null, poNumber: null, amountHT: 4250.0, amountTTC: 4886.29, status: "PAID", date: "2026-06-15" },
+    // Dépense fournisseur portant le numéro de BC "BC-1001" — aucun
+    // CustomerRef, donc correspondance par Règle 2 (numéro de BC).
+    { quickbooksId: "QBO-EXP-812", type: "EXPENSE", customerRefId: null, qbProjectRef: null, poNumber: "BC-1001", amountHT: 6200.0, amountTTC: 7128.15, status: "PAID", date: "2026-06-05" },
+    // Dépense dont le numéro de BC ne correspond à aucun projet connu
+    // — tombe dans "Factures QuickBooks non assignées".
+    { quickbooksId: "QBO-EXP-813", type: "EXPENSE", customerRefId: null, qbProjectRef: null, poNumber: "BC-9999", amountHT: 340.0, amountTTC: 390.83, status: "DUE", date: "2026-07-01" },
+    // Facture sans CustomerRef ni numéro de BC reconnu — non assignée.
+    { quickbooksId: "QBO-INV-502", type: "INVOICE", customerRefId: null, qbProjectRef: null, poNumber: null, amountHT: 890.0, amountTTC: 1023.53, status: "UNPAID", date: "2026-07-10" },
+  ];
+}
+
+// Logique de correspondance (mapping) — Règle 1 (client/sous-projet
+// QuickBooks) puis Règle 2 (numéro de BC), sinon aucune correspondance
+// (l'appelant place alors la transaction en attribution manuelle).
+function attribuerTransactionQuickBooks(transaction, projets, clients) {
+  // Règle 1a : correspondance directe par ProjectRef (sous-projet QB).
+  if (transaction.qbProjectRef) {
+    const parRef = projets.find((p) => p.id === transaction.qbProjectRef);
+    if (parRef) return parRef.id;
+  }
+  // Règle 1b : correspondance par CustomerRef QuickBooks → client de
+  // l'appli → projet "En cours" le plus pertinent pour ce client.
+  if (transaction.customerRefId) {
+    const client = clients.find((c) => c.quickbooksCustomerId === transaction.customerRefId);
+    if (client) {
+      const projetsDuClient = projets.filter((p) => p.clientId === client.id);
+      const projetPertinent = projetsDuClient.find((p) => p.statut === "En cours") || projetsDuClient[0];
+      if (projetPertinent) return projetPertinent.id;
+    }
+  }
+  // Règle 2 : correspondance par numéro de bon de commande.
+  if (transaction.poNumber) {
+    const projetParBc = projets.find((p) => (p.bonsCommande || []).some((bc) => bc.numeroBC === transaction.poNumber));
+    if (projetParBc) return projetParBc.id;
+  }
+  return null; // Fallback → attribution manuelle requise.
+}
+
+// ============================================================
+// CALCUL DE RENTABILITÉ D'UN PROJET (temps réel)
+// ============================================================
+// Avancement calendrier (temps écoulé entre dateDebut et dateFin),
+// distinct de l'avancement budgétaire — utilisé pour la double barre
+// de progression du Hub Projets.
+// Jauge de santé budgétaire — code couleur à 3 paliers :
+// vert (< 75% consommé), jaune (75-100%), rouge clignotant (> 100%,
+// dépassement réel du budget).
+function couleurSanteBudget(pourcentageDepense) {
+  if (pourcentageDepense > 100) {
+    return { barre: "bg-red-500 animate-pulse", texte: "text-red-600", pastille: "bg-red-500 animate-pulse" };
+  }
+  if (pourcentageDepense >= 75) {
+    return { barre: "bg-amber-500", texte: "text-amber-600", pastille: "bg-amber-500" };
+  }
+  return { barre: "bg-emerald-500", texte: "text-emerald-600", pastille: "bg-emerald-500" };
+}
+
+function calculerAvancementCalendrier(projet) {
+  if (!projet.dateDebut || !projet.dateFin) return null;
+  const debut = new Date(projet.dateDebut).getTime();
+  const fin = new Date(projet.dateFin).getTime();
+  if (!(fin > debut)) return null;
+  const pct = ((Date.now() - debut) / (fin - debut)) * 100;
+  return Math.max(0, Math.min(100, pct));
+}
+
+// "En retard" est un indicateur calculé (pas un statut choisi par
+// l'admin) : la date de fin prévue est dépassée et le projet n'est
+// pas marqué "Terminé".
+function projetEnRetard(projet) {
+  if (!projet.dateFin || projet.statut === "Terminé") return false;
+  return new Date(projet.dateFin).getTime() < Date.now();
+}
+
+// ------------------------------------------------------------
+// SANTÉ GLOBALE D'UN PROJET — règle unifiée utilisée PARTOUT (Hub,
+// Kanban, fiche client, tableau de bord) pour que le même projet
+// affiche toujours la même couleur, peu importe l'endroit :
+//   VERT  = sous-budget ET dans les temps
+//   JAUNE = 75-100% du budget consommé OU échéance dans les 7 jours
+//   ROUGE = dépassement de budget OU en retard OU en perte
+// ------------------------------------------------------------
+function evaluerSanteProjet(projet, r) {
+  const enRetard = projetEnRetard(projet);
+  const enPerte = r.profitReel < 0;
+
+  if (r.depassementBudget || enRetard || enPerte) {
+    return { niveau: "rouge", pastille: "bg-red-500 animate-pulse", texte: "text-red-600", fond: "bg-red-100" };
+  }
+
+  let echeanceProche = false;
+  if (projet.dateFin && projet.statut !== "Terminé") {
+    const joursRestants = (new Date(projet.dateFin).getTime() - Date.now()) / 86400000;
+    echeanceProche = joursRestants >= 0 && joursRestants <= 7;
+  }
+
+  if (r.pourcentageDepense >= 75 || echeanceProche) {
+    return { niveau: "jaune", pastille: "bg-amber-500", texte: "text-amber-600", fond: "bg-amber-100" };
+  }
+
+  return { niveau: "vert", pastille: "bg-emerald-500", texte: "text-emerald-600", fond: "bg-emerald-100" };
+}
+
+function calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs = [], tauxMetiers = {}, inspections = [], coutCamionDefaut = 0) {
+  // Heures du projet — les heures ADMINISTRATIVES et DIVERSES en sont
+  // exclues même si elles portent un projetId. Une visite de soumission
+  // faite avant d'avoir vendu le contrat ne doit pas gonfler le coût de
+  // ce contrat : elle est un frais de vente de l'entreprise.
+  // (Ces heures restent PAYÉES — voir « Heures de la semaine ».)
+  const travauxDuProjet = travaux.filter(
+    (t) => t.projetId === projet.id && (t.categorieHeures || "projet") === "projet"
+  );
+  // Heures Totales du Projet = Heures Tâches Projet + Heures Transport
+  // Aller/Retour imputées (voir la règle d'imputation automatique côté
+  // app technicien, basée sur la chronologie de la journée). Les deux
+  // catégories sont distinguées ici pour l'affichage, mais comptent
+  // également dans le coût de main-d'œuvre.
+  const travauxChantier = travauxDuProjet.filter((t) => !t.estTransport);
+  const travauxTransport = travauxDuProjet.filter((t) => t.estTransport);
+  const heuresChantier = travauxChantier.reduce((s, t) => s + (t.heures || 0), 0);
+  const heuresTransport = travauxTransport.reduce((s, t) => s + (t.heures || 0), 0);
+  const totalHeures = heuresChantier + heuresTransport;
+  // Kilométrage total de transport rattaché au projet — capturé par
+  // GPS au départ/arrivée de chaque trajet côté app technicien.
+  const kilometrageTransport = travauxTransport.reduce((s, t) => s + (t.distanceKm || 0), 0);
+  // Dépenses QuickBooks (achats/sous-traitance) rattachées à ce projet.
+  // Les factures de vente QuickBooks rattachées → suivies séparément
+  // comme "facturé réel" (encaissements réels vs budget), sans changer le
+  // calcul du profit (qui reste basé sur le budget initial vendu).
+  const transactionsDuProjet = (transactionsQb || []).filter((t) => t.projectId === projet.id);
+  const depensesQb = transactionsDuProjet.filter((t) => t.type === "EXPENSE");
+  const facturesQb = transactionsDuProjet.filter((t) => t.type === "INVOICE");
+  // ------------------------------------------------------------
+  // ANTI-DOUBLE-COMPTAGE : un bon de commande saisi dans l'app et la
+  // facture fournisseur correspondante dans QuickBooks (même numéro de
+  // BC) sont LA MÊME dépense. On ne les additionne jamais :
+  // - BC apparié à une dépense QB → le montant RÉEL de QuickBooks fait
+  //   foi (il remplace le montant saisi, qui n'était qu'une estimation ;
+  //   un BC laissé à 0 se remplit donc tout seul) ;
+  // - BC sans dépense QB → son montant saisi compte (estimation) ;
+  // - dépense QB sans BC correspondant → s'ajoute normalement.
+  // ------------------------------------------------------------
+  const numeroBcNormalise = (v) => String(v || "").trim().toUpperCase();
+  const depensesParNumeroBc = new Map();
+  depensesQb.forEach((d) => {
+    const num = numeroBcNormalise(d.poNumber);
+    if (num) depensesParNumeroBc.set(num, d);
+  });
+  const bcApparies = new Set();
+  const coutMateriauxBC = (projet.bonsCommande || []).reduce((s, bc) => {
+    const correspondance = depensesParNumeroBc.get(numeroBcNormalise(bc.numeroBC));
+    if (correspondance) {
+      bcApparies.add(correspondance.quickbooksId);
+      return s + (Number(correspondance.amountHT) || 0); // montant RÉEL de QuickBooks
+    }
+    return s + (Number(bc.montantHT) || 0); // estimation saisie dans l'app
+  }, 0);
+  // Dépenses QuickBooks qui ne correspondent à AUCUN bon de commande.
+  const coutMateriauxQb = depensesQb
+    .filter((d) => !bcApparies.has(d.quickbooksId))
+    .reduce((s, t) => s + (Number(t.amountHT) || 0), 0);
+  const coutMateriaux = coutMateriauxBC + coutMateriauxQb;
+  const totalFactureReel = facturesQb.reduce((s, t) => s + t.amountHT, 0);
+  // Coût de main-d'œuvre : idéalement calculé par employé (taux du métier
+  // + niveau de celui qui a pointé les heures, lu dans la table centrale).
+  // Tant qu'un « travail » ne porte pas d'employeId (avant l'app technicien
+  // + Supabase), on retombe sur le taux unique du projet.
+  const tauxDeEmploye = (t) => {
+    // Priorité 1 : le taux FIGÉ à la saisie (spec contrôle de gestion) —
+    // stocké sur la ligne quand le technicien a terminé la tâche.
+    if (Number(t.tauxCoutantFige) > 0) return Number(t.tauxCoutantFige);
+    const emp = utilisateurs.find((u) => u.id === t.employeId);
+    // Priorité 2 : taux horaire INDIVIDUEL de la fiche (métiers de bureau).
+    if (Number(emp?.tauxHoraire) > 0) return Number(emp.tauxHoraire);
+    // Priorité 3 : grille CCQ (métier × niveau) + prime individuelle.
+    const taux = emp && tauxMetiers?.[emp.metier]?.[emp.niveau];
+    if (Number(taux) > 0) return Number(taux) + (Number(emp?.primeHoraire) || 0);
+    return projet.tauxHoraireCoutant || 0;
+  };
+  // Ventilation du coût main-d'œuvre par catégorie, avec le MÊME taux par
+  // employé que ci-dessus — garantit coutMainOeuvreChantier + coutTransport === coutMainOeuvre.
+  const coutMainOeuvreChantier = travauxChantier.reduce((s, t) => s + (t.heures || 0) * tauxDeEmploye(t), 0);
+  const coutTransport = travauxTransport.reduce((s, t) => s + (t.heures || 0) * tauxDeEmploye(t), 0);
+  const coutMainOeuvre = coutMainOeuvreChantier + coutTransport;
+  // ------------------------------------------------------------
+  // COÛT DU CAMION (bloc 5) : chaque heure d'un technicien qui AVAIT un
+  // camion ce jour-là (son inspection du matin le dit) coûte le taux
+  // camion en plus — chantier ET transports, le camion roule toute la
+  // journée. Passager ou sans véhicule : zéro (le camion du conducteur
+  // coûte déjà, on ne compte jamais deux fois le même véhicule).
+  // Taux FIGÉ sur l'inspection du matin ; à défaut (vieille inspection
+  // d'avant ce champ, ou inspection introuvable), le taux courant des
+  // Paramètres — on COMPTE le camion en cas de doute : un coûtant
+  // légèrement surestimé est moins dangereux qu'une job qui a l'air
+  // plus payante qu'elle l'est.
+  const coutCamionDe = (t) => {
+    const email = (t.employeEmail || "").toLowerCase();
+    if (!email || !t.date) return coutCamionDefaut;
+    const insp = inspections.find((i) => i.date === t.date && (i.technicienEmail || "").toLowerCase() === email);
+    if (!insp) return coutCamionDefaut;
+    if (insp.sansVehicule || insp.passagerDeNom) return 0;
+    return insp.coutCamionHoraire != null ? insp.coutCamionHoraire : coutCamionDefaut;
+  };
+  const coutCamion = travauxDuProjet.reduce((s, t) => s + (t.heures || 0) * coutCamionDe(t), 0);
+  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion;
+  const profitReel = projet.budgetTotal - coutTotalReel;
+  const pourcentageMarge = projet.budgetTotal > 0 ? (profitReel / projet.budgetTotal) * 100 : 0;
+  const pourcentageDepense = projet.budgetTotal > 0 ? (coutTotalReel / projet.budgetTotal) * 100 : 0;
+  return {
+    travauxDuProjet,
+    travauxChantier,
+    travauxTransport,
+    heuresChantier,
+    heuresTransport,
+    kilometrageTransport,
+    totalHeures,
+    coutMateriauxBC,
+    coutMateriauxQb,
+    coutMateriaux,
+    transactionsDuProjet,
+    totalFactureReel,
+    coutMainOeuvre,
+    coutMainOeuvreChantier,
+    coutTransport,
+    coutCamion,
+    coutTotalReel,
+    profitReel,
+    pourcentageMarge,
+    pourcentageDepense,
+    depassementBudget: coutTotalReel > projet.budgetTotal,
+  };
+}
+
+// Numéro de repli, utilisé UNIQUEMENT si la base est injoignable. La
+// vraie numérotation est séquentielle et vient de Supabase (compteurs) —
+// voir lib/supabase/compteurs.js. Le préfixe « HORS-LIGNE » rend le cas
+// visible : ces numéros sont à corriger manuellement.
+function genererNumeroSecours(prefixe) {
+  return `${prefixe}-HORS-LIGNE-${Date.now().toString().slice(-6)}`;
+}
+// Récupère le courriel par défaut d'un client (celui marqué `defaut`,
+// sinon le premier de la liste) — utilisé partout où l'ancien champ
+// unique `client.courriel` servait de repli avant l'envoi d'un
+// document, quand aucune sélection explicite n'a encore été faite.
+function courrielDefautClient(client) {
+  if (!client?.courriels?.length) return null;
+  return client.courriels.find((c) => c.defaut) || client.courriels[0];
+}
+
+function todayISO() {
+  // Même règle que dateISO : la « date du jour » est la date LOCALE.
+  return dateISO(new Date());
+}
+
+// Compression d'une image jointe à une tâche — mêmes réglages que l'app
+// technicien (1600 px / qualité 80 %) : assez pour lire un plan annoté
+// ou une plaque signalétique, sans téléverser des originaux de 8 Mo.
+function compresserImageJointe(file) {
+  return new Promise((resolve, reject) => {
+    const lecteur = new FileReader();
+    lecteur.onerror = () => reject(new Error("Fichier illisible"));
+    lecteur.onload = (e) => {
+      const img = new window.Image();
+      img.onerror = () => reject(new Error("Image invalide"));
+      img.onload = () => {
+        const largeurMax = 1600;
+        const echelle = Math.min(1, largeurMax / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width * echelle;
+        canvas.height = img.height * echelle;
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => (blob ? resolve({ blob }) : reject(new Error("Compression échouée"))), "image/jpeg", 0.8);
+      };
+      img.src = e.target.result;
+    };
+    lecteur.readAsDataURL(file);
+  });
+}
+
+// Nombre de jours écoulés depuis une date "AAAA-MM-JJ". Au niveau MODULE
+// parce que deux écrans s'en servent (la carte « État des véhicules » et
+// le dossier d'un camion) : en le laissant local au premier, le second
+// plantait sur « joursDepuis is not defined » dès qu'une anomalie était
+// ouverte.
+function joursDepuis(d) {
+  if (!d) return 0;
+  return Math.max(0, Math.round((new Date(`${todayISO()}T00:00:00`) - new Date(`${String(d).slice(0, 10)}T00:00:00`)) / 86400000));
+}
+
+// Destinataires choisis dans ModalSelectionCourriel (choix MULTIPLE) —
+// tolère aussi un objet seul (anciens appels). Retourne toujours une liste.
+function listeDestinataires(choix) {
+  if (!choix) return [];
+  return Array.isArray(choix) ? choix.filter(Boolean) : [choix];
+}
+// « courriel1 (Principal), courriel2 (Comptabilité) » pour le journal.
+function libelleDestinataires(choix) {
+  return listeDestinataires(choix)
+    .map((c) => `${c.email}${c.label ? ` (${c.label})` : ""}`)
+    .join(", ");
+}
+
+// DIMANCHE de la semaine de paie (dimanche→samedi) d'une date — accepte
+// une date « AAAA-MM-JJ » ou un horodatage ISO complet. Sert à décider si
+// une correction d'heures est TARDIVE (semaine de paie déjà passée) et à
+// quelle semaine son report appartient.
+function dimancheDeSemaineISO(d) {
+  const dt =
+    typeof d === "string"
+      ? d.includes("T")
+        ? new Date(d) // horodatage complet → converti en heure locale
+        : new Date(`${d}T00:00:00`) // date seule → minuit local
+      : new Date(d);
+  dt.setHours(0, 0, 0, 0);
+  dt.setDate(dt.getDate() - dt.getDay());
+  return dateISO(dt);
+}
+
+// ------------------------------------------------------------
+// PERSISTANCE DU JOURNAL D'ACTIVITÉ (audit trail)
+// ------------------------------------------------------------
+// En prod, chaque entrée du journal correspond à une écriture dans
+// une table Supabase `journal_audit` (append-only, jamais modifiable
+// ni supprimable depuis le client), conformément à l'exigence Loi 25
+// de traçabilité des accès/modifications. Ici, en attendant le
+// branchement réel, on persiste au moins dans localStorage pour que
+// l'historique survive à un rechargement de page plutôt que d'être
+// perdu à chaque fois.
+const CLE_JOURNAL = "ventilationdgl_journal_v1";
+// Plafond généreux (pas 10-12 comme un simple aperçu) — un vrai
+// journal d'audit doit couvrir au moins plusieurs jours d'activité.
+const PLAFOND_JOURNAL = 500;
+
+function chargerJournalDepuisStockage() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return [];
+    const brut = window.localStorage.getItem(CLE_JOURNAL);
+    const parsed = brut ? JSON.parse(brut) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function sauvegarderJournal(journal) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    window.localStorage.setItem(CLE_JOURNAL, JSON.stringify(journal));
+  } catch {
+    // Quota dépassé ou stockage indisponible — l'historique reste en
+    // mémoire pour la session en cours sans bloquer l'utilisateur.
+  }
+}
+
+function dateISO(d) {
+  // Date LOCALE (Québec), jamais UTC : avec toISOString(), entre ~20 h et
+  // minuit heure locale, la date bascule déjà sur « demain » — toutes les
+  // clés de l'agenda (placements, drag & drop, envoi aux techniciens)
+  // partaient alors sur le mauvais jour. L'app technicien calcule déjà
+  // ses dates en local (isoLocal) : les deux doivent rester identiques.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const j = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${j}`;
+}
+function ajouterJours(d, n) {
+  const copie = new Date(d);
+  copie.setDate(copie.getDate() + n);
+  return copie;
+}
+
+// ============================================================
+// NAVIGATION
+// ============================================================
+// ============================================================
+// MENU LATÉRAL — navigation groupée (bureau : fixe à gauche ;
+// mobile : tiroir ☰ par-dessus le contenu). Filtré par permissions.
+// ============================================================
+function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDeconnexion, ouvert, onFermer, reduit, onBasculerReduit }) {
+  const groupes = [
+    { titre: "Vue d'ensemble", items: [
+      { id: "tableau-de-bord", label: "Tableau de bord", icone: LayoutGrid },
+      { id: "recherche", label: "Recherche", icone: Search },
+    ]},
+    { titre: "Clients & ventes", items: [
+      { id: "clients", label: "Clients", icone: Users },
+      { id: "devis", label: "Devis", icone: FileText },
+      { id: "facturation", label: "Facturation", icone: Bell, badge: badges?.facturation },
+    ]},
+    { titre: "Opérations", items: [
+      { id: "agenda", label: "Agenda", icone: Calendar, badge: badges?.agenda },
+      { id: "projets", label: "Projets", icone: Briefcase, badge: badges?.projets },
+      { id: "inspections", label: "Véhicules", icone: Car },
+      { id: "pieces", label: "Pièces en commande", icone: Package, badge: badges?.pieces },
+    ]},
+    { titre: "Administration", items: [
+      { id: "paies", label: "Heures de la semaine", icone: Banknote, badge: badges?.paies },
+      { id: "tarifs", label: "Tarifs", icone: CreditCard },
+      { id: "utilisateurs", label: "Utilisateurs", icone: UserCog },
+      { id: "parametres", label: "Paramètres", icone: Settings },
+    ]},
+  ]
+    .map((g) => ({ ...g, items: g.items.filter((i) => permissions.includes(i.id)) }))
+    .filter((g) => g.items.length > 0);
+
+  // Bascule réduit/agrandi : flèche ‹ à droite de « Vue d'ensemble »
+  // (menu ouvert) ou flèche › en haut du rail (menu réduit).
+  const contenu = (estReduit, avecBascule) => (
+    <>
+      <div className={`flex items-center border-b border-white/10 py-4 ${estReduit ? "justify-center px-2" : "gap-2.5 px-4"}`}>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#FF6A13] text-sm font-extrabold text-white">V</span>
+        {!estReduit && (
+          <div className="min-w-0">
+            <p className="truncate text-xs font-extrabold text-white">Ventilation DGL</p>
+            <p className="text-[10px] text-slate-500">Administration</p>
+          </div>
+        )}
+      </div>
+      <nav className="flex-1 overflow-y-auto px-2 py-2">
+        {estReduit && avecBascule && (
+          <button
+            onClick={onBasculerReduit}
+            title="Agrandir le menu"
+            aria-label="Agrandir le menu"
+            className="mx-auto mb-1 flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+          >
+            <ChevronRight size={16} />
+          </button>
+        )}
+        {groupes.map((g, gi) => (
+          <div key={g.titre}>
+            {estReduit ? (
+              <div className="mx-2 my-2 border-t border-white/10" />
+            ) : (
+              <div className="flex items-center justify-between pr-0.5">
+                <p className="px-2.5 pb-1 pt-3 text-[9px] font-extrabold uppercase tracking-widest text-slate-500">{g.titre}</p>
+                {gi === 0 && avecBascule && (
+                  <button
+                    onClick={onBasculerReduit}
+                    title="Réduire le menu"
+                    aria-label="Réduire le menu"
+                    className="mt-2 flex h-6 w-6 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                )}
+              </div>
+            )}
+            {g.items.map((o) => {
+              const Icone = o.icone;
+              const actif = vue === o.id;
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => { onChoisir(o.id); onFermer?.(); }}
+                  title={o.label}
+                  className={`relative flex w-full items-center rounded-lg py-2 text-left text-[13px] font-semibold ${
+                    estReduit ? "justify-center px-0" : "gap-2.5 px-2.5"
+                  } ${actif ? "bg-[#FF6A13] font-extrabold text-white" : "text-slate-300 hover:bg-white/5"}`}
+                >
+                  <Icone size={estReduit ? 17 : 15} className="shrink-0" />
+                  {!estReduit && <span className="min-w-0 flex-1 truncate">{o.label}</span>}
+                  {o.badge > 0 && (
+                    <span className={`rounded-full bg-red-500 font-extrabold text-white ${
+                      estReduit ? "absolute right-1 top-0.5 px-1 text-[8px]" : "shrink-0 px-1.5 py-0.5 text-[9px]"
+                    }`}>{o.badge}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </nav>
+      <div className={`border-t border-white/10 py-3 ${estReduit ? "px-2 text-center" : "px-4"}`}>
+        {!estReduit && (
+          <>
+            <p className="truncate text-[11px] font-bold text-slate-200">{courriel}</p>
+            <p className="text-[10px] text-slate-500">{role}</p>
+          </>
+        )}
+        <button
+          onClick={onDeconnexion}
+          title="Déconnexion"
+          className={`mt-2 rounded-lg border border-white/20 text-slate-300 hover:bg-white/5 ${
+            estReduit ? "p-1.5" : "px-3 py-1 text-[10px] font-bold"
+          }`}
+        >
+          {estReduit ? <LogOut size={14} /> : "Déconnexion"}
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <>
+      {/* Bureau : colonne fixe, réductible en rail d'icônes (flèche ‹ / ›) */}
+      <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col bg-[#131B2E] transition-all md:flex ${reduit ? "w-14" : "w-56"}`}>
+        {contenu(reduit, true)}
+      </aside>
+      {/* Mobile : tiroir par-dessus (toujours complet) */}
+      {ouvert && (
+        <div className="fixed inset-0 z-40 md:hidden" onClick={onFermer}>
+          <div className="absolute inset-0 bg-black/50" />
+          <aside className="absolute left-0 top-0 flex h-full w-64 flex-col bg-[#131B2E]" onClick={(e) => e.stopPropagation()}>
+            {contenu(false, false)}
+          </aside>
+        </div>
+      )}
+    </>
+  );
+}
+
+function BarreNav({ onglet, setOnglet, compteAttente, compteAlertes, compteRisqueProjets, permissions }) {
+  const onglets = [
+    { id: "tableau-de-bord", label: "Tableau de bord", icone: LayoutGrid },
+    { id: "recherche", label: "Recherche", icone: Search },
+    { id: "clients", label: "Clients", icone: Users },
+    { id: "projets", label: "Projets", icone: Briefcase, badge: compteRisqueProjets },
+    { id: "devis", label: "Devis", icone: FileText },
+    { id: "agenda", label: "Agenda", icone: Calendar, badge: compteAttente },
+    { id: "facturation", label: "Facturation", icone: Bell, badge: compteAlertes },
+    { id: "inspections", label: "Véhicules", icone: Car },
+    { id: "tarifs", label: "Tarifs", icone: CreditCard },
+    { id: "utilisateurs", label: "Utilisateurs", icone: UserCog },
+  ].filter((o) => permissions.includes(o.id));
+  return (
+    <div className="sticky top-0 z-20 flex items-stretch overflow-x-auto border-b border-slate-200 bg-white px-2 md:px-6">
+      {onglets.map((o) => {
+        const Icone = o.icone;
+        const actif = onglet === o.id;
+        return (
+          <button
+            key={o.id}
+            onClick={() => setOnglet(o.id)}
+            className={`relative flex flex-1 items-center justify-center gap-2 border-b-2 px-2 py-3.5 text-sm font-bold md:flex-none md:px-5 ${
+              actif ? "border-[#FF6A13] text-[#131B2E]" : "border-transparent text-slate-400"
+            }`}
+          >
+            <Icone size={17} />
+            <span className="hidden sm:inline">{o.label}</span>
+            {o.badge > 0 && (
+              <span className="absolute -top-0.5 right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white md:static md:ml-0.5">
+                {o.badge}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// INSPECTIONS VÉHICULES — données de démo + entretien périodique
+// (remplacées par Supabase à l'Étape B — voir schema.sql, table
+// inspections_vehicules / entretiens_vehicules)
+// ============================================================
+const SEUIL_ENTRETIEN_KM = 10000;
+const SEUIL_ENTRETIEN_MOIS = 6;
+
+function dateIlYaMois(n) {
+  const d = new Date();
+  d.setMonth(d.getMonth() - n);
+  return dateISO(d);
+}
+function moisDepuis(iso) {
+  if (!iso) return Infinity;
+  const d = new Date(`${iso}T00:00:00`);
+  const now = new Date();
+  return (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+}
+
+// Camions dont l'entretien périodique est DÛ (10 000 km depuis le dernier
+// entretien OU 6 mois écoulés) — même règle que l'onglet Inspections,
+// réutilisée par la tuile « Entretiens camions » du tableau de bord.
+function camionsEntretienDu(inspections, entretiens) {
+  const camions = [...new Set((inspections || []).filter((i) => !i.sansVehicule && i.camion).map((i) => i.camion))];
+  return camions.filter((camion) => {
+    const kmList = (inspections || []).filter((i) => i.camion === camion && i.km != null).map((i) => i.km);
+    const kmActuel = kmList.length ? Math.max(...kmList) : 0;
+    const dernier = (entretiens || []).filter((e) => e.camion === camion).sort((a, b) => b.date.localeCompare(a.date))[0];
+    const ecartKm = kmActuel - (dernier ? dernier.km : 0);
+    const mois = dernier ? moisDepuis(dernier.date) : Infinity;
+    return ecartKm >= SEUIL_ENTRETIEN_KM || mois >= SEUIL_ENTRETIEN_MOIS;
+  });
+}
+
+const INSPECTIONS_INIT = [
+  { id: "insp1", date: dateISO(new Date()), technicienNom: "Marc Gagnon", sansVehicule: false, camion: "Camion 02", km: 142380, anomalie: true, remarque: "Feu arrière gauche grillé", controleProblemes: ["Lumières"], statutAnomalie: "nouvelle", noteCharge: "", prisParNom: "" },
+  { id: "insp2", date: dateISO(new Date()), technicienNom: "Sophie Roy", sansVehicule: false, camion: "Camion 01", km: 98120, anomalie: false, remarque: "", controleProblemes: [], statutAnomalie: "aucune", noteCharge: "", prisParNom: "" },
+  { id: "insp3", date: dateISO(new Date()), technicienNom: "Éric Bouchard", sansVehicule: true, camion: "", km: null, anomalie: false, remarque: "", controleProblemes: [], statutAnomalie: "aucune", noteCharge: "", prisParNom: "" },
+  { id: "insp4", date: dateISO(new Date()), technicienNom: "Sophie Roy", sansVehicule: false, camion: "Camion 05", km: 54900, anomalie: true, remarque: "Frein arrière mou", controleProblemes: ["Freins"], statutAnomalie: "prise_en_charge", noteCharge: "Pièce reçue, réparation faite le jour même.", prisParNom: "l'administrateur" },
+  { id: "insp5", date: dateISO(ajouterJours(new Date(), -1)), technicienNom: "Marc Gagnon", sansVehicule: false, camion: "Camion 03", km: 76540, anomalie: false, remarque: "", controleProblemes: [], statutAnomalie: "aucune", noteCharge: "", prisParNom: "" },
+];
+
+const ENTRETIENS_INIT = [
+  { id: "ent1", camion: "Camion 01", km: 88000, date: dateIlYaMois(3) },
+  { id: "ent2", camion: "Camion 02", km: 135000, date: dateIlYaMois(4) },
+  { id: "ent3", camion: "Camion 03", km: 70000, date: dateIlYaMois(8) },
+  { id: "ent4", camion: "Camion 05", km: 50000, date: dateIlYaMois(2) },
+];
+
+// PHOTOS D'UNE FICHE D'INSPECTION — vignettes cliquables (elles
+// s'ouvrent en pleine taille dans un onglet). Une anomalie décrite par
+// écrit reste vague ; la photo dit tout de suite s'il faut sortir le
+// camion de la route ou attendre le prochain entretien.
+function PhotosInspection({ photos }) {
+  const liste = (photos || []).filter(Boolean);
+  if (liste.length === 0) return null;
+  return (
+    <div className="mt-2">
+      <p className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+        <Camera size={10} /> {liste.length} photo{liste.length > 1 ? "s" : ""}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {liste.map((url, idx) => (
+          <a
+            key={url + idx}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Ouvrir en pleine taille"
+            className="block overflow-hidden rounded-lg border border-slate-200 hover:border-slate-400"
+          >
+            <img src={url} alt={`Anomalie ${idx + 1}`} className="h-16 w-20 object-cover" />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ONGLET PIÈCES EN COMMANDE
+// ------------------------------------------------------------
+// Le pont entre le diagnostic et la réparation. Une pièce manquante
+// bloque la 2e visite : tant qu'elle n'est pas arrivée (et payée si le
+// paiement est exigé), la tâche de retour ne peut pas aller à l'horaire.
+//
+// DEUX NIVEAUX D'ACCÈS :
+//   • Les administrateurs COMMANDENT (bon de commande, réception, annulation)
+//   • Répartiteur et chargé de projet VOIENT seulement — pour répondre
+//     au client qui appelle savoir où en est sa pièce. Voir n'est pas
+//     commander : deux personnes qui commandent, c'est deux commandes.
+//
+// Le compteur de JOURS est ce qui fait relancer un fournisseur qui
+// traîne : une pièce commandée depuis trois semaines doit crier.
+// ============================================================
+const STATUTS_PIECE = {
+  a_commander: { label: "À commander", cls: "bg-red-100 text-red-700 border-red-300" },
+  commandee: { label: "Commandée", cls: "bg-amber-100 text-amber-800 border-amber-300" },
+  facture_recue: { label: "Facture reçue — vérifier", cls: "bg-blue-100 text-blue-700 border-blue-300" },
+  recue: { label: "Reçue", cls: "bg-emerald-100 text-emerald-700 border-emerald-300" },
+  annulee: { label: "Annulée", cls: "bg-slate-100 text-slate-500 border-slate-300" },
+};
+
+function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot }) {
+  const configEnt = useEntreprise();
+  const [filtre, setFiltre] = useState("ouvertes");
+  const [annulationPour, setAnnulationPour] = useState(null);
+  const [raisonAnnulation, setRaisonAnnulation] = useState("");
+  // ENVOI DIRECT du BC par l'application (service Resend). Tant que la
+  // clé n'est pas configurée, la route répond « simulé » et on affiche
+  // quoi faire au lieu d'échouer. Le résultat s'écrit SUR la carte de
+  // la pièce concernée, pas dans une alerte générique.
+  const [envoiBcEnCours, setEnvoiBcEnCours] = useState(null);
+  const [messageEnvoiBc, setMessageEnvoiBc] = useState(null); // { id, texte, ok }
+  const envoyerBcParApplication = async (p) => {
+    const adresses = courrielsFournisseur(p);
+    if (adresses.length === 0) return;
+    setEnvoiBcEnCours(p.id);
+    const r = await envoyerCourriel({
+      a: adresses,
+      sujet: `Bon de commande ${p.numeroBc || ""} — ${configEnt.nomLegal}`,
+      html: gabaritBonCommande({ config: configEnt, piece: p }),
+    });
+    setEnvoiBcEnCours(null);
+    if (r.envoye) {
+      onMaj(p.id, { bc_envoye_le: new Date().toISOString() });
+      setMessageEnvoiBc({ id: p.id, ok: true, texte: `Courriel envoyé à ${adresses.join(", ")}` });
+    } else if (r.simule) {
+      setMessageEnvoiBc({
+        id: p.id,
+        ok: false,
+        texte: "Service d'envoi pas encore configuré (clé Resend absente) — utilise « ✉️ Courriel au fournisseur » en attendant.",
+      });
+    } else {
+      setMessageEnvoiBc({ id: p.id, ok: false, texte: r.erreur || "Envoi refusé — réessaie." });
+    }
+  };
+  // 💰 DEMANDE DE PAIEMENT AU CLIENT — montant taxé, descriptif, courriel.
+  // La confirmation du paiement reste un geste humain (« Paiement reçu ✓ ») ;
+  // en Phase 4, ce même bouton créera la vraie facture QuickBooks et le
+  // paiement détecté déverrouillera tout seul.
+  const [demandePour, setDemandePour] = useState(null);
+  const [demandeMontant, setDemandeMontant] = useState("");
+  const [demandeDescription, setDemandeDescription] = useState("");
+  const [demandeEmails, setDemandeEmails] = useState([]);
+  const [demandeExtra, setDemandeExtra] = useState("");
+  const [demandeEnCours, setDemandeEnCours] = useState(false);
+  const [messageDemande, setMessageDemande] = useState(null); // { id, ok, texte }
+  // FRAIS DE DÉPLACEMENT — la visite de retour est un 2e appel de
+  // service (règle validée) : elle peut exiger son dépôt comme les
+  // autres. Cochable dans la même fenêtre : un seul courriel, un seul
+  // virement — ou deux temps si on ne coche pas (pièce à la commande,
+  // déplacement à la réception).
+  const [demandeDeplacement, setDemandeDeplacement] = useState(false);
+  const [demandeZone, setDemandeZone] = useState("Zone 1");
+  const [demandeMontantDeplacement, setDemandeMontantDeplacement] = useState("");
+  // La pièce est-elle encore à payer ? (sinon la fenêtre sert au
+  // déplacement seul — 2e temps du circuit)
+  const pieceEncoreAPayer = (p) => (p.paiementAvantCommande || p.paiementRequis) && !p.paiementRecu;
+  const ficheClientPiece = (p) =>
+    (clients || []).find((c) => c.id === p.clientId) ||
+    (clients || []).find((c) => (c.nom || "").trim().toLowerCase() === (p.clientNom || "").trim().toLowerCase());
+  const choisirZone = (zone) => {
+    setDemandeZone(zone);
+    const prix = Number(prixDepots?.[zone]) || 0;
+    setDemandeMontantDeplacement(prix > 0 ? String(prix) : "");
+  };
+  const ouvrirDemande = (p, { deplacementSeul = false } = {}) => {
+    const fiche = ficheClientPiece(p);
+    const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
+    const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
+    setDemandePour(p);
+    setDemandeMontant(!deplacementSeul && p.montantPiece != null ? String(p.montantPiece) : "");
+    setDemandeEmails(defauts.length > 0 ? defauts : tous.slice(0, 1));
+    setDemandeExtra("");
+    setDemandeDeplacement(deplacementSeul);
+    if (deplacementSeul) choisirZone(demandeZone);
+    setDemandeDescription(
+      deplacementSeul
+        ? `Bonne nouvelle : la pièce pour votre ${p.modele ? `unité ${p.modele}` : "équipement"} (${p.pieceRequise}) est arrivée. Dès la réception des frais de déplacement ci-dessous, nous vous appelons pour fixer la visite d'installation.`
+        : `Une pièce est requise pour la réparation de votre ${p.modele ? `unité ${p.modele}` : "équipement"} : ${p.pieceRequise}. ` +
+            (p.paiementAvantCommande
+              ? "Le paiement est requis avant que nous puissions passer la commande auprès du fournisseur."
+              : "Le paiement est requis avant de planifier la visite d'installation.")
+    );
+  };
+  const envoyerDemandePaiement = async () => {
+    const p = demandePour;
+    if (!p) return;
+    const extra = demandeExtra.trim();
+    const adresses = [...new Set([...demandeEmails, ...(extra ? [extra] : [])])];
+    // Les lignes de la demande : pièce (si encore à payer), déplacement
+    // (si coché). Le total taxé se calcule sur l'ensemble.
+    const montantPiece = pieceEncoreAPayer(p) ? parseFloat(demandeMontant) || 0 : 0;
+    const montantDepl = demandeDeplacement ? parseFloat(demandeMontantDeplacement) || 0 : 0;
+    const lignes = [
+      ...(montantPiece > 0 ? [{ etiquette: `Pièce — ${p.pieceRequise}`, montant: montantPiece }] : []),
+      ...(montantDepl > 0 ? [{ etiquette: `Frais de déplacement — ${demandeZone}`, montant: montantDepl }] : []),
+    ];
+    const totalHT = montantPiece + montantDepl;
+    if (adresses.length === 0 || totalHT <= 0) return;
+    setDemandeEnCours(true);
+    const t = calculerTaxes(totalHT, configEnt);
+    const r = await envoyerCourriel({
+      a: adresses,
+      sujet: `Demande de paiement — ${montantPiece > 0 ? "pièce pour votre réparation" : "frais de déplacement"} (${configEnt.nomCommercial || configEnt.nomLegal})`,
+      html: gabaritDemandePaiement({
+        config: configEnt,
+        clientNom: p.clientNom,
+        description: demandeDescription,
+        lignes,
+        tps: t.tps,
+        tvq: t.tvq,
+        total: t.total,
+      }),
+    });
+    setDemandeEnCours(false);
+    if (!r.envoye && !r.simule) {
+      setMessageDemande({ id: p.id, ok: false, texte: r.erreur || "Envoi refusé — réessaie." });
+      return;
+    }
+    // Les verrous s'enregistrent même en mode simulé : le blocage est
+    // l'intention, le courriel n'est que le messager (on peut appeler).
+    if (montantPiece > 0) {
+      onMaj(p.id, {
+        ...(r.envoye ? { demande_paiement_le: new Date().toISOString() } : {}),
+        montant_piece: montantPiece,
+      });
+    }
+    if (montantDepl > 0 && p.tacheRetourId) {
+      // Un VRAI dépôt sur la tâche de retour — même machine que les
+      // appels de service : blocage 🔒, badge en facturation, déduction
+      // automatique. 7 jours au lieu de 24 h : la pièce est déjà à nous,
+      // on ne perd rien à laisser le client respirer.
+      onCreerDepot?.(p.tacheRetourId, { montantHT: montantDepl, joursLimite: 7 });
+    }
+    setMessageDemande(
+      r.envoye
+        ? { id: p.id, ok: true, texte: `Demande de ${t.total.toFixed(2)} $ (taxes incl.) envoyée à ${adresses.join(", ")}` }
+        : { id: p.id, ok: false, texte: "Service d'envoi pas encore configuré (clé Resend absente) — appelle le client, les montants et verrous sont notés." }
+    );
+    setDemandePour(null);
+  };
+  // Adresse courriel du fournisseur d'une pièce — depuis sa fiche.
+  // Les fiches acceptent plusieurs adresses (achats, comptabilité…) ;
+  // on accepte aussi bien des objets {email} que des chaînes brutes.
+  const courrielsFournisseur = (p) => {
+    const f = (fournisseurs || []).find((x) => (x.nom || "").trim().toLowerCase() === (p.fournisseurNom || "").trim().toLowerCase());
+    return (f?.courriels || []).map((c) => (typeof c === "string" ? c : c.email || "")).filter(Boolean);
+  };
+  // Courriel du BC — tout pré-rempli, il ne reste qu'à cliquer Envoyer
+  // dans son propre logiciel (Outlook, Gmail…). Le courriel part de la
+  // vraie adresse de l'utilisateur : la réponse revient dans SA boîte.
+  const lienCourrielBc = (p, adresse) => {
+    const lignesUnites = (p.unites || [])
+      .map((u) => `- Modèle : ${u.modele || "—"} · Nº série : ${u.serie || "—"}`)
+      .join("\n");
+    const corps =
+      `Bonjour,\n\nVeuillez trouver notre bon de commande ${p.numeroBc || ""} :\n\n` +
+      `Pièce : ${p.pieceRequise}\n` +
+      (p.modele || p.numeroSerie ? `Équipement : ${p.modele || "—"} · Nº série : ${p.numeroSerie || "—"}\n` : "") +
+      (lignesUnites ? `${lignesUnites}\n` : "") +
+      (p.note ? `Note : ${p.note}\n` : "") +
+      `\nMerci de confirmer la disponibilité et la date de livraison prévue.\n\n` +
+      `${configEnt.nomLegal}\n${configEnt.telephone || ""}`;
+    return `mailto:${encodeURIComponent(adresse)}?subject=${encodeURIComponent(`Bon de commande ${p.numeroBc || ""} — ${configEnt.nomLegal}`)}&body=${encodeURIComponent(corps)}`;
+  };
+  // FORMULAIRE « pièce commandée » : fournisseur + nº de BC + date de
+  // réception PRÉVUE. La date est facultative — bien des fournisseurs
+  // ne s'engagent sur rien, et forcer une date inventée serait pire
+  // que pas de date du tout : on planifierait dessus.
+  const [editionBc, setEditionBc] = useState(null);
+  const [formBc, setFormBc] = useState({ fournisseurNom: "", numeroBc: "", datePrevue: "" });
+
+  const ouvertes = (pieces || []).filter((p) => p.statut !== "recue" && p.statut !== "annulee");
+  const affichees =
+    filtre === "ouvertes" ? ouvertes : filtre === "toutes" ? pieces || [] : (pieces || []).filter((p) => p.statut === filtre);
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-3 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-extrabold text-slate-900">Pièces en commande</h2>
+          <p className="text-xs text-slate-400">
+            {ouvertes.length} pièce{ouvertes.length > 1 ? "s" : ""} en attente · la tâche de retour se débloque à la réception
+          </p>
+        </div>
+        {!peutCommander && (
+          <span className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700">
+            <Lock size={12} /> Consultation seulement — pour tes suivis clients
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {[["ouvertes", "En attente"], ["a_commander", "À commander"], ["commandee", "Commandées"], ["recue", "Reçues"], ["toutes", "Toutes"]].map(
+          ([val, label]) => (
+            <button
+              key={val}
+              onClick={() => setFiltre(val)}
+              className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
+                filtre === val ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          )
+        )}
+      </div>
+
+      {affichees.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">
+          Aucune pièce dans cette catégorie.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {affichees.map((p) => {
+            const st = STATUTS_PIECE[p.statut] || STATUTS_PIECE.a_commander;
+            // Deux façons d'être en retard : la date promise est passée
+            // (le fournisseur a manqué sa parole), ou il n'y a jamais eu
+            // de date et ça traîne depuis deux semaines.
+            const enRetard = p.enRetard || (p.statut !== "recue" && p.statut !== "annulee" && p.jours >= 14);
+            return (
+              <div key={p.id} className={`rounded-2xl border bg-white p-4 ${enRetard ? "border-red-300" : "border-slate-200"}`}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-extrabold text-slate-900">{p.pieceRequise}</p>
+                    <p className="text-xs text-slate-500">{p.clientNom}</p>
+                    {(p.modele || p.numeroSerie) && (
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {p.modele}
+                        {p.modele && p.numeroSerie ? " · " : ""}
+                        {p.numeroSerie ? `Nº ${p.numeroSerie}` : ""}
+                      </p>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${st.cls}`}>{st.label}</span>
+                    {p.statut !== "recue" && p.statut !== "annulee" && (
+                      <p className={`mt-1 text-[11px] font-bold tabular-nums ${enRetard ? "text-red-600" : "text-slate-400"}`}>
+                        {p.jours === 0 ? "aujourd'hui" : `${p.jours} jour${p.jours > 1 ? "s" : ""}`}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {(p.fournisseurNom || p.numeroBc) && (
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    {p.fournisseurNom || "Fournisseur non précisé"}
+                    {p.numeroBc ? <> · bon de commande <span className="font-bold">{p.numeroBc}</span></> : ""}
+                  </p>
+                )}
+                {p.dateReceptionPrevue && p.statut !== "recue" && p.statut !== "annulee" && (
+                  <p className={`mt-0.5 text-[11px] font-bold ${p.enRetard ? "text-red-600" : "text-sky-700"}`}>
+                    {p.enRetard ? "⚠️ Était attendue le " : "📅 Réception prévue le "}
+                    {new Date(`${p.dateReceptionPrevue}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" })}
+                    {p.enRetard ? " — relancer le fournisseur" : ""}
+                  </p>
+                )}
+                {p.statut === "commandee" && !p.dateReceptionPrevue && (
+                  <p className="mt-0.5 text-[11px] text-slate-400">Aucune date de réception confirmée par le fournisseur.</p>
+                )}
+                {p.statut === "recue" && (
+                  <p className="mt-1.5 text-[11px] text-emerald-700">
+                    Reçue par {p.recuParNom || "—"}
+                    {p.recuVia === "quickbooks" ? " (via QuickBooks)" : ""}
+                    {p.recuLe ? ` · ${new Date(p.recuLe).toLocaleDateString("fr-CA")}` : ""}
+                  </p>
+                )}
+                {p.statut === "annulee" && p.annuleRaison && (
+                  <p className="mt-1.5 text-[11px] italic text-slate-500">Annulée — {p.annuleRaison}</p>
+                )}
+                {/* PAIEMENT DU CLIENT — deux moments possibles, deux
+                    messages différents : avant la COMMANDE (la pièce ne
+                    part même pas chez le fournisseur sans l'argent) ou
+                    avant la PLANIFICATION (on commande tout de suite,
+                    mais on ne cédule pas la pose sans l'argent). */}
+                {p.paiementAvantCommande && !p.paiementRecu && (
+                  <p className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                    💰 Le client doit payer{Number(p.montantPiece) > 0 ? ` ${Number(p.montantPiece).toFixed(2)} $ HT` : ""} AVANT la commande
+                    {p.jours > 0 ? ` · en attente depuis ${p.jours} jour${p.jours > 1 ? "s" : ""} — relancer le CLIENT` : ""}
+                  </p>
+                )}
+                {p.paiementAvantCommande && p.paiementRecu && p.statut !== "recue" && p.statut !== "annulee" && (
+                  <p className="mt-1.5 rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">
+                    💰 Pièce payée d&apos;avance par le client{Number(p.montantPiece) > 0 ? ` (${Number(p.montantPiece).toFixed(2)} $ HT)` : ""} — sera déduite de la facture du retour
+                  </p>
+                )}
+                {p.paiementRequis && !p.paiementRecu && (
+                  <p className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                    💰 Paiement du client requis avant de replanifier
+                  </p>
+                )}
+                {p.bcEnvoyeLe && (
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    ✉️ BC envoyé au fournisseur le {new Date(p.bcEnvoyeLe).toLocaleDateString("fr-CA")}
+                  </p>
+                )}
+
+                {/* ACTIONS — administrateurs seulement. Le répartiteur
+                    voit tout ce qui précède, mais rien de ce qui suit. */}
+                {peutCommander && p.statut !== "recue" && p.statut !== "annulee" && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                    {editionBc === p.id ? (
+                      <div className="w-full space-y-2">
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Fournisseur</label>
+                            <input
+                              list={`fourn-${p.id}`}
+                              value={formBc.fournisseurNom}
+                              onChange={(e) => setFormBc({ ...formBc, fournisseurNom: e.target.value })}
+                              placeholder="Descair, Master…"
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                            />
+                            <datalist id={`fourn-${p.id}`}>
+                              {(fournisseurs || []).map((f) => (
+                                <option key={f.id || f.nom} value={f.nom} />
+                              ))}
+                            </datalist>
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Nº de bon de commande</label>
+                            <input
+                              value={formBc.numeroBc}
+                              onChange={(e) => setFormBc({ ...formBc, numeroBc: e.target.value })}
+                              placeholder="Vide = généré automatiquement"
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                            />
+                            <p className="mt-0.5 text-[9px] text-slate-400">
+                              Laisse vide : le prochain numéro officiel (même compteur que les BC fournisseurs) sera pris à l&apos;enregistrement — aucun numéro brûlé si tu annules.
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">
+                            Date de réception prévue <span className="font-normal normal-case text-slate-400">(facultatif)</span>
+                          </label>
+                          <input
+                            type="date"
+                            value={formBc.datePrevue}
+                            onChange={(e) => setFormBc({ ...formBc, datePrevue: e.target.value })}
+                            className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
+                          />
+                          <p className="mt-0.5 text-[10px] text-slate-400">
+                            Si le fournisseur ne s&apos;engage pas, laisse vide — c&apos;est correct. La date sert à rappeler
+                            le client d&apos;avance, et vire au rouge si elle passe sans que la pièce arrive.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={async () => {
+                              // BLOC 1 — numéro généré À L'ENREGISTREMENT
+                              // (pas à l'ouverture du formulaire) : un
+                              // formulaire ouvert puis annulé ne brûle
+                              // aucun numéro, la séquence comptable reste
+                              // pleine. Même compteur que les BC
+                              // fournisseurs : jamais de doublon.
+                              let numero = formBc.numeroBc.trim();
+                              if (!numero) {
+                                try {
+                                  numero = await numeroBonCommande();
+                                } catch {
+                                  numero = "";
+                                }
+                              }
+                              onMaj(p.id, {
+                                fournisseur_nom: formBc.fournisseurNom.trim() || null,
+                                numero_bc: numero || null,
+                                date_reception_prevue: formBc.datePrevue || null,
+                                statut: "commandee",
+                              });
+                              setEditionBc(null);
+                            }}
+                            className="min-h-0 px-3 py-1.5 text-xs"
+                          >
+                            <Check size={13} /> Pièce commandée
+                          </Button>
+                          <Button variant="outline" onClick={() => setEditionBc(null)} className="min-h-0 px-3 py-1.5 text-xs">Annuler</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* BLOC 3 — paiement avant commande : tant que le
+                            client n'a pas payé, COMMANDER est verrouillé.
+                            « Paiement reçu » reste un geste humain, comme
+                            pour les dépôts : c'est la personne qui voit
+                            l'argent rentrer qui clique. */}
+                        {p.paiementAvantCommande && !p.paiementRecu && p.statut === "a_commander" ? (
+                          <>
+                            <span className="flex items-center gap-1.5 rounded-lg bg-amber-100 px-2.5 py-1.5 text-[11px] font-bold text-amber-800">
+                              <Lock size={12} /> Commande verrouillée — paiement du client requis
+                            </span>
+                            <Button
+                              onClick={() => onMaj(p.id, { paiement_recu: true })}
+                              className="min-h-0 px-3 py-1.5 text-xs"
+                            >
+                              <Check size={13} /> Paiement reçu
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            onClick={() => {
+                              setEditionBc(p.id);
+                              setFormBc({
+                                fournisseurNom: p.fournisseurNom || "",
+                                numeroBc: p.numeroBc || "",
+                                datePrevue: p.dateReceptionPrevue || "",
+                              });
+                            }}
+                            className="min-h-0 px-3 py-1.5 text-xs"
+                          >
+                            {p.statut === "commandee" ? "Modifier la commande" : "📦 Marquer commandée"}
+                          </Button>
+                        )}
+                        {/* BLOC 2 — courriel du BC : ouvre le logiciel de
+                            courriel de l'utilisateur, tout pré-rempli.
+                            On ne peut pas savoir s'il a vraiment cliqué
+                            Envoyer — d'où la confirmation manuelle. */}
+                        {p.statut === "commandee" && courrielsFournisseur(p).length > 0 && (
+                          <>
+                            <Button
+                              onClick={() => envoyerBcParApplication(p)}
+                              disabled={envoiBcEnCours === p.id}
+                              className="min-h-0 px-3 py-1.5 text-xs"
+                            >
+                              {envoiBcEnCours === p.id ? "Envoi…" : "✉️ Envoyer le BC"}
+                            </Button>
+                            <a
+                              href={lienCourrielBc(p, courrielsFournisseur(p)[0])}
+                              className="flex min-h-0 items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                            >
+                              ✉️ Par mon logiciel
+                            </a>
+                          </>
+                        )}
+                        {p.statut === "commandee" && courrielsFournisseur(p).length === 0 && p.fournisseurNom && (
+                          <span className="text-[10px] text-slate-400">✉️ Aucun courriel sur la fiche « {p.fournisseurNom} »</span>
+                        )}
+                        {p.statut === "commandee" && !p.bcEnvoyeLe && (
+                          <button
+                            onClick={() => onMaj(p.id, { bc_envoye_le: new Date().toISOString() })}
+                            className="text-[11px] font-semibold text-slate-500 underline underline-offset-2 hover:text-emerald-700"
+                          >
+                            ✓ Marquer le BC envoyé
+                          </button>
+                        )}
+                        {messageEnvoiBc?.id === p.id && (
+                          <p className={`w-full text-[11px] font-semibold ${messageEnvoiBc.ok ? "text-emerald-700" : "text-amber-700"}`}>
+                            {messageEnvoiBc.ok ? "✓ " : "⚠️ "}{messageEnvoiBc.texte}
+                          </p>
+                        )}
+                        {/* RÉCEPTION — le seul geste qui débloque la
+                            planification. Toujours humain : une facture
+                            fournisseur ne prouve pas que la pièce est
+                            arrivée sur la tablette. */}
+                        <Button
+                          onClick={() => onRecue(p.id, nomUtilisateur)}
+                          className="min-h-0 px-3 py-1.5 text-xs"
+                        >
+                          <Check size={13} /> Pièce reçue
+                        </Button>
+                        <button
+                          onClick={() => { setAnnulationPour(p.id); setRaisonAnnulation(""); }}
+                          className="text-[11px] font-semibold text-slate-400 underline underline-offset-2 hover:text-red-600"
+                        >
+                          Annuler
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* BLOC 3 — moment du paiement exigé. Trois choix, parce
+                    que trois réalités : rien (facturé au retour, le cas
+                    normal), avant la COMMANDE (grosse pièce, client
+                    inconnu), avant la PLANIFICATION (on commande, mais on
+                    ne pose pas sans l'argent). */}
+                {peutCommander && (p.statut === "a_commander" || p.statut === "commandee") && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2 text-[11px]">
+                    <label className="font-bold text-slate-400">💰 Paiement du client :</label>
+                    <select
+                      value={p.paiementAvantCommande ? "avant_commande" : p.paiementRequis ? "avant_planification" : "aucun"}
+                      onChange={(e) =>
+                        onMaj(p.id, {
+                          paiement_avant_commande: e.target.value === "avant_commande",
+                          paiement_requis: e.target.value === "avant_planification",
+                        })
+                      }
+                      className="rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
+                    >
+                      <option value="aucun">Aucun — facturé au retour</option>
+                      <option value="avant_commande">Exigé AVANT la commande</option>
+                      <option value="avant_planification">Exigé avant la planification</option>
+                    </select>
+                    {(p.paiementAvantCommande || p.paiementRequis) && (
+                      <span className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          defaultValue={p.montantPiece ?? ""}
+                          onBlur={(e) => {
+                            const v = e.target.value === "" ? null : parseFloat(e.target.value) || 0;
+                            if (v !== p.montantPiece) onMaj(p.id, { montant_piece: v });
+                          }}
+                          placeholder="Montant"
+                          className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-[11px] tabular-nums"
+                        />
+                        <span className="text-slate-400">$ HT</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* 💰 DEMANDE DE PAIEMENT — le verrou sans la demande,
+                    c'est une pièce qui dort : tout le monde croit que
+                    quelqu'un d'autre a appelé le client. Ici, la demande
+                    écrite part (courriel) et laisse une TRACE datée. */}
+                {peutCommander && p.statut !== "annulee" && (p.paiementAvantCommande || p.paiementRequis) && !p.paiementRecu && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button onClick={() => ouvrirDemande(p)} className="min-h-0 px-3 py-1.5 text-xs">
+                      💰 {p.demandePaiementLe ? "Renvoyer la demande de paiement" : "Demander le paiement"}
+                    </Button>
+                    {p.demandePaiementLe && (
+                      <span className="text-[11px] font-semibold text-emerald-700">
+                        ✓ Demande envoyée le {new Date(p.demandePaiementLe).toLocaleDateString("fr-CA")}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* 2e TEMPS — pièce reçue (et payée s'il le fallait) :
+                    demander les frais de déplacement seuls. Le meilleur
+                    moment psychologique : la demande arrive avec la
+                    bonne nouvelle « votre pièce est là ». */}
+                {peutCommander && p.statut === "recue" && p.tacheRetourId && !depots?.[p.tacheRetourId] &&
+                  !((p.paiementAvantCommande || p.paiementRequis) && !p.paiementRecu) && (
+                  <div className="mt-2">
+                    <Button onClick={() => ouvrirDemande(p, { deplacementSeul: true })} className="min-h-0 px-3 py-1.5 text-xs">
+                      🚚 Demander les frais de déplacement
+                    </Button>
+                  </div>
+                )}
+                {/* ÉTAT DU DÉPÔT DE DÉPLACEMENT sur la tâche de retour */}
+                {p.tacheRetourId && depots?.[p.tacheRetourId] && (() => {
+                  const d = depots[p.tacheRetourId];
+                  const paye = String(d.statut || "").startsWith("paye");
+                  return (
+                    <p className={`mt-1.5 rounded-lg px-2 py-1 text-[11px] font-bold ${paye ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
+                      {paye
+                        ? `🚚 Frais de déplacement PAYÉS ✓${d.modePaiement ? ` (${d.modePaiement})` : ""}`
+                        : `🚚 Frais de déplacement demandés — ${(Number(d.montantHT) || 0).toFixed(2)} $ HT · en attente du paiement`}
+                    </p>
+                  );
+                })()}
+                {messageDemande?.id === p.id && (
+                  <p className={`mt-1 text-[11px] font-semibold ${messageDemande.ok ? "text-emerald-700" : "text-amber-700"}`}>
+                    {messageDemande.ok ? "✓ " : "⚠️ "}{messageDemande.texte}
+                  </p>
+                )}
+
+                {annulationPour === p.id && (
+                  <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
+                    <label className="mb-1 block text-[10px] font-bold uppercase text-slate-400">Raison de l&apos;annulation</label>
+                    <input
+                      value={raisonAnnulation}
+                      onChange={(e) => setRaisonAnnulation(e.target.value)}
+                      placeholder="Client refuse la réparation, pièce discontinuée…"
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        onClick={() => { onAnnuler(p.id, raisonAnnulation); setAnnulationPour(null); }}
+                        disabled={!raisonAnnulation.trim()}
+                        className="min-h-0 px-3 py-1.5 text-xs"
+                      >
+                        Confirmer l&apos;annulation
+                      </Button>
+                      <Button variant="outline" onClick={() => setAnnulationPour(null)} className="min-h-0 px-3 py-1.5 text-xs">Retour</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* FENÊTRE — DEMANDE DE PAIEMENT AU CLIENT */}
+      {demandePour && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDemandePour(null)}>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-extrabold text-slate-900">💰 Demande de paiement — {demandePour.clientNom}</h3>
+            <p className="mt-0.5 text-[11px] text-slate-400">{demandePour.pieceRequise}</p>
+
+            <label className="mt-3 mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Message au client</label>
+            <textarea
+              value={demandeDescription}
+              onChange={(e) => setDemandeDescription(e.target.value)}
+              rows={3}
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+
+            {pieceEncoreAPayer(demandePour) && (
+              <>
+                <label className="mt-2 mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Pièce ($ HT)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={demandeMontant}
+                  onChange={(e) => setDemandeMontant(e.target.value)}
+                  className="w-40 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
+                />
+              </>
+            )}
+
+            {/* FRAIS DE DÉPLACEMENT — cochable ici (tout d'un coup) ou
+                demandé plus tard, seul, à la réception (deux temps). */}
+            {demandePour.tacheRetourId && !depots?.[demandePour.tacheRetourId] && (
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={demandeDeplacement}
+                    onChange={(e) => {
+                      setDemandeDeplacement(e.target.checked);
+                      if (e.target.checked && !demandeMontantDeplacement) choisirZone(demandeZone);
+                    }}
+                  />
+                  🚚 Inclure les frais de déplacement (visite d'installation)
+                </label>
+                {demandeDeplacement && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <select
+                      value={demandeZone}
+                      onChange={(e) => choisirZone(e.target.value)}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    >
+                      {ZONES_DEPOTS.map((z) => (
+                        <option key={z} value={z}>
+                          {z}{Number(prixDepots?.[z]) > 0 ? ` — ${Number(prixDepots[z]).toFixed(2)} $` : ""}
+                        </option>
+                      ))}
+                      <option value="Hors zone">🗺️ Hors zone — montant manuel</option>
+                    </select>
+                    <span className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={demandeMontantDeplacement}
+                        onChange={(e) => setDemandeMontantDeplacement(e.target.value)}
+                        placeholder="Montant"
+                        className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
+                      />
+                      <span className="text-[10px] text-slate-400">$ HT</span>
+                    </span>
+                    <p className="w-full text-[10px] text-slate-400">
+                      Crée un dépôt sur la tâche de retour (payable sous 7 jours) — elle restera bloquée tant que le déplacement n'est pas payé.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {(() => {
+              const mp = pieceEncoreAPayer(demandePour) ? parseFloat(demandeMontant) || 0 : 0;
+              const md = demandeDeplacement ? parseFloat(demandeMontantDeplacement) || 0 : 0;
+              const totalHT = mp + md;
+              if (totalHT <= 0) return null;
+              const t = calculerTaxes(totalHT, configEnt);
+              return (
+                <p className="mt-2 text-[11px] text-slate-500">
+                  {mp > 0 && md > 0 ? `Pièce ${mp.toFixed(2)} $ + déplacement ${md.toFixed(2)} $ · ` : ""}
+                  TPS {t.tps.toFixed(2)} $ · TVQ {t.tvq.toFixed(2)} $ → <span className="font-extrabold text-slate-800">{t.total.toFixed(2)} $ toutes taxes incluses</span>
+                  {" "}— c'est ce montant que le client verra.
+                </p>
+              );
+            })()}
+
+            <label className="mt-3 mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Envoyer à :</label>
+            {(ficheClientPiece(demandePour)?.courriels || []).map((c) => {
+              const adresse = typeof c === "string" ? c : c.email;
+              if (!adresse) return null;
+              const coche = demandeEmails.includes(adresse);
+              return (
+                <label key={adresse} className="mb-1 flex items-center gap-1.5 text-xs text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={coche}
+                    onChange={() =>
+                      setDemandeEmails((prev) => (coche ? prev.filter((a) => a !== adresse) : [...prev, adresse]))
+                    }
+                  />
+                  {adresse}
+                  {typeof c === "object" && c.label ? <span className="text-[10px] text-slate-400">({c.label})</span> : null}
+                </label>
+              );
+            })}
+            <input
+              value={demandeExtra}
+              onChange={(e) => setDemandeExtra(e.target.value)}
+              placeholder="Autre adresse (optionnel)"
+              className="mb-3 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+
+            <div className="flex gap-2">
+              <Button
+                onClick={envoyerDemandePaiement}
+                disabled={
+                  demandeEnCours ||
+                  (pieceEncoreAPayer(demandePour) ? parseFloat(demandeMontant) || 0 : 0) +
+                    (demandeDeplacement ? parseFloat(demandeMontantDeplacement) || 0 : 0) <=
+                    0 ||
+                  (demandeEmails.length === 0 && !demandeExtra.trim())
+                }
+                className="min-h-0 flex-1 py-2 text-xs"
+              >
+                {demandeEnCours ? "Envoi…" : "Envoyer la demande"}
+              </Button>
+              <Button variant="outline" onClick={() => setDemandePour(null)} className="min-h-0 py-2 text-xs">
+                Annuler
+              </Button>
+            </div>
+            <p className="mt-2 text-[10px] text-slate-400">
+              Quand l'argent rentre, clique « Paiement reçu ✓ » sur la carte — c'est toujours un humain qui confirme.
+              (La facture officielle QuickBooks arrivera à la phase QuickBooks.)
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OngletInspectionsVehicules({ inspections, setInspections, entretiens, setEntretiens, ajouterJournal, persisterPriseEnCharge, persisterEntretien, parcCamions, setParcCamions, carnet, setCarnet, onEntreeCarnet, onAnomalieReparee }) {
+  const [filtreDate, setFiltreDate] = useState("");
+  const [filtreCamion, setFiltreCamion] = useState("");
+  const [filtreStatut, setFiltreStatut] = useState("tous");
+  const [chargeId, setChargeId] = useState(null);
+  const [noteCharge, setNoteCharge] = useState("");
+  // Gestion du parc de véhicules (ajout/retrait) — le technicien
+  // choisira dans cette liste au lieu d'écrire le nom à la main.
+  const [parcOuvert, setParcOuvert] = useState(false);
+  const [nouveauCamionNom, setNouveauCamionNom] = useState("");
+  const [nouveauCamionPlaque, setNouveauCamionPlaque] = useState("");
+  const [nouveauCamionModele, setNouveauCamionModele] = useState("");
+  // Retrait d'un camion : { camion } — saisie du motif et du remplaçant.
+  const [retraitCamion, setRetraitCamion] = useState(null);
+  const [motifRetrait, setMotifRetrait] = useState("");
+  const [remplacePar, setRemplacePar] = useState("");
+  // Dossier d'un ancien véhicule ouvert (consultation de l'historique).
+  const [dossierAncienId, setDossierAncienId] = useState(null);
+  // Saisie des travaux réalisés (réparation d'anomalie OU entretien) :
+  // { type, camion, inspectionId, km } — alimente le carnet du véhicule.
+  const [travauxSaisie, setTravauxSaisie] = useState(null);
+  const [travDescription, setTravDescription] = useState("");
+  const [travCout, setTravCout] = useState("");
+  const [travGarage, setTravGarage] = useState("");
+  // Carnet d'entretien global déplié (bas de page).
+  const [carnetOuvert, setCarnetOuvert] = useState(null);
+  // Dossier du véhicule ouvert (nom du camion) + onglet actif. La tuile
+  // reste une vue de surveillance ; tout le détail et les actions vivent
+  // ici, dans un espace confortable.
+  const [dossierCamion, setDossierCamion] = useState(null);
+  const [ongletDossier, setOngletDossier] = useState("etat");
+
+  const entreesCarnetDe = (nom) => (carnet || []).filter((e) => e.camion === nom);
+
+  // Enregistre les travaux au carnet. Pour une réparation, ferme aussi
+  // l'anomalie d'origine (le camion peut redevenir conforme).
+  const confirmerTravaux = () => {
+    if (!travauxSaisie || !travDescription.trim()) return;
+    const entree = {
+      camion: travauxSaisie.camion,
+      type: travauxSaisie.type,
+      description: travDescription.trim(),
+      cout: travCout === "" ? null : parseFloat(travCout) || 0,
+      garage: travGarage.trim(),
+      km: travauxSaisie.km ?? null,
+      inspectionId: travauxSaisie.inspectionId || null,
+      date: todayISO(),
+    };
+    // Affichage immédiat, écriture en arrière-plan.
+    setCarnet((prev) => [{ ...entree, id: `carnet-local-${Date.now()}`, parNom: "moi" }, ...(prev || [])]);
+    onEntreeCarnet?.(entree).catch?.(() =>
+      ajouterJournal(`⚠️ Travaux sur ${entree.camion} enregistrés localement, mais NON sauvegardés (table carnet_vehicules absente ?).`)
+    );
+    if (travauxSaisie.type === "reparation" && travauxSaisie.inspectionId) {
+      // L'anomalie est close : elle sort des anomalies ouvertes.
+      setInspections((prev) => prev.map((x) => (x.id === travauxSaisie.inspectionId ? { ...x, statutAnomalie: "reparee" } : x)));
+      onAnomalieReparee?.(travauxSaisie.inspectionId);
+      ajouterJournal(`✅ Réparation faite sur ${entree.camion} — ${entree.description}${entree.cout != null ? ` · ${entree.cout.toFixed(2)} $` : ""}${entree.garage ? ` · ${entree.garage}` : ""}`);
+    } else {
+      // Entretien périodique : remet aussi le compteur km/mois à zéro.
+      setEntretiens((prev) => [{ id: `ent-${Date.now()}`, camion: entree.camion, km: entree.km || 0, date: todayISO() }, ...prev]);
+      persisterEntretien?.({ camion: entree.camion, km: entree.km || 0 });
+      ajouterJournal(`🔧 Entretien fait sur ${entree.camion} — ${entree.description}${entree.cout != null ? ` · ${entree.cout.toFixed(2)} $` : ""}${entree.garage ? ` · ${entree.garage}` : ""}`);
+    }
+    setTravauxSaisie(null);
+    setTravDescription("");
+    setTravCout("");
+    setTravGarage("");
+  };
+
+  // Camions du PARC OFFICIEL (répertoire) + ceux vus dans les
+  // inspections mais pas encore enregistrés (héritage / saisie libre).
+  const camionsParc = (parcCamions || []).filter((c) => c.actif).map((c) => c.nom);
+  const camionsInspectes = [...new Set(inspections.filter((i) => !i.sansVehicule && i.camion).map((i) => i.camion))];
+  const camions = [...new Set([...camionsParc, ...camionsInspectes])];
+  const camionsHorsParc = camionsInspectes.filter((n) => !camionsParc.includes(n));
+
+  const ajouterCamion = () => {
+    const nom = nouveauCamionNom.trim();
+    if (!nom) return;
+    if ((parcCamions || []).some((c) => c.nom.trim().toLowerCase() === nom.toLowerCase())) return;
+    const nouveau = {
+      id: `cam-${Date.now()}`,
+      nom,
+      immatriculation: nouveauCamionPlaque.trim(),
+      marqueModele: nouveauCamionModele.trim(),
+      annee: "",
+      actif: true,
+      notes: "",
+    };
+    setParcCamions((prev) => [...(prev || []), nouveau]);
+    sauvegarderCamion(nouveau).catch(() =>
+      ajouterJournal(`⚠️ Camion « ${nom} » ajouté localement, mais NON enregistré (table camions absente ?).`)
+    );
+    ajouterJournal(`🚚 Camion « ${nom} » ajouté au parc — il apparaît maintenant dans la liste des techniciens.`);
+    setNouveauCamionNom("");
+    setNouveauCamionPlaque("");
+    setNouveauCamionModele("");
+  };
+
+  // RETRAIT DU PARC (vente, remplacement, bris majeur) : on note le motif
+  // et le camion remplaçant. Le dossier reste consultable dans « Anciens
+  // véhicules » avec tout son historique d'inspections et d'entretiens.
+  const retirerCamion = (c, motif, remplacePar) => {
+    const maj = { ...c, actif: false, retireLe: todayISO(), motifRetrait: motif || "", remplacePar: remplacePar || "" };
+    setParcCamions((prev) => (prev || []).map((x) => (x.id === c.id ? maj : x)));
+    sauvegarderCamion(maj).catch(() => {});
+    ajouterJournal(
+      `🚫 Camion « ${c.nom} » retiré du parc${motif ? ` — ${motif}` : ""}${remplacePar ? ` · remplacé par ${remplacePar}` : ""}. Son dossier reste consultable dans « Anciens véhicules ».`
+    );
+    setRetraitCamion(null);
+  };
+
+  const remettreCamion = (c) => {
+    const maj = { ...c, actif: true, retireLe: null, motifRetrait: "", remplacePar: "" };
+    setParcCamions((prev) => (prev || []).map((x) => (x.id === c.id ? maj : x)));
+    sauvegarderCamion(maj).catch(() => {});
+    ajouterJournal(`🚚 Camion « ${c.nom} » remis en service — de nouveau proposé aux techniciens.`);
+  };
+
+  // Résumé d'historique d'un camion (pour le dossier des anciens véhicules).
+  const historiqueCamion = (nom) => {
+    const ins = inspections.filter((i) => i.camion === nom);
+    const ent = entretiens.filter((e) => e.camion === nom);
+    const kms = ins.filter((i) => i.km != null).map((i) => i.km);
+    return {
+      nbInspections: ins.length,
+      nbAnomalies: ins.filter((i) => i.anomalie).length,
+      dernierKm: kms.length ? Math.max(...kms) : null,
+      derniereInspection: ins.slice().sort((a, b) => b.date.localeCompare(a.date))[0] || null,
+      nbEntretiens: ent.length,
+      dernierEntretien: ent.slice().sort((a, b) => b.date.localeCompare(a.date))[0] || null,
+    };
+  };
+  const statutEntretien = (camion) => {
+    const kmList = inspections.filter((i) => i.camion === camion && i.km != null).map((i) => i.km);
+    const kmActuel = kmList.length ? Math.max(...kmList) : 0;
+    const dernier = entretiens.filter((e) => e.camion === camion).sort((a, b) => b.date.localeCompare(a.date))[0];
+    const kmDernier = dernier ? dernier.km : 0;
+    const ecartKm = kmActuel - kmDernier;
+    const mois = dernier ? moisDepuis(dernier.date) : Infinity;
+    const duKm = ecartKm >= SEUIL_ENTRETIEN_KM;
+    const duMois = mois >= SEUIL_ENTRETIEN_MOIS;
+    return { camion, kmActuel, ecartKm, mois, du: duKm || duMois, raison: duKm ? "km" : duMois ? "temps" : null };
+  };
+  // Note : la version courte « marquer l'entretien fait » a été retirée.
+  // Elle remettait le compteur à zéro SANS rien écrire au carnet du
+  // véhicule — donc sans description, sans coût, sans garage. C'est
+  // `confirmerTravaux` qui fait les deux, et c'est le seul chemin.
+
+  const confirmerCharge = (i) => {
+    if (!noteCharge.trim()) return;
+    // Mise à jour locale immédiate + écriture Supabase (statut + note).
+    setInspections((prev) => prev.map((x) => (x.id === i.id ? { ...x, statutAnomalie: "prise_en_charge", noteCharge: noteCharge.trim(), prisParNom: "l'administrateur" } : x)));
+    persisterPriseEnCharge?.(i.id, noteCharge.trim());
+    ajouterJournal(`🛠️ Anomalie ${i.camion} prise en charge — ${noteCharge.trim()}`);
+    setChargeId(null);
+    setNoteCharge("");
+  };
+
+  const liste = inspections
+    .filter((i) => (filtreDate ? i.date === filtreDate : true))
+    .filter((i) => (filtreCamion.trim() ? (i.camion || "").toLowerCase().includes(filtreCamion.trim().toLowerCase()) : true))
+    .filter((i) => (filtreStatut === "anomalie" ? i.anomalie : filtreStatut === "ok" ? !i.anomalie : true))
+    .slice()
+    // TRI : les anomalies NON PRISES EN CHARGE remontent TOUJOURS en tête,
+    // peu importe leur date — sinon une anomalie de mardi non traitée se
+    // retrouvait sous les inspections normales de mercredi. Entre elles,
+    // la PLUS ANCIENNE d'abord (celle qui attend depuis le plus longtemps).
+    // Le reste des inspections suit, de la plus récente à la plus ancienne.
+    .sort((a, b) => {
+      const ouverte = (i) => i.anomalie && i.statutAnomalie !== "prise_en_charge" && i.statutAnomalie !== "reparee";
+      const urgenceA = ouverte(a) ? 1 : 0;
+      const urgenceB = ouverte(b) ? 1 : 0;
+      if (urgenceA !== urgenceB) return urgenceB - urgenceA;
+      if (urgenceA === 1) return a.date.localeCompare(b.date); // la plus ancienne en premier
+      return b.date.localeCompare(a.date);
+    });
+
+  // Le conducteur déclaré par un passager a-t-il vraiment un camion ce
+  // jour-là ? Si lui-même s'est déclaré « sans véhicule » (ou passager),
+  // quelque chose cloche — mieux vaut une petite alerte ici qu'une
+  // erreur silencieuse dans les coûts et la facturation.
+  const conducteurIncoherent = (i) => {
+    if (!i.passagerDeNom) return false;
+    const duJour = inspections.filter((x) => x.date === i.date && x.technicienNom === i.passagerDeNom);
+    if (duJour.length === 0) return false; // pas encore inspecté — normal le matin
+    return !duJour.some((x) => !x.sansVehicule && x.camion);
+  };
+  const badgeStatut = (i) => {
+    if (i.passagerDeNom)
+      return (
+        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+          👥 Passager de {i.passagerDeNom}
+          {conducteurIncoherent(i) ? " · ⚠️ conducteur sans camion ?" : ""}
+        </span>
+      );
+    if (i.sansVehicule) return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">Sans véhicule</span>;
+    if (!i.anomalie) return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">OK</span>;
+    if (i.statutAnomalie === "reparee") return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">✅ Réparée</span>;
+    if (i.statutAnomalie === "prise_en_charge") return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Pris en charge</span>;
+    return <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">⚠ Anomalie · nouvelle</span>;
+  };
+
+  return (
+    <div className="mx-auto max-w-4xl space-y-4 p-4 md:p-6">
+      <h2 className="text-lg font-extrabold text-slate-900">Inspections véhicules</h2>
+
+      {/* ÉTAT DES VÉHICULES — une carte par camion réunissant SON anomalie
+          (et la mesure prise) ET son entretien périodique. Trié par
+          urgence : anomalie non traitée → prise en charge / entretien dû
+          → conforme. Remplace l'ancienne section « Entretien périodique ». */}
+      {(() => {
+        const etats = camions
+          .map((nom) => {
+            const insCamion = inspections.filter((i) => i.camion === nom);
+            const derniere = insCamion.slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+            // Une anomalie RÉPARÉE est close : elle ne compte ni comme
+            // ouverte, ni comme « prise en charge ».
+            const anomaliesOuvertes = insCamion
+              .filter((i) => i.anomalie && i.statutAnomalie !== "prise_en_charge" && i.statutAnomalie !== "reparee")
+              .sort((a, b) => a.date.localeCompare(b.date));
+            const anomaliesPrises = insCamion
+              .filter((i) => i.anomalie && i.statutAnomalie === "prise_en_charge")
+              .sort((a, b) => b.date.localeCompare(a.date));
+            const ent = statutEntretien(nom);
+            const priorite = anomaliesOuvertes.length > 0 ? 0 : anomaliesPrises.length > 0 || ent.du ? 1 : 2;
+            return { nom, derniere, anomaliesOuvertes, anomaliesPrises, ent, priorite };
+          })
+          .sort((a, b) => a.priorite - b.priorite || a.nom.localeCompare(b.nom));
+        const nbAnomalie = etats.filter((e) => e.anomaliesOuvertes.length > 0).length;
+        const nbPris = etats.filter((e) => e.anomaliesOuvertes.length === 0 && e.anomaliesPrises.length > 0).length;
+        const nbEntretien = etats.filter((e) => e.ent.du).length;
+        return (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-extrabold uppercase tracking-wide text-slate-500">🚚 État des véhicules</h3>
+              <Button variant="outline" onClick={() => setParcOuvert((v) => !v)} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
+                {parcOuvert ? "Fermer" : "Gérer le parc"}
+              </Button>
+            </div>
+            <p className="mb-3 text-[11px] text-slate-400">
+              {nbAnomalie} en anomalie · {nbPris} pris en charge · {nbEntretien} entretien{nbEntretien > 1 ? "s" : ""} dû{nbEntretien > 1 ? "s" : ""} · {etats.length} camion{etats.length > 1 ? "s" : ""} au parc
+            </p>
+
+            {/* GESTION DU PARC — ajout/retrait des camions proposés aux techniciens. */}
+            {parcOuvert && (
+              <div className="mb-3 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Parc de véhicules</p>
+                {(parcCamions || []).length === 0 && camionsHorsParc.length === 0 && (
+                  <p className="text-xs text-slate-400">Aucun camion enregistré — ajoute-en un ci-dessous.</p>
+                )}
+                {(parcCamions || []).filter((c) => c.actif).map((c) => (
+                  <div key={c.id}>
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800">{c.nom}</p>
+                        <p className="text-[10px] text-slate-400">{[c.marqueModele, c.immatriculation].filter(Boolean).join(" · ") || "—"}</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setRetraitCamion(c);
+                          setMotifRetrait("");
+                          setRemplacePar("");
+                        }}
+                        className="shrink-0 rounded-md border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-600"
+                      >
+                        Retirer du parc…
+                      </button>
+                    </div>
+                    {/* SAISIE DU RETRAIT — motif + camion remplaçant. */}
+                    {retraitCamion?.id === c.id && (
+                      <div className="mt-1.5 rounded-lg border border-amber-300 bg-amber-50 p-2.5">
+                        <p className="text-[11px] font-bold text-amber-900">Retirer « {c.nom} » du parc</p>
+                        <p className="mt-0.5 text-[10px] text-amber-700">
+                          Il disparaîtra de la liste des techniciens, mais son dossier complet (inspections, anomalies, entretiens) restera consultable dans « Anciens véhicules ».
+                        </p>
+                        <div className="mt-2 space-y-1.5">
+                          <select
+                            value={motifRetrait}
+                            onChange={(e) => setMotifRetrait(e.target.value)}
+                            className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs font-semibold"
+                          >
+                            <option value="">— Motif du retrait —</option>
+                            <option value="Remplacé par un nouveau véhicule">Remplacé par un nouveau véhicule</option>
+                            <option value="Vendu">Vendu</option>
+                            <option value="Fin de location">Fin de location</option>
+                            <option value="Bris majeur / hors service">Bris majeur / hors service</option>
+                            <option value="Accident">Accident</option>
+                            <option value="Autre">Autre</option>
+                          </select>
+                          <select
+                            value={remplacePar}
+                            onChange={(e) => setRemplacePar(e.target.value)}
+                            className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs"
+                          >
+                            <option value="">— Remplacé par (optionnel) —</option>
+                            {(parcCamions || []).filter((x) => x.actif && x.id !== c.id).map((x) => (
+                              <option key={x.id} value={x.nom}>{x.nom}</option>
+                            ))}
+                          </select>
+                          <div className="flex gap-1.5">
+                            <Button onClick={() => retirerCamion(c, motifRetrait, remplacePar)} disabled={!motifRetrait} className="min-h-0 flex-1 py-1.5 text-[11px]">
+                              Confirmer le retrait
+                            </Button>
+                            <Button variant="outline" onClick={() => setRetraitCamion(null)} className="min-h-0 py-1.5 text-[11px]">
+                              Annuler
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {camionsHorsParc.length > 0 && (
+                  <p className="rounded-lg bg-amber-50 p-2 text-[10px] font-semibold text-amber-700">
+                    ⚠️ Camions vus dans des inspections mais absents du parc : {camionsHorsParc.join(", ")} — ajoute-les pour qu'ils apparaissent dans la liste des techniciens.
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input value={nouveauCamionNom} onChange={(e) => setNouveauCamionNom(e.target.value)} placeholder="Nom / numéro *" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  <input value={nouveauCamionPlaque} onChange={(e) => setNouveauCamionPlaque(e.target.value)} placeholder="Immatriculation" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  <input value={nouveauCamionModele} onChange={(e) => setNouveauCamionModele(e.target.value)} placeholder="Marque / modèle" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  <Button variant="outline" onClick={ajouterCamion} disabled={!nouveauCamionNom.trim()} className="min-h-0 py-1.5 text-xs">
+                    <Plus size={12} /> Ajouter le camion
+                  </Button>
+                </div>
+
+                {/* ANCIENS VÉHICULES — dossiers conservés : coordonnées du
+                    camion, motif du retrait, remplaçant, et tout son
+                    historique d'inspections et d'entretiens. */}
+                {(parcCamions || []).some((c) => !c.actif) && (
+                  <div className="mt-3 border-t border-slate-200 pt-2.5">
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      🗄️ Anciens véhicules ({(parcCamions || []).filter((c) => !c.actif).length})
+                    </p>
+                    <div className="space-y-1.5">
+                      {(parcCamions || [])
+                        .filter((c) => !c.actif)
+                        .sort((a, b) => (b.retireLe || "").localeCompare(a.retireLe || ""))
+                        .map((c) => {
+                          const h = historiqueCamion(c.nom);
+                          const ouvert = dossierAncienId === c.id;
+                          return (
+                            <div key={c.id} className="rounded-lg border border-slate-200 bg-white">
+                              <button
+                                onClick={() => setDossierAncienId(ouvert ? null : c.id)}
+                                className="flex w-full items-center justify-between gap-2 p-2 text-left"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-slate-700">{c.nom}</p>
+                                  <p className="text-[10px] text-slate-400">
+                                    Retiré {c.retireLe || "—"}
+                                    {c.motifRetrait ? ` · ${c.motifRetrait}` : ""}
+                                    {c.remplacePar ? ` · remplacé par ${c.remplacePar}` : ""}
+                                  </p>
+                                </div>
+                                <ChevronDown size={14} className={`shrink-0 text-slate-400 transition-transform ${ouvert ? "rotate-180" : ""}`} />
+                              </button>
+                              {ouvert && (
+                                <div className="space-y-1.5 border-t border-slate-100 p-2.5 text-[11px] text-slate-600">
+                                  <p><span className="font-bold text-slate-700">Véhicule :</span> {[c.marqueModele, c.immatriculation].filter(Boolean).join(" · ") || "—"}</p>
+                                  <p><span className="font-bold text-slate-700">Dernier kilométrage :</span> {h.dernierKm != null ? `${h.dernierKm.toLocaleString("fr-CA")} km` : "inconnu"}</p>
+                                  <p><span className="font-bold text-slate-700">Inspections :</span> {h.nbInspections} au total{h.nbAnomalies > 0 ? ` · ${h.nbAnomalies} avec anomalie` : ""}</p>
+                                  <p><span className="font-bold text-slate-700">Dernière inspection :</span> {h.derniereInspection ? `${h.derniereInspection.date}${h.derniereInspection.technicienNom ? ` par ${h.derniereInspection.technicienNom}` : ""}` : "aucune"}</p>
+                                  <p><span className="font-bold text-slate-700">Entretiens :</span> {h.nbEntretiens} au total{h.dernierEntretien ? ` · dernier le ${h.dernierEntretien.date} (${h.dernierEntretien.km?.toLocaleString("fr-CA")} km)` : ""}</p>
+                                  {/* CARNET conservé même après le retrait du parc. */}
+                                  {entreesCarnetDe(c.nom).length > 0 && (
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                        📖 Carnet ({entreesCarnetDe(c.nom).length} entrées · {entreesCarnetDe(c.nom).reduce((s, x) => s + (x.cout || 0), 0).toFixed(2)} $ au total)
+                                      </p>
+                                      <div className="mt-1 space-y-0.5">
+                                        {entreesCarnetDe(c.nom)
+                                          .slice()
+                                          .sort((a, b) => b.date.localeCompare(a.date))
+                                          .map((entree) => (
+                                            <p key={entree.id} className="text-[10px] text-slate-600">
+                                              <span className="tabular-nums text-slate-400">{entree.date}</span> · {entree.type === "reparation" ? "🔴" : "🔵"} {entree.description}
+                                              {entree.cout != null ? ` · ${entree.cout.toFixed(2)} $` : ""}
+                                            </p>
+                                          ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className="flex gap-1.5 pt-1">
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => {
+                                        setFiltreCamion(c.nom);
+                                        setFiltreStatut("tous");
+                                        setFiltreDate("");
+                                      }}
+                                      className="min-h-0 py-1.5 text-[11px]"
+                                    >
+                                      Voir ses inspections
+                                    </Button>
+                                    <Button variant="outline" onClick={() => remettreCamion(c)} className="min-h-0 py-1.5 text-[11px]">
+                                      Remettre en service
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {etats.length === 0 ? (
+              <p className="text-sm text-slate-400">Aucun véhicule au parc — clique « Gérer le parc » pour en ajouter.</p>
+            ) : (
+              // TUILES DE SURVEILLANCE — l'essentiel seulement, scannable
+              // d'un coup d'œil. Le détail, les formulaires et le carnet
+              // vivent dans la fenêtre « Dossier du véhicule » (au clic).
+              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                {etats.map((e) => {
+                  const alerte = e.anomaliesOuvertes[0];
+                  return (
+                    <button
+                      key={e.nom}
+                      onClick={() => setDossierCamion(e.nom)}
+                      title="Ouvrir le dossier du véhicule"
+                      className={`rounded-xl border border-l-4 p-3 text-left transition-shadow hover:shadow-md ${
+                        e.priorite === 0
+                          ? "border-slate-200 border-l-red-500 bg-red-50"
+                          : e.priorite === 1
+                          ? "border-slate-200 border-l-amber-500 bg-amber-50"
+                          : "border-slate-200 border-l-emerald-500 bg-white"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <p className="text-sm font-extrabold text-slate-900">{e.nom}</p>
+                        <div className="flex flex-wrap gap-1">
+                          {e.anomaliesOuvertes.length > 0 && (
+                            <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-extrabold text-red-700">
+                              ⚠️ ANOMALIE{e.anomaliesOuvertes.length > 1 ? ` ×${e.anomaliesOuvertes.length}` : ""}
+                            </span>
+                          )}
+                          {e.anomaliesOuvertes.length === 0 && e.anomaliesPrises.length > 0 && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-extrabold text-amber-700">🛠️ PRIS EN CHARGE</span>
+                          )}
+                          {e.ent.du && <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-extrabold text-blue-700">🔧 ENTRETIEN DÛ</span>}
+                          {e.priorite === 2 && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-extrabold text-emerald-700">✓ CONFORME</span>}
+                        </div>
+                      </div>
+                      <p className="mt-0.5 text-[10px] tabular-nums text-slate-400">
+                        {e.ent.kmActuel > 0 ? `${e.ent.kmActuel.toLocaleString("fr-CA")} km` : "km inconnu"}
+                        {e.derniere ? ` · inspection : ${e.derniere.date}` : " · jamais inspecté"}
+                      </p>
+                      {/* UNE SEULE ligne d'alerte — le détail est dans le dossier. */}
+                      {alerte ? (
+                        <p className="mt-1.5 truncate text-[11px] font-semibold text-red-700">
+                          {alerte.remarque || (alerte.controleProblemes || []).join(", ") || "Anomalie signalée"} — en attente depuis {joursDepuis(alerte.date)} j
+                        </p>
+                      ) : e.anomaliesPrises.length > 0 ? (
+                        <p className="mt-1.5 truncate text-[11px] text-amber-700">
+                          {e.anomaliesPrises.length} anomalie{e.anomaliesPrises.length > 1 ? "s" : ""} en cours de règlement
+                        </p>
+                      ) : e.ent.du ? (
+                        <p className="mt-1.5 truncate text-[11px] text-blue-700">
+                          Entretien dû — {e.ent.raison === "km" ? `${e.ent.ecartKm.toLocaleString("fr-CA")} km depuis le dernier` : `dernier il y a ${e.ent.mois} mois`}
+                        </p>
+                      ) : (
+                        <p className="mt-1.5 text-[11px] text-slate-400">Aucune anomalie · entretien à jour</p>
+                      )}
+                      <p className="mt-1.5 text-[10px] font-bold text-slate-400">
+                        Ouvrir le dossier ›{entreesCarnetDe(e.nom).length > 0 ? ` · 📖 ${entreesCarnetDe(e.nom).length} au carnet` : ""}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* INSPECTIONS */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Inspections</h3>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <input type="date" value={filtreDate} onChange={(e) => setFiltreDate(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          <input value={filtreCamion} onChange={(e) => setFiltreCamion(e.target.value)} placeholder="Rechercher un camion" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          <select value={filtreStatut} onChange={(e) => setFiltreStatut(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold">
+            <option value="tous">Tous les statuts</option>
+            <option value="anomalie">Anomalies</option>
+            <option value="ok">OK</option>
+          </select>
+        </div>
+        {liste.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Aucune inspection.</p>
+        ) : (
+          <div className="space-y-2">
+            {liste.map((i) => (
+              <div key={i.id} className={`rounded-lg p-3 ${i.anomalie && i.statutAnomalie === "nouvelle" ? "border-l-4 border-red-500 bg-red-50" : i.anomalie ? "border border-amber-200 bg-amber-50" : "border border-slate-200"}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-bold text-slate-800">{i.sansVehicule ? "— (sans véhicule)" : i.camion}</p>
+                    <p className="text-[11px] text-slate-400">{i.date} · {i.technicienNom}{i.km != null ? ` · ${i.km.toLocaleString("fr-CA")} km` : ""}</p>
+                  </div>
+                  {badgeStatut(i)}
+                </div>
+                {i.anomalie && (
+                  <p className="mt-1.5 text-[12px] text-red-700">{i.remarque}{i.controleProblemes.length ? ` · ${i.controleProblemes.join(", ")}` : ""}</p>
+                )}
+                <PhotosInspection photos={i.photos} />
+                {i.anomalie && i.statutAnomalie === "nouvelle" && (
+                  chargeId === i.id ? (
+                    <div className="mt-2 rounded-lg border border-dashed border-slate-300 bg-white p-2.5">
+                      <label className="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-400">Action effectuée (obligatoire)</label>
+                      <textarea rows={2} value={noteCharge} onChange={(e) => setNoteCharge(e.target.value)} placeholder="Décris ce qui a été fait / à faire…" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                      <div className="mt-2 flex gap-2">
+                        <Button onClick={() => confirmerCharge(i)} disabled={!noteCharge.trim()} className="min-h-0 py-1.5 text-xs">Confirmer la prise en charge</Button>
+                        <Button variant="outline" onClick={() => setChargeId(null)} className="min-h-0 py-1.5 text-xs">Annuler</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button onClick={() => setChargeId(i.id)} className="mt-2 min-h-0 py-1.5 text-xs">Prendre en charge</Button>
+                  )
+                )}
+                {i.statutAnomalie === "prise_en_charge" && (
+                  <p className="mt-1.5 text-[11px] text-amber-700"><span className="font-bold">Action :</span> {i.noteCharge} — par {i.prisParNom || "l'administrateur"}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* CARNET D'ENTRETIEN DU PARC — tout ce qui a été fait sur TOUS les
+          camions (réparations + entretiens), avec le total dépensé par
+          véhicule : utile en fin d'année pour décider quel camion
+          remplacer. */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <button
+          onClick={() => setCarnetOuvert(carnetOuvert === "global" ? null : "global")}
+          className="flex w-full items-center justify-between gap-2 text-left"
+        >
+          <div>
+            <h3 className="text-xs font-extrabold uppercase tracking-wide text-slate-500">📖 Carnet d'entretien du parc</h3>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              {(carnet || []).length} intervention{(carnet || []).length > 1 ? "s" : ""} enregistrée{(carnet || []).length > 1 ? "s" : ""}
+              {(carnet || []).length > 0 ? ` · ${(carnet || []).reduce((s, x) => s + (x.cout || 0), 0).toFixed(2)} $ au total` : ""}
+            </p>
+          </div>
+          <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${carnetOuvert === "global" ? "rotate-180" : ""}`} />
+        </button>
+        {carnetOuvert === "global" && (
+          (carnet || []).length === 0 ? (
+            <p className="mt-3 rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+              Aucune intervention enregistrée — les réparations et entretiens confirmés depuis les cartes de véhicules apparaîtront ici.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {[...new Set((carnet || []).map((e) => e.camion))].sort().map((nomCamion) => {
+                const entrees = entreesCarnetDe(nomCamion).slice().sort((a, b) => b.date.localeCompare(a.date));
+                const total = entrees.reduce((s, x) => s + (x.cout || 0), 0);
+                const nbRep = entrees.filter((x) => x.type === "reparation").length;
+                const nbEnt = entrees.filter((x) => x.type === "entretien").length;
+                return (
+                  <div key={nomCamion} className="rounded-xl border border-slate-200 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-extrabold text-slate-900">{nomCamion}</p>
+                      <p className="text-[11px] font-bold tabular-nums text-slate-700">
+                        {nbRep} réparation{nbRep > 1 ? "s" : ""} · {nbEnt} entretien{nbEnt > 1 ? "s" : ""} · <span className="text-slate-900">{total.toFixed(2)} $</span>
+                      </p>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {entrees.map((entree) => (
+                        <div key={entree.id} className="flex items-start justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5">
+                          <p className="min-w-0 text-[11px]">
+                            <span className={`mr-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold ${entree.type === "reparation" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>
+                              {entree.type === "reparation" ? "RÉPARATION" : "ENTRETIEN"}
+                            </span>
+                            <span className="font-semibold text-slate-800">{entree.description}</span>
+                            <span className="block text-[10px] text-slate-400">
+                              {entree.date}
+                              {entree.km ? ` · ${entree.km.toLocaleString("fr-CA")} km` : ""}
+                              {entree.garage ? ` · ${entree.garage}` : ""}
+                              {entree.parNom ? ` · par ${entree.parNom}` : ""}
+                            </span>
+                          </p>
+                          {entree.cout != null && (
+                            <span className="shrink-0 text-[11px] font-bold tabular-nums text-slate-700">{entree.cout.toFixed(2)} $</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+      </div>
+
+      {/* ============================================================
+          DOSSIER DU VÉHICULE — ouvert au clic sur une tuile. Trois
+          onglets : État actuel (avec TOUTES les actions), Carnet
+          d'entretien, Historique des inspections. La tuile reste ainsi
+          une simple vue de surveillance.
+          ============================================================ */}
+      {dossierCamion && (() => {
+        const nom = dossierCamion;
+        const insCamion = inspections.filter((i) => i.camion === nom);
+        const ouvertes = insCamion
+          .filter((i) => i.anomalie && i.statutAnomalie !== "prise_en_charge" && i.statutAnomalie !== "reparee")
+          .sort((a, b) => a.date.localeCompare(b.date));
+        const prises = insCamion
+          .filter((i) => i.anomalie && i.statutAnomalie === "prise_en_charge")
+          .sort((a, b) => b.date.localeCompare(a.date));
+        const ent = statutEntretien(nom);
+        const fiche = (parcCamions || []).find((c) => c.nom === nom);
+        const entrees = entreesCarnetDe(nom).slice().sort((a, b) => b.date.localeCompare(a.date));
+        const totalCarnet = entrees.reduce((s, x) => s + (x.cout || 0), 0);
+        const fermer = () => {
+          setDossierCamion(null);
+          setTravauxSaisie(null);
+          setChargeId(null);
+          setOngletDossier("etat");
+        };
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={fermer}>
+            <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">🚚 {nom}</h3>
+                  <p className="text-[11px] text-slate-500">
+                    {[fiche?.marqueModele, fiche?.immatriculation].filter(Boolean).join(" · ") || "Aucune information de véhicule"}
+                    {ent.kmActuel > 0 ? ` · ${ent.kmActuel.toLocaleString("fr-CA")} km` : ""}
+                  </p>
+                </div>
+                <button onClick={fermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+              </div>
+
+              {/* ONGLETS */}
+              <div className="mb-3 flex rounded-xl border border-slate-200 p-0.5">
+                {[
+                  ["etat", `État actuel${ouvertes.length > 0 ? ` (${ouvertes.length})` : ""}`],
+                  ["carnet", `📖 Carnet (${entrees.length})`],
+                  ["inspections", `Inspections (${insCamion.length})`],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setOngletDossier(id)}
+                    className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-extrabold ${ongletDossier === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ---------- ÉTAT ACTUEL ---------- */}
+              {ongletDossier === "etat" && (
+                <div className="space-y-2.5">
+                  {ouvertes.length === 0 && prises.length === 0 && !ent.du && (
+                    <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center text-sm font-semibold text-emerald-700">
+                      ✓ Aucune anomalie · entretien à jour ({Math.max(0, SEUIL_ENTRETIEN_KM - ent.ecartKm).toLocaleString("fr-CA")} km restants)
+                    </p>
+                  )}
+
+                  {/* ANOMALIES OUVERTES */}
+                  {ouvertes.map((a) => (
+                    <div key={a.id} className="rounded-xl border border-red-200 bg-red-50 p-3">
+                      <p className="text-[10px] font-extrabold uppercase text-red-700">Anomalie signalée</p>
+                      <p className="text-sm font-bold text-red-700">{a.remarque || (a.controleProblemes || []).join(", ") || "Anomalie signalée"}</p>
+                      <p className="text-[11px] text-slate-500">
+                        {(a.controleProblemes || []).join(", ")}
+                        {a.technicienNom ? ` · par ${a.technicienNom}` : ""} · {a.date}
+                      </p>
+                      <p className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-extrabold text-red-700">
+                        ⏳ En attente depuis {joursDepuis(a.date)} jour{joursDepuis(a.date) > 1 ? "s" : ""}
+                      </p>
+                      {chargeId === a.id ? (
+                        <div className="mt-2 rounded-lg border border-slate-300 bg-white p-2">
+                          <textarea
+                            value={noteCharge}
+                            onChange={(ev) => setNoteCharge(ev.target.value)}
+                            rows={2}
+                            placeholder="Mesure prise (ex : pièce commandée, réparation prévue vendredi)"
+                            className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                          />
+                          <div className="mt-1.5 flex gap-1.5">
+                            <Button onClick={() => confirmerCharge(a)} disabled={!noteCharge.trim()} className="min-h-0 flex-1 py-1.5 text-xs">Confirmer</Button>
+                            <Button variant="outline" onClick={() => setChargeId(null)} className="min-h-0 py-1.5 text-xs">Annuler</Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button onClick={() => { setChargeId(a.id); setNoteCharge(""); }} className="mt-2 w-full min-h-0 py-2 text-xs">
+                          🛠️ Prendre en charge…
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* ANOMALIES PRISES EN CHARGE — à clore par « Réparation faite ». */}
+                  {prises.map((a) => (
+                    <div key={a.id} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-[10px] font-extrabold uppercase text-amber-700">Anomalie · prise en charge</p>
+                      <p className="text-sm font-bold text-amber-800">{a.remarque || (a.controleProblemes || []).join(", ") || "Anomalie signalée"}</p>
+                      <p className="text-[11px] text-slate-500">
+                        {(a.controleProblemes || []).join(", ")}
+                        {a.technicienNom ? ` · par ${a.technicienNom}` : ""} · {a.date}
+                      </p>
+                      <p className="mt-1.5 text-xs text-slate-700"><span className="font-bold">Mesure prise :</span> {a.noteCharge || "—"}</p>
+                      {a.prisParNom && <p className="text-[10px] text-slate-400">par {a.prisParNom}</p>}
+                      {travauxSaisie?.inspectionId === a.id ? (
+                        <div className="mt-2 rounded-lg border border-slate-300 bg-white p-2.5">
+                          <p className="text-xs font-bold text-slate-800">✅ Réparation faite</p>
+                          <div className="mt-1.5 space-y-1.5">
+                            <textarea
+                              value={travDescription}
+                              onChange={(ev) => setTravDescription(ev.target.value)}
+                              rows={2}
+                              placeholder="Ce qui a été fait (ex : ampoule + fusible remplacés)"
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                            />
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <input type="number" min={0} step="0.01" value={travCout} onChange={(ev) => setTravCout(ev.target.value)} placeholder="Coût $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                              <input value={travGarage} onChange={(ev) => setTravGarage(ev.target.value)} placeholder="Garage / fournisseur" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                            </div>
+                            <p className="text-[10px] text-slate-400">Enregistré au carnet le {todayISO()}{ent.kmActuel > 0 ? ` · ${ent.kmActuel.toLocaleString("fr-CA")} km` : ""}.</p>
+                            <div className="flex gap-1.5">
+                              <Button onClick={confirmerTravaux} disabled={!travDescription.trim()} className="min-h-0 flex-1 py-1.5 text-xs">Confirmer</Button>
+                              <Button variant="outline" onClick={() => setTravauxSaisie(null)} className="min-h-0 py-1.5 text-xs">Annuler</Button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <Button
+                          onClick={() => { setTravauxSaisie({ type: "reparation", camion: nom, inspectionId: a.id, km: ent.kmActuel }); setTravDescription(""); setTravCout(""); setTravGarage(""); }}
+                          className="mt-2 w-full min-h-0 py-2 text-xs"
+                        >
+                          ✅ Réparation faite…
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* ENTRETIEN PÉRIODIQUE */}
+                  <div className={`rounded-xl border p-3 ${ent.du ? "border-blue-200 bg-blue-50" : "border-slate-200 bg-slate-50"}`}>
+                    <p className={`text-[10px] font-extrabold uppercase ${ent.du ? "text-blue-700" : "text-slate-400"}`}>Entretien périodique</p>
+                    <p className="text-xs text-slate-700">
+                      {ent.du
+                        ? `Dû — ${ent.raison === "km" ? `${ent.ecartKm.toLocaleString("fr-CA")} km depuis le dernier` : `dernier entretien il y a ${ent.mois} mois`}`
+                        : `À jour · ${Math.max(0, SEUIL_ENTRETIEN_KM - ent.ecartKm).toLocaleString("fr-CA")} km restants`}
+                    </p>
+                    {travauxSaisie?.type === "entretien" && travauxSaisie.camion === nom ? (
+                      <div className="mt-2 rounded-lg border border-slate-300 bg-white p-2.5">
+                        <p className="text-xs font-bold text-slate-800">🔧 Entretien fait</p>
+                        <div className="mt-1.5 space-y-1.5">
+                          <textarea
+                            value={travDescription}
+                            onChange={(ev) => setTravDescription(ev.target.value)}
+                            rows={2}
+                            placeholder="Ce qui a été fait (ex : huile, filtres, inspection freins)"
+                            className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input type="number" min={0} step="0.01" value={travCout} onChange={(ev) => setTravCout(ev.target.value)} placeholder="Coût $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                            <input value={travGarage} onChange={(ev) => setTravGarage(ev.target.value)} placeholder="Garage / fournisseur" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                          </div>
+                          <p className="text-[10px] text-slate-400">Enregistré au carnet le {todayISO()}{ent.kmActuel > 0 ? ` · ${ent.kmActuel.toLocaleString("fr-CA")} km` : ""}.</p>
+                          <div className="flex gap-1.5">
+                            <Button onClick={confirmerTravaux} disabled={!travDescription.trim()} className="min-h-0 flex-1 py-1.5 text-xs">Confirmer</Button>
+                            <Button variant="outline" onClick={() => setTravauxSaisie(null)} className="min-h-0 py-1.5 text-xs">Annuler</Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        onClick={() => { setTravauxSaisie({ type: "entretien", camion: nom, inspectionId: null, km: ent.kmActuel }); setTravDescription(""); setTravCout(""); setTravGarage(""); }}
+                        className="mt-2 w-full min-h-0 py-2 text-xs"
+                      >
+                        🔧 Entretien fait…
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ---------- CARNET ---------- */}
+              {ongletDossier === "carnet" && (
+                entrees.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                    Aucune intervention au carnet — les réparations et entretiens confirmés apparaîtront ici.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {entrees.map((entree) => (
+                      <div key={entree.id} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="min-w-0 text-xs">
+                            <span className={`mr-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold ${entree.type === "reparation" ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>
+                              {entree.type === "reparation" ? "RÉPARATION" : "ENTRETIEN"}
+                            </span>
+                            <span className="font-semibold text-slate-800">{entree.description}</span>
+                          </p>
+                          {entree.cout != null && <span className="shrink-0 text-xs font-bold tabular-nums text-slate-700">{entree.cout.toFixed(2)} $</span>}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-slate-400">
+                          {entree.date}
+                          {entree.km ? ` · ${entree.km.toLocaleString("fr-CA")} km` : ""}
+                          {entree.garage ? ` · ${entree.garage}` : ""}
+                          {entree.parNom ? ` · par ${entree.parNom}` : ""}
+                        </p>
+                      </div>
+                    ))}
+                    <p className="pt-1 text-right text-xs font-bold text-slate-700">Total dépensé sur ce véhicule : {totalCarnet.toFixed(2)} $</p>
+                  </div>
+                )
+              )}
+
+              {/* ---------- INSPECTIONS ---------- */}
+              {ongletDossier === "inspections" && (
+                insCamion.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">Aucune inspection pour ce véhicule.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {insCamion
+                      .slice()
+                      .sort((a, b) => b.date.localeCompare(a.date))
+                      .map((i) => (
+                        <div key={i.id} className="rounded-lg border border-slate-200 bg-white p-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-xs font-bold text-slate-800">
+                              {i.date}
+                              {i.technicienNom ? ` · ${i.technicienNom}` : ""}
+                            </p>
+                            {badgeStatut(i)}
+                          </div>
+                          <p className="mt-0.5 text-[11px] tabular-nums text-slate-400">
+                            {i.km != null ? `${i.km.toLocaleString("fr-CA")} km` : "km non saisi"}
+                          </p>
+                          {i.anomalie && (
+                            <p className="mt-1 text-[11px] text-slate-600">
+                              {i.remarque || (i.controleProblemes || []).join(", ")}
+                              {i.noteCharge ? ` — mesure : ${i.noteCharge}` : ""}
+                            </p>
+                          )}
+                          {/* Photos prises par le technicien — c'est ici,
+                              dans le dossier du véhicule, qu'on veut les
+                              retrouver avec la fiche d'inspection. */}
+                          <PhotosInspection photos={i.photos} />
+                        </div>
+                      ))}
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ============================================================
+// TABLEAU DE BORD (accueil — vue d'ensemble)
+// ============================================================
+// ============================================================
+// ONGLET PAIES — compilation des heures par technicien, par
+// semaine de paie (DIMANCHE à SAMEDI, hebdomadaire — choix du
+// propriétaire). Source : travaux_effectues (heures réellement
+// enregistrées par les techniciens au bouton « Terminer »).
+// Heures seulement — AUCUN montant de salaire ici.
+// ============================================================
+function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets }) {
+  // Journée dont on demande le déblocage (fenêtre de confirmation).
+  const [deblocageDemande, setDeblocageDemande] = useState(null);
+  // Détail des heures administratives d'un employé (quelles visites,
+  // chez quel client, sur quel projet).
+  const [detailAdmin, setDetailAdmin] = useState(null);
+  // Avertissement avant de copier une paie incomplète (journée bloquée).
+  const [avertissementPaieOuvert, setAvertissementPaieOuvert] = useState(false);
+  // Règles de paie lues dans les Paramètres de l'entreprise (seuil des
+  // heures supplémentaires, heure de bascule « Nuit ») — plus codées en
+  // dur, pour qu'un changement de convention se règle dans l'écran.
+  const configEnt = useEntreprise();
+  const seuilSupp = Number(configEnt.seuilHeuresSupp) || 40;
+  const heureNuit = Number(configEnt.heureBasculeNuit) || 16;
+  // Ligne en cours d'édition dans le résumé d'une journée — on corrige
+  // les HEURES DE DÉBUT/FIN (plus naturel que la durée) : { id, debut,
+  // fin } au format HH:MM. Admins = effet immédiat, répartiteur =
+  // proposition groupée à valider.
+  const [editionLigne, setEditionLigne] = useState(null);
+  const [erreurEdition, setErreurEdition] = useState("");
+  // Dimanche de la semaine affichée (navigation ± 7 jours).
+  const [dimancheAffiche, setDimancheAffiche] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - d.getDay()); // getDay() : 0 = dimanche
+    return d;
+  });
+  const [detailEmail, setDetailEmail] = useState(null);
+  // Détail d'une JOURNÉE précise : { email, iso } — ouvert au clic sur
+  // la cellule d'un jour (le clic sur le NOM montre toute la semaine).
+  const [detailJour, setDetailJour] = useState(null);
+  const [copie, setCopie] = useState(false);
+
+  const jours = Array.from({ length: 7 }, (_, i) => ajouterJours(dimancheAffiche, i));
+  const isoJours = jours.map(dateISO);
+  const debutISO = isoJours[0];
+  const finISO = isoJours[6];
+
+  // Heures réelles de la semaine — seules les lignes portant un courriel
+  // d'employé comptent (celles envoyées par l'app technicien).
+  const lignesSemaineBrutes = (travaux || []).filter((t) => t.employeEmail && t.date >= debutISO && t.date <= finISO);
+
+  // JOURNÉES BLOQUÉES (chrono oublié fermé automatiquement) — la journée
+  // entière du technicien sort de TOUS les totaux tant qu'un
+  // administrateur ne l'a pas débloquée. Les lignes existent toujours
+  // (on les montre dans le détail), elles ne sont simplement pas
+  // comptées : aucune heure douteuse n'entre dans une paie.
+  const bloques = joursBloques(travaux);
+  const estBloque = (email, date) => bloques.has(cleJour(email, date));
+  const lignesSemaine = lignesSemaineBrutes.filter((t) => !estBloque(t.employeEmail, t.date));
+  // Résumé pour la bannière d'alerte : une entrée par journée bloquée.
+  const journeesBloquees = [];
+  lignesSemaineBrutes.forEach((t) => {
+    if (!estBloque(t.employeEmail, t.date)) return;
+    const cle = cleJour(t.employeEmail, t.date);
+    if (journeesBloquees.some((j) => j.cle === cle)) return;
+    journeesBloquees.push({
+      cle,
+      email: t.employeEmail,
+      date: t.date,
+      raison: (lignesSemaineBrutes.find((x) => x.jourBloque && cleJour(x.employeEmail, x.date) === cle) || {}).bloqueRaison || "",
+    });
+  });
+  // Trois catégories SÉPARÉES : chantier, transport début/fin de journée,
+  // et transport journalier (déplacements entre deux tâches).
+  // La détection reconnaît les TROIS noms successifs de cette tâche —
+  // « Transport journalier » et les anciens « Transport durant la
+  // journée » / « Transport CCQ » — pour que les heures déjà
+  // enregistrées sous un ancien nom continuent de compter.
+  const estCcq = (t) => t.estTransport && /ccq|durant la journée|journalier/i.test(t.titre || "");
+  // Dîner non payé : ligne de −30 min envoyée quand le technicien coche
+  // « Lunch » avant son transport de fin de journée.
+  const estLunch = (t) => !t.estTransport && /dîner|diner|lunch/i.test(t.titre || "");
+
+  const heureLocaleDe = (ts) => {
+    if (!ts) return null;
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  // CLASSIFICATION DE LA JOURNÉE d'un technicien (règle validée) :
+  // - SAM/DIM : tout le travail du samedi et du dimanche (prime sur tout) ;
+  // - NUIT (lun-ven) : la PREMIÈRE intervention réelle du jour démarre à
+  //   16 h 00 ou plus tard → toute la journée est classée Nuit ;
+  // - JOUR : le reste — y compris un travail commencé avant 16 h qui se
+  //   prolonge en soirée (simple prolongation), et les anciennes lignes
+  //   sans heure de début réelle (complétées avant la capture).
+  const classificationJournee = (lignesDuJour, iso) => {
+    const js = new Date(`${iso}T00:00:00`).getDay();
+    if (js === 0 || js === 6) return "weekend";
+    const debuts = (lignesDuJour || []).filter((l) => l.debutReel && !estLunch(l)).map((l) => new Date(l.debutReel).getTime());
+    if (debuts.length === 0) return "jour";
+    return new Date(Math.min(...debuts)).getHours() >= heureNuit ? "nuit" : "jour";
+  };
+
+  // PLAN D'AJUSTEMENT par heures de début/fin : la journée reste une
+  // ligne continue — déplacer une frontière réalloue le temps au voisin
+  // (il gagne ce que la ligne cède, et inversement). Exceptions : un
+  // voisin à 0 h (chrono oublié) n'est jamais touché, et un changement en
+  // bordure de journée ajoute/retire du temps net. La durée de la ligne
+  // bouge par DELTAS (les pauses du technicien restent respectées).
+  const planAjustement = (travail, debutStr, finStr, lignesJour) => {
+    const date = travail.date;
+    const nouveauDebut = new Date(`${date}T${debutStr}:00`);
+    const nouvelleFin = new Date(`${date}T${finStr}:00`);
+    if (!(nouvelleFin > nouveauDebut)) return { erreur: "La fin doit être après le début." };
+    const ISO = (d) => d.toISOString();
+    // Ligne sans heures réelles enregistrées (complétée avant la capture) :
+    // édition simple — durée = fin − début, aucun voisin touché.
+    if (!travail.debutReel || !travail.finReelle) {
+      const heures = Math.round(((nouvelleFin - nouveauDebut) / 3600000) * 100) / 100;
+      return { ajustements: [{ travail, heures, debutReel: ISO(nouveauDebut), finReelle: ISO(nouvelleFin) }], apercu: [] };
+    }
+    const ancienDebut = new Date(travail.debutReel);
+    const ancienneFin = new Date(travail.finReelle);
+    const deltaDebut = (ancienDebut - nouveauDebut) / 3600000; // + = commence plus tôt
+    const deltaFin = (nouvelleFin - ancienneFin) / 3600000; // + = finit plus tard
+    const heuresLigne = Math.round(((Number(travail.heures) || 0) + deltaDebut + deltaFin) * 100) / 100;
+    if (heuresLigne <= 0) return { erreur: "La correction rendrait cette ligne à 0 h ou moins." };
+    const ajustements = [{ travail, heures: heuresLigne, debutReel: ISO(nouveauDebut), finReelle: ISO(nouvelleFin) }];
+    const apercu = [];
+    const chronologie = lignesJour
+      .filter((l) => l.debutReel && l.finReelle && !estLunch(l))
+      .sort((a, b) => new Date(a.debutReel) - new Date(b.debutReel));
+    const idx = chronologie.findIndex((l) => l.id === travail.id);
+    const prec = idx > 0 ? chronologie[idx - 1] : null;
+    const suiv = idx >= 0 && idx < chronologie.length - 1 ? chronologie[idx + 1] : null;
+    if (Math.abs(deltaDebut) > 0.004 && prec && (Number(prec.heures) || 0) > 0) {
+      const h = Math.round(((Number(prec.heures) || 0) - deltaDebut) * 100) / 100;
+      if (h <= 0) return { erreur: `Impossible : « ${prec.titre} » tomberait à ${h.toFixed(2)} h. Ajuste-la d'abord.` };
+      ajustements.push({ travail: prec, heures: h, finReelle: ISO(nouveauDebut) });
+      apercu.push(`« ${prec.titre} » : ${(Number(prec.heures) || 0).toFixed(2)} h → ${h.toFixed(2)} h`);
+    }
+    if (Math.abs(deltaFin) > 0.004 && suiv && (Number(suiv.heures) || 0) > 0) {
+      const h = Math.round(((Number(suiv.heures) || 0) - deltaFin) * 100) / 100;
+      if (h <= 0) return { erreur: `Impossible : « ${suiv.titre} » tomberait à ${h.toFixed(2)} h. Ajuste-la d'abord.` };
+      ajustements.push({ travail: suiv, heures: h, debutReel: ISO(nouvelleFin) });
+      apercu.push(`« ${suiv.titre} » : ${(Number(suiv.heures) || 0).toFixed(2)} h → ${h.toFixed(2)} h`);
+    }
+    return { ajustements, apercu };
+  };
+  const parEmploye = {};
+  lignesSemaine.forEach((t) => {
+    const cle = t.employeEmail.toLowerCase();
+    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, details: [] });
+    const h = Number(t.heures) || 0;
+    e.parJour[t.date] = (e.parJour[t.date] || 0) + h;
+    // ADMINISTRATIF et DIVERS passent AVANT le classement habituel :
+    // ce sont des heures payées, mais qui ne sont ni du chantier ni du
+    // transport. Sans ce test en premier, une visite de soumission
+    // serait comptée comme du chantier et gonflerait un coût de projet.
+    const cat = t.categorieHeures || "projet";
+    if (estLunch(t)) e.diner += h;
+    else if (cat === "administratif") e.administratif += h;
+    else if (cat === "divers") e.divers += h;
+    else if (estCcq(t)) e.transportCcq += h;
+    else if (t.estTransport) e.transport += h;
+    else e.chantier += h;
+    e.total += h;
+    e.details.push(t);
+  });
+  // TOUTE L'ÉQUIPE apparaît — même les techniciens à 0 h cette semaine :
+  // chaque personne du répertoire ayant un courriel a sa ligne. On voit
+  // ainsi d'un coup d'œil qui n'a pas d'heures enregistrées.
+  (utilisateurs || []).forEach((u) => {
+    const cle = (u.courriel || "").toLowerCase();
+    if (!cle || parEmploye[cle]) return;
+    parEmploye[cle] = { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, details: [] };
+  });
+  // REPORT ± : corrections TARDIVES validées PENDANT la semaine affichée
+  // mais portant sur des lignes de semaines ANTÉRIEURES — la différence
+  // (heures corrigées − heures d'avant) s'ajoute à la paie de cette
+  // semaine, sans rouvrir la semaine déjà payée.
+  (travaux || []).forEach((t) => {
+    if (!t.supabase || !t.employeEmail || !t.corrigeLe || t.heuresAvantCorrection == null) return;
+    if (dimancheDeSemaineISO(t.corrigeLe) !== debutISO) return; // report ∈ semaine affichée
+    if (!(t.date < debutISO)) return; // la ligne vient bien d'une semaine antérieure
+    const delta = Math.round(((Number(t.heures) || 0) - (Number(t.heuresAvantCorrection) || 0)) * 100) / 100;
+    if (Math.abs(delta) < 0.005) return;
+    const cle = t.employeEmail.toLowerCase();
+    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, details: [] });
+    e.report += delta;
+    e.reportDetails.push({ titre: t.titre, date: t.date, delta });
+  });
+  // NUIT / SAM-DIM : classification PAR JOURNÉE (voir classificationJournee),
+  // sommée en net (dîner inclus) — le reste des heures est du JOUR.
+  Object.values(parEmploye).forEach((e) => {
+    const parDate = {};
+    e.details.forEach((t) => {
+      (parDate[t.date] = parDate[t.date] || []).push(t);
+    });
+    Object.entries(parDate).forEach(([iso, lignes]) => {
+      const classe = classificationJournee(lignes, iso);
+      if (classe === "jour") return;
+      const somme = lignes.reduce((s, t) => s + (Number(t.heures) || 0), 0);
+      if (classe === "nuit") e.nuit += somme;
+      else e.weekend += somme;
+    });
+  });
+  const nomPour = (email, repli) =>
+    (utilisateurs || []).find((u) => (u.courriel || "").toLowerCase() === email)?.nom || repli || email.split("@")[0];
+  // Normes du travail (Québec) : au-delà de 40 h/semaine = heures
+  // supplémentaires (taux et demi) — on sépare les deux totaux.
+  const employesSemaine = Object.values(parEmploye)
+    .map((e) => ({
+      ...e,
+      nom: nomPour(e.email, e.details[0]?.employeNom),
+      regulieres: Math.min(e.total, seuilSupp),
+      supplementaires: Math.max(0, e.total - seuilSupp),
+    }))
+    .sort((a, b) => a.nom.localeCompare(b.nom));
+
+  const labelSemaine = `du ${jours[0].toLocaleDateString("fr-CA", { day: "numeric", month: "long" })} au ${jours[6].toLocaleDateString("fr-CA", { day: "numeric", month: "long" })}`;
+
+  // TOTAUX DE LA SEMAINE (toute l'équipe) — une ligne de compilation en
+  // bas du tableau : chaque jour, chaque catégorie, et le grand total.
+  const totauxEquipe = employesSemaine.reduce(
+    (acc, e) => {
+      isoJours.forEach((iso) => {
+        if (e.parJour[iso]) acc.parJour[iso] = (acc.parJour[iso] || 0) + e.parJour[iso];
+      });
+      acc.chantier += e.chantier;
+      acc.transport += e.transport;
+      acc.transportCcq += e.transportCcq;
+      acc.administratif += e.administratif;
+      acc.divers += e.divers;
+      acc.diner += e.diner;
+      acc.nuit += e.nuit;
+      acc.weekend += e.weekend;
+      acc.report += e.report;
+      acc.total += e.total;
+      return acc;
+    },
+    { parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, total: 0 }
+  );
+
+  // Copie le tableau en format tabulé — prêt à coller dans Excel ou
+  // dans le logiciel de paie.
+  // EXPORT DE PAIE — refuse de copier en SILENCE s'il reste une journée
+  // bloquée dans la semaine. Sans ce garde-fou, l'admin copierait une
+  // paie amputée d'une journée sans s'en rendre compte, et le technicien
+  // découvrirait le manque sur son chèque. On avertit, on n'interdit pas.
+  const copierPourLaPaie = (confirme = false) => {
+    if (journeesBloquees.length > 0 && !confirme) {
+      setAvertissementPaieOuvert(true);
+      return;
+    }
+    const enTete = ["Technicien", ...jours.map((j) => j.toLocaleDateString("fr-CA", { weekday: "short", day: "numeric" })), "Chantier", "Transport", "Transport journalier", "Administratif", "Divers", "Dîner", "Nuit", "Sam/Dim", "Report ±", "Régulières", `Supplémentaires (>${seuilSupp} h)`, "TOTAL À PAYER"].join("\t");
+    const corps = employesSemaine
+      .map((e) =>
+        [
+          e.nom,
+          ...isoJours.map((iso) => (e.parJour[iso] ? e.parJour[iso].toFixed(2) : "")),
+          e.chantier.toFixed(2),
+          e.transport.toFixed(2),
+          e.transportCcq.toFixed(2),
+          e.administratif.toFixed(2),
+          e.divers.toFixed(2),
+          e.diner !== 0 ? e.diner.toFixed(2) : "",
+          e.nuit !== 0 ? e.nuit.toFixed(2) : "",
+          e.weekend !== 0 ? e.weekend.toFixed(2) : "",
+          e.report !== 0 ? e.report.toFixed(2) : "",
+          e.regulieres.toFixed(2),
+          e.supplementaires > 0 ? e.supplementaires.toFixed(2) : "",
+          (e.total + e.report).toFixed(2),
+        ].join("\t")
+      )
+      .join("\n");
+    const ligneTotaux = [
+      "TOTAL ÉQUIPE",
+      ...isoJours.map((iso) => (totauxEquipe.parJour[iso] ? totauxEquipe.parJour[iso].toFixed(2) : "")),
+      totauxEquipe.chantier.toFixed(2),
+      totauxEquipe.transport.toFixed(2),
+      totauxEquipe.transportCcq.toFixed(2),
+      totauxEquipe.administratif.toFixed(2),
+      totauxEquipe.divers.toFixed(2),
+      totauxEquipe.diner !== 0 ? totauxEquipe.diner.toFixed(2) : "",
+      totauxEquipe.nuit !== 0 ? totauxEquipe.nuit.toFixed(2) : "",
+      totauxEquipe.weekend !== 0 ? totauxEquipe.weekend.toFixed(2) : "",
+      totauxEquipe.report !== 0 ? totauxEquipe.report.toFixed(2) : "",
+      "",
+      "",
+      (totauxEquipe.total + totauxEquipe.report).toFixed(2),
+    ].join("\t");
+    navigator.clipboard
+      ?.writeText(`Semaine de paie ${labelSemaine} (${debutISO} au ${finISO})\n${enTete}\n${corps}\n${ligneTotaux}`)
+      .then(() => {
+        setCopie(true);
+        setTimeout(() => setCopie(false), 2500);
+      })
+      .catch(() => {});
+  };
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-lg font-extrabold text-slate-900">Heures de la semaine</h2>
+          <p className="text-xs text-slate-400">Semaine de paie du dimanche au samedi · heures réelles enregistrées par les techniciens</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setDimancheAffiche(ajouterJours(dimancheAffiche, -7))} aria-label="Semaine précédente" className="rounded-lg border border-slate-200 p-1.5"><ChevronLeft size={16} /></button>
+          {/* Largeur fixe : les flèches ne bougent jamais (même règle que l'agenda). */}
+          <span className="min-w-[190px] text-center text-sm font-extrabold text-slate-800">{labelSemaine}</span>
+          <button onClick={() => setDimancheAffiche(ajouterJours(dimancheAffiche, 7))} aria-label="Semaine suivante" className="rounded-lg border border-slate-200 p-1.5"><ChevronRight size={16} /></button>
+          <button
+            onClick={() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); setDimancheAffiche(d); }}
+            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-600"
+          >
+            Cette semaine
+          </button>
+        </div>
+      </div>
+
+      {/* JOURNÉES BLOQUÉES — chrono oublié fermé automatiquement. Rouge
+          et en premier : ces heures ne sont dans AUCUN total, donc le
+          technicien n'est pas payé pour cette journée tant que ce n'est
+          pas réglé. La marche à suivre est écrite dans la bannière —
+          appeler, corriger, débloquer — pour qu'aucun admin n'ait à
+          deviner quoi faire. */}
+      {journeesBloquees.length > 0 && (
+        <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-3">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-red-700">
+            🔒 {journeesBloquees.length} journée{journeesBloquees.length > 1 ? "s" : ""} bloquée{journeesBloquees.length > 1 ? "s" : ""} — non comptée{journeesBloquees.length > 1 ? "s" : ""} dans la paie
+          </p>
+          <div className="mt-2 space-y-1.5">
+            {journeesBloquees.map((j) => {
+              const u = (utilisateurs || []).find((x) => (x.courriel || "").toLowerCase() === j.email);
+              const labelDate = new Date(`${j.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
+              return (
+                <div key={j.cle} className="flex flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] font-bold text-slate-800">
+                      {nomPour(j.email)} — <span className="capitalize">{labelDate}</span>
+                    </p>
+                    <p className="text-[11px] text-slate-600">{j.raison}</p>
+                    {u?.telephone ? (
+                      <p className="mt-0.5 flex items-center gap-1 text-[11px] font-bold text-red-700">
+                        <Phone size={11} className="shrink-0" /> {u.telephone}
+                      </p>
+                    ) : null}
+                    <p className="mt-0.5 text-[10px] text-slate-400">
+                      1. Appelle-le pour son heure de fin réelle · 2. Corrige ses heures en cliquant la cellule du jour · 3. Débloque.
+                    </p>
+                  </div>
+                  {droitHeures === "direct" ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => setDeblocageDemande(j)}
+                      className="min-h-0 px-3 py-1.5 text-[11px]"
+                    >
+                      🔓 Débloquer
+                    </Button>
+                  ) : (
+                    <span className="text-[10px] font-semibold text-slate-400">Déblocage réservé aux administrateurs</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION DU DÉBLOCAGE — geste volontaire : on ne veut pas
+          qu'un clic distrait remette des heures fausses dans la paie. */}
+      {deblocageDemande && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeblocageDemande(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-start gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <AlertTriangle size={18} className="text-amber-600" />
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Débloquer cette journée ?</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  As-tu bien <span className="font-bold">corrigé les heures</span> de {nomPour(deblocageDemande.email)} après
+                  l&apos;avoir appelé ? Une fois débloquée, cette journée <span className="font-bold">compte dans la paie</span> avec
+                  les heures actuellement enregistrées.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setDeblocageDemande(null)} className="min-h-0 py-2 text-xs">Annuler</Button>
+              <Button
+                onClick={() => {
+                  const j = deblocageDemande;
+                  setDeblocageDemande(null);
+                  onDebloquerJournee?.(j.email, j.date);
+                }}
+                className="min-h-0 py-2 text-xs"
+              >
+                Oui, débloquer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AVERTISSEMENT AVANT DE COPIER UNE PAIE INCOMPLÈTE */}
+      {avertissementPaieOuvert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setAvertissementPaieOuvert(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-start gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100">
+                <AlertTriangle size={18} className="text-red-600" />
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">
+                  {journeesBloquees.length} journée{journeesBloquees.length > 1 ? "s" : ""} n&apos;{journeesBloquees.length > 1 ? "" : "est"}
+                  {journeesBloquees.length > 1 ? "sont pas incluses" : " pas incluse"}
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  Ces journées sont <span className="font-bold">bloquées</span> (chrono oublié) et ne comptent dans aucun total.
+                  Si tu copies maintenant, {journeesBloquees.length > 1 ? "ces techniciens seront" : "ce technicien sera"} <span className="font-bold">sous-payé</span>.
+                </p>
+                <ul className="mt-2 space-y-0.5">
+                  {journeesBloquees.map((j) => (
+                    <li key={j.cle} className="text-[11px] font-semibold text-red-700">
+                      • {nomPour(j.email)} — {new Date(`${j.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" })}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setAvertissementPaieOuvert(false)} className="min-h-0 py-2 text-xs">
+                Je vais corriger
+              </Button>
+              <Button
+                onClick={() => { setAvertissementPaieOuvert(false); copierPourLaPaie(true); }}
+                className="min-h-0 py-2 text-xs"
+              >
+                Copier quand même
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AVIS AUX ADMINISTRATEURS — propositions d'ajustement d'heures du
+          répartiteur, à VALIDER ou REFUSER. Tant que rien n'est validé,
+          l'heure originale compte partout (paie, projets, agenda). */}
+      {(() => {
+        const propositions = (travaux || []).filter((t) => t.supabase && t.heuresProposees != null);
+        if (propositions.length === 0) return null;
+        // Les lignes d'une même correction partagent un groupe : elles se
+        // valident ou se refusent D'UN BLOC (jamais une demi-correction).
+        const groupes = {};
+        propositions.forEach((t) => {
+          const g = t.groupeProposition || t.id;
+          (groupes[g] = groupes[g] || []).push(t);
+        });
+        return (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-amber-700">
+              ⏳ {Object.keys(groupes).length} correction{Object.keys(groupes).length > 1 ? "s" : ""} d'heures en attente de validation
+            </p>
+            <div className="mt-2 space-y-1.5">
+              {Object.entries(groupes).map(([g, lignes]) => (
+                <div key={g} className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    {lignes.map((t) => (
+                      <p key={t.id} className="text-[11px] text-slate-700">
+                        <span className="tabular-nums text-slate-400">{t.date}</span> · <span className="font-bold">{t.employeNom || t.employeEmail}</span> · {t.titre} :{" "}
+                        <span className="font-bold tabular-nums">
+                          {(Number(t.heures) || 0).toFixed(2)} h → {(Number(t.heuresProposees) || 0).toFixed(2)} h
+                        </span>
+                        {t.debutPropose && t.finPropose && (
+                          <span className="tabular-nums text-slate-400"> ({heureLocaleDe(t.debutPropose)} → {heureLocaleDe(t.finPropose)})</span>
+                        )}
+                      </p>
+                    ))}
+                    <p className="text-[10px] text-slate-400">proposée par {lignes[0]?.propositionPar || "?"}{lignes.length > 1 ? ` — ${lignes.length} lignes corrigées ensemble` : ""}</p>
+                  </div>
+                  {droitHeures === "direct" ? (
+                    <div className="flex gap-1.5">
+                      <button onClick={() => onValiderGroupe?.(lignes)} className="rounded-md bg-emerald-600 px-2.5 py-1.5 text-[10px] font-bold text-white">
+                        ✅ Valider
+                      </button>
+                      <button onClick={() => onRefuserGroupe?.(lignes)} className="rounded-md border border-red-300 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
+                        ❌ Refuser
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] font-bold text-amber-600">En attente d'un administrateur</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {employesSemaine.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">
+          Aucune heure enregistrée cette semaine — les heures apparaissent quand un technicien clique « Terminer » sur une tâche.
+        </p>
+      ) : (
+        <>
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+            <table className="w-full min-w-[1100px] text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left">
+                  {/* COLONNE DES NOMS FIGÉE (sticky left-0) — en glissant
+                      vers la droite pour voir les totaux, on garde le nom
+                      du technicien sous les yeux. Même principe que la
+                      colonne des employés dans l'agenda. Le fond opaque
+                      est obligatoire : sans lui, les colonnes qui défilent
+                      apparaîtraient par transparence en dessous. */}
+                  <th className="sticky left-0 z-20 border-r border-slate-200 bg-slate-50 px-3 py-2 font-extrabold uppercase tracking-wide text-slate-500">Technicien</th>
+                  {jours.map((j, i) => (
+                    <th key={isoJours[i]} className="px-2 py-2 text-center font-bold capitalize text-slate-400">
+                      {j.toLocaleDateString("fr-CA", { weekday: "short" })}<br />
+                      <span className="font-extrabold text-slate-600">{j.getDate()}</span>
+                    </th>
+                  ))}
+                  <th className="px-2 py-2 text-right font-bold text-slate-500">Chantier</th>
+                  <th className="px-2 py-2 text-right font-bold text-slate-500">Transport</th>
+                  <th className="px-2 py-2 text-right font-bold text-slate-500">Transport journalier</th>
+                  <th className="px-2 py-2 text-right font-bold text-slate-500">Dîner</th>
+                  <th className="px-2 py-2 text-right font-bold text-indigo-500">🌙 Nuit</th>
+                  <th className="px-2 py-2 text-right font-bold text-sky-600">Sam/Dim</th>
+                  <th className="px-2 py-2 text-right font-bold text-purple-600">Report ±</th>
+                  <th className="px-3 py-2 text-right font-extrabold text-slate-700">TOTAL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {employesSemaine.map((e) => (
+                  <React.Fragment key={e.email}>
+                    <tr
+                      onClick={() => setDetailEmail(detailEmail === e.email ? null : e.email)}
+                      className="group cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                      title="Cliquer pour voir le détail des tâches"
+                    >
+                      {/* Nom figé à gauche. Le survol de la ligne doit être
+                          repris ici (group-hover) : le fond opaque de la
+                          cellule masquerait sinon le hover de la ligne. */}
+                      <td className="sticky left-0 z-10 border-r border-slate-100 bg-white px-3 py-2.5 group-hover:bg-slate-50">
+                        <p className="font-bold text-slate-800">{e.nom}</p>
+                        <p className="text-[10px] text-slate-400">{e.email}</p>
+                      </td>
+                      {isoJours.map((iso) => {
+                        const actif = detailJour && detailJour.email === e.email && detailJour.iso === iso;
+                        // JOURNÉE BLOQUÉE : cadenas rouge au lieu des
+                        // heures. Elle reste cliquable — l'admin doit
+                        // pouvoir ouvrir le détail pour corriger.
+                        const bloquee = estBloque(e.email, iso);
+                        if (bloquee) {
+                          return (
+                            <td
+                              key={iso}
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                setDetailJour(actif ? null : { email: e.email, iso });
+                              }}
+                              title="Journée bloquée — chrono oublié. Cliquer pour voir et corriger."
+                              className={`cursor-pointer px-2 py-2.5 text-center text-[11px] font-extrabold ${
+                                actif ? "bg-red-200 text-red-800" : "bg-red-100 text-red-700 hover:bg-red-200"
+                              }`}
+                            >
+                              🔒
+                            </td>
+                          );
+                        }
+                        return (
+                          <td
+                            key={iso}
+                            onClick={(ev) => {
+                              if (!e.parJour[iso]) return;
+                              // Ne pas déclencher aussi le détail SEMAINE (clic de ligne).
+                              ev.stopPropagation();
+                              setDetailJour(actif ? null : { email: e.email, iso });
+                            }}
+                            title={e.parJour[iso] ? "Cliquer pour le détail de cette journée" : undefined}
+                            className={`px-2 py-2.5 text-center tabular-nums ${e.parJour[iso] ? "cursor-pointer hover:bg-blue-50" : ""} ${
+                              actif ? "bg-blue-100 font-extrabold text-blue-700" : "text-slate-600"
+                            }`}
+                          >
+                            {e.parJour[iso] ? e.parJour[iso].toFixed(1) : <span className="text-slate-200">—</span>}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.chantier.toFixed(2)} h</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transport.toFixed(2)} h</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transportCcq.toFixed(2)} h</td>
+                      {/* ADMINISTRATIF cliquable : ouvre le detail des
+                          visites (quel client, quel projet on est alle
+                          voir) — c est la question qu on se pose en
+                          regardant un cumul d heures administratives. */}
+                      <td
+                        onClick={(ev) => { if (e.administratif > 0) { ev.stopPropagation(); setDetailAdmin(detailAdmin === e.email ? null : e.email); } }}
+                        title={e.administratif > 0 ? "Voir les visites" : undefined}
+                        className={`px-2 py-2.5 text-right tabular-nums ${e.administratif > 0 ? "cursor-pointer font-bold text-sky-700 hover:bg-sky-50" : "text-slate-300"}`}
+                      >{e.administratif > 0 ? `${e.administratif.toFixed(2)} h` : "—"}</td>
+                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.divers > 0 ? "font-bold text-stone-600" : "text-slate-300"}`}>{e.divers > 0 ? `${e.divers.toFixed(2)} h` : "—"}</td>
+                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.diner < 0 ? "font-bold text-rose-600" : "text-slate-300"}`}>
+                        {e.diner < 0 ? `${e.diner.toFixed(2)} h` : "—"}
+                      </td>
+                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.nuit !== 0 ? "font-bold text-indigo-600" : "text-slate-300"}`}>
+                        {e.nuit !== 0 ? `${e.nuit.toFixed(2)} h` : "—"}
+                      </td>
+                      <td
+                        className={`px-2 py-2.5 text-right tabular-nums ${e.weekend !== 0 ? "font-bold text-sky-600" : "text-slate-300"}`}
+                      >
+                        {e.weekend !== 0 ? `${e.weekend.toFixed(2)} h` : "—"}
+                      </td>
+                      <td
+                        className={`px-2 py-2.5 text-right tabular-nums ${e.report !== 0 ? "font-bold text-purple-600" : "text-slate-300"}`}
+                        title={
+                          e.report !== 0
+                            ? e.reportDetails.map((r) => `${r.date} · ${r.titre} : ${r.delta > 0 ? "+" : ""}${r.delta.toFixed(2)} h`).join("\n")
+                            : undefined
+                        }
+                      >
+                        {e.report !== 0 ? `${e.report > 0 ? "+" : ""}${e.report.toFixed(2)} h` : "—"}
+                      </td>
+                      <td className="px-3 py-2.5 text-right">
+                        <span className="font-extrabold tabular-nums text-slate-900">{(e.total + e.report).toFixed(2)} h</span>
+                        {e.report !== 0 && (
+                          <p className="text-[10px] font-bold tabular-nums text-purple-600">
+                            {e.total.toFixed(2)} trav. {e.report > 0 ? "+" : ""}{e.report.toFixed(2)} report
+                          </p>
+                        )}
+                        {e.supplementaires > 0 && (
+                          <p className="text-[10px] font-bold text-amber-600">
+                            {seuilSupp.toFixed(2).replace(".", ",")} rég. + {e.supplementaires.toFixed(2)} sup.
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                    {/* DÉTAIL DES HEURES ADMINISTRATIVES — quelles
+                        visites, chez quel client, sur quel projet. La
+                        question qu'on se pose devant un cumul d'heures
+                        administratives, c'est « on est allés où ? ». */}
+                    {detailAdmin === e.email && (() => {
+                      const visites = e.details.filter((t) => (t.categorieHeures || "projet") === "administratif");
+                      if (visites.length === 0) return null;
+                      return (
+                        <tr className="border-b-2 border-sky-200 bg-sky-50">
+                          <td colSpan={18} className="px-4 py-3">
+                            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-sky-700">
+                              🔎 Heures administratives de {e.nom} — {e.administratif.toFixed(2)} h
+                            </p>
+                            <div className="space-y-1">
+                              {visites.slice().sort((a, b) => a.date.localeCompare(b.date)).map((t) => {
+                                const projet = (projets || []).find((p) => p.id === t.projetId);
+                                return (
+                                  <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5">
+                                    <span className="min-w-0">
+                                      <span className="text-[11px] font-bold text-slate-800">{t.titre}</span>
+                                      {t.clientNom ? <span className="ml-1.5 text-[11px] text-slate-500">· {t.clientNom}</span> : null}
+                                      {projet ? <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">{projet.nom}</span> : null}
+                                    </span>
+                                    <span className="shrink-0 text-[11px] tabular-nums text-slate-500">
+                                      {t.date} · <span className="font-bold text-slate-700">{(Number(t.heures) || 0).toFixed(2)} h</span>
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <p className="mt-2 text-[10px] text-sky-700">
+                              Ces heures sont PAYÉES mais n'entrent pas dans le coût des projets — elles sont un frais
+                              général de l'entreprise.
+                            </p>
+                          </td>
+                        </tr>
+                      );
+                    })()}
+
+                    {/* DÉTAIL D'UNE JOURNÉE — ouvert au clic sur la cellule
+                        d'un jour : déroulement de la journée avec une
+                        étiquette de catégorie par entrée + récapitulatif. */}
+                    {detailJour?.email === e.email && (() => {
+                      const iso = detailJour.iso;
+                      // Une journée BLOQUÉE n'est pas dans `details` (elle
+                      // est exclue des totaux) — mais l'admin doit voir
+                      // ses lignes pour les corriger. On les reprend
+                      // alors directement dans les lignes brutes.
+                      const jourBloqueIci = estBloque(e.email, iso);
+                      const lignesJour = jourBloqueIci
+                        ? lignesSemaineBrutes.filter((t) => t.date === iso && (t.employeEmail || "").toLowerCase() === e.email)
+                        : e.details.filter((t) => t.date === iso);
+                      if (lignesJour.length === 0) return null;
+                      // Ordre lisible : Transport Début en premier, Fin en
+                      // dernier (pas d'heure exacte sur les lignes — seulement
+                      // des durées par tâche).
+                      const rang = (t) => (/début/i.test(t.titre || "") ? 0 : /fin de journée/i.test(t.titre || "") ? 2 : 1);
+                      const ordonnees = lignesJour.slice().sort((a, b) => rang(a) - rang(b));
+                      const catDe = (t) =>
+                        estLunch(t)
+                          ? { label: "DÎNER", cls: "bg-rose-100 text-rose-700" }
+                          : estCcq(t)
+                          ? { label: "TRANSP. JOURNALIER", cls: "bg-amber-100 text-amber-700" }
+                          : t.estTransport
+                          ? { label: "TRANSPORT", cls: "bg-slate-200 text-slate-600" }
+                          : { label: "CHANTIER", cls: "bg-emerald-100 text-emerald-700" };
+                      const tj = lignesJour.reduce(
+                        (acc, t) => {
+                          const h = Number(t.heures) || 0;
+                          if (estLunch(t)) acc.diner += h;
+                          else if (estCcq(t)) acc.ccq += h;
+                          else if (t.estTransport) acc.transport += h;
+                          else acc.chantier += h;
+                          acc.total += h;
+                          return acc;
+                        },
+                        { chantier: 0, transport: 0, ccq: 0, diner: 0, total: 0 }
+                      );
+                      const labelJour = new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
+                      return (
+                        <tr className="border-b-2 border-blue-200 bg-blue-50">
+                          <td colSpan={18} className="px-4 py-3">
+                            <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-blue-700">
+                              📅 <span className="capitalize">{labelJour}</span> — journée de {e.nom} ({tj.total.toFixed(2)} h)
+                              {(() => {
+                                // Badge de classification de la journée (règle Nuit/Sam-Dim).
+                                const classe = classificationJournee(lignesJour, iso);
+                                if (classe === "nuit")
+                                  return <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] text-indigo-700">🌙 NUIT — 1re intervention à {heureNuit} h+</span>;
+                                if (classe === "weekend")
+                                  return <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[9px] text-sky-700">SAM/DIM — fin de semaine</span>;
+                                return null;
+                              })()}
+                            </p>
+                            <div className="space-y-1.5">
+                              {ordonnees.map((t) => {
+                                const cat = catDe(t);
+                                return (
+                                  <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-white px-3 py-1.5">
+                                    <p className="min-w-0 flex-1 truncate text-[11px] text-slate-700">
+                                      <span className={`mr-2 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${cat.cls}`}>{cat.label}</span>
+                                      {t.titre || "Travail"}
+                                      {t.clientNom ? ` — ${t.clientNom}` : ""}
+                                    </p>
+                                    <div className="flex shrink-0 items-center gap-1.5">
+                                      {editionLigne?.id === t.id ? (
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <input
+                                            type="time"
+                                            value={editionLigne.debut}
+                                            onChange={(ev) => setEditionLigne({ ...editionLigne, debut: ev.target.value })}
+                                            className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums"
+                                          />
+                                          <span className="text-[10px] text-slate-400">→</span>
+                                          <input
+                                            type="time"
+                                            value={editionLigne.fin}
+                                            onChange={(ev) => setEditionLigne({ ...editionLigne, fin: ev.target.value })}
+                                            className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums"
+                                          />
+                                          <button
+                                            onClick={() => {
+                                              const plan = planAjustement(t, editionLigne.debut, editionLigne.fin, lignesJour);
+                                              if (plan.erreur) {
+                                                setErreurEdition(plan.erreur);
+                                                return;
+                                              }
+                                              onAjusterPlan?.(plan.ajustements);
+                                              setEditionLigne(null);
+                                              setErreurEdition("");
+                                            }}
+                                            className="rounded-md bg-[#131B2E] px-2.5 py-1.5 text-[10px] font-bold text-white"
+                                          >
+                                            {droitHeures === "direct" ? "OK" : "Proposer"}
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setEditionLigne(null);
+                                              setErreurEdition("");
+                                            }}
+                                            aria-label="Annuler"
+                                            className="rounded-md border border-slate-300 px-2 py-1.5 text-[10px] font-bold text-slate-500"
+                                          >
+                                            ✗
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          {t.debutReel && t.finReelle && (
+                                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold tabular-nums text-slate-500">
+                                              {heureLocaleDe(t.debutReel)} → {heureLocaleDe(t.finReelle)}
+                                            </span>
+                                          )}
+                                          <p className="text-[11px] font-extrabold tabular-nums text-slate-800">{(Number(t.heures) || 0).toFixed(2)} h</p>
+                                          {t.corrigeLe && t.heuresAvantCorrection != null && (
+                                            <span
+                                              className="rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700"
+                                              title={`Corrigée après la fermeture de cette semaine de paie (avant : ${(Number(t.heuresAvantCorrection) || 0).toFixed(2)} h) — la différence est reportée sur la semaine du ${dimancheDeSemaineISO(t.corrigeLe)}.`}
+                                            >
+                                              ✏️ reportée → sem. du {dimancheDeSemaineISO(t.corrigeLe)}
+                                            </span>
+                                          )}
+                                          {t.heuresProposees != null && (
+                                            <span
+                                              className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700"
+                                              title={`Proposé par ${t.propositionPar || "?"} — à valider par un administrateur`}
+                                            >
+                                              ⏳ → {(Number(t.heuresProposees) || 0).toFixed(2)} h
+                                            </span>
+                                          )}
+                                          {droitHeures && t.supabase && !estLunch(t) && (
+                                            <button
+                                              onClick={() => {
+                                                // Point de départ : heures réelles si connues, sinon
+                                                // 07:00 + durée (ligne d'avant la capture).
+                                                const debut = heureLocaleDe(t.debutReel) || "07:00";
+                                                const fin =
+                                                  heureLocaleDe(t.finReelle) ||
+                                                  (() => {
+                                                    const d = new Date(`${t.date}T${debut}:00`);
+                                                    d.setMinutes(d.getMinutes() + Math.round((Number(t.heures) || 1) * 60));
+                                                    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+                                                  })();
+                                                setEditionLigne({ id: t.id, debut, fin });
+                                                setErreurEdition("");
+                                              }}
+                                              title={droitHeures === "direct" ? "Corriger les heures de début/fin (effet immédiat)" : "Proposer une correction (validée par un administrateur)"}
+                                              className="rounded-md border border-slate-200 p-1.5 text-slate-400 hover:text-slate-700"
+                                            >
+                                              <Pencil size={11} />
+                                            </button>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            {erreurEdition && (
+                              <p className="mt-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
+                                ⚠️ {erreurEdition}
+                              </p>
+                            )}
+                            <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-bold text-slate-700">
+                              <span>🟢 Chantier : <span className="tabular-nums">{tj.chantier.toFixed(2)} h</span></span>
+                              <span>⚪ Transport : <span className="tabular-nums">{tj.transport.toFixed(2)} h</span></span>
+                              <span>🟡 Transport journalier : <span className="tabular-nums">{tj.ccq.toFixed(2)} h</span></span>
+                              {tj.diner < 0 && (
+                                <span className="text-rose-600">🍴 Dîner (non payé) : <span className="tabular-nums">{tj.diner.toFixed(2)} h</span></span>
+                              )}
+                              <span>Σ Total du jour : <span className="tabular-nums">{tj.total.toFixed(2)} h</span></span>
+                            </p>
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                    {detailEmail === e.email && (
+                      <tr className="border-b border-slate-100 bg-slate-50">
+                        <td colSpan={14} className="px-4 py-3">
+                          <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Détail des tâches de {e.nom}</p>
+                          <div className="space-y-1">
+                            {e.details
+                              .slice()
+                              .sort((a, b) => (a.date + (a.titre || "")).localeCompare(b.date + (b.titre || "")))
+                              .map((t) => (
+                                <p key={t.id} className="text-[11px] text-slate-600">
+                                  <span className="tabular-nums text-slate-400">{t.date}</span> · {t.estTransport ? "🚚 " : ""}{t.titre || "Travail"}
+                                  {t.clientNom ? ` — ${t.clientNom}` : ""} ·{" "}
+                                  <span className="font-bold tabular-nums">{(Number(t.heures) || 0).toFixed(2)} h</span>
+                                </p>
+                              ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+              {/* COMPILATION DE LA SEMAINE — toute l'équipe : total par
+                  jour, par catégorie (Chantier / Transport / Transport
+                  CCQ) et GRAND TOTAL. */}
+              <tfoot>
+                <tr className="border-t-2 border-slate-300 bg-slate-100">
+                  {/* « Total équipe » figé lui aussi : c'est justement en
+                      lisant les totaux qu'on a glissé vers la droite. */}
+                  <td className="sticky left-0 z-10 border-r border-slate-300 bg-slate-100 px-3 py-2.5 font-extrabold uppercase tracking-wide text-slate-700">Total équipe</td>
+                  {isoJours.map((iso) => (
+                    <td key={iso} className="px-2 py-2.5 text-center font-bold tabular-nums text-slate-700">
+                      {totauxEquipe.parJour[iso] ? totauxEquipe.parJour[iso].toFixed(1) : <span className="text-slate-300">—</span>}
+                    </td>
+                  ))}
+                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{totauxEquipe.chantier.toFixed(2)} h</td>
+                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{totauxEquipe.transport.toFixed(2)} h</td>
+                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{totauxEquipe.transportCcq.toFixed(2)} h</td>
+                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-sky-700">{totauxEquipe.administratif.toFixed(2)} h</td>
+                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-stone-600">{totauxEquipe.divers.toFixed(2)} h</td>
+                  <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.diner < 0 ? "text-rose-600" : "text-slate-400"}`}>
+                    {totauxEquipe.diner < 0 ? `${totauxEquipe.diner.toFixed(2)} h` : "—"}
+                  </td>
+                  <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.nuit !== 0 ? "text-indigo-600" : "text-slate-400"}`}>
+                    {totauxEquipe.nuit !== 0 ? `${totauxEquipe.nuit.toFixed(2)} h` : "—"}
+                  </td>
+                  <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.weekend !== 0 ? "text-sky-600" : "text-slate-400"}`}>
+                    {totauxEquipe.weekend !== 0 ? `${totauxEquipe.weekend.toFixed(2)} h` : "—"}
+                  </td>
+                  <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.report !== 0 ? "text-purple-600" : "text-slate-400"}`}>
+                    {totauxEquipe.report !== 0 ? `${totauxEquipe.report > 0 ? "+" : ""}${totauxEquipe.report.toFixed(2)} h` : "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-right text-sm font-extrabold tabular-nums text-slate-900">{(totauxEquipe.total + totauxEquipe.report).toFixed(2)} h</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-slate-400">
+              Heures régulières : jusqu'à {seuilSupp} h/semaine · au-delà = heures supplémentaires (taux et demi, normes du Québec). Clique le <span className="font-bold">nom</span> d'un technicien pour sa semaine complète, ou la <span className="font-bold">cellule d'un jour</span> pour le détail de cette journée.
+            </p>
+            <Button onClick={() => copierPourLaPaie()} className="min-h-0 px-4 py-2 text-xs">
+              {copie ? <><Check size={14} /> Copié !</> : <><Copy size={14} /> Copier pour la paie</>}
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ANALYSE DE RENTABILITÉ — s'ouvre depuis la tuile « Marge moyenne »
+// ------------------------------------------------------------
+// Quatre angles (global · par job · par client · par technicien) et les
+// cinq extras validés par le propriétaire : estimé-vs-réel, tendance,
+// top/flop 5, coût invisible, seuil d'alerte réglable (Paramètres).
+//
+// HONNÊTETÉ DES CHIFFRES : main-d'œuvre et camion sont solides (taux
+// figés, heures chronométrées). Les MATÉRIAUX réels attendent QuickBooks
+// (Phase 4) — d'ici là, l'estimé-vs-réel utilise le coûtant du devis
+// comme approximation des matériaux, et l'écran le dit.
+// ============================================================
+function bornesPeriodeAnalyse(cle, debutFiscal = "01-01") {
+  const n = new Date();
+  const deb = (a, m, j) => dateISO(new Date(a, m, j));
+  if (cle === "mois") return { debut: deb(n.getFullYear(), n.getMonth(), 1), fin: dateISO(n) };
+  if (cle === "mois-1") return { debut: deb(n.getFullYear(), n.getMonth() - 1, 1), fin: deb(n.getFullYear(), n.getMonth(), 0) };
+  if (cle === "trimestre") return { debut: deb(n.getFullYear(), n.getMonth() - 2, 1), fin: dateISO(n) };
+  if (cle === "annee") return { debut: deb(n.getFullYear(), 0, 1), fin: dateISO(n) };
+  if (cle === "fiscale" || cle === "fiscale-1") {
+    // Le DERNIER jalon "MM-JJ" passé ouvre l'année fiscale courante.
+    const [mois, jour] = String(debutFiscal || "01-01").split("-").map((x) => parseInt(x, 10));
+    const m = (mois || 1) - 1;
+    const j = jour || 1;
+    const jalonCetteAnnee = new Date(n.getFullYear(), m, j);
+    const debutCourante = jalonCetteAnnee <= n ? jalonCetteAnnee : new Date(n.getFullYear() - 1, m, j);
+    if (cle === "fiscale") return { debut: dateISO(debutCourante), fin: dateISO(n) };
+    const debutPrec = new Date(debutCourante.getFullYear() - 1, m, j);
+    // La précédente finit la VEILLE du début de la courante.
+    const finPrec = new Date(debutCourante.getTime() - 86400000);
+    return { debut: dateISO(debutPrec), fin: dateISO(finPrec) };
+  }
+  return { debut: "0000-01-01", fin: "9999-12-31" };
+}
+
+function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, onFermer }) {
+  const configEnt = useEntreprise();
+  const seuil = Number(configEnt?.seuilMargeAlerte) || 25;
+  const camionDefaut = Number(configEnt?.coutCamionHoraire) || 0;
+  const [periode, setPeriode] = useState("mois");
+
+  // Coût camion d'une ligne d'heures : l'inspection du matin fait foi
+  // (camion réel + taux FIGÉ ce jour-là), passager = zéro.
+  const coutCamionDe = (t) => {
+    const insp = (inspections || []).find(
+      (i) => i.date === t.date && !i.sansVehicule && !i.passagerDeNom &&
+        (i.technicienEmail && t.employeEmail ? i.technicienEmail === t.employeEmail : i.technicienNom === t.employeNom)
+    );
+    if (!insp) return 0;
+    return (Number(t.heures) || 0) * (insp.coutCamionHoraire != null ? insp.coutCamionHoraire : camionDefaut);
+  };
+  const coutMoDe = (t) => (Number(t.heures) || 0) * (Number(t.tauxCoutantFige) || 0);
+
+  // ---- CALCULS D'UNE PÉRIODE (réutilisés pour la tendance) ----
+  const calculerPeriode = (bornes) => {
+    const dedans = (d) => d && d >= bornes.debut && d <= bornes.fin;
+    const travauxPeriode = (travaux || []).filter((t) => t.supabase !== false && dedans(t.date));
+    const facturable = travauxPeriode.filter((t) => (t.categorieHeures || "projet") === "projet");
+    const invisible = travauxPeriode.filter((t) => t.categorieHeures === "administratif" || t.categorieHeures === "divers");
+    const coutMo = facturable.reduce((s, t) => s + coutMoDe(t) + coutCamionDe(t), 0);
+    const coutInvisible = invisible.reduce((s, t) => s + coutMoDe(t), 0);
+    const heuresInvisibles = invisible.reduce((s, t) => s + (Number(t.heures) || 0), 0);
+    const revenus = (bons || []).reduce(
+      (s, b) => s + (b.facturesEmises || []).filter((f) => dedans(f.date)).reduce((x, f) => x + (Number(f.montant) || 0), 0),
+      0
+    );
+    const margeOp = revenus > 0 ? ((revenus - coutMo) / revenus) * 100 : null;
+    return { revenus, coutMo, coutInvisible, heuresInvisibles, margeOp, travauxPeriode };
+  };
+
+  const debutFiscal = configEnt?.debutAnneeFiscale || "01-01";
+  const bornes = bornesPeriodeAnalyse(periode, debutFiscal);
+  const stats = calculerPeriode(bornes);
+  // 🔁 COMPARATIF « à pareille date l'an passé » : les MÊMES bornes,
+  // reculées d'un an. Jamais 9 mois contre 12 — ça mentirait.
+  const reculerUnAn = (d) => {
+    const [a, m, j] = String(d).split("-").map(Number);
+    return dateISO(new Date(a - 1, m - 1, j));
+  };
+  const statsAnPasse =
+    periode === "tout" ? null : calculerPeriode({ debut: reculerUnAn(bornes.debut), fin: reculerUnAn(bornes.fin) });
+  const aDesDonneesAnPasse = !!statsAnPasse && (statsAnPasse.revenus > 0 || statsAnPasse.coutMo > 0 || statsAnPasse.coutInvisible > 0);
+  // 📈 TENDANCE — toujours mois courant vs mois dernier, peu importe la
+  // période affichée : c'est un repère fixe.
+  const moisCourant = calculerPeriode(bornesPeriodeAnalyse("mois"));
+  const moisDernier = calculerPeriode(bornesPeriodeAnalyse("mois-1"));
+  const tendance =
+    moisCourant.margeOp == null || moisDernier.margeOp == null
+      ? null
+      : Math.round((moisCourant.margeOp - moisDernier.margeOp) * 10) / 10;
+
+  // ---- 📐 ESTIMÉ vs RÉEL — par devis facturé ----
+  const estimeVsReel = (() => {
+    const parDevis = new Map();
+    (bons || []).forEach((b) => {
+      if (!b.devisNumero || !(b.facturesEmises || []).length) return;
+      const e = parDevis.get(b.devisNumero) || { tacheIds: [], facture: 0 };
+      e.tacheIds.push(b.tacheId);
+      e.facture += (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+      parDevis.set(b.devisNumero, e);
+    });
+    const lignes = [];
+    parDevis.forEach((e, numero) => {
+      const devis = (devisListe || []).find((d) => d.numero === numero);
+      if (!devis) return;
+      const vendant = (devis.lignes || []).reduce((s, l) => s + (Number(l.prix_vendant) || 0) * (Number(l.quantite) || 1), 0);
+      const coutant = (devis.lignes || []).filter((l) => !l.estRabais).reduce((s, l) => s + (Number(l.prix_coutant) || 0) * (Number(l.quantite) || 1), 0);
+      if (vendant <= 0) return;
+      const margeEstimee = ((vendant - coutant) / vendant) * 100;
+      // Réel : facturé − main-d'œuvre/camion réels − matériaux (coûtant
+      // du devis, en attendant les vraies dépenses QuickBooks).
+      const travauxDuDevis = (travaux || []).filter((t) => e.tacheIds.some((id) => id && String(t.tacheId || "").split("::")[0] === id));
+      const coutMoReel = travauxDuDevis
+        .filter((t) => (t.categorieHeures || "projet") === "projet")
+        .reduce((s, t) => s + coutMoDe(t) + coutCamionDe(t), 0);
+      const margeReelle = e.facture > 0 ? ((e.facture - coutMoReel - coutant) / e.facture) * 100 : null;
+      if (margeReelle == null) return;
+      lignes.push({
+        numero,
+        clientNom: devis.clientNom || "",
+        facture: e.facture,
+        margeEstimee,
+        margeReelle,
+        ecart: Math.round((margeReelle - margeEstimee) * 10) / 10,
+      });
+    });
+    return lignes.sort((a, b) => a.ecart - b.ecart);
+  })();
+
+  // ---- 🏆 PAR JOB (tous projets avec du facturé) ----
+  const jobs = (analyse || [])
+    .filter((x) => (x.r.totalFactureReel || 0) > 0)
+    .map((x) => ({
+      nom: x.p.nom,
+      clientNom: x.p.clientNom || "",
+      facture: x.r.totalFactureReel,
+      cout: x.r.coutTotalReel,
+      profit: x.r.profitReel,
+      marge: x.r.pourcentageMarge,
+    }))
+    .sort((a, b) => b.marge - a.marge);
+  const top5 = jobs.slice(0, 5);
+  const flop5 = jobs.slice(-5).reverse();
+
+  // ---- PAR CLIENT (agrégat des jobs) ----
+  const parClient = (() => {
+    const m = new Map();
+    jobs.forEach((j) => {
+      const cle = j.clientNom || "Sans client";
+      const e = m.get(cle) || { clientNom: cle, facture: 0, cout: 0, jobs: 0 };
+      e.facture += j.facture;
+      e.cout += j.cout;
+      e.jobs += 1;
+      m.set(cle, e);
+    });
+    return [...m.values()]
+      .map((e) => ({ ...e, profit: e.facture - e.cout, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : 0 }))
+      .sort((a, b) => b.facture - a.facture);
+  })();
+
+  // ---- PAR TECHNICIEN (période choisie) ----
+  const parTechnicien = (() => {
+    const m = new Map();
+    stats.travauxPeriode.forEach((t) => {
+      const cle = t.employeNom || t.employeEmail || "—";
+      const e = m.get(cle) || { nom: cle, chantier: 0, transport: 0, invisible: 0, cout: 0 };
+      const h = Number(t.heures) || 0;
+      if (t.categorieHeures === "administratif" || t.categorieHeures === "divers") e.invisible += h;
+      else if (t.estTransport) e.transport += h;
+      else e.chantier += h;
+      e.cout += coutMoDe(t) + coutCamionDe(t);
+      m.set(cle, e);
+    });
+    return [...m.values()]
+      .map((e) => {
+        const total = e.chantier + e.transport + e.invisible;
+        return { ...e, total, pctFacturable: total > 0 ? ((e.chantier + e.transport) / total) * 100 : 0 };
+      })
+      .sort((a, b) => b.total - a.total);
+  })();
+
+  const classeMarge = (m) => (m == null ? "text-slate-400" : m < seuil ? "text-red-600" : "text-emerald-700");
+  const fmt$ = (v) => `${(Number(v) || 0).toFixed(0)} $`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 md:p-6" onClick={onFermer}>
+      <div className="w-full max-w-4xl rounded-2xl bg-white p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-lg font-extrabold text-slate-900">📊 Analyse de rentabilité</h3>
+            <p className="text-[11px] text-slate-400">
+              Marge sous <span className="font-bold text-red-600">{seuil} %</span> = rouge (seuil réglable dans Paramètres)
+              {(periode === "fiscale" || periode === "fiscale-1") && (
+                <span className="ml-1 font-semibold text-slate-500">· du {bornes.debut} au {bornes.fin}</span>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select value={periode} onChange={(e) => setPeriode(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold">
+              <option value="mois">Ce mois-ci</option>
+              <option value="mois-1">Le mois dernier</option>
+              <option value="trimestre">3 derniers mois</option>
+              <option value="annee">Cette année (calendrier)</option>
+              <option value="fiscale">Année fiscale en cours</option>
+              <option value="fiscale-1">Année fiscale précédente</option>
+              <option value="tout">Tout</option>
+            </select>
+            <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+          </div>
+        </div>
+
+        {/* TUILES GLOBALES */}
+        <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-[9px] font-extrabold uppercase text-slate-400">Revenus facturés</p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-900">{fmt$(stats.revenus)}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-[9px] font-extrabold uppercase text-slate-400">Main-d'œuvre + camion</p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-900">{fmt$(stats.coutMo)}</p>
+          </div>
+          <div className="rounded-xl border border-purple-200 bg-purple-50 p-3">
+            <p className="text-[9px] font-extrabold uppercase text-purple-500">👻 Coût invisible</p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-purple-700">{fmt$(stats.coutInvisible)}</p>
+            <p className="text-[10px] text-purple-500">{stats.heuresInvisibles.toFixed(1)} h admin + divers</p>
+          </div>
+          <div className={`rounded-xl border p-3 ${stats.margeOp != null && stats.margeOp < seuil ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}`}>
+            <p className="text-[9px] font-extrabold uppercase text-slate-500">Marge opérationnelle</p>
+            <p className={`mt-0.5 text-xl font-extrabold tabular-nums ${classeMarge(stats.margeOp)}`}>
+              {stats.margeOp == null ? "—" : `${stats.margeOp.toFixed(0)} %`}
+            </p>
+            {tendance != null && (
+              <p className={`text-[10px] font-bold ${tendance > 0.5 ? "text-emerald-600" : tendance < -0.5 ? "text-red-600" : "text-slate-400"}`}>
+                {tendance > 0.5 ? "↗" : tendance < -0.5 ? "↘" : "→"} {tendance > 0 ? "+" : ""}{tendance} pts vs mois dernier
+              </p>
+            )}
+            <p className="text-[9px] text-slate-400">avant matériaux (QuickBooks : Phase 4)</p>
+          </div>
+        </div>
+
+        {/* 🔁 COMPARATIF vs L'AN PASSÉ — mêmes bornes, un an plus tôt */}
+        {statsAnPasse && (
+          <div className="mt-4 rounded-xl border border-slate-200 p-3">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+              🔁 Comparatif — à pareille date l'an passé
+              <span className="ml-1 font-semibold normal-case text-slate-400">({reculerUnAn(bornes.debut)} → {reculerUnAn(bornes.fin)})</span>
+            </p>
+            {!aDesDonneesAnPasse ? (
+              <p className="mt-2 text-xs text-slate-400">
+                Aucune donnée pour cette période l'an passé — normal, l'application est jeune. Ce tableau prendra vie tout seul l'an prochain.
+              </p>
+            ) : (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="border-b border-slate-200 text-left text-slate-400">
+                    <th className="py-1 pr-2 font-semibold" /><th className="py-1 pr-2 text-right font-semibold">Cette période</th>
+                    <th className="py-1 pr-2 text-right font-semibold">L'an passé</th><th className="py-1 text-right font-semibold">Écart</th>
+                  </tr></thead>
+                  <tbody>
+                    {[
+                      ["Revenus facturés", stats.revenus, statsAnPasse.revenus, "$"],
+                      ["Main-d'œuvre + camion", stats.coutMo, statsAnPasse.coutMo, "$"],
+                      ["👻 Coût invisible", stats.coutInvisible, statsAnPasse.coutInvisible, "$"],
+                      ["Marge opérationnelle", stats.margeOp, statsAnPasse.margeOp, "pts"],
+                    ].map(([nom, courant, passe, unite]) => {
+                      const ecart =
+                        unite === "pts"
+                          ? courant != null && passe != null
+                            ? Math.round((courant - passe) * 10) / 10
+                            : null
+                          : passe > 0
+                            ? Math.round(((courant - passe) / passe) * 1000) / 10
+                            : null;
+                      // Un coût qui MONTE est une mauvaise nouvelle — la
+                      // couleur suit le sens d'affaires, pas le signe.
+                      const bonneNouvelle = nom.includes("Revenus") || nom.includes("Marge") ? ecart > 0 : ecart < 0;
+                      const affiche = (v) => (v == null ? "—" : unite === "pts" ? v.toFixed(0) + " %" : v.toFixed(0) + " $");
+                      return (
+                        <tr key={nom} className="border-b border-slate-100 last:border-0">
+                          <td className="py-1.5 pr-2 font-bold text-slate-800">{nom}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums">{affiche(courant)}</td>
+                          <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{affiche(passe)}</td>
+                          <td className={"py-1.5 text-right font-extrabold tabular-nums " + (ecart == null ? "text-slate-300" : bonneNouvelle ? "text-emerald-600" : "text-red-600")}>
+                            {ecart == null ? "—" : (ecart > 0 ? "↗ +" : ecart < 0 ? "↘ " : "→ ") + ecart + (unite === "pts" ? " pts" : " %")}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 📐 ESTIMÉ vs RÉEL */}
+        <div className="mt-4 rounded-xl border border-slate-200 p-3">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">📐 Marge estimée vs réelle — par devis facturé</p>
+          <p className="mt-0.5 text-[10px] text-slate-400">
+            Réel = facturé − main-d'œuvre/camion réels − matériaux au coûtant du devis (vraies dépenses : Phase 4). L'écart t'améliore pour le prochain devis.
+          </p>
+          {estimeVsReel.length === 0 ? (
+            <p className="mt-2 text-xs text-slate-400">Aucun devis facturé pour l'instant — cette table se remplira toute seule.</p>
+          ) : (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b border-slate-200 text-left text-slate-400">
+                  <th className="py-1 pr-2 font-semibold">Devis</th><th className="py-1 pr-2 font-semibold">Client</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Estimée</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Réelle</th><th className="py-1 text-right font-semibold">Écart</th>
+                </tr></thead>
+                <tbody>
+                  {estimeVsReel.map((l) => (
+                    <tr key={l.numero} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-2 font-bold text-slate-800">{l.numero}</td>
+                      <td className="py-1.5 pr-2 text-slate-500">{l.clientNom}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(l.facture)}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{l.margeEstimee.toFixed(0)} %</td>
+                      <td className={`py-1.5 pr-2 text-right font-bold tabular-nums ${classeMarge(l.margeReelle)}`}>{l.margeReelle.toFixed(0)} %</td>
+                      <td className={`py-1.5 text-right font-extrabold tabular-nums ${l.ecart < -3 ? "text-red-600" : l.ecart > 3 ? "text-emerald-600" : "text-slate-400"}`}>
+                        {l.ecart > 0 ? "+" : ""}{l.ecart} pts
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* 🏆 TOP / FLOP */}
+        {jobs.length > 0 && (
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {[["🏆 Top 5 — meilleures marges", top5], ["🚨 Flop 5 — pires marges", flop5]].map(([titre, liste]) => (
+              <div key={titre} className="rounded-xl border border-slate-200 p-3">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">{titre}</p>
+                {liste.map((j) => (
+                  <div key={j.nom} className="mt-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 truncate">
+                      <span className="font-bold text-slate-800">{j.nom}</span>
+                      <span className="text-slate-400"> · {j.clientNom}</span>
+                    </span>
+                    <span className={`shrink-0 font-extrabold tabular-nums ${classeMarge(j.marge)}`}>{j.marge.toFixed(0)} %</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* PAR CLIENT */}
+        {parClient.length > 0 && (
+          <div className="mt-4 rounded-xl border border-slate-200 p-3">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Par client — pour qui travaille-t-on vraiment ?</p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b border-slate-200 text-left text-slate-400">
+                  <th className="py-1 pr-2 font-semibold">Client</th><th className="py-1 pr-2 text-right font-semibold">Jobs</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Profit</th>
+                  <th className="py-1 text-right font-semibold">Marge</th>
+                </tr></thead>
+                <tbody>
+                  {parClient.map((c) => (
+                    <tr key={c.clientNom} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-2 font-bold text-slate-800">{c.clientNom}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{c.jobs}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(c.facture)}</td>
+                      <td className={`py-1.5 pr-2 text-right font-bold tabular-nums ${c.profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(c.profit)}</td>
+                      <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(c.marge)}`}>{c.marge.toFixed(0)} %</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* PAR TECHNICIEN */}
+        <div className="mt-4 rounded-xl border border-slate-200 p-3">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Par technicien — où va le temps ({periode === "tout" ? "tout" : "période choisie"})</p>
+          <p className="mt-0.5 text-[10px] text-amber-600">
+            ⚠️ Un outil de répartition du travail, pas un palmarès : celui qu'on envoie sur les diagnostics difficiles aura l'air « moins facturable » — c'est peut-être ton meilleur.
+          </p>
+          {parTechnicien.length === 0 ? (
+            <p className="mt-2 text-xs text-slate-400">Aucune heure saisie dans la période.</p>
+          ) : (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b border-slate-200 text-left text-slate-400">
+                  <th className="py-1 pr-2 font-semibold">Technicien</th><th className="py-1 pr-2 text-right font-semibold">Chantier</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Transport</th><th className="py-1 pr-2 text-right font-semibold">👻 Admin/divers</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Coût (MO+camion)</th><th className="py-1 text-right font-semibold">% facturable</th>
+                </tr></thead>
+                <tbody>
+                  {parTechnicien.map((t) => (
+                    <tr key={t.nom} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-2 font-bold text-slate-800">{t.nom}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{t.chantier.toFixed(1)} h</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{t.transport.toFixed(1)} h</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums text-purple-600">{t.invisible.toFixed(1)} h</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(t.cout)}</td>
+                      <td className="py-1.5 text-right font-bold tabular-nums text-slate-700">{t.pctFacturable.toFixed(0)} %</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe }) {
+  const configTdb = useEntreprise();
+  const analyse = projets.map((p) => {
+    const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
+    return { p, r, sante: evaluerSanteProjet(p, r) };
+  });
+  // Heures RÉELLES saisies aujourd'hui par les techniciens (chantier +
+  // transport confondus) — date locale.
+  const heuresAujourdhui = (travaux || [])
+    .filter((t) => t.date === todayISO())
+    .reduce((s, t) => s + (Number(t.heures) || 0), 0);
+  // Camions dont l'entretien périodique est dû (10 000 km / 6 mois).
+  const entretiensDus = camionsEntretienDu(inspections, entretiens);
+  const aRisque = analyse.filter((x) => x.sante.niveau === "rouge");
+  const rang = { rouge: 0, jaune: 1, vert: 2 };
+  const aSurveiller = analyse
+    .filter((x) => x.sante.niveau !== "vert")
+    .sort((a, b) => rang[a.sante.niveau] - rang[b.sante.niveau]);
+  const margeMoyenne = analyse.length ? analyse.reduce((s, x) => s + x.r.pourcentageMarge, 0) / analyse.length : 0;
+  // 📊 Analyse de rentabilité — ouverte par la tuile « Marge moyenne ».
+  const [analyseOuverte, setAnalyseOuverte] = useState(false);
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-lg font-extrabold text-slate-900">Tableau de bord</h2>
+        <span className="text-xs text-slate-400">Vue d'ensemble</span>
+      </div>
+
+      {/* TUILES KPI */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <button onClick={() => setOnglet("agenda")} className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-left active:scale-[0.99]">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-400">Heures aujourd'hui</p>
+          <p className="mt-1 text-3xl font-extrabold tabular-nums text-blue-700">{heuresAujourdhui.toFixed(1)} h</p>
+          <p className="mt-1 text-[11px] text-blue-400">saisies par les techniciens</p>
+        </button>
+        <button
+          onClick={() => setOnglet("inspections")}
+          className={`rounded-2xl border p-4 text-left active:scale-[0.99] ${
+            entretiensDus.length > 0 ? "border-orange-300 bg-orange-50" : "border-slate-200 bg-white"
+          }`}
+        >
+          <p className={`text-[10px] font-extrabold uppercase tracking-wide ${entretiensDus.length > 0 ? "text-orange-500" : "text-slate-400"}`}>
+            Entretiens camions
+          </p>
+          <p className={`mt-1 text-3xl font-extrabold tabular-nums ${entretiensDus.length > 0 ? "text-orange-600" : "text-[#131B2E]"}`}>
+            {entretiensDus.length}
+          </p>
+          <p className={`mt-1 truncate text-[11px] ${entretiensDus.length > 0 ? "text-orange-500" : "text-slate-400"}`}>
+            {entretiensDus.length > 0 ? entretiensDus.join(", ") : "aucun entretien dû"}
+          </p>
+        </button>
+        <button onClick={() => setOnglet("projets")} className="rounded-2xl border border-red-200 bg-red-50 p-4 text-left active:scale-[0.99]">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-red-400">Projets à risque</p>
+          <p className="mt-1 text-3xl font-extrabold tabular-nums text-red-600">{aRisque.length}</p>
+          <p className="mt-1 text-[11px] text-red-400">dépassement ou en perte</p>
+        </button>
+        <button onClick={() => setOnglet("facturation")} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left active:scale-[0.99]">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-amber-500">Factures en attente</p>
+          <p className="mt-1 text-3xl font-extrabold tabular-nums text-amber-700">{compteAlertes}</p>
+          <p className="mt-1 text-[11px] text-amber-600">à émettre / réviser</p>
+        </button>
+        <button onClick={() => setOnglet("agenda")} className="rounded-2xl border border-slate-200 bg-white p-4 text-left active:scale-[0.99]">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Tâches à planifier</p>
+          <p className="mt-1 text-3xl font-extrabold tabular-nums text-[#131B2E]">{compteAttente}</p>
+          <p className="mt-1 text-[11px] text-slate-400">non assignées</p>
+        </button>
+        <button onClick={() => setAnalyseOuverte(true)} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-left active:scale-[0.99]">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-500">Marge moyenne</p>
+          <p className="mt-1 text-3xl font-extrabold tabular-nums text-emerald-700">{margeMoyenne.toFixed(0)}%</p>
+          <p className="mt-1 text-[11px] text-emerald-600">projets actifs · cliquer pour l'analyse</p>
+        </button>
+      </div>
+
+      {analyseOuverte && (
+        <ModalAnalyseRentabilite
+          analyse={analyse}
+          travaux={travaux}
+          bons={bons}
+          devisListe={devisListe}
+          inspections={inspections}
+          onFermer={() => setAnalyseOuverte(false)}
+        />
+      )}
+
+      <div className="grid gap-4 md:grid-cols-[1.5fr_1fr]">
+        {/* VISITES DE SOUMISSION SANS DEVIS
+            ------------------------------------------------------------
+            Une visite faite mais jamais chiffrée, c'est une vente qui
+            s'éteint toute seule. Le rappel MONTE LE TON avec les jours :
+            visible dès le premier, rouge après trois. Un client qui
+            attend une semaine a souvent déjà appelé un concurrent. */}
+        {(soumissionsSansDevis || []).length > 0 && (
+          <div className="rounded-2xl border-2 border-indigo-300 bg-indigo-50 p-4">
+            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-indigo-700">
+              <FileText size={13} /> {soumissionsSansDevis.length} visite{soumissionsSansDevis.length > 1 ? "s" : ""} de soumission sans devis
+            </h3>
+            <div className="space-y-1.5">
+              {soumissionsSansDevis.map((v) => {
+                const urgent = v.jours >= 3;
+                return (
+                  <div
+                    key={v.id}
+                    className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
+                      urgent ? "border-red-300 bg-red-50" : "border-indigo-200 bg-white"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-bold text-slate-800">{v.clientNom || v.titre}</p>
+                      <p className="text-[10px] text-slate-500">Visite du {v.date}</p>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                        urgent ? "bg-red-500 text-white" : "bg-indigo-100 text-indigo-700"
+                      }`}
+                    >
+                      {v.jours === 0 ? "aujourd'hui" : `${v.jours} jour${v.jours > 1 ? "s" : ""}`}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[10px] leading-snug text-indigo-700">
+              Ces visites disparaîtront d'ici dès qu'un devis sera créé pour le client.
+            </p>
+          </div>
+        )}
+
+        {/* PROJETS À SURVEILLER */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Projets à surveiller</h3>
+          {aSurveiller.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Aucun projet à risque — tout est au vert. 🎉</p>
+          ) : (
+            <div className="space-y-1">
+              {aSurveiller.map(({ p, r, sante }) => (
+                <button key={p.id} onClick={() => setOnglet("projets")} className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-slate-50">
+                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${sante.pastille}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-800">{p.nom}</p>
+                    <p className="truncate text-[11px] text-slate-400">{clients.find((c) => c.id === p.clientId)?.nom} · {p.statut}</p>
+                  </div>
+                  <div className="w-24 shrink-0">
+                    <div className="mb-0.5 flex justify-between text-[9px] font-bold text-slate-400"><span>Budget</span><span className="tabular-nums">{r.pourcentageDepense.toFixed(0)}%</span></div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                      <div className={`h-full rounded-full ${couleurSanteBudget(r.pourcentageDepense).barre}`} style={{ width: `${Math.min(100, r.pourcentageDepense)}%` }} />
+                    </div>
+                  </div>
+                  <span className={`w-12 shrink-0 text-right text-sm font-extrabold tabular-nums ${sante.texte}`}>{r.pourcentageMarge.toFixed(0)}%</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ACTIVITÉ RÉCENTE */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Activité récente</h3>
+          {journal.length === 0 ? (
+            <p className="text-sm text-slate-400">Aucune activité pour le moment.</p>
+          ) : (
+            <div className="space-y-2">
+              {journal.slice(0, 6).map((e) => (
+                <div key={e.id} className="flex gap-2 text-[12px] leading-snug text-slate-600">
+                  <span className="shrink-0 text-[10px] font-bold tabular-nums text-slate-300">{e.heure}</span>
+                  <span className="min-w-0">{e.texte}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SAISIE D'ADRESSE — GOOGLE PLACES
+// ------------------------------------------------------------
+// Les suggestions viennent de la vraie API Google Places (restreinte
+// au Canada). Avant, c'était une liste de 5 adresses fictives : aucune
+// adresse réelle n'apparaissait, donc rien ne pouvait être sélectionné
+// et la création d'un client restait bloquée sur « adresse incomplète ».
+//
+// Google renvoie la ville et le code postal DÉJÀ DÉCOUPÉS. C'est le
+// vrai gain : ces champs partent sur les factures des clients, et les
+// deviner dans une chaîne de texte finit toujours par produire une
+// adresse fautive.
+//
+// SAISIE MANUELLE CONSERVÉE : si la clé manque, si le quota est
+// dépassé, ou hors ligne, on retombe sur la saisie libre avec ville
+// obligatoire. Créer un client ne doit jamais dépendre d'un tiers.
+// ============================================================
+function AutocompleteAdresse({ onSelection }) {
+  const [texte, setTexte] = useState("");
+  const [ouvert, setOuvert] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [chargement, setChargement] = useState(false);
+  const [googleEnPanne, setGoogleEnPanne] = useState(!googlePlacesDisponible());
+  // Champs de repli, utilisés seulement en saisie manuelle.
+  const [ville, setVille] = useState("");
+  const [codePostal, setCodePostal] = useState("");
+  // Jeton de session Google : une seule unité de facturation pour toute
+  // la recherche + la sélection (voir lib/googlePlaces.js).
+  const jetonRef = useRef(null);
+
+  // Recherche différée de 300 ms : on n'interroge pas Google à chaque
+  // lettre, on attend que le doigt s'arrête.
+  useEffect(() => {
+    if (googleEnPanne || texte.trim().length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    let annule = false;
+    setChargement(true);
+    const minuterie = setTimeout(async () => {
+      try {
+        if (!jetonRef.current) jetonRef.current = await nouveauJeton();
+        const res = await chercherAdresses(texte, jetonRef.current);
+        if (!annule) setSuggestions(res);
+      } catch {
+        // Clé refusée, quota dépassé, hors ligne — on bascule en saisie
+        // manuelle sans message technique incompréhensible.
+        if (!annule) {
+          setGoogleEnPanne(true);
+          setSuggestions([]);
+        }
+      } finally {
+        if (!annule) setChargement(false);
+      }
+    }, 300);
+    return () => {
+      annule = true;
+      clearTimeout(minuterie);
+    };
+  }, [texte, googleEnPanne]);
+
+  const choisir = async (s) => {
+    try {
+      const details = await detailsAdresse(s, jetonRef.current);
+      onSelection(details);
+      setTexte(details.label);
+    } catch {
+      // Détails indisponibles : on garde au moins le texte de la
+      // suggestion plutôt que de perdre le choix du client.
+      onSelection({ label: s.texte, ligne1: s.texte, ville: "", codePostal: "" });
+      setTexte(s.texte);
+    }
+    jetonRef.current = null; // le jeton meurt avec la sélection
+    setSuggestions([]);
+    setOuvert(false);
+  };
+
+  // Saisie manuelle : proposée quand Google est indisponible, ou quand
+  // aucune suggestion ne correspond (adresse neuve, chantier sans
+  // numéro civique…).
+  const saisieLibre = texte.trim().length >= 5 && !chargement && suggestions.length === 0;
+
+  const confirmerSaisieLibre = () => {
+    if (!texte.trim() || !ville.trim()) return;
+    onSelection({
+      label: texte.trim(),
+      ligne1: texte.trim(),
+      ville: ville.trim(),
+      codePostal: codePostal.trim(),
+    });
+    setOuvert(false);
+  };
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+        <input
+          value={texte}
+          onChange={(e) => {
+            setTexte(e.target.value);
+            setOuvert(true);
+          }}
+          placeholder="Commence à taper l'adresse…"
+          className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-9 text-sm"
+        />
+        {chargement && (
+          <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+        )}
+      </div>
+
+      {ouvert && suggestions.length > 0 && (
+        <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+          {suggestions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => choisir(s)}
+              className="flex w-full items-start gap-2 border-b border-slate-100 px-3 py-2.5 text-left text-sm last:border-0 hover:bg-slate-50"
+            >
+              <MapPin size={14} className="mt-0.5 shrink-0 text-[#FF6A13]" />
+              {s.texte}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {saisieLibre && (
+        <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+          <p className="mb-1.5 text-[10px] leading-snug text-slate-500">
+            {googleEnPanne
+              ? "Suggestions Google indisponibles — entre l'adresse à la main."
+              : "Aucune suggestion ne correspond. Tu peux utiliser l'adresse telle quelle."}
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Ville *</label>
+              <input
+                value={ville}
+                onChange={(e) => setVille(e.target.value)}
+                placeholder="Mirabel"
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Code postal</label>
+              <input
+                value={codePostal}
+                onChange={(e) => setCodePostal(e.target.value.toUpperCase())}
+                placeholder="J7N 3V4"
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none"
+              />
+            </div>
+          </div>
+          <Button onClick={confirmerSaisieLibre} disabled={!ville.trim()} className="mt-2 w-full min-h-0 py-2 text-xs">
+            <Check size={13} /> Utiliser cette adresse
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ONGLET DEVIS
+// ============================================================
+// ============================================================
+// ONGLET CLIENTS
+// ============================================================
+// ============================================================
+// ONGLET RECHERCHE RAPIDE
+// ============================================================
+function correspond(client, terme) {
+  const t = terme.trim().toLowerCase();
+  if (!t) return false;
+  const champs = [
+    client.nom,
+    client.entreprise,
+    ...(client.courriels || []).map((c) => c.email),
+    client.telephone,
+    client.adresseFacturation,
+    ...(client.adresses || []).map((a) => `${a.nom} ${a.ligne1} ${a.codePostal || ""}`),
+  ];
+  return champs.some((c) => c && c.toLowerCase().includes(t));
+}
+
+// ============================================================
+// LISTE DES DEVIS D'UN CLIENT — regroupée par DOSSIER (numeroBase) avec
+// les onglets de versions. Réutilisée dans le dossier client et dans les
+// résultats de recherche : un seul comportement partout.
+// ============================================================
+function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }) {
+  const [dossierOuvert, setDossierOuvert] = useState(null);
+  const [versionAffichee, setVersionAffichee] = useState(null);
+  const [apercu, setApercu] = useState(null);
+
+  // Regroupement par dossier : une entrée par devis, ses révisions dedans.
+  const dossiers = (() => {
+    const parBase = {};
+    (devisListe || [])
+      .filter((d) => (clientId ? d.clientId === clientId : true))
+      .forEach((d) => {
+        const base = d.numeroBase || d.numero;
+        (parBase[base] = parBase[base] || []).push(d);
+      });
+    return Object.entries(parBase)
+      .map(([base, versions]) => {
+        const triees = versions.sort((a, b) => (a.version ?? 0) - (b.version ?? 0));
+        const active = triees.find((v) => v.versionActive !== false) || triees[triees.length - 1];
+        return { base, versions: triees, active };
+      })
+      .sort((a, b) => (b.active.creeLe || b.active.date || "").localeCompare(a.active.creeLe || a.active.date || ""));
+  })();
+
+  if (dossiers.length === 0) {
+    return <p className="text-xs text-slate-400">Aucun devis pour ce client.</p>;
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {dossiers.map(({ base, versions, active }) => {
+        const ouvert = dossierOuvert === base;
+        const affichee = ouvert ? versions.find((v) => v.numero === versionAffichee) || active : active;
+        // Devis ciblé par la recherche : mis en évidence à l'ouverture.
+        const cible = surlignerNumero && versions.some((v) => v.numero === surlignerNumero);
+        return (
+          <div
+            key={base}
+            className={`rounded-lg border p-2.5 ${cible ? "border-[#FF6A13] bg-orange-50 ring-2 ring-orange-200" : "border-slate-200 bg-white"}`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-slate-900">
+                  {affichee.numero}
+                  {versions.length > 1 && (
+                    <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">{versions.length} versions</span>
+                  )}
+                  {affichee.estContrat && (
+                    <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">
+                      CONTRAT · {affichee.frequenceFacturationAnnuelle}×/an
+                    </span>
+                  )}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  {affichee.date}
+                  {affichee.noteVersion ? ` · ${affichee.noteVersion}` : ""}
+                  {!compact && affichee.clientNom ? ` · ${affichee.clientNom}` : ""}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-xs font-bold tabular-nums text-slate-800">{affichee.totalVendant.toFixed(2)} $</p>
+                <span
+                  className={`inline-block rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                    affichee.statut === "accepte" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {affichee.statut === "accepte" ? "ACCEPTÉ" : "ENVOYÉ"}
+                </span>
+              </div>
+            </div>
+
+            {/* ONGLETS DES VERSIONS */}
+            {versions.length > 1 && (
+              <div className="mt-1.5 flex flex-wrap gap-1 rounded-md border border-slate-200 p-0.5">
+                {versions.map((v) => (
+                  <button
+                    key={v.numero}
+                    onClick={() => {
+                      setDossierOuvert(base);
+                      setVersionAffichee(v.numero);
+                    }}
+                    title={v.noteVersion || undefined}
+                    className={`rounded px-1.5 py-1 text-[9px] font-extrabold ${
+                      v.numero === affichee.numero ? "bg-[#131B2E] text-white" : "text-slate-500 hover:bg-slate-50"
+                    }`}
+                  >
+                    {v.version === 0 ? "Originale" : `v${v.version}`}
+                    {v.numero === active.numero ? " ★" : ""}
+                  </button>
+                ))}
+              </div>
+            )}
+            {affichee.numero !== active.numero && (
+              <p className="mt-1 text-[9px] font-bold text-slate-400">🔒 Version archivée — la courante est {active.numero}</p>
+            )}
+            {affichee.traite && (
+              <p className="mt-1 text-[9px] font-bold text-blue-600">
+                ✓ Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
+              </p>
+            )}
+            <Button variant="outline" onClick={() => setApercu(affichee)} className="mt-1.5 w-full min-h-0 gap-1 py-1.5 text-[11px]">
+              <FileText size={11} /> Voir version client
+            </Button>
+          </div>
+        );
+      })}
+      {apercu && <ApercuDevisClient devis={apercu} onFermer={() => setApercu(null)} />}
+    </div>
+  );
+}
+
+function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }) {
+  const q = terme.trim().toLowerCase();
+  const resultats = terme.trim() ? clients.filter((c) => correspond(c, terme)) : [];
+
+  // DEVIS trouvés : par numéro (« 3500 », « DEV-3500-1 »), par nom de
+  // client, ou par CONTENU (un item du devis — « rooftop », « membrane »).
+  // Regroupés par dossier pour ne pas répéter toutes les versions.
+  const devisTrouves = (() => {
+    if (!q) return [];
+    const correspondDevis = (d) =>
+      (d.numero || "").toLowerCase().includes(q) ||
+      (d.numeroBase || "").toLowerCase().includes(q) ||
+      (d.clientNom || "").toLowerCase().includes(q) ||
+      (d.lignes || []).some((l) => (l.nom || "").toLowerCase().includes(q));
+    const parBase = {};
+    (devisListe || []).filter(correspondDevis).forEach((d) => {
+      const base = d.numeroBase || d.numero;
+      (parBase[base] = parBase[base] || []).push(d);
+    });
+    return Object.entries(parBase)
+      .map(([base, versions]) => {
+        const triees = versions.sort((a, b) => (a.version ?? 0) - (b.version ?? 0));
+        return { base, versions: triees, active: triees.find((v) => v.versionActive !== false) || triees[triees.length - 1] };
+      })
+      .sort((a, b) => (b.active.date || "").localeCompare(a.active.date || ""));
+  })();
+
+  const total = resultats.length + devisTrouves.length;
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+        <input
+          autoFocus
+          value={terme}
+          onChange={(e) => setTerme(e.target.value)}
+          placeholder="Client, adresse, téléphone, nº de devis, produit..."
+          className="w-full rounded-xl border border-slate-300 py-3 pl-10 pr-3 text-sm"
+        />
+      </div>
+
+      {!terme.trim() && (
+        <p className="text-center text-xs text-slate-400">
+          Cherche un <span className="font-bold">client</span> (nom, entreprise, adresse, téléphone, courriel) ou un{" "}
+          <span className="font-bold">devis</span> (numéro, client, produit inscrit dedans).
+        </p>
+      )}
+
+      {terme.trim() && total === 0 && (
+        <p className="text-center text-xs text-slate-400">Aucun résultat pour « {terme} ».</p>
+      )}
+
+      {total > 0 && (
+        <p className="text-xs font-bold text-slate-400">{total} résultat{total > 1 ? "s" : ""}</p>
+      )}
+
+      {/* DEVIS — un clic ouvre le dossier du client, devis en évidence. */}
+      {devisTrouves.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Devis ({devisTrouves.length})</p>
+          {devisTrouves.map(({ base, versions, active }) => (
+            <button
+              key={base}
+              onClick={() => onOuvrirDevis?.(active)}
+              className="flex w-full items-start justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-[#FF6A13] hover:bg-orange-50"
+            >
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
+                  {active.numero}
+                  {versions.length > 1 && (
+                    <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">{versions.length} versions</span>
+                  )}
+                </p>
+                <p className="text-xs text-slate-500">{active.clientNom}</p>
+                <p className="mt-0.5 truncate text-[10px] text-slate-400">
+                  {(active.lignes || []).map((l) => l.nom).filter(Boolean).slice(0, 3).join(" · ") || "—"}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-sm font-bold tabular-nums text-slate-800">{active.totalVendant.toFixed(2)} $</p>
+                <p className="text-[10px] text-slate-400">{active.date}</p>
+                <span className="mt-0.5 inline-block text-[10px] font-bold text-[#FF6A13]">Ouvrir ›</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {resultats.length > 0 && (
+        <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Clients ({resultats.length})</p>
+      )}
+      <div className="space-y-2">
+        {resultats.map((c) => (
+          <div key={c.id} className="rounded-xl border border-slate-200 bg-white p-3.5">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-bold text-slate-900">{c.nom}</p>
+                {c.entreprise && <p className="text-xs font-semibold text-[#131B2E]">{c.entreprise}</p>}
+              </div>
+              {c.quickbooksCustomerId && (
+                <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                  {c.quickbooksCustomerId}
+                </span>
+              )}
+            </div>
+            <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
+              {(c.courriels || []).map((cc) => (
+                <div key={cc.id} className="flex items-center gap-1.5">
+                  <Mail size={11} /> {cc.email}
+                  <span className="text-[10px] text-slate-400">({cc.label}{cc.defaut ? " · défaut" : ""})</span>
+                </div>
+              ))}
+              {c.telephone && <div className="flex items-center gap-1.5"><Phone size={11} /> {c.telephone}</div>}
+              {(c.adresses || []).map((a) => (
+                <div key={a.id} className="flex items-center gap-1.5"><MapPin size={11} /> {a.nom} — {a.ligne1}</div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// DÉTAIL D'UN TRAVAIL (passé ou à venir) — notes + photos
+// ============================================================
+// ============================================================
+// APERÇU DU BON DE TRAVAIL — VERSION CLIENT
+// ------------------------------------------------------------
+// Ce que le client reçoit réellement : coordonnées d'entreprise,
+// notes de terrain (jamais les notes internes), photos, montant s'il
+// y a lieu, et confirmation de signature. Aucune information de coût
+// interne ni note réservée à l'équipe n'apparaît ici.
+// ============================================================
+function ApercuBonTravailClient({ travail, clients, onFermer }) {
+  const client = (clients || []).find((c) => c.id === travail.clientId);
+  const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${client.adresses[0].ligne1}` : null);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-5 text-sm">
+          <EnTeteEntreprise />
+          <p className="mt-3 text-lg font-extrabold text-[#131B2E]">BON DE TRAVAIL</p>
+          <p className="text-xs text-slate-500">Date : {travail.date}</p>
+          <AdressesDocument
+            clientNom={client?.nom || travail.clientNom}
+            adresseFacturation={client?.adresseFacturation}
+            adresseTravaux={adresse}
+          />
+
+          <div className="mt-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Description des travaux</p>
+            <p className="mt-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+              {travail.noteTerrain || travail.titre || "Détails à venir."}
+            </p>
+          </div>
+
+          {/* PHOTOS RÉELLES du chantier (stockage Supabase) — avant/après. */}
+          {(travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0) && (
+            <div className="mt-3 space-y-2">
+              {travail.photosAvantUrls?.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos avant travaux</p>
+                  <div className="mt-1 grid grid-cols-3 gap-2">
+                    {travail.photosAvantUrls.map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                        <img src={u} alt={`Avant ${i + 1}`} className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {travail.photosApresUrls?.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos après travaux</p>
+                  <div className="mt-1 grid grid-cols-3 gap-2">
+                    {travail.photosApresUrls.map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                        <img src={u} alt={`Après ${i + 1}`} className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {/* Repli — anciennes lignes de démonstration (libellés seulement). */}
+          {!(travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0) && travail.photos?.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos</p>
+              <div className="mt-1 grid grid-cols-3 gap-2">
+                {travail.photos.map((label, i) => (
+                  <div key={i} className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 p-1.5 text-center">
+                    <Camera size={16} className="text-slate-400" />
+                    <span className="text-[9px] leading-tight text-slate-500">{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {travail.montant != null && (
+            <div className="mt-4 flex justify-between border-t border-slate-200 pt-2 text-sm font-extrabold text-slate-900">
+              <span>Montant</span><span className="tabular-nums">{travail.montant.toFixed(2)} $</span>
+            </div>
+          )}
+
+          <TermesConditions />
+
+          <div className="mt-4 flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[11px] font-semibold text-emerald-700">
+            <FileCheck2 size={14} className="shrink-0" /> Signé électroniquement par le client à la fin de l'intervention
+          </div>
+
+          <PiedDocument />
+        </div>
+
+        <BoutonPDF type="bon-travail" travail={travail} clients={clients} />
+
+        <p className="mt-2 text-[11px] text-slate-400">
+          Aperçu de démonstration — les notes internes et informations de coût ne sont jamais incluses dans le document réellement envoyé.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DetailTravail({ travail, clients, onFermer, onReactiver }) {
+  const [apercuClientOuvert, setApercuClientOuvert] = useState(false);
+  const complete = travail.statut === "complete";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                complete ? "bg-emerald-100 text-emerald-700" : "bg-orange-100 text-[#B14E0E]"
+              }`}
+            >
+              {complete ? "COMPLÉTÉ" : "À VENIR"}
+            </span>
+            <h3 className="mt-1.5 text-sm font-extrabold text-slate-900">{travail.titre}</h3>
+            <p className="text-xs text-slate-500">{travail.date}</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        {complete && travail.montant != null && (
+          <p className="mb-3 text-sm font-bold tabular-nums text-slate-800">{travail.montant.toFixed(2)} $</p>
+        )}
+
+        {complete && (
+          <Button variant="outline" onClick={() => setApercuClientOuvert(true)} className="mb-3 w-full min-h-0 gap-1.5 py-2 text-xs">
+            <FileText size={13} /> Voir version client
+          </Button>
+        )}
+
+        {travail.estTransport && (
+          <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase text-slate-400">Kilométrage transport</p>
+              <p className="text-sm font-bold tabular-nums text-slate-800">{(travail.distanceKm || 0).toFixed(1)} km</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase text-slate-400">Temps de transport</p>
+              <p className="text-sm font-bold tabular-nums text-slate-800">{(travail.heures || 0).toFixed(2)} h</p>
+            </div>
+          </div>
+        )}
+
+        {complete && (() => {
+          const DELAI_MODIFICATION_MS = 10 * 60 * 1000;
+          const dansDelai = travail.envoyeA && Date.now() - travail.envoyeA <= DELAI_MODIFICATION_MS;
+          return (
+            <div className={`mb-3 rounded-xl border p-3 ${travail.modifReactivee || dansDelai ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                    <KeyRound size={13} />
+                    Modification par l'employé
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">
+                    {travail.modifReactivee
+                      ? "Réactivée — l'employé peut modifier ce travail (2e signature client requise)."
+                      : dansDelai
+                      ? "Encore dans la fenêtre de 10 minutes suivant l'envoi — l'employé peut modifier sans réactivation (2e signature client requise)."
+                      : "Verrouillée — le délai de 10 minutes suivant l'envoi est écoulé."}
+                  </p>
+                </div>
+                <Button
+                  variant={travail.modifReactivee ? "outline" : "primary"}
+                  onClick={() => onReactiver(travail.id, !travail.modifReactivee)}
+                  className="min-h-0 px-3 py-1.5 text-xs"
+                >
+                  {travail.modifReactivee ? "Désactiver" : "Réactiver"}
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
+
+        <div className="mb-3">
+          <p className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+            Notes de terrain
+            <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-emerald-700">
+              Visible au client
+            </span>
+          </p>
+          <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+            {travail.noteTerrain || "Aucune note pour l'instant."}
+          </p>
+        </div>
+
+        <div className="mb-4">
+          <p className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
+            Notes internes
+            <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-slate-600">
+              Non visible au client
+            </span>
+          </p>
+          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-700">
+            {travail.noteInterne || "Aucune note interne."}
+          </p>
+        </div>
+
+        <div>
+          <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Photos</p>
+          {travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0 ? (
+            <div className="space-y-2">
+              {travail.photosAvantUrls?.length > 0 && (
+                <div>
+                  <p className="mb-1 text-[10px] font-bold text-slate-400">Avant travaux</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {travail.photosAvantUrls.map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                        <img src={u} alt={`Avant ${i + 1}`} className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {travail.photosApresUrls?.length > 0 && (
+                <div>
+                  <p className="mb-1 text-[10px] font-bold text-slate-400">Après travaux</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {travail.photosApresUrls.map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                        <img src={u} alt={`Après ${i + 1}`} className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : travail.photos.length === 0 ? (
+            <p className="text-xs text-slate-400">Aucune photo pour l'instant.</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              {travail.photos.map((label, i) => (
+                <div key={i} className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 p-1.5 text-center">
+                  <Camera size={16} className="text-slate-400" />
+                  <span className="text-[9px] leading-tight text-slate-500">{label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <p className="mt-3 text-[11px] text-slate-400">
+          Cette réactivation doit se synchroniser vers l'app technicien (via Supabase Realtime en prod) pour que l'employé y ait accès de son côté.
+        </p>
+      </div>
+      {apercuClientOuvert && <ApercuBonTravailClient travail={travail} clients={clients} onFermer={() => setApercuClientOuvert(false)} />}
+    </div>
+  );
+}
+
+// ============================================================
+// APERÇU DU COURRIEL DE CONNEXION
+// ============================================================
+function ApercuCourrielConnexion({ utilisateur, onFermer }) {
+  const { nomLegal: nomEntreprise } = useEntreprise();
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            <Mail size={18} className="text-[#FF6A13]" />
+            <h3 className="text-sm font-extrabold">Lien de connexion envoyé</h3>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+        <div className="rounded-xl border border-slate-200 p-4 text-sm">
+          <p className="text-xs text-slate-400">À : {utilisateur.courriel}</p>
+          <p className="mt-1 font-bold text-slate-800">Objet : Accès à l'application {nomEntreprise}</p>
+          <p className="mt-2 text-slate-600">
+            Bonjour {utilisateur.nom},<br /><br />
+            Un accès ({utilisateur.typeAcces}) a été créé pour vous. Utilisez le lien ci-dessous pour vous connecter
+            et créer votre mot de passe.
+          </p>
+          <p className="mt-2 truncate rounded-lg bg-slate-50 p-2 text-xs text-blue-600">
+            https://app.ventilationdgl.com/connexion?u={utilisateur.nomUtilisateur}&jeton=xxxxxxxx
+          </p>
+          <p className="mt-2 text-xs text-slate-500">Nom d'utilisateur : <span className="font-bold">{utilisateur.nomUtilisateur}</span></p>
+        </div>
+        <p className="mt-2 text-[11px] text-slate-400">
+          Aperçu de démonstration — l'envoi réel se fait via une fonction backend (service courriel transactionnel) avec un jeton à usage unique généré par Supabase Auth.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ONGLET UTILISATEURS
+// ============================================================
+// ============================================================
+// FICHE PROFIL UTILISATEUR — ajout/modification des informations
+// personnelles et du profil de l'employé
+// ============================================================
+function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSupprimer, estAdminPrincipal, tauxMetiers }) {
+  // Confirmation explicite avant suppression (2 clics).
+  const [confirmeSuppression, setConfirmeSuppression] = useState(false);
+  // La fiche d'un administrateur est INTOUCHABLE pour un Admin régulier
+  // (même règle que dans Gestion des accès).
+  const ficheAdministrateur = ["Admin principal", "Admin régulier", "Administrateur"].includes(utilisateur.typeAcces);
+  const verrouillePourRegulier = !estAdminPrincipal && ficheAdministrateur;
+  const [nom, setNom] = useState(utilisateur.nom || "");
+  const [courriel, setCourriel] = useState(utilisateur.courriel || "");
+  const [telephone, setTelephone] = useState(utilisateur.telephone || "");
+  // Conversion des ANCIENNES valeurs de type d'accès (« Administrateur »,
+  // « Employé ») vers les 5 rôles actuels — sans ça, une ancienne valeur
+  // absente du menu semblait affichée correctement mais restait inchangée
+  // à l'enregistrement.
+  const [typeAcces, setTypeAcces] = useState(() => {
+    const v = utilisateur.typeAcces;
+    if (v === "Administrateur") return "Admin principal";
+    if (v === "Employé") return "Technicien";
+    // Anciens rôles autonomes → regroupés sous « Administration bureau ».
+    if (v === "Chargé de projet" || v === "Répartiteur") return "Administration bureau";
+    return TYPES_ACCES.includes(v) ? v : "Technicien";
+  });
+  // Métier NORMALISÉ selon le type d'accès converti : une fiche héritée
+  // peut porter un métier qui n'est plus permis pour son type (ex. type
+  // « Répartiteur » converti en Administration bureau avec un métier de
+  // terrain) — on bascule alors sur le premier métier permis, sinon le
+  // menu afficherait un choix trompeur sans changer la valeur.
+  const [metier, setMetier] = useState(() => {
+    const permis = metiersPourTypeAcces(typeAcces, tauxMetiers);
+    return permis.includes(utilisateur.metier) ? utilisateur.metier : permis[0];
+  });
+  const [niveau, setNiveau] = useState(() => {
+    const permis = metiersPourTypeAcces(typeAcces, tauxMetiers);
+    const m = permis.includes(utilisateur.metier) ? utilisateur.metier : permis[0];
+    const niveaux = niveauxPourMetier(m);
+    return niveaux.includes(utilisateur.niveau) ? utilisateur.niveau : niveaux[0];
+  });
+  // Taux horaire INDIVIDUEL (métiers de bureau) et PRIME horaire
+  // individuelle (métiers de terrain — s'ajoute à la grille CCQ).
+  const [tauxHoraire, setTauxHoraire] = useState(utilisateur.tauxHoraire ?? 0);
+  const [primeHoraire, setPrimeHoraire] = useState(utilisateur.primeHoraire ?? 0);
+  const [poste, setPoste] = useState(utilisateur.poste || "");
+  const [dateEmbauche, setDateEmbauche] = useState(utilisateur.dateEmbauche || "");
+  const [adresse, setAdresse] = useState(utilisateur.adresse || "");
+  const [notesRH, setNotesRH] = useState(utilisateur.notesRH || "");
+
+  // GRILLE DES ACCÈS intégrée à la fiche : démarre sur les défauts du
+  // type/métier, puis se remplace par les accès RÉELS du compte (table
+  // permissions_utilisateurs) dès qu'ils sont chargés.
+  const [sectionsAcces, setSectionsAcces] = useState(() => accesParDefautPour(
+    (() => {
+      const v = utilisateur.typeAcces;
+      if (v === "Administrateur") return "Admin principal";
+      if (v === "Employé") return "Technicien";
+      if (v === "Chargé de projet" || v === "Répartiteur") return "Administration bureau";
+      return TYPES_ACCES.includes(v) ? v : "Technicien";
+    })(),
+    utilisateur.metier
+  ));
+  useEffect(() => {
+    const c = (utilisateur.courriel || "").trim().toLowerCase();
+    if (!c) return;
+    supabase
+      .from("permissions_utilisateurs")
+      .select("sections")
+      .eq("email", c)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (Array.isArray(data?.sections)) setSectionsAcces(data.sections);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const basculerSectionAcces = (s) =>
+    setSectionsAcces((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
+
+  const changerMetier = (m) => {
+    setMetier(m);
+    setNiveau(niveauxPourMetier(m)[0]);
+    // Changer la sous-catégorie recharge ses accès par défaut.
+    if (typeAcces === "Administration bureau") setSectionsAcces(accesParDefautPour(typeAcces, m));
+  };
+
+  // Le type d'accès et le métier restent cohérents : choisir
+  // « Administration bureau » bascule sur un métier de bureau (sa
+  // sous-catégorie), « Technicien » sur un métier de terrain.
+  const changerTypeAcces = (t) => {
+    setTypeAcces(t);
+    const permis = metiersPourTypeAcces(t, tauxMetiers);
+    const metierFinal = permis.includes(metier) ? metier : permis[0];
+    if (metierFinal !== metier) {
+      setMetier(metierFinal);
+      setNiveau(niveauxPourMetier(metierFinal)[0]);
+    }
+    setSectionsAcces(accesParDefautPour(t, metierFinal));
+  };
+
+  const peutEnregistrer = nom.trim().length > 0 && courriel.trim().length > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Profil de l'employé</h3>
+            <p className="text-xs text-slate-500">@{utilisateur.nomUtilisateur}</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Nom complet</label>
+              <input value={nom} onChange={(e) => setNom(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Type d'accès</label>
+              <select
+                value={typeAcces}
+                onChange={(e) => changerTypeAcces(e.target.value)}
+                disabled={verrouillePourRegulier}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                {(estAdminPrincipal || verrouillePourRegulier ? TYPES_ACCES : TYPES_ACCES.filter((t) => t !== "Admin principal" && t !== "Admin régulier")).map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">Enregistrer la fiche règle aussi les ACCÈS de ce compte (type + métier). Ajustements fins : « Gestion des accès ».</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">
+                Métier{typeAcces === "Administration bureau" ? " (sous-catégorie)" : ""}
+              </label>
+              <select value={metier} onChange={(e) => changerMetier(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">
+                {metiersPourTypeAcces(typeAcces, tauxMetiers).map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            {estMetierBureau(metier) ? (
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Taux horaire ($/h)</label>
+                <InputNombreDecimal
+                  valeur={tauxHoraire || 0}
+                  onChange={(v) => setTauxHoraire(v)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums"
+                />
+                <p className="mt-1 text-[10px] text-slate-400">Taux individuel — figé sur chaque heure au moment de la saisie.</p>
+              </div>
+            ) : (
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Niveau</label>
+                <select value={niveau} onChange={(e) => setNiveau(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">
+                  {niveauxPourMetier(metier).map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+          {!estMetierBureau(metier) && (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Prime horaire (+ $/h) — entente individuelle</label>
+              <InputNombreDecimal
+                valeur={primeHoraire || 0}
+                onChange={(v) => setPrimeHoraire(v)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">
+                S'ajoute à la grille CCQ (Tarifs). Taux coûtant réel = grille {metier} · {niveau} + prime. 0 = aucune entente.
+              </p>
+            </div>
+          )}
+
+          {/* GESTION DES ACCÈS directement dans la fiche : la grille se
+              remplit selon le type/métier, ajustable case par case, et
+              s'enregistre avec la fiche. */}
+          <GrilleAcces sections={sectionsAcces} onBasculer={basculerSectionAcces} desactive={verrouillePourRegulier} />
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Courriel</label>
+              <input type="email" value={courriel} onChange={(e) => setCourriel(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Téléphone</label>
+              <input type="tel" value={telephone} onChange={(e) => setTelephone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-3">
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Informations personnelles</p>
+            <div className="space-y-2">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Poste / fonction</label>
+                <input value={poste} onChange={(e) => setPoste(e.target.value)} placeholder="Ex: Technicien senior" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Date d'embauche</label>
+                  <input type="date" value={dateEmbauche} onChange={(e) => setDateEmbauche(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Adresse</label>
+                  <input value={adresse} onChange={(e) => setAdresse(e.target.value)} placeholder="Optionnel" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Notes internes (RH)</label>
+                <textarea
+                  value={notesRH}
+                  onChange={(e) => setNotesRH(e.target.value)}
+                  rows={3}
+                  placeholder="Notes visibles seulement par les administrateurs"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          <Button
+            onClick={() =>
+              onEnregistrer({
+                nom,
+                courriel,
+                telephone,
+                typeAcces,
+                metier,
+                niveau,
+                // Métier de bureau : taux individuel (pas de prime) ;
+                // métier de terrain : prime au-dessus de la grille CCQ.
+                tauxHoraire: estMetierBureau(metier) ? Number(tauxHoraire) || 0 : null,
+                primeHoraire: !estMetierBureau(metier) ? Number(primeHoraire) || 0 : null,
+                sectionsAcces,
+                poste,
+                dateEmbauche,
+                adresse,
+                notesRH,
+              })
+            }
+            className="w-full"
+            disabled={!peutEnregistrer || verrouillePourRegulier}
+          >
+            Enregistrer les modifications
+          </Button>
+
+          {verrouillePourRegulier && (
+            <p className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-500">
+              <Lock size={12} className="shrink-0" /> Fiche d'un administrateur — modifiable par un Admin principal seulement.
+            </p>
+          )}
+
+          {/* SUPPRESSION DE LA FICHE — retire l'employé du répertoire (et
+              de l'agenda) et RÉVOQUE immédiatement tous ses accès.
+              Confirmation en 2 clics. */}
+          {onSupprimer && !verrouillePourRegulier && (
+            confirmeSuppression ? (
+              <div className="rounded-xl border border-red-300 bg-red-50 p-3">
+                <p className="text-xs font-bold text-red-700">
+                  Supprimer définitivement la fiche de {utilisateur.nom} ? Tous ses accès seront révoqués immédiatement (il ne pourra plus ouvrir ni l'admin ni l'app technicien).
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <Button variant="danger" onClick={onSupprimer} className="min-h-0 flex-1 py-2 text-xs">
+                    Oui, supprimer et révoquer les accès
+                  </Button>
+                  <Button variant="outline" onClick={() => setConfirmeSuppression(false)} className="min-h-0 flex-1 py-2 text-xs">
+                    Annuler
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button variant="outline" onClick={() => setConfirmeSuppression(true)} className="w-full min-h-0 border-red-200 py-2 text-xs text-red-600">
+                <Trash2 size={13} /> Supprimer la fiche de l'employé…
+              </Button>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ONGLET TARIFS — grille des taux horaires + liste de prix des dépôts
+// (modification réservée à l'Admin principal, consultation sinon)
+// ============================================================
+function OngletTarifs({ tauxMetiers, setTauxMetiers, onSauvegarderTaux, prixDepots, setPrixDepots, onSauvegarderPrixDepots, estAdminPrincipal, ajouterJournal, catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, onSauvegarderCoutCamion }) {
+  // Taux de taxes des Paramètres — pour afficher les prix taxes incluses.
+  const configEnt = useEntreprise();
+  // État du bouton « Sauvegarder la liste de prix » (dépôts par zone).
+  const [etatPrix, setEtatPrix] = useState("");
+  // Confirmation avant d'appliquer la nouvelle liste de prix.
+  const [confirmationPrixOuverte, setConfirmationPrixOuverte] = useState(false);
+  const sauvegarderLesPrix = async () => {
+    setConfirmationPrixOuverte(false);
+    setEtatPrix("enregistrement");
+    try {
+      await onSauvegarderPrixDepots?.();
+      setEtatPrix("ok");
+      ajouterJournal("💰 Liste de prix des dépôts (zones) sauvegardée");
+      setTimeout(() => setEtatPrix(""), 2500);
+    } catch {
+      setEtatPrix("erreur");
+    }
+  };
+  // État du bouton « Sauvegarder les taux » : "" | "enregistrement" | "ok" | "erreur"
+  const [etatTaux, setEtatTaux] = useState("");
+  // Fenêtre de confirmation avant d'appliquer la grille (les taux
+  // touchent les coûts de main-d'œuvre — on valide avant d'écrire).
+  const [confirmationTauxOuverte, setConfirmationTauxOuverte] = useState(false);
+  const sauvegarderLesTaux = async () => {
+    setConfirmationTauxOuverte(false);
+    setEtatTaux("enregistrement");
+    try {
+      await onSauvegarderTaux?.();
+      setEtatTaux("ok");
+      ajouterJournal("💰 Grille des taux horaires coûtants sauvegardée");
+      setTimeout(() => setEtatTaux(""), 2500);
+    } catch {
+      setEtatTaux("erreur");
+    }
+  };
+
+  // ➕ AJOUTER UN MÉTIER — le nom est nettoyé et dédoublonné ; le métier
+  // naît avec les niveaux CCQ standards, tous à 0 $.
+  const [ajoutMetierOuvert, setAjoutMetierOuvert] = useState(false);
+  const [nouveauMetier, setNouveauMetier] = useState("");
+  const ajouterMetier = () => {
+    const nom = nouveauMetier.trim().replace(/\s+/g, " ");
+    if (!nom) return;
+    const propre = nom.charAt(0).toUpperCase() + nom.slice(1);
+    const dejaLa = [...metiersTerrainDe(tauxMetiers), ...METIERS_BUREAU].some(
+      (m) => m.toLowerCase() === propre.toLowerCase()
+    );
+    if (dejaLa) {
+      ajouterJournal(`⚠️ Le métier « ${propre} » existe déjà — rien à ajouter.`);
+    } else {
+      setTauxMetiers((prev) => ({ ...prev, [propre]: Object.fromEntries(NIVEAUX_CCQ_DEFAUT.map((n) => [n, 0])) }));
+      ajouterJournal(`🧰 Métier « ${propre} » ajouté (Apprenti 1-4 + Compagnon, taux à 0) — remplis ses taux puis « Sauvegarder les taux ».`);
+    }
+    setAjoutMetierOuvert(false);
+    setNouveauMetier("");
+  };
+
+  // 🚚 COÛT DU CAMION — déménagé ici depuis Paramètres (demande du
+  // propriétaire) : tous les COÛTANTS au même endroit. Un seul chiffre :
+  // un camion coûte pareil peu importe le métier de celui qui le conduit.
+  const [camionValeur, setCamionValeur] = useState(configEnt?.coutCamionHoraire ?? 15);
+  const [etatCamion, setEtatCamion] = useState("");
+  useEffect(() => {
+    setCamionValeur(configEnt?.coutCamionHoraire ?? 15);
+  }, [configEnt?.coutCamionHoraire]);
+  const sauvegarderCamion = async () => {
+    setEtatCamion("enregistrement");
+    try {
+      await onSauvegarderCoutCamion?.(Number(camionValeur) || 0);
+      setEtatCamion("ok");
+      setTimeout(() => setEtatCamion(""), 2500);
+    } catch {
+      setEtatCamion("erreur");
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 p-4 md:p-6">
+      <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Tarifs</h2>
+
+      {/* CATALOGUE D'ITEMS — replié par défaut : 289 items ne doivent
+          pas repousser la grille des taux hors de l'écran. */}
+      <SectionCatalogue
+        catalogue={catalogue}
+        onEnregistrerItem={onEnregistrerItem}
+        onDesactiverItem={onDesactiverItem}
+        onReactiverItem={onReactiverItem}
+        estAdminPrincipal={estAdminPrincipal}
+      />
+
+      {/* TABLE CENTRALE DES TAUX PAR MÉTIER — modification réservée à l'Admin principal */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Taux horaires coûtants par métier</p>
+        {estAdminPrincipal ? (
+          <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+            Modifie lors des augmentations annuelles, puis clique « Sauvegarder » — appliqué à chaque technicien selon son métier et son niveau.
+          </p>
+        ) : (
+          <p className="mt-0.5 mb-3 flex items-center gap-1.5 text-[11px] font-semibold text-amber-700">
+            <Lock size={12} className="shrink-0" /> Consultation seulement — la modification des taux est réservée à l'Admin principal.
+          </p>
+        )}
+        {/* Grille CCQ : métiers de TERRAIN seulement — les métiers de
+            bureau ont leur taux individuel sur leur fiche employé.
+            La liste est VIVANTE : les fondateurs + tout métier ajouté
+            ci-dessous (électricien, plombier…). */}
+        {metiersTerrainDe(tauxMetiers).map((m) => (
+          <div key={m} className="mb-3 last:mb-0">
+            <p className="mb-1 text-[11px] font-bold text-slate-700">{m}</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {niveauxPourMetier(m).map((niv) => (
+                <div key={niv}>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{niv}</label>
+                  <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={tauxMetiers[m]?.[niv] ?? 0}
+                      disabled={!estAdminPrincipal}
+                      onChange={(e) => setTauxMetiers((prev) => ({ ...prev, [m]: { ...prev[m], [niv]: e.target.value } }))}
+                      className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+                    />
+                    <span className="text-[10px] text-slate-400">$/h</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {/* ➕ AJOUTER UN MÉTIER — la grille est le registre : un métier
+            ajouté ici apparaît aussitôt dans les fiches employés, avec
+            les niveaux CCQ standards et des taux à 0 à remplir. */}
+        {estAdminPrincipal && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            {ajoutMetierOuvert ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={nouveauMetier}
+                  onChange={(e) => setNouveauMetier(e.target.value)}
+                  placeholder="Ex : Électricien, Plombier…"
+                  className="min-w-[180px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                />
+                <Button onClick={ajouterMetier} disabled={!nouveauMetier.trim()} className="min-h-0 px-3 py-1.5 text-xs">
+                  Ajouter
+                </Button>
+                <Button variant="outline" onClick={() => { setAjoutMetierOuvert(false); setNouveauMetier(""); }} className="min-h-0 px-3 py-1.5 text-xs">
+                  Annuler
+                </Button>
+                <p className="w-full text-[10px] text-slate-400">
+                  Le métier arrive avec les niveaux Apprenti 1-4 + Compagnon et des taux à 0 $ — remplis-les puis clique « Sauvegarder les taux ».
+                </p>
+              </div>
+            ) : (
+              <Button variant="outline" onClick={() => setAjoutMetierOuvert(true)} className="min-h-0 gap-1 px-3 py-1.5 text-xs">
+                <Plus size={12} /> Ajouter un métier
+              </Button>
+            )}
+          </div>
+        )}
+        {estAdminPrincipal && (
+          <div className="mt-3 flex items-center gap-2">
+            <Button onClick={() => setConfirmationTauxOuverte(true)} loading={etatTaux === "enregistrement"} className="min-h-0 px-4 py-2 text-xs">
+              💾 Sauvegarder les taux
+            </Button>
+            {etatTaux === "ok" && (
+              <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><Check size={13} /> Enregistré</span>
+            )}
+            {etatTaux === "erreur" && (
+              <span className="text-xs font-bold text-red-600">Échec — vérifie que le SQL « 05 » a été lancé, puis réessaie.</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* CONFIRMATION — sauvegarde de la grille des taux */}
+      {confirmationTauxOuverte && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmationTauxOuverte(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-start gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <AlertTriangle size={18} className="text-amber-600" />
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Modifier les taux horaires ?</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  Cette sauvegarde <span className="font-bold">modifie les taux horaires coûtants des employés</span> selon
+                  leur métier et leur niveau. Elle s'appliquera aux <span className="font-bold">travaux saisis à partir de
+                  maintenant</span> — les travaux déjà enregistrés conservent leur taux d'origine (taux figé).
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setConfirmationTauxOuverte(false)} className="min-h-0 py-2 text-xs">
+                Annuler
+              </Button>
+              <Button onClick={sauvegarderLesTaux} className="min-h-0 py-2 text-xs">
+                Confirmer la sauvegarde
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🚚 COÛT DU CAMION — un coûtant comme les taux, donc rangé avec
+          eux. UNE seule valeur pour toute la flotte : figée chaque matin
+          sur l'inspection, donc un changement ici ne touche que demain. */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">🚚 Coût du camion</p>
+        <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+          Ajouté au coûtant de chaque heure (chantier et transport) des journées où le technicien a un camion.
+          Sert aussi au taux du 2ᵉ technicien passager ({(Number(prixDepots?.taux_horaire_vendant) || 0) > 0 ? `${(Number(prixDepots.taux_horaire_vendant) - (Number(camionValeur) || 0)).toFixed(2)} $/h au lieu de ${Number(prixDepots.taux_horaire_vendant).toFixed(2)}` : "taux vendant − coût du camion"} $/h).
+          Les journées déjà enregistrées gardent leur ancien coût (figé à l'inspection du matin).
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className={`flex w-40 items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={camionValeur}
+              disabled={!estAdminPrincipal}
+              onChange={(e) => setCamionValeur(e.target.value)}
+              className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+            />
+            <span className="text-[10px] text-slate-400">$/h</span>
+          </div>
+          {estAdminPrincipal && (
+            <Button onClick={sauvegarderCamion} loading={etatCamion === "enregistrement"} className="min-h-0 px-4 py-2 text-xs">
+              💾 Sauvegarder
+            </Button>
+          )}
+          {etatCamion === "ok" && <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><Check size={13} /> Enregistré</span>}
+          {etatCamion === "erreur" && <span className="text-xs font-bold text-red-600">Échec — réessaie</span>}
+        </div>
+      </div>
+
+      {/* LISTE DE PRIX — DÉPÔTS D'APPELS DE SERVICE (par zone) */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Liste de prix — dépôts d'appels de service</p>
+        {estAdminPrincipal ? (
+          <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+            Montants HT par zone — proposés dans la liste déroulante à la création d'une tâche. « Hors zone » = tarif sur mesure, saisi manuellement.
+          </p>
+        ) : (
+          <p className="mt-0.5 mb-3 flex items-center gap-1.5 text-[11px] font-semibold text-amber-700">
+            <Lock size={12} className="shrink-0" /> Consultation seulement — modification réservée à l'Admin principal.
+          </p>
+        )}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {ZONES_DEPOTS.map((zone) => (
+            <div key={zone}>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{zone}</label>
+              <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={prixDepots?.[zone] ?? 0}
+                  disabled={!estAdminPrincipal}
+                  onChange={(e) => setPrixDepots((prev) => ({ ...prev, [zone]: e.target.value }))}
+                  className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+                />
+                <span className="text-[10px] text-slate-400">$ HT</span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[10px] text-slate-400">🗺️ Hors zone : pas de prix fixe — l'option « tarif sur mesure » de la liste déroulante ouvre la saisie manuelle.</p>
+
+        {/* TEMPS INCLUS + TAUX VENDANT (dépassement facturable) */}
+        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 sm:grid-cols-3">
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Zones 1-2-3 — temps inclus CHEZ LE CLIENT (min)</label>
+            <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+              <input
+                type="number"
+                min={0}
+                step="5"
+                value={prixDepots?.minutes_incluses ?? 90}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => setPrixDepots((prev) => ({ ...prev, minutes_incluses: e.target.value }))}
+                className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+              />
+              <span className="text-[10px] text-slate-400">min</span>
+            </div>
+            <p className="mt-0.5 text-[9px] text-slate-400">Le transport est déjà inclus dans le prix de zone.</p>
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Hors zone — temps inclus TOTAL (min)</label>
+            <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+              <input
+                type="number"
+                min={0}
+                step="15"
+                value={prixDepots?.minutes_incluses_hors_zone ?? 180}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => setPrixDepots((prev) => ({ ...prev, minutes_incluses_hors_zone: e.target.value }))}
+                className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+              />
+              <span className="text-[10px] text-slate-400">min</span>
+            </div>
+            <p className="mt-0.5 text-[9px] text-slate-400">Transport aller-retour depuis le 771 boul. Industriel + temps sur place.</p>
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Taux horaire VENDANT technicien</label>
+            <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={prixDepots?.taux_horaire_vendant ?? 0}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => setPrixDepots((prev) => ({ ...prev, taux_horaire_vendant: e.target.value }))}
+                className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+              />
+              <span className="text-[10px] text-slate-400">$/h</span>
+            </div>
+          </div>
+        </div>
+        <p className="mt-1.5 text-[10px] text-slate-400">
+          ⏱️ Au-delà du temps inclus, le dépassement devient automatiquement <span className="font-bold">facturable au taux vendant</span> — calculé sur les heures réelles du technicien.
+          {Number(prixDepots?.taux_horaire_vendant) > 0 && (
+            <span className="ml-1 font-bold tabular-nums text-slate-500">
+              ({Number(prixDepots.taux_horaire_vendant).toFixed(2)} $ HT = {taxesDepot(Number(prixDepots.taux_horaire_vendant), configEnt).total.toFixed(2)} $/h taxes incl.)
+            </span>
+          )}
+        </p>
+        {estAdminPrincipal && (
+          <div className="mt-3 flex items-center gap-2">
+            <Button onClick={() => setConfirmationPrixOuverte(true)} loading={etatPrix === "enregistrement"} className="min-h-0 px-4 py-2 text-xs">
+              💾 Sauvegarder la liste de prix
+            </Button>
+            {etatPrix === "ok" && (
+              <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><Check size={13} /> Enregistré</span>
+            )}
+            {etatPrix === "erreur" && (
+              <span className="text-xs font-bold text-red-600">Échec — vérifie que le SQL « 08 - prix depots » a été lancé, puis réessaie.</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* CONFIRMATION — sauvegarde de la liste de prix des dépôts */}
+      {confirmationPrixOuverte && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmationPrixOuverte(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-start gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <AlertTriangle size={18} className="text-amber-600" />
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Modifier la liste de prix des dépôts ?</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  Ces montants seront proposés dans la liste déroulante des dépôts d'appels de service
+                  (zones 1, 2 et 3), <span className="font-bold">pour toutes les nouvelles tâches</span>.
+                  Les dépôts déjà créés conservent leur montant d'origine.
+                </p>
+                <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs tabular-nums text-slate-700">
+                  {ZONES_DEPOTS.map((z) => (
+                    <p key={z}><span className="font-bold">{z} :</span> {(Number(prixDepots?.[z]) || 0).toFixed(2)} $ HT ({taxesDepot(Number(prixDepots?.[z]) || 0, configEnt).total.toFixed(2)} $ taxes incl.)</p>
+                  ))}
+                  <p className="mt-1 border-t border-slate-200 pt-1"><span className="font-bold">Zones — temps chez le client :</span> {Number(prixDepots?.minutes_incluses) || 0} min · <span className="font-bold">Hors zone — temps total :</span> {Number(prixDepots?.minutes_incluses_hors_zone) || 0} min</p>
+                  <p><span className="font-bold">Taux vendant :</span> {(Number(prixDepots?.taux_horaire_vendant) || 0).toFixed(2)} $/h HT ({taxesDepot(Number(prixDepots?.taux_horaire_vendant) || 0, configEnt).total.toFixed(2)} $/h taxes incl.)</p>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setConfirmationPrixOuverte(false)} className="min-h-0 py-2 text-xs">
+                Annuler
+              </Button>
+              <Button onClick={sauvegarderLesPrix} className="min-h-0 py-2 text-xs">
+                Confirmer la sauvegarde
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// ============================================================
+// CATALOGUE D'ITEMS — liste de prix (onglet Tarifs)
+// ------------------------------------------------------------
+// 289 items importés de QuickBooks : impossible d'afficher ça en bloc
+// sans noyer l'écran. La liste reste donc REPLIÉE et ne montre que ce
+// qu'on cherche — recherche instantanée + filtre par catégorie, dans
+// une zone qui défile sur une hauteur fixe.
+//
+// Le prix coûtant est visible ICI et nulle part ailleurs : ni sur les
+// devis, ni sur les bons de travail, ni dans l'app technicien.
+// ============================================================
+function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }) {
+  const [f, setF] = useState({
+    nom: item?.nom || "",
+    categorie: item?.categorie || "",
+    typeItem: item?.typeItem || "materiel",
+    unite: item?.unite || "unité",
+    prix_coutant: item?.prix_coutant ?? "",
+    prix_vendant: item?.prix_vendant ?? "",
+    description: item?.description || "",
+  });
+  const [etat, setEtat] = useState("");
+  const [erreur, setErreur] = useState("");
+  const maj = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  const coutant = f.prix_coutant === "" ? null : Number(f.prix_coutant);
+  const vendant = f.prix_vendant === "" ? null : Number(f.prix_vendant);
+  const marge = margePourcent(vendant, coutant);
+  const profit = profitDollars(vendant, coutant);
+
+  // SAISIE DE LA MARGE → le prix de vente se calcule. C'est le sens
+  // « inverse » : on tarife un item neuf à partir de son coût.
+  const appliquerMarge = (pct) => {
+    const v = vendantPourMarge(coutant, Number(pct));
+    if (v != null) maj("prix_vendant", Math.round(v * 100) / 100);
+  };
+
+  const enregistrer = async () => {
+    if (!f.nom.trim()) { setErreur("Le nom est obligatoire."); return; }
+    setEtat("enregistrement");
+    setErreur("");
+    try {
+      await onEnregistrer({ ...item, ...f });
+      onFermer();
+    } catch (e) {
+      setEtat("");
+      setErreur(e?.message || "Échec de l'enregistrement.");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-800">{item?.id ? "Modifier l'item" : "Nouvel item"}</h3>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="space-y-2.5">
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Nom *</label>
+            <input value={f.nom} onChange={(e) => maj("nom", e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none" />
+          </div>
+          <div className="grid gap-2.5 sm:grid-cols-3">
+            <div className="sm:col-span-2">
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Catégorie</label>
+              <input list="cats-catalogue" value={f.categorie} onChange={(e) => maj("categorie", e.target.value)}
+                placeholder="Choisir ou écrire"
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none" />
+              <datalist id="cats-catalogue">
+                {categories.map((c) => <option key={c} value={c} />)}
+              </datalist>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Type</label>
+              <select value={f.typeItem} onChange={(e) => maj("typeItem", e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none">
+                <option value="materiel">Matériel</option>
+                <option value="service">Service / forfait</option>
+              </select>
+            </div>
+          </div>
+
+          {/* LES TROIS CHAMPS LIÉS — coûtant, vendant, marge */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="mb-2 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Prix et marge</p>
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Prix coûtant</label>
+                <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2">
+                  <input type="number" step="0.01" min="0" value={f.prix_coutant}
+                    onChange={(e) => maj("prix_coutant", e.target.value)} placeholder="inconnu"
+                    className="w-full bg-transparent py-1.5 text-xs outline-none" />
+                  <span className="text-[10px] text-slate-400">$</span>
+                </div>
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Prix de vente</label>
+                <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2">
+                  <input type="number" step="0.01" min="0" value={f.prix_vendant}
+                    onChange={(e) => maj("prix_vendant", e.target.value)}
+                    className="w-full bg-transparent py-1.5 text-xs outline-none" />
+                  <span className="text-[10px] text-slate-400">$</span>
+                </div>
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Marge visée</label>
+                <div className={`flex items-center rounded-lg border bg-white px-2 ${coutant == null ? "border-slate-200" : "border-slate-300"}`}>
+                  <input type="number" step="0.1" value={marge != null ? Math.round(marge * 10) / 10 : ""}
+                    onChange={(e) => appliquerMarge(e.target.value)}
+                    disabled={coutant == null}
+                    placeholder={coutant == null ? "—" : ""}
+                    className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-300" />
+                  <span className="text-[10px] text-slate-400">%</span>
+                </div>
+              </div>
+            </div>
+            {coutant == null ? (
+              <p className="mt-2 text-[10px] leading-snug text-amber-700">
+                ⚠️ Sans prix coûtant, aucune marge n&apos;est calculée — un coût vide veut dire <span className="font-bold">inconnu</span>, jamais zéro.
+              </p>
+            ) : (
+              <p className="mt-2 text-[10px] text-slate-500">
+                Profit : <span className="font-extrabold tabular-nums text-emerald-700">{profit != null ? `${profit.toFixed(2)} $` : "—"}</span>
+                <span className="ml-2 text-slate-400">marge = (vente − coûtant) ÷ vente</span>
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Description (apparaît sur le devis)</label>
+            <textarea rows={3} value={f.description} onChange={(e) => maj("description", e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none" />
+          </div>
+        </div>
+
+        {erreur && <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">{erreur}</p>}
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={onFermer} className="min-h-0 py-2 text-xs">Annuler</Button>
+          <Button onClick={enregistrer} loading={etat === "enregistrement"} className="min-h-0 py-2 text-xs">Enregistrer</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// SÉLECTEUR D'ITEM AVEC RECHERCHE — remplace la liste déroulante, qui
+// tenait pour 5 items de démonstration mais devient inutilisable à 289.
+// On tape, on filtre, on clique. Le prix COÛTANT n'apparaît jamais ici :
+// ce composant sert à monter des devis et des factures, deux documents
+// qui vont chez le client.
+function SelecteurItem({ catalogue, onChoisir, libelle = "+ Ajouter un produit" }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [q, setQ] = useState("");
+  const champRef = useRef(null);
+
+  useEffect(() => {
+    if (ouvert && champRef.current) champRef.current.focus();
+  }, [ouvert]);
+
+  const resultats = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const base = catalogue || [];
+    if (!t) return base.slice(0, 40);
+    return base.filter((i) => `${i.nom} ${i.categorie}`.toLowerCase().includes(t)).slice(0, 40);
+  }, [catalogue, q]);
+
+  if (!ouvert) {
+    return (
+      <Button variant="outline" onClick={() => setOuvert(true)} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
+        <Search size={12} /> {libelle}
+      </Button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-16" onClick={() => setOuvert(false)}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 rounded-lg border border-slate-300 px-2.5 py-2">
+          <Search size={15} className="shrink-0 text-slate-400" />
+          <input ref={champRef} value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="Chercher un item…" className="w-full text-sm outline-none" />
+          <button onClick={() => setOuvert(false)} aria-label="Fermer"><X size={16} className="text-slate-400" /></button>
+        </div>
+        <div className="mt-2 max-h-[55vh] overflow-y-auto">
+          {(catalogue || []).length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-slate-400">
+              Catalogue vide — lance le snippet SQL « 26 » pour importer ta liste de prix.
+            </p>
+          ) : resultats.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-slate-400">Aucun item ne correspond à « {q} ».</p>
+          ) : (
+            resultats.map((i) => (
+              <button
+                key={i.id}
+                onClick={() => { onChoisir(i); setOuvert(false); setQ(""); }}
+                className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-2 py-2 text-left last:border-0 hover:bg-slate-50"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold text-slate-800">{i.nom}</span>
+                  {i.categorie && <span className="block truncate text-[10px] text-slate-400">{i.categorie}</span>}
+                </span>
+                <span className="shrink-0 text-xs font-bold tabular-nums text-slate-700">
+                  {i.prix_vendant != null ? `${i.prix_vendant.toFixed(2)} $` : "—"}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+        {!q && (catalogue || []).length > 40 && (
+          <p className="mt-1 text-[10px] text-slate-400">40 premiers sur {catalogue.length} — tape pour chercher.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, estAdminPrincipal }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [recherche, setRecherche] = useState("");
+  const [categorie, setCategorie] = useState("");
+  const [itemModal, setItemModal] = useState(null);
+  // RETRAIT — deux clics (le bouton devient « Confirmer ? ») : assez de
+  // friction pour éviter l'accident, pas assez pour décourager le ménage.
+  const [retraitPour, setRetraitPour] = useState(null);
+  // ITEMS RETIRÉS — chargés seulement à l'ouverture du tiroir : 99 % des
+  // visites du catalogue n'en ont pas besoin.
+  const [retiresOuvert, setRetiresOuvert] = useState(false);
+  const [retires, setRetires] = useState(null); // null = pas encore chargés
+  const chargerRetires = () => {
+    listerCatalogueRetires()
+      .then(setRetires)
+      .catch(() => setRetires([]));
+  };
+  const basculerRetires = () => {
+    const suivant = !retiresOuvert;
+    setRetiresOuvert(suivant);
+    if (suivant && retires === null) chargerRetires();
+  };
+  const retirer = (i) => {
+    setRetraitPour(null);
+    onDesactiverItem(i);
+    // S'il est déjà chargé, le tiroir des retirés l'accueille tout de suite.
+    setRetires((prev) => (prev === null ? prev : [...prev, { ...i, actif: false }].sort((a, b) => a.nom.localeCompare(b.nom))));
+  };
+  const reactiver = (i) => {
+    onReactiverItem?.(i);
+    setRetires((prev) => (prev === null ? prev : prev.filter((x) => x.id !== i.id)));
+  };
+
+  const categories = useMemo(
+    () => [...new Set((catalogue || []).map((i) => i.categorie).filter(Boolean))].sort(),
+    [catalogue]
+  );
+
+  const resultats = useMemo(() => {
+    const q = recherche.trim().toLowerCase();
+    return (catalogue || [])
+      .filter((i) => (categorie ? i.categorie === categorie : true))
+      .filter((i) => (q ? `${i.nom} ${i.categorie} ${i.description}`.toLowerCase().includes(q) : true));
+  }, [catalogue, recherche, categorie]);
+
+  // Combien d'items n'ont pas de coût — utile à voir d'un coup d'œil,
+  // ce sont eux dont la marge reste aveugle.
+  const sansCout = (catalogue || []).filter((i) => i.prix_coutant == null).length;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+            Catalogue d&apos;items <span className="text-slate-400">({(catalogue || []).length})</span>
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-400">
+            Liste de prix des devis · prix coûtant visible ici seulement
+            {sansCout > 0 && <span className="ml-1 font-semibold text-amber-600">· {sansCout} sans coût</span>}
+          </p>
+        </div>
+        {ouvert ? <ChevronUp size={16} className="shrink-0 text-slate-400" /> : <ChevronDown size={16} className="shrink-0 text-slate-400" />}
+      </button>
+
+      {ouvert && (
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-[180px] flex-1 items-center gap-1.5 rounded-lg border border-slate-300 px-2 py-1.5">
+              <Search size={13} className="shrink-0 text-slate-400" />
+              <input value={recherche} onChange={(e) => setRecherche(e.target.value)}
+                placeholder="Rechercher un item…" className="w-full text-xs outline-none" />
+              {recherche && <button onClick={() => setRecherche("")} aria-label="Effacer"><X size={12} className="text-slate-400" /></button>}
+            </div>
+            <select value={categorie} onChange={(e) => setCategorie(e.target.value)}
+              className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold outline-none">
+              <option value="">Toutes les catégories</option>
+              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {estAdminPrincipal && (
+              <Button onClick={() => setItemModal({})} className="min-h-0 px-3 py-1.5 text-xs">
+                <Plus size={13} /> Nouvel item
+              </Button>
+            )}
+          </div>
+
+          <p className="mt-2 text-[10px] text-slate-400">
+            {resultats.length} item{resultats.length > 1 ? "s" : ""} affiché{resultats.length > 1 ? "s" : ""}
+          </p>
+
+          {/* Hauteur fixe qui défile : la liste ne pousse jamais le reste
+              de l'écran, même avec 289 items. */}
+          <div className="mt-1 max-h-[380px] overflow-y-auto rounded-xl border border-slate-200">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-slate-50">
+                <tr className="border-b border-slate-200 text-left">
+                  <th className="px-2.5 py-1.5 font-bold text-slate-500">Item</th>
+                  <th className="px-2 py-1.5 text-right font-bold text-slate-500">Coûtant</th>
+                  <th className="px-2 py-1.5 text-right font-bold text-slate-500">Vente</th>
+                  <th className="px-2 py-1.5 text-right font-bold text-slate-500">Profit</th>
+                  <th className="px-2 py-1.5 text-right font-bold text-slate-500">Marge</th>
+                  {estAdminPrincipal && <th className="px-2 py-1.5" />}
+                </tr>
+              </thead>
+              <tbody>
+                {resultats.length === 0 ? (
+                  <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Aucun item ne correspond.</td></tr>
+                ) : (
+                  resultats.slice(0, 200).map((i) => {
+                    const m = margePourcent(i.prix_vendant, i.prix_coutant);
+                    const p = profitDollars(i.prix_vendant, i.prix_coutant);
+                    return (
+                      <tr key={i.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                        <td className="px-2.5 py-1.5">
+                          <p className="font-semibold text-slate-800">{i.nom}</p>
+                          {i.categorie && <p className="text-[10px] text-slate-400">{i.categorie}</p>}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">
+                          {i.prix_coutant != null ? `${i.prix_coutant.toFixed(2)} $` : <span className="text-amber-500" title="Coût inconnu">—</span>}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-semibold tabular-nums text-slate-800">
+                          {i.prix_vendant != null ? `${i.prix_vendant.toFixed(2)} $` : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">
+                          {p != null ? `${p.toFixed(2)} $` : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className={`px-2 py-1.5 text-right font-bold tabular-nums ${m == null ? "text-slate-300" : m < 0 ? "text-red-600" : "text-slate-700"}`}>
+                          {m != null ? `${m.toFixed(1)} %` : "—"}
+                        </td>
+                        {estAdminPrincipal && (
+                          <td className="px-2 py-1.5 text-right">
+                            {retraitPour === i.id ? (
+                              <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                                <button
+                                  onClick={() => retirer(i)}
+                                  className="rounded-lg bg-red-600 px-2 py-1 text-[10px] font-extrabold text-white"
+                                >
+                                  Retirer ?
+                                </button>
+                                <button onClick={() => setRetraitPour(null)} className="text-[10px] font-semibold text-slate-400 underline">
+                                  Non
+                                </button>
+                              </span>
+                            ) : (
+                              <span className="flex items-center justify-end gap-2">
+                                <button onClick={() => setItemModal(i)} className="text-slate-400 hover:text-slate-700" aria-label="Modifier">
+                                  <Pencil size={13} />
+                                </button>
+                                <button
+                                  onClick={() => setRetraitPour(i.id)}
+                                  className="text-slate-300 hover:text-red-600"
+                                  aria-label="Retirer du catalogue"
+                                  title="Retirer (discontinué / remplacé) — récupérable en tout temps"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+          {resultats.length > 200 && (
+            <p className="mt-1 text-[10px] text-slate-400">200 premiers affichés — affine ta recherche.</p>
+          )}
+
+          {/* 🗄️ ITEMS RETIRÉS — discontinués ou remplacés. Jamais
+              supprimés : les anciens devis y réfèrent, et un produit
+              « discontinué » revient parfois chez le fabricant. */}
+          <div className="mt-3 border-t border-slate-100 pt-2">
+            <button onClick={basculerRetires} className="flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-slate-600">
+              {retiresOuvert ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              🗄️ Items retirés{retires !== null ? ` (${retires.length})` : ""}
+            </button>
+            {retiresOuvert && (
+              <div className="mt-2">
+                {retires === null ? (
+                  <p className="text-[11px] text-slate-400">Chargement…</p>
+                ) : retires.length === 0 ? (
+                  <p className="text-[11px] text-slate-400">Aucun item retiré — le catalogue est entier.</p>
+                ) : (
+                  <div className="max-h-[220px] overflow-y-auto rounded-xl border border-slate-200">
+                    {retires.map((i) => (
+                      <div key={i.id} className="flex items-center justify-between gap-2 border-b border-slate-100 px-2.5 py-1.5 last:border-0">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-semibold text-slate-500 line-through">{i.nom}</p>
+                          {i.categorie && <p className="text-[10px] text-slate-400">{i.categorie}</p>}
+                        </div>
+                        {estAdminPrincipal && (
+                          <button
+                            onClick={() => reactiver(i)}
+                            className="shrink-0 rounded-lg border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+                          >
+                            ↩️ Remettre au catalogue
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {itemModal && (
+        <ModalItemCatalogue
+          item={itemModal.id ? itemModal : null}
+          categories={categories}
+          onFermer={() => setItemModal(null)}
+          onEnregistrer={onEnregistrerItem}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ONGLET PARAMÈTRES — la fiche d'identité de l'entreprise
+// ------------------------------------------------------------
+// Tout ce qui était écrit en dur dans le code (adresse, téléphone,
+// numéros TPS/TVQ/RBQ, taux de taxes, règles de paie) se règle ici.
+// Trois onglets pour ne pas noyer l'écran :
+//   1. Entreprise          — ce qui s'imprime en haut des documents
+//   2. Taxes & facturation  — ce qui entre dans les calculs d'argent
+//   3. Paie & heures        — les règles de l'onglet « Heures de la semaine »
+//
+// Sauvegarde EXPLICITE avec confirmation (même logique que Tarifs) :
+// ces valeurs partent chez les clients et dans les paies, on ne les
+// modifie pas par accident en cliquant à côté.
+//
+// Réservé à l'Admin principal — les autres consultent seulement.
+// ============================================================
+// Un champ des Paramètres (étiquette + saisie + aide facultative).
+// Défini au niveau du fichier — voir la note dans OngletParametres.
+function ChampParametre({ brouillon, champ, estAdminPrincipal, cle, libelle, aide, placeholder, type = "text", pas, unite }) {
+  return (
+    <div>
+      <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{libelle}</label>
+      <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+        <input
+          type={type}
+          step={pas}
+          min={type === "number" ? 0 : undefined}
+          value={brouillon[cle] ?? ""}
+          placeholder={placeholder}
+          disabled={!estAdminPrincipal}
+          onChange={(e) => champ(cle, type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)}
+          className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+        />
+        {unite ? <span className="shrink-0 text-[10px] text-slate-400">{unite}</span> : null}
+      </div>
+      {aide ? <p className="mt-0.5 text-[9px] leading-snug text-slate-400">{aide}</p> : null}
+    </div>
+  );
+}
+
+function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJournal }) {
+  const [brouillon, setBrouillon] = useState(config);
+  const [ongletActif, setOngletActif] = useState("entreprise");
+  const [etat, setEtat] = useState(""); // "" | "enregistrement" | "ok" | "erreur"
+  const [messageErreur, setMessageErreur] = useState("");
+  const [confirmationOuverte, setConfirmationOuverte] = useState(false);
+  const [apercuOuvert, setApercuOuvert] = useState(false);
+
+  // Si la configuration arrive (ou change) côté serveur pendant qu'on
+  // est sur l'écran sans avoir rien touché, on suit.
+  const signatureConfig = JSON.stringify(config);
+  useEffect(() => {
+    setBrouillon(config);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signatureConfig]);
+
+  const modifie = JSON.stringify(brouillon) !== signatureConfig;
+  const champ = (cle, valeur) => setBrouillon((p) => ({ ...p, [cle]: valeur }));
+
+  const enregistrer = async () => {
+    setConfirmationOuverte(false);
+    setEtat("enregistrement");
+    setMessageErreur("");
+    try {
+      await onSauvegarder(brouillon);
+      setEtat("ok");
+      ajouterJournal(`⚙️ Paramètres de l'entreprise mis à jour (${brouillon.nomLegal})`);
+      setTimeout(() => setEtat(""), 2500);
+    } catch (e) {
+      setEtat("erreur");
+      setMessageErreur(e?.message || "");
+    }
+  };
+
+  // Raccourci pour ne pas répéter les mêmes propriétés à chaque champ.
+  // (Le composant `ChampParametre` est défini HORS de cette fonction :
+  // s'il était défini ici, React le recréerait à chaque frappe et le
+  // curseur sortirait du champ après chaque lettre.)
+  const propsChamp = { brouillon, champ, estAdminPrincipal };
+
+  const ONGLETS = [
+    { id: "entreprise", label: "Entreprise" },
+    { id: "taxes", label: "Taxes & facturation" },
+    { id: "paie", label: "Paie & heures" },
+  ];
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 p-4 md:p-6">
+      <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Paramètres</h2>
+
+      {!estAdminPrincipal && (
+        <p className="flex items-center gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+          <Lock size={12} className="shrink-0" /> Consultation seulement — la modification des paramètres est réservée à l'Admin principal.
+        </p>
+      )}
+
+      {/* Onglets internes */}
+      <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+        {ONGLETS.map((o) => (
+          <button
+            key={o.id}
+            onClick={() => setOngletActif(o.id)}
+            className={`flex-1 rounded-lg px-2 py-2 text-[11px] font-bold transition-colors ${
+              ongletActif === o.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ---------------- 1. ENTREPRISE ---------------- */}
+      {ongletActif === "entreprise" && (
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Identité et coordonnées</p>
+            <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+              C'est exactement ce qui s'imprime en haut de tes devis, bons de travail, bons de commande et factures.
+            </p>
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <ChampParametre {...propsChamp} cle="nomLegal" libelle="Raison sociale" placeholder="Ventilation DGL inc." />
+              <ChampParametre {...propsChamp} cle="nomCommercial" libelle="Nom commercial (si différent)" placeholder="— facultatif —" />
+              <div className="sm:col-span-2">
+                <ChampParametre {...propsChamp} cle="adresse" libelle="Adresse complète" placeholder="771 Boul Industriel, Blainville QC J7C 3V3" />
+              </div>
+              <ChampParametre {...propsChamp} cle="telephone" libelle="Téléphone" placeholder="(450) 543-9855" />
+              <ChampParametre {...propsChamp} cle="telephoneUrgence" libelle="Téléphone d'urgence" placeholder="— facultatif —" />
+              <ChampParametre {...propsChamp} cle="courriel" libelle="Courriel général" placeholder="info@…" />
+              <ChampParametre {...propsChamp} cle="courrielFacturation" libelle="Courriel de facturation" aide="Utilisé pour les envois liés à la facturation." placeholder="— facultatif —" />
+              <div className="sm:col-span-2">
+                <ChampParametre {...propsChamp} cle="siteWeb" libelle="Site web" placeholder="— facultatif —" />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Numéros officiels</p>
+            <p className="mt-0.5 mb-3 text-[11px] text-slate-400">Laisse un champ vide s'il ne s'applique pas — la ligne disparaît alors des documents.</p>
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <ChampParametre {...propsChamp} cle="numeroTps" libelle="Nº d'inscription TPS/TVH" placeholder="000000000 RT0001" />
+              <ChampParametre {...propsChamp} cle="numeroTvq" libelle="Nº d'enregistrement TVQ" placeholder="0000000000 TQ0001" />
+              <ChampParametre {...propsChamp} cle="numeroRbq" libelle="Licence RBQ" placeholder="0000-0000-00" />
+              <ChampParametre {...propsChamp} cle="numeroNeq" libelle="NEQ (registre des entreprises)" placeholder="— facultatif —" />
+            </div>
+            <label className={`mt-3 flex items-start gap-2 rounded-xl border p-2.5 ${estAdminPrincipal ? "border-slate-200" : "border-slate-100 bg-slate-50"}`}>
+              <input
+                type="checkbox"
+                checked={!!brouillon.membreCmmtq}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => champ("membreCmmtq", e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <span className="text-[11px] leading-snug text-slate-600">
+                <span className="font-bold text-slate-800">Membre de la CMMTQ</span>
+                <br />Affiche le logo CMMTQ dans l'en-tête des documents.
+              </span>
+            </label>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Logo</p>
+            <div className="mt-2 flex items-center gap-3">
+              <img src="/logo-dgl.png" alt="" className="h-12 w-auto" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              <p className="text-[11px] leading-snug text-slate-500">
+                Le logo est le fichier <span className="font-mono font-bold">/public/logo-dgl.png</span>. Pour le changer,
+                remplace ce fichier — aucun code à modifier. (Un téléversement depuis cet écran viendra plus tard.)
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- 2. TAXES & FACTURATION ---------------- */}
+      {ongletActif === "taxes" && (
+        <div className="space-y-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Taux de taxes</p>
+            <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+              Appliqués partout : devis, factures, dépôts. Écris le pourcentage (ex. <span className="font-bold">9.975</span> pour 9,975 %).
+            </p>
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <ChampParametre {...propsChamp} cle="tauxTps" libelle="TPS / TVH" type="number" pas="0.001" unite="%" />
+              <ChampParametre {...propsChamp} cle="tauxTvq" libelle="TVQ" type="number" pas="0.001" unite="%" aide="Mets 0 si ta province n'a pas de taxe provinciale distincte." />
+            </div>
+            <div className="mt-3 rounded-xl bg-slate-50 p-3 text-[11px] text-slate-600">
+              Exemple sur <span className="font-bold">1 000,00 $</span> avant taxes :
+              <span className="ml-1 tabular-nums">
+                TPS {calculerTaxes(1000, brouillon).tps.toFixed(2)} $ · TVQ {calculerTaxes(1000, brouillon).tvq.toFixed(2)} $ ·
+                <span className="font-bold"> total {calculerTaxes(1000, brouillon).total.toFixed(2)} $</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Facturation</p>
+            <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+              <ChampParametre {...propsChamp} cle="termePaiementDefaut" libelle="Terme de paiement par défaut" placeholder="Net 30" />
+            </div>
+            <div className="mt-2.5">
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Note affichée au bas des factures</label>
+              <textarea
+                rows={2}
+                value={brouillon.noteFacture ?? ""}
+                disabled={!estAdminPrincipal}
+                placeholder="Ex. : Intérêt de 1,5 % par mois sur tout solde en souffrance."
+                onChange={(e) => champ("noteFacture", e.target.value)}
+                className={`w-full rounded-lg border px-2 py-1.5 text-xs outline-none disabled:text-slate-400 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- 3. PAIE & HEURES ---------------- */}
+      {ongletActif === "paie" && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Règles de calcul des heures</p>
+          <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+            Ces règles pilotent l'onglet « Heures de la semaine » et l'app technicien.
+          </p>
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <ChampParametre
+              {...propsChamp}
+              cle="seuilHeuresSupp"
+              libelle="Seuil des heures supplémentaires"
+              type="number"
+              pas="0.5"
+              unite="h/sem."
+              aide="Au-delà : heures supplémentaires (taux et demi). Normes du Québec : 40 h."
+            />
+            <ChampParametre
+              {...propsChamp}
+              cle="minutesDiner"
+              libelle="Dîner non payé"
+              type="number"
+              pas="5"
+              unite="min"
+              aide="Déduit quand le technicien coche « Lunch » à son transport de fin de journée."
+            />
+            <ChampParametre
+              {...propsChamp}
+              cle="heureBasculeNuit"
+              libelle="Heure de bascule « Nuit »"
+              type="number"
+              pas="1"
+              unite="h"
+              aide="Du lundi au vendredi, si la 1re intervention démarre à cette heure ou plus tard, toute la journée est classée Nuit. Samedi/dimanche a toujours priorité."
+            />
+            <ChampParametre
+              {...propsChamp}
+              cle="seuilMargeAlerte"
+              libelle="Seuil d'alerte de marge"
+              type="number"
+              pas="1"
+              unite="%"
+              aide="Dans l'analyse de rentabilité (tuile « Marge moyenne » du tableau de bord), toute marge SOUS ce pourcentage s'affiche en rouge — jobs, clients, devis. Mets-y ta marge minimum acceptable."
+            />
+            {/* ANNÉE FISCALE — un jalon "mois + jour". L'analyse de
+                rentabilité offre « Année fiscale » calculée date à date
+                depuis ce jalon : les mêmes bornes que le comptable. */}
+            {(() => {
+              const [moisF, jourF] = String(brouillon.debutAnneeFiscale || "01-01").split("-").map((x) => parseInt(x, 10));
+              const majFiscal = (m, j) =>
+                champ("debutAnneeFiscale", `${String(m).padStart(2, "0")}-${String(j).padStart(2, "0")}`);
+              const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+              return (
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Début de l'année fiscale</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={jourF || 1}
+                      disabled={!estAdminPrincipal}
+                      onChange={(e) => majFiscal(moisF || 1, Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
+                      className={`w-16 rounded-lg border px-2 py-1.5 text-xs ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                    />
+                    <select
+                      value={moisF || 1}
+                      disabled={!estAdminPrincipal}
+                      onChange={(e) => majFiscal(Number(e.target.value), jourF || 1)}
+                      className={`flex-1 rounded-lg border px-2 py-1.5 text-xs ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                    >
+                      {MOIS.map((nom, i) => (
+                        <option key={nom} value={i + 1}>{nom}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="mt-0.5 text-[9px] leading-snug text-slate-400">
+                    Ex. : année fiscale du 1er novembre au 31 octobre → inscris 1 novembre. L'analyse de rentabilité offrira « Année fiscale en cours » et « précédente », date à date — les mêmes bornes que ton comptable.
+                  </p>
+                </div>
+              );
+            })()}
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Premier jour de la semaine de paie</label>
+              <select
+                value={brouillon.premierJourSemaine ?? 0}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => champ("premierJourSemaine", Number(e.target.value))}
+                className={`w-full rounded-lg border px-2 py-1.5 text-xs outline-none disabled:text-slate-400 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}
+              >
+                <option value={0}>Dimanche</option>
+                <option value={1}>Lundi</option>
+              </select>
+              <p className="mt-0.5 text-[9px] leading-snug text-slate-400">
+                Actuellement, la compilation est bâtie dimanche → samedi. Changer ce choix demande un ajustement du tableau — à faire lors du passage multi-entreprises.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Barre d'action — visible sur les trois onglets */}
+      {estAdminPrincipal && (
+        <div className="sticky bottom-3 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-3 backdrop-blur">
+          <Button
+            onClick={() => setConfirmationOuverte(true)}
+            disabled={!modifie}
+            loading={etat === "enregistrement"}
+            className="min-h-0 px-4 py-2 text-xs"
+          >
+            💾 Enregistrer les paramètres
+          </Button>
+          <Button variant="outline" onClick={() => setApercuOuvert(true)} className="min-h-0 px-3 py-2 text-xs">
+            👁️ Voir l'en-tête des documents
+          </Button>
+          {modifie && etat !== "ok" && (
+            <span className="text-[11px] font-semibold text-amber-600">Modifications non enregistrées</span>
+          )}
+          {etat === "ok" && (
+            <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><Check size={13} /> Enregistré</span>
+          )}
+          {etat === "erreur" && (
+            <span className="text-[11px] font-bold text-red-600">
+              Échec — vérifie que le SQL « 23 » a été lancé, puis réessaie. {messageErreur}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* APERÇU EN DIRECT — l'en-tête tel qu'il sortira, avec le brouillon */}
+      {apercuOuvert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setApercuOuvert(false)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-start justify-between">
+              <h3 className="text-sm font-extrabold text-slate-500">Aperçu — en-tête des documents</h3>
+              <button onClick={() => setApercuOuvert(false)}><X size={18} className="text-slate-400" /></button>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-5">
+              {/* On passe le BROUILLON : tu vois le résultat avant même d'enregistrer. */}
+              <EnTeteEntreprise config={brouillon} />
+              <p className="mt-3 text-lg font-extrabold text-[#131B2E]">DEVIS DEV-3500</p>
+              <p className="text-xs text-slate-500">Exemple — sous-total 1 000,00 $</p>
+              <div className="mt-3 space-y-1 text-xs">
+                <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">1 000,00 $</span></div>
+                <div className="flex justify-between text-slate-500"><span>TPS ({tauxAffiche(brouillon.tauxTps)}%)</span><span className="tabular-nums">{calculerTaxes(1000, brouillon).tps.toFixed(2)} $</span></div>
+                <div className="flex justify-between text-slate-500"><span>TVQ ({tauxAffiche(brouillon.tauxTvq)}%)</span><span className="tabular-nums">{calculerTaxes(1000, brouillon).tvq.toFixed(2)} $</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm font-extrabold text-slate-900">
+                  <span>Total</span><span className="tabular-nums">{calculerTaxes(1000, brouillon).total.toFixed(2)} $</span>
+                </div>
+              </div>
+              <PiedDocument config={brouillon} />
+            </div>
+            {modifie && (
+              <p className="mt-2 text-[11px] font-semibold text-amber-600">
+                Cet aperçu montre tes modifications en cours — elles ne seront réelles qu'une fois enregistrées.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION avant d'écrire */}
+      {confirmationOuverte && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmationOuverte(false)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-start gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <AlertTriangle size={18} className="text-amber-600" />
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Enregistrer les paramètres ?</h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  Ces informations apparaissent sur <span className="font-bold">les documents envoyés aux clients</span> et
+                  entrent dans <span className="font-bold">les calculs de taxes et de paie</span>. Les documents déjà émis
+                  ne changent pas ; les nouveaux utiliseront ces valeurs.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setConfirmationOuverte(false)} className="min-h-0 py-2 text-xs">Annuler</Button>
+              <Button onClick={enregistrer} className="min-h-0 py-2 text-xs">Confirmer</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tauxMetiers, persisterUtilisateur, supprimerUtilisateur, estAdminPrincipal }) {
+  const [formulaireOuvert, setFormulaireOuvert] = useState(false);
+  const [nom, setNom] = useState("");
+  const [telephone, setTelephone] = useState("");
+  const [courriel, setCourriel] = useState("");
+  const [nomUtilisateur, setNomUtilisateur] = useState("");
+  const [typeAcces, setTypeAcces] = useState("Technicien");
+  const [metier, setMetier] = useState(METIERS[0]);
+  const [niveau, setNiveau] = useState(niveauxPourMetier(METIERS[0])[0]);
+  // Taux individuel (métiers de bureau) / prime au-dessus de la grille
+  // CCQ (métiers de terrain) — saisis dès la création de la fiche.
+  const [tauxHoraire, setTauxHoraire] = useState(0);
+  const [primeHoraire, setPrimeHoraire] = useState(0);
+  const [courrielAperçu, setCourrielAperçu] = useState(null);
+  const [utilisateurOuvertId, setUtilisateurOuvertId] = useState(null);
+
+  // GRILLE DES ACCÈS dans le formulaire de création : suit le type
+  // d'accès + métier choisis, ajustable case par case avant de créer.
+  const [sectionsAcces, setSectionsAcces] = useState(accesParDefautPour("Technicien"));
+  const basculerSectionAcces = (s) =>
+    setSectionsAcces((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
+
+  const changerMetier = (m) => {
+    setMetier(m);
+    setNiveau(niveauxPourMetier(m)[0]); // le niveau doit rester valide pour le métier
+    if (typeAcces === "Administration bureau") setSectionsAcces(accesParDefautPour(typeAcces, m));
+  };
+
+  // Type d'accès et métier restent cohérents (voir metiersPourTypeAcces).
+  const changerTypeAcces = (t) => {
+    setTypeAcces(t);
+    const permis = metiersPourTypeAcces(t, tauxMetiers);
+    const metierFinal = permis.includes(metier) ? metier : permis[0];
+    if (metierFinal !== metier) {
+      setMetier(metierFinal);
+      setNiveau(niveauxPourMetier(metierFinal)[0]);
+    }
+    setSectionsAcces(accesParDefautPour(t, metierFinal));
+  };
+
+  const reinitialiserFormulaire = () => {
+    setNom("");
+    setTelephone("");
+    setCourriel("");
+    setNomUtilisateur("");
+    setTypeAcces("Technicien");
+    setMetier(METIERS[0]);
+    setNiveau(niveauxPourMetier(METIERS[0])[0]);
+    setTauxHoraire(0);
+    setPrimeHoraire(0);
+    setSectionsAcces(accesParDefautPour("Technicien"));
+  };
+
+  const peutCreer = nom.trim() && courriel.trim() && nomUtilisateur.trim();
+
+  const creerUtilisateur = () => {
+    if (!peutCreer) return;
+    const nouvel = {
+      id: `u-${Date.now()}`,
+      nom: nom.trim(),
+      telephone: telephone.trim(),
+      courriel: courriel.trim(),
+      nomUtilisateur: nomUtilisateur.trim().toLowerCase(),
+      typeAcces,
+      metier,
+      niveau,
+      tauxHoraire: estMetierBureau(metier) ? Number(tauxHoraire) || 0 : null,
+      primeHoraire: !estMetierBureau(metier) ? Number(primeHoraire) || 0 : null,
+      sectionsAcces,
+      motDePasseCree: false,
+    };
+    setUtilisateurs((prev) => [...prev, nouvel]);
+    // Persistance Supabase : l'employé survit aux rechargements et
+    // apparaît durablement dans l'agenda (et la synchro des tâches).
+    persisterUtilisateur?.(nouvel);
+    ajouterJournal(`👤 Utilisateur "${nouvel.nom}" créé (${typeAcces}) — lien de connexion envoyé`);
+    setFormulaireOuvert(false);
+    reinitialiserFormulaire();
+    setCourrielAperçu(nouvel);
+  };
+
+  const envoyerLienConnexion = (u) => {
+    ajouterJournal(`📧 Lien de connexion renvoyé à ${u.nom} (${u.courriel})`);
+    setCourrielAperçu(u);
+  };
+
+  const reinitialiserMotDePasse = (id) => {
+    setUtilisateurs((prev) => prev.map((u) => (u.id === id ? { ...u, motDePasseCree: false } : u)));
+    const u = utilisateurs.find((x) => x.id === id);
+    ajouterJournal(`🔑 Mot de passe réinitialisé pour ${u.nom} — un nouveau lien de connexion lui a été envoyé`);
+    setCourrielAperçu(u);
+  };
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 p-4 md:p-6">
+      <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Utilisateurs</h2>
+
+      {/* "NOUVEL UTILISATEUR" — toujours en premier */}
+      <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white">
+        <button
+          onClick={() => setFormulaireOuvert((v) => !v)}
+          className="flex w-full items-center gap-3 p-4 text-left"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FF6A13]/10">
+            <UserPlus size={18} className="text-[#FF6A13]" />
+          </div>
+          <span className="font-bold text-slate-800">Nouvel utilisateur</span>
+        </button>
+
+        {formulaireOuvert && (
+          <div className="space-y-3 border-t border-slate-200 p-4">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Nom complet</label>
+              <input
+                value={nom}
+                onChange={(e) => setNom(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Type d'accès</label>
+              <select
+                value={typeAcces}
+                onChange={(e) => changerTypeAcces(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold"
+              >
+                {(estAdminPrincipal ? TYPES_ACCES : TYPES_ACCES.filter((t) => t !== "Admin principal" && t !== "Admin régulier")).map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">Créer la fiche règle aussi les ACCÈS de ce compte (type + métier). Ajustements fins : « Gestion des accès ».</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">
+                  Métier{typeAcces === "Administration bureau" ? " (sous-catégorie)" : ""}
+                </label>
+                <select
+                  value={metier}
+                  onChange={(e) => changerMetier(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold"
+                >
+                  {metiersPourTypeAcces(typeAcces, tauxMetiers).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+              {estMetierBureau(metier) ? (
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Taux horaire ($/h)</label>
+                  <InputNombreDecimal
+                    valeur={tauxHoraire || 0}
+                    onChange={(v) => setTauxHoraire(v)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Niveau</label>
+                  <select
+                    value={niveau}
+                    onChange={(e) => setNiveau(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold"
+                  >
+                    {niveauxPourMetier(metier).map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            {!estMetierBureau(metier) && (
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Prime horaire (+ $/h) — entente individuelle (0 = aucune)</label>
+                <InputNombreDecimal
+                  valeur={primeHoraire || 0}
+                  onChange={(v) => setPrimeHoraire(v)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums"
+                />
+                <p className="mt-1 text-[10px] text-slate-400">S'ajoute à la grille CCQ (onglet Tarifs) pour cet employé seulement.</p>
+              </div>
+            )}
+
+            {/* GESTION DES ACCÈS directement à la création : la grille suit
+                le type d'accès + métier, ajustable case par case. */}
+            <GrilleAcces sections={sectionsAcces} onBasculer={basculerSectionAcces} />
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Téléphone</label>
+                <input
+                  type="tel"
+                  value={telephone}
+                  onChange={(e) => setTelephone(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Courriel</label>
+                <input
+                  type="email"
+                  value={courriel}
+                  onChange={(e) => setCourriel(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Nom d'utilisateur</label>
+              <input
+                value={nomUtilisateur}
+                onChange={(e) => setNomUtilisateur(e.target.value)}
+                placeholder="Ex: jtremblay"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <Button onClick={creerUtilisateur} disabled={!peutCreer} className="w-full">
+              Créer l'utilisateur et envoyer le lien de connexion
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* LISTE DES UTILISATEURS */}
+      <div className="space-y-2">
+        {utilisateurs.map((u) => (
+          <div key={u.id} className="rounded-xl border border-slate-200 bg-white p-3.5">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-bold text-slate-900">{u.nom}</p>
+                <p className="text-xs text-slate-400">@{u.nomUtilisateur}{u.poste ? ` · ${u.poste}` : ""}</p>
+              </div>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${COULEUR_TYPE_ACCES[u.typeAcces] || "bg-slate-100 text-slate-600"}`}>
+                {u.typeAcces}
+              </span>
+            </div>
+            <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
+              {u.courriel && <div className="flex items-center gap-1.5"><Mail size={11} /> {u.courriel}</div>}
+              {u.telephone && <div className="flex items-center gap-1.5"><Phone size={11} /> {u.telephone}</div>}
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck size={11} />
+                {u.motDePasseCree ? "Mot de passe déjà créé" : "En attente de première connexion"}
+              </div>
+              {u.metier && (
+                <div className="flex items-center gap-1.5">
+                  <Briefcase size={11} /> {u.metier} · {u.niveau}
+                  {Number(tauxMetiers?.[u.metier]?.[u.niveau]) > 0
+                    ? ` · ${Number(tauxMetiers[u.metier][u.niveau]).toFixed(2)} $/h`
+                    : " · taux à saisir"}
+                </div>
+              )}
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <Button variant="outline" onClick={() => setUtilisateurOuvertId(u.id)} className="min-h-0 py-1.5 text-xs">
+                <Pencil size={12} /> Modifier
+              </Button>
+              <Button variant="outline" onClick={() => reinitialiserMotDePasse(u.id)} className="min-h-0 py-1.5 text-xs">
+                <KeyRound size={12} /> Mot de passe
+              </Button>
+              <Button onClick={() => envoyerLienConnexion(u)} className="min-h-0 py-1.5 text-xs">
+                <Send size={12} /> Lien
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {courrielAperçu && <ApercuCourrielConnexion utilisateur={courrielAperçu} onFermer={() => setCourrielAperçu(null)} />}
+      {utilisateurOuvertId && (
+        <ModalProfilUtilisateur
+          tauxMetiers={tauxMetiers}
+          utilisateur={utilisateurs.find((u) => u.id === utilisateurOuvertId)}
+          estAdminPrincipal={estAdminPrincipal}
+          onFermer={() => setUtilisateurOuvertId(null)}
+          onEnregistrer={(champs) => {
+            const existant = utilisateurs.find((u) => u.id === utilisateurOuvertId);
+            setUtilisateurs((prev) => prev.map((u) => (u.id === utilisateurOuvertId ? { ...u, ...champs } : u)));
+            if (existant) persisterUtilisateur?.({ ...existant, ...champs });
+            ajouterJournal(`✏️ Profil de ${champs.nom || existant?.nom} mis à jour`);
+            setUtilisateurOuvertId(null);
+          }}
+          onSupprimer={() => {
+            const existant = utilisateurs.find((u) => u.id === utilisateurOuvertId);
+            if (existant) supprimerUtilisateur?.(existant);
+            setUtilisateurOuvertId(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// TABLEAU DE BORD D'UN PROJET (rentabilité en temps réel)
+// ============================================================
+// ============================================================
+// ONGLETS DU TABLEAU DE BORD PROJET — sous-composants extraits pour
+// alléger ModalDetailProjet et permettre à chaque onglet de ne
+// recevoir que les données dont il a besoin.
+// ============================================================
+const ONGLETS_PROJET = [
+  { id: "apercu", label: "Vue d'ensemble" },
+  { id: "achats", label: "Bons de commande" },
+  { id: "temps", label: "Feuille de temps" },
+  { id: "facturation", label: "Facturation" },
+];
+
+function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQuickBooks, syncQbEnCours, peutSyncQb }) {
+  // Utilise la ventilation calculée par calculerRentabiliteProjet (même
+  // logique par employé que r.coutMainOeuvre) — plus de recalcul au taux fixe.
+  const coutMainOeuvreChantier = r.coutMainOeuvreChantier || 0;
+  const coutTransport = r.coutTransport || 0;
+  const donneesComparaison = useMemo(
+    () => [
+      { nom: "Budget", montant: Math.round(projet.budgetTotal) },
+      { nom: "Coût réel", montant: Math.round(r.coutTotalReel) },
+    ],
+    [projet.budgetTotal, r.coutTotalReel]
+  );
+  const donneesRepartition = useMemo(
+    () =>
+      [
+        { nom: "Main-d'œuvre", valeur: Math.round(coutMainOeuvreChantier) },
+        { nom: "Matériaux", valeur: Math.round(r.coutMateriaux) },
+        { nom: "Transport", valeur: Math.round(coutTransport) },
+        // Bloc 5 — le camion est un coût comme les autres : 15 $/h pour
+        // chaque heure d'un technicien qui en avait un ce jour-là.
+        { nom: "Camion", valeur: Math.round(r.coutCamion || 0) },
+      ].filter((d) => d.valeur > 0),
+    [coutMainOeuvreChantier, r.coutMateriaux, coutTransport, r.coutCamion]
+  );
+  const COULEURS_REPARTITION = ["#131B2E", "#FF6A13", "#3B82F6", "#0EA5E9"];
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${sante.pastille}`} />
+          <select
+            value={projet.statut}
+            onChange={(e) => onChangerStatut(projet.id, e.target.value)}
+            className="rounded-full border border-slate-300 px-3 py-1 text-xs font-bold text-slate-700"
+          >
+            {STATUTS_PROJET.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <Button
+          variant="outline"
+          onClick={peutSyncQb ? onSyncQuickBooks : undefined}
+          disabled={!peutSyncQb}
+          loading={syncQbEnCours}
+          title={peutSyncQb ? undefined : "Réservé aux administrateurs"}
+          className="min-h-0 gap-1.5 px-2.5 py-1.5 text-xs"
+        >
+          {!syncQbEnCours && (peutSyncQb ? <RefreshCw size={12} /> : <Lock size={12} />)} Synchroniser QuickBooks
+        </Button>
+      </div>
+
+      {/* BARRE DE PROGRESSION FINANCIÈRE */}
+      <div className={`mb-4 rounded-xl p-3.5 ${sante.niveau === "rouge" ? "bg-red-50" : sante.niveau === "jaune" ? "bg-amber-50" : "bg-slate-50"}`}>
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-bold text-slate-600">Budget dépensé</span>
+          {r.depassementBudget && (
+            <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-600">
+              <AlertCircle size={11} /> Dépassement de budget
+            </span>
+          )}
+        </div>
+        <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+          <div
+            className={`h-full rounded-full ${couleurSanteBudget(r.pourcentageDepense).barre}`}
+            style={{ width: `${Math.min(100, r.pourcentageDepense)}%` }}
+          />
+        </div>
+        <div className="mt-1.5 flex justify-between text-[11px] text-slate-500">
+          <span className={`font-semibold ${couleurSanteBudget(r.pourcentageDepense).texte}`}>
+            {r.coutTotalReel.toFixed(2)} $ dépensé ({r.pourcentageDepense.toFixed(0)}%)
+          </span>
+          <span>Budget : {projet.budgetTotal.toFixed(2)} $</span>
+        </div>
+      </div>
+
+      {/* RENTABILITÉ */}
+      <div className="mb-4 space-y-1 rounded-xl bg-slate-50 p-3 text-xs">
+        <div className="flex justify-between text-slate-500"><span>Coût matériaux/achats (BC)</span><span className="tabular-nums">{r.coutMateriaux.toFixed(2)} $</span></div>
+        <div className="flex justify-between text-slate-500"><span>Heures de travail sur chantier</span><span className="tabular-nums">{r.heuresChantier} h</span></div>
+        <div className="flex justify-between text-slate-500"><span>Heures de transport imputées</span><span className="tabular-nums">{r.heuresTransport} h</span></div>
+        {r.kilometrageTransport > 0 && (
+          <div className="flex justify-between text-slate-500"><span>Kilométrage transport</span><span className="tabular-nums">{r.kilometrageTransport.toFixed(1)} km</span></div>
+        )}
+        <div className="flex justify-between font-semibold text-slate-600"><span>Total heures projet</span><span className="tabular-nums">{r.totalHeures} h</span></div>
+        <div className="flex justify-between text-slate-500"><span>Coût main-d'œuvre ({r.totalHeures} h × {projet.tauxHoraireCoutant.toFixed(2)} $)</span><span className="tabular-nums">{r.coutMainOeuvre.toFixed(2)} $</span></div>
+        {(r.coutCamion || 0) > 0 && (
+          <div className="flex justify-between text-slate-500"><span>Coût camion (heures avec véhicule)</span><span className="tabular-nums">{r.coutCamion.toFixed(2)} $</span></div>
+        )}
+        <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-slate-700"><span>Coût total réel</span><span className="tabular-nums">{r.coutTotalReel.toFixed(2)} $</span></div>
+        <div className="flex justify-between font-bold text-slate-800"><span>Budget initial</span><span className="tabular-nums">{projet.budgetTotal.toFixed(2)} $</span></div>
+        <div className={`flex justify-between border-t border-slate-200 pt-1 text-sm font-extrabold ${r.profitReel < 0 ? "text-red-600" : "text-emerald-600"}`}>
+          <span>Profit réel ({r.pourcentageMarge.toFixed(1)}%)</span><span className="tabular-nums">{r.profitReel.toFixed(2)} $</span>
+        </div>
+      </div>
+
+      {/* RAPPORTS — GRAPHIQUES DE RENTABILITÉ */}
+      <div>
+        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+          <BarChart3 size={12} /> Rapports
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-xl border border-slate-200 p-2">
+            <p className="mb-1 text-center text-[10px] font-semibold text-slate-500">Budget vs coût réel</p>
+            <ResponsiveContainer width="100%" height={140}>
+              <BarChart data={donneesComparaison} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <XAxis dataKey="nom" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 9 }} />
+                <Tooltip formatter={(v) => `${v} $`} />
+                <Bar dataKey="montant" radius={[4, 4, 0, 0]}>
+                  {donneesComparaison.map((entree, i) => (
+                    <Cell key={i} fill={i === 1 && r.depassementBudget ? "#EF4444" : i === 1 ? "#10B981" : "#131B2E"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="rounded-xl border border-slate-200 p-2">
+            <p className="mb-1 text-center text-[10px] font-semibold text-slate-500">Répartition des dépenses</p>
+            {donneesRepartition.length === 0 ? (
+              <p className="flex h-[140px] items-center justify-center text-center text-[10px] text-slate-400">Aucune dépense enregistrée pour l'instant.</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={140}>
+                <PieChart>
+                  <Pie data={donneesRepartition} dataKey="valeur" nameKey="nom" innerRadius={30} outerRadius={50} paddingAngle={2}>
+                    {donneesRepartition.map((entree, i) => (
+                      <Cell key={i} fill={COULEURS_REPARTITION[i % COULEURS_REPARTITION.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v) => `${v} $`} />
+                  <Legend wrapperStyle={{ fontSize: 9 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OngletBonsCommandeProjet({ projet, onAjouterBC, transactionsQb, fournisseurs, setFournisseurs, ajouterJournal, clients }) {
+  // Dépenses QuickBooks de ce projet, indexées par numéro de BC — sert à
+  // montrer quels BC ont déjà leur facture fournisseur réelle (le montant
+  // de QuickBooks fait alors foi, jamais additionné au montant saisi).
+  const depensesParBc = new Map(
+    (transactionsQb || [])
+      .filter((t) => t.projectId === projet.id && t.type === "EXPENSE" && t.poNumber)
+      .map((t) => [String(t.poNumber).trim().toUpperCase(), t])
+  );
+  const [bcFournisseurId, setBcFournisseurId] = useState("");
+  const [bcMontant, setBcMontant] = useState("");
+  const [bcNumero, setBcNumero] = useState("");
+  const [bcDescription, setBcDescription] = useState("");
+  const [modalFournisseur, setModalFournisseur] = useState(false);
+  // Envoi du BC au fournisseur : choix des adresses avant création.
+  const [envoiOuvert, setEnvoiOuvert] = useState(false);
+  const [courrielsChoisis, setCourrielsChoisis] = useState([]);
+
+  const fournisseurChoisi = (fournisseurs || []).find((f) => f.id === bcFournisseurId) || null;
+  const adresseLivraison =
+    projet.adresseLivraison ||
+    (clients || []).find((c) => c.id === projet.clientId)?.adresses?.[0]?.ligne1 ||
+    null;
+
+  const choisirFournisseur = (id) => {
+    setBcFournisseurId(id);
+    const f = (fournisseurs || []).find((x) => x.id === id);
+    setCourrielsChoisis((f?.courriels || []).filter((c) => c.defaut).map((c) => c.email));
+  };
+
+  // Étape 1 : si le fournisseur a des courriels, proposer l'envoi.
+  const demarrerAjoutBC = () => {
+    if (!fournisseurChoisi) return;
+    if ((fournisseurChoisi.courriels || []).length > 0) {
+      setEnvoiOuvert(true);
+      return;
+    }
+    creerBC([]);
+  };
+
+  // Étape 2 : création du BC + envoi (simulé) du bon au fournisseur.
+  const creerBC = async (destinataires) => {
+    setEnvoiOuvert(false);
+    // Numéro saisi à la main, sinon prochain numéro SÉQUENTIEL de la base.
+    let numero = bcNumero.trim();
+    if (!numero) {
+      try {
+        numero = await numeroBonCommande();
+      } catch {
+        numero = genererNumeroSecours("BC");
+        ajouterJournal?.("⚠️ Numéro de BC séquentiel indisponible — numéro de secours attribué, à corriger manuellement.");
+      }
+    }
+    onAjouterBC(projet.id, {
+      id: `bc-${Date.now()}`,
+      numeroBC: numero,
+      fournisseur: fournisseurChoisi?.nom || "",
+      fournisseurId: fournisseurChoisi?.id || null,
+      description: bcDescription.trim(),
+      // Le MONTANT est optionnel : un BC créé sans montant (0 $) se
+      // remplira tout seul quand la facture fournisseur portant le même
+      // numéro arrivera de QuickBooks (voir calculerRentabiliteProjet).
+      montantHT: parseFloat(bcMontant) || 0,
+      statut: destinataires.length > 0 ? "Envoyé au fournisseur" : "En attente",
+      courrielsEnvoi: destinataires,
+      date: todayISO(),
+    });
+    ajouterJournal?.(
+      destinataires.length > 0
+        ? `📧 Bon de commande ${numero} envoyé à ${fournisseurChoisi?.nom} (${destinataires.join(", ")}) — ${bcDescription.trim() || "sans description"}${adresseLivraison ? ` · livraison : ${adresseLivraison}` : ""}`
+        : `📋 Bon de commande ${numero} créé pour ${fournisseurChoisi?.nom || "fournisseur"} — aucun courriel envoyé`
+    );
+    setBcFournisseurId("");
+    setBcMontant("");
+    setBcNumero("");
+    setBcDescription("");
+    setCourrielsChoisis([]);
+  };
+
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">Bons de commande</p>
+      <div className="space-y-1.5">
+        {(projet.bonsCommande || []).map((bc) => {
+          const depenseQb = depensesParBc.get(String(bc.numeroBC || "").trim().toUpperCase());
+          const montantAffiche = depenseQb ? Number(depenseQb.amountHT) || 0 : Number(bc.montantHT) || 0;
+          return (
+            <div key={bc.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2 text-xs">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-800">{bc.numeroBC} — {bc.fournisseur}</p>
+                {bc.description && <p className="mt-0.5 whitespace-pre-line text-[11px] text-slate-600">{bc.description}</p>}
+                <p className="text-[10px] text-slate-400">{bc.date} · {bc.statut}</p>
+                {bc.courrielsEnvoi?.length > 0 && (
+                  <p className="mt-0.5 text-[10px] font-semibold text-blue-600">📧 Envoyé à {bc.courrielsEnvoi.join(", ")}</p>
+                )}
+                {depenseQb ? (
+                  <p className="mt-0.5 text-[10px] font-bold text-emerald-600">
+                    ✓ Montant réel de QuickBooks ({depenseQb.status === "PAID" ? "payée" : "à payer"})
+                    {Number(bc.montantHT) > 0 && Math.abs(Number(bc.montantHT) - montantAffiche) > 0.01
+                      ? ` — estimation saisie : ${Number(bc.montantHT).toFixed(2)} $`
+                      : ""}
+                  </p>
+                ) : Number(bc.montantHT) === 0 ? (
+                  <p className="mt-0.5 text-[10px] font-bold text-amber-600">⏳ En attente de la facture QuickBooks (BC {bc.numeroBC})</p>
+                ) : (
+                  <p className="mt-0.5 text-[10px] text-slate-400">Estimation saisie — sera remplacée par le montant de QuickBooks</p>
+                )}
+              </div>
+              <span className={`shrink-0 font-bold tabular-nums ${depenseQb ? "text-emerald-700" : montantAffiche === 0 ? "text-amber-600" : "text-slate-700"}`}>
+                {montantAffiche.toFixed(2)} $
+              </span>
+            </div>
+          );
+        })}
+        {(projet.bonsCommande || []).length === 0 && <p className="text-xs text-slate-400">Aucun bon de commande pour l'instant.</p>}
+      </div>
+      {/* NOUVEAU BON DE COMMANDE — le fournisseur vient du répertoire, la
+          description part dans le courriel, et le BC peut être envoyé
+          directement au fournisseur à sa création. */}
+      <div className="mt-3 space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Nouveau bon de commande</p>
+        <select
+          value={bcFournisseurId}
+          onChange={(e) => {
+            if (e.target.value === "__nouveau__") {
+              setModalFournisseur(true);
+              return;
+            }
+            choisirFournisseur(e.target.value);
+          }}
+          className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold"
+        >
+          <option value="">— Choisir un fournisseur —</option>
+          <option value="__nouveau__">➕ Nouveau fournisseur…</option>
+          {(fournisseurs || []).map((f) => (
+            <option key={f.id} value={f.id}>{f.nom}</option>
+          ))}
+        </select>
+        <textarea
+          value={bcDescription}
+          onChange={(e) => setBcDescription(e.target.value)}
+          rows={2}
+          placeholder="Ce qui est commandé (ex : 12 × membrane élastomère, livraison au chantier)"
+          className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+        />
+        <div className="grid grid-cols-2 gap-1.5">
+          <input value={bcNumero} onChange={(e) => setBcNumero(e.target.value)} placeholder="N° BC (auto si vide)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          <input
+            type="number" min={0} step="0.01" value={bcMontant} onChange={(e) => setBcMontant(e.target.value)}
+            placeholder="Montant avant taxes $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+          />
+        </div>
+        <Button variant="outline" onClick={demarrerAjoutBC} disabled={!fournisseurChoisi} className="w-full min-h-0 py-1.5 text-xs">
+          <Plus size={12} /> {fournisseurChoisi && (fournisseurChoisi.courriels || []).length > 0 ? "Créer et envoyer le BC" : "Ajouter le BC"}
+        </Button>
+      </div>
+      <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
+        Montant <span className="font-bold">avant taxes</span> (les taxes payées aux fournisseurs sont récupérables, donc jamais comptées comme coût).
+        Tu peux le laisser vide : il se remplira automatiquement quand la facture fournisseur portant ce numéro de BC arrivera de QuickBooks.
+      </p>
+
+      {modalFournisseur && (
+        <ModalNouveauFournisseur
+          fournisseurs={fournisseurs}
+          setFournisseurs={setFournisseurs}
+          ajouterJournal={ajouterJournal}
+          onFermer={() => setModalFournisseur(false)}
+          onSelection={choisirFournisseur}
+        />
+      )}
+
+      {/* ENVOI DU BON DE COMMANDE AU FOURNISSEUR — choix multiple des
+          adresses + aperçu de ce qui part. */}
+      {envoiOuvert && fournisseurChoisi && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEnvoiOuvert(false)}>
+          <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-extrabold text-slate-900">📧 Envoyer le bon de commande</h3>
+            <p className="mt-0.5 text-xs text-slate-500">À {fournisseurChoisi.nom} — coche une ou plusieurs adresses.</p>
+            <div className="mt-3 space-y-1.5">
+              {(fournisseurChoisi.courriels || []).map((c) => (
+                <label
+                  key={c.email}
+                  className={`flex cursor-pointer items-center gap-2.5 rounded-xl border p-2.5 ${
+                    courrielsChoisis.includes(c.email) ? "border-[#FF6A13] bg-orange-50" : "border-slate-200"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={courrielsChoisis.includes(c.email)}
+                    onChange={() =>
+                      setCourrielsChoisis((prev) => (prev.includes(c.email) ? prev.filter((x) => x !== c.email) : [...prev, c.email]))
+                    }
+                    className="h-4 w-4 shrink-0 accent-[#FF6A13]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-slate-800">{c.email}</span>
+                    <span className="block text-[11px] text-slate-500">{c.label}{c.defaut ? " · défaut" : ""}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {/* Aperçu de ce qui sera envoyé */}
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
+              <p className="font-bold text-slate-800">Bon de commande {bcNumero.trim() || "(numéro automatique)"}</p>
+              <p className="mt-1 whitespace-pre-wrap">{bcDescription.trim() || "— aucune description saisie —"}</p>
+              {adresseLivraison && <p className="mt-1">📍 Livraison : {adresseLivraison}</p>}
+              <p className="mt-1 text-slate-400">Projet : {projet.nom}</p>
+            </div>
+            <div className="mt-4 space-y-2">
+              <Button onClick={() => creerBC(courrielsChoisis)} disabled={courrielsChoisis.length === 0} className="w-full">
+                Envoyer le BC{courrielsChoisis.length > 1 ? ` (${courrielsChoisis.length} adresses)` : ""}
+              </Button>
+              <Button variant="outline" onClick={() => creerBC([])} className="w-full">
+                Créer sans envoyer de courriel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OngletTempsProjet({ r }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+        Tâches & heures ({r.heuresChantier} h chantier + {r.heuresTransport} h transport = {r.totalHeures} h)
+      </p>
+      <div className="space-y-1.5">
+        {r.travauxDuProjet.map((t) => (
+          <div key={t.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-2 text-xs">
+            <div className="flex items-center gap-1.5">
+              {t.estTransport && <Car size={12} className="shrink-0 text-slate-400" />}
+              <div>
+                <p className="font-semibold text-slate-800">{t.titre}</p>
+                <p className="text-[10px] text-slate-400">{t.date}{t.estTransport ? " · imputation automatique" : ""}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="font-bold tabular-nums text-slate-700">{t.heures || 0} h</p>
+              {t.estTransport && t.distanceKm > 0 && (
+                <p className="text-[10px] tabular-nums text-slate-400">{t.distanceKm.toFixed(1)} km</p>
+              )}
+            </div>
+          </div>
+        ))}
+        {r.travauxDuProjet.length === 0 && <p className="text-xs text-slate-400">Aucune tâche rattachée à ce projet pour l'instant.</p>}
+      </div>
+    </div>
+  );
+}
+
+function OngletFacturationProjet({ r, devisDuClient }) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+          Finances — Factures & dépenses QuickBooks ({r.transactionsDuProjet.length})
+        </p>
+        {r.transactionsDuProjet.length === 0 ? (
+          <p className="text-xs text-slate-400">Aucune transaction QuickBooks synchronisée pour ce projet. Clique "Synchroniser QuickBooks" dans l'onglet Vue d'ensemble.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {r.transactionsDuProjet.map((t) => (
+              <div key={t.quickbooksId} className="flex items-center justify-between rounded-lg border border-slate-200 p-2 text-xs">
+                <div className="flex items-center gap-2">
+                  {t.type === "INVOICE" ? (
+                    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">VENTE</span>
+                  ) : (
+                    <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold text-orange-700">DÉPENSE</span>
+                  )}
+                  <div>
+                    <p className="font-semibold text-slate-800">{t.quickbooksId}</p>
+                    <p className="text-[10px] text-slate-400">{t.date}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="font-bold tabular-nums text-slate-700">{t.amountHT.toFixed(2)} $ HT</p>
+                  <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${
+                    t.status === "PAID" ? "bg-emerald-100 text-emerald-700" : t.status === "UNPAID" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {t.status === "PAID" ? <CheckCircle2 size={10} /> : t.status === "UNPAID" ? <AlertTriangle size={10} /> : <Cloud size={10} />}
+                    {t.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 text-[11px] font-semibold text-slate-500">
+              <span>Total facturé réel (encaissé/à encaisser)</span>
+              <span className="tabular-nums">{r.totalFactureReel.toFixed(2)} $</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">Facturation progressive</p>
+        {devisDuClient.length === 0 ? (
+          <p className="text-xs text-slate-400">Aucun devis pour ce client — voir l'onglet Devis pour en créer un, puis l'onglet Facturation pour les acomptes.</p>
+        ) : (
+          <div className="space-y-1">
+            {devisDuClient.map((d) => (
+              <div key={d.id} className="flex items-center justify-between rounded-lg border border-slate-200 p-2 text-xs">
+                <span className="font-semibold text-slate-800">{d.numero}</span>
+                <span className="tabular-nums text-slate-600">{d.totalVendant.toFixed(2)} $</span>
+              </div>
+            ))}
+            <p className="text-[10px] text-slate-400">Voir l'onglet Facturation pour émettre les acomptes/factures de situation.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onChangerStatut, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
+  const [ongletActif, setOngletActif] = useState("apercu");
+  const configProj = useEntreprise();
+  const r = useMemo(
+    () => calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections || [], Number(configProj?.coutCamionHoraire) || 0),
+    [projet, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, configProj]
+  );
+  const sante = useMemo(() => evaluerSanteProjet(projet, r), [projet, r]);
+  const devisDuClient = useMemo(() => devisListe.filter((d) => d.clientId === projet.clientId), [devisListe, projet.clientId]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white">
+        <div className="p-5 pb-0">
+          <div className="mb-3 flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900">{projet.nom}</h3>
+              <p className="text-xs text-slate-500">{projet.dateDebut} → {projet.dateFin}</p>
+              {projet.adresseTravaux && (
+                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400">
+                  <MapPin size={11} /> {projet.adresseTravaux}
+                </p>
+              )}
+            </div>
+            <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+          </div>
+
+          {/* ONGLETS */}
+          <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
+            {ONGLETS_PROJET.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => setOngletActif(o.id)}
+                className={`shrink-0 border-b-2 px-3 py-2 text-xs font-bold ${
+                  ongletActif === o.id ? "border-[#131B2E] text-[#131B2E]" : "border-transparent text-slate-400"
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="overflow-y-auto p-5">
+          {ongletActif === "apercu" && (
+            <OngletApercuProjet projet={projet} r={r} sante={sante} onChangerStatut={onChangerStatut} onSyncQuickBooks={onSyncQuickBooks} syncQbEnCours={syncQbEnCours} peutSyncQb={peutSyncQb} />
+          )}
+          {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
+          {ongletActif === "temps" && <OngletTempsProjet r={r} />}
+          {ongletActif === "facturation" && <OngletFacturationProjet r={r} devisDuClient={devisDuClient} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// HUB PROJETS & RENTABILITÉ — vue générale, recherche/filtres,
+// cartes synthétiques de tous les projets
+// ============================================================
+const FILTRES_STATUT_HUB = ["Tous", "À planifier", "En cours", "Facturation d'acompte", "Terminé", "En retard"];
+
+const LigneProjetClient = React.memo(function LigneProjetClient({ p, travaux, transactionsQb, utilisateurs, tauxMetiers, onOuvrir }) {
+  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers), [p, travaux, transactionsQb, utilisateurs, tauxMetiers]);
+  const sante = evaluerSanteProjet(p, r);
+  return (
+    <button
+      onClick={() => onOuvrir(p.id)}
+      className="block w-full rounded-lg border border-slate-200 bg-white p-2 text-left hover:bg-slate-50"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${sante.pastille}`} />
+          <div>
+            <p className="text-xs font-bold text-slate-800">{p.nom}</p>
+            <p className="text-[10px] text-slate-400">{p.statut} · {p.dateDebut} → {p.dateFin || "?"}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 text-right">
+          <p className={`text-xs font-bold tabular-nums ${sante.texte}`}>
+            {r.pourcentageMarge.toFixed(0)}% marge
+          </p>
+          <ChevronRight size={12} className="text-slate-300" />
+        </div>
+      </div>
+      {/* Micro-jauge : budget consommé (coût réel / budget), couleur = santé */}
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-slate-100">
+          <div
+            className={`h-full rounded-full ${couleurSanteBudget(r.pourcentageDepense).barre}`}
+            style={{ width: `${Math.min(100, r.pourcentageDepense)}%` }}
+          />
+        </div>
+        <span className="shrink-0 text-[9px] font-semibold tabular-nums text-slate-400">
+          {r.pourcentageDepense.toFixed(0)}%
+        </span>
+      </div>
+    </button>
+  );
+});
+
+const CarteProjet = React.memo(function CarteProjet({ p, client, travaux, transactionsQb, utilisateurs, tauxMetiers, onOuvrir, draggable, onDragStart, compact }) {
+  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers), [p, travaux, transactionsQb, utilisateurs, tauxMetiers]);
+  const avancementCalendrier = useMemo(() => calculerAvancementCalendrier(p), [p]);
+  const enRetard = projetEnRetard(p);
+  const enPerte = r.profitReel < 0;
+
+  return (
+    <button
+      onClick={() => onOuvrir(p.id)}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      className={`w-full rounded-2xl border border-slate-200 bg-white text-left hover:border-slate-300 ${
+        draggable ? "cursor-grab active:cursor-grabbing" : ""
+      } ${compact ? "p-3" : "p-4"}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className={`font-bold text-slate-900 ${compact ? "text-xs" : "text-sm"}`}>{p.nom}</p>
+          <p className="text-[11px] text-slate-500">{client?.nom}{!compact && ` · ${p.statut}`}</p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          {r.depassementBudget && (
+            <span className="flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-600">
+              <AlertCircle size={10} /> {!compact && "Risque de dépassement"}
+            </span>
+          )}
+          {enPerte && (
+            <span className="flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-600">
+              <AlertCircle size={10} /> {!compact && "En perte"}
+            </span>
+          )}
+          {enRetard && (
+            <span className="flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+              <Clock size={10} /> {!compact && "En retard"}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Double barre de progression : budget vs calendrier */}
+      <div className="mt-3 space-y-1.5">
+        <div>
+          <div className="flex justify-between text-[10px] font-semibold text-slate-400">
+            <span>Budget consommé</span><span>{r.pourcentageDepense.toFixed(0)}%</span>
+          </div>
+          <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className={`h-full rounded-full ${couleurSanteBudget(r.pourcentageDepense).barre}`} style={{ width: `${Math.min(100, r.pourcentageDepense)}%` }} />
+          </div>
+        </div>
+        {!compact && avancementCalendrier !== null && (
+          <div>
+            <div className="flex justify-between text-[10px] font-semibold text-slate-400">
+              <span>Avancement calendrier</span><span>{avancementCalendrier.toFixed(0)}%</span>
+            </div>
+            <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-blue-400" style={{ width: `${avancementCalendrier}%` }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Chiffres clés */}
+      <div className="mt-3 grid grid-cols-3 gap-1 text-center">
+        <div>
+          <p className="text-[9px] font-bold uppercase text-slate-400">Budget</p>
+          <p className="text-xs font-bold tabular-nums text-slate-800">{p.budgetTotal.toFixed(0)} $</p>
+        </div>
+        <div>
+          <p className="text-[9px] font-bold uppercase text-slate-400">Coûts réels</p>
+          <p className="text-xs font-bold tabular-nums text-slate-800">{r.coutTotalReel.toFixed(0)} $</p>
+        </div>
+        <div>
+          <p className="text-[9px] font-bold uppercase text-slate-400">Profit</p>
+          <p className={`text-xs font-bold tabular-nums ${enPerte ? "text-red-600" : "text-emerald-600"}`}>
+            {r.profitReel.toFixed(0)} $ ({r.pourcentageMarge.toFixed(0)}%)
+          </p>
+        </div>
+      </div>
+    </button>
+  );
+});
+
+function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooks, onAssignerTransaction, ajouterJournal, peutSyncQb, fournisseurs, setFournisseurs, inspections }) {
+  const [recherche, setRecherche] = useState("");
+  const [filtreStatut, setFiltreStatut] = useState("Tous");
+  const [filtreClientId, setFiltreClientId] = useState("");
+  const [projetOuvertId, setProjetOuvertId] = useState(null);
+  const [assignationManuelleId, setAssignationManuelleId] = useState(null);
+  const [vueAffichage, setVueAffichage] = useState("liste"); // "liste" | "kanban"
+  const [colonneSurvolee, setColonneSurvolee] = useState(null);
+
+  const projetOuvert = projets.find((p) => p.id === projetOuvertId) || null;
+  const transactionsNonAssignees = transactionsQb.filter((t) => !t.projectId);
+
+  const ajouterBonCommandeProjet = (projetId, bc) => {
+    setProjets((prev) => prev.map((p) => (p.id === projetId ? { ...p, bonsCommande: [...(p.bonsCommande || []), bc] } : p)));
+    const p = projets.find((x) => x.id === projetId);
+    ajouterJournal(`📦 BC ${bc.numeroBC} (${bc.montantHT.toFixed(2)} $) ajouté au projet "${p?.nom}"`);
+  };
+
+  const changerStatutProjet = (projetId, statut) => {
+    setProjets((prev) => prev.map((p) => (p.id === projetId ? { ...p, statut } : p)));
+  };
+
+  const projetsFiltres = projets.filter((p) => {
+    if (filtreClientId && p.clientId !== filtreClientId) return false;
+    if (filtreStatut !== "Tous") {
+      if (filtreStatut === "En retard" ? !projetEnRetard(p) : p.statut !== filtreStatut) return false;
+    }
+    if (recherche.trim()) {
+      const client = clients.find((c) => c.id === p.clientId);
+      const texte = `${p.nom} ${client?.nom || ""}`.toLowerCase();
+      if (!texte.includes(recherche.trim().toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Projets &amp; Rentabilité</h2>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-slate-200 p-0.5">
+            <button
+              onClick={() => setVueAffichage("liste")}
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold ${vueAffichage === "liste" ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+            >
+              <List size={12} /> Liste
+            </button>
+            <button
+              onClick={() => setVueAffichage("kanban")}
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-bold ${vueAffichage === "kanban" ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+            >
+              <LayoutGrid size={12} /> Kanban
+            </button>
+          </div>
+          <Button
+            variant="outline"
+            onClick={peutSyncQb ? onSyncQuickBooks : undefined}
+            disabled={!peutSyncQb}
+            loading={syncQbEnCours}
+            title={peutSyncQb ? undefined : "Réservé aux administrateurs"}
+            className="min-h-0 gap-1.5 px-2.5 py-1.5 text-xs"
+          >
+            {!syncQbEnCours && (peutSyncQb ? <RefreshCw size={12} /> : <Lock size={12} />)} Synchroniser QuickBooks
+          </Button>
+        </div>
+      </div>
+
+      {/* RECHERCHE & FILTRES */}
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+          <input
+            value={recherche}
+            onChange={(e) => setRecherche(e.target.value)}
+            placeholder="Rechercher par nom de projet ou client..."
+            className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {FILTRES_STATUT_HUB.map((s) => (
+            <button
+              key={s}
+              onClick={() => setFiltreStatut(s)}
+              className={`rounded-full px-3 py-1 text-xs font-bold ${
+                filtreStatut === s ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <select
+          value={filtreClientId}
+          onChange={(e) => setFiltreClientId(e.target.value)}
+          className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+        >
+          <option value="">Tous les clients</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>{c.nom}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* FACTURES QUICKBOOKS NON ASSIGNÉES */}
+      {transactionsNonAssignees.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-700">
+            <AlertTriangle size={13} /> Factures QuickBooks non assignées ({transactionsNonAssignees.length})
+          </p>
+          <div className="space-y-1.5">
+            {transactionsNonAssignees.map((t) => {
+              const choixProjet = assignationManuelleId?.quickbooksId === t.quickbooksId ? assignationManuelleId.projetId : "";
+              return (
+                <div key={t.quickbooksId} className="rounded-lg border border-amber-200 bg-white p-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1 font-semibold text-slate-800">
+                      <AlertTriangle size={11} className="text-red-500" /> {t.quickbooksId} · {t.type === "INVOICE" ? "Vente" : "Dépense"}
+                    </span>
+                    <span className="font-bold tabular-nums text-slate-700">{t.amountHT.toFixed(2)} $ HT</span>
+                  </div>
+                  <div className="mt-1.5 flex gap-1.5">
+                    <select
+                      value={choixProjet}
+                      onChange={(e) => setAssignationManuelleId({ quickbooksId: t.quickbooksId, projetId: e.target.value })}
+                      className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
+                    >
+                      <option value="">Choisir le projet...</option>
+                      {projets.map((p) => <option key={p.id} value={p.id}>{p.nom}</option>)}
+                    </select>
+                    <Button
+                      variant="outline"
+                      disabled={!choixProjet}
+                      onClick={() => { onAssignerTransaction(t.quickbooksId, choixProjet); setAssignationManuelleId(null); }}
+                      className="min-h-0 px-2 py-1 text-[11px]"
+                    >
+                      Assigner
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+
+      {/* CARTES PROJETS — vue Liste ou Kanban */}
+      {vueAffichage === "liste" ? (
+        <div className="space-y-3">
+          {projetsFiltres.length === 0 && (
+            <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+              Aucun projet ne correspond à ces critères. Les projets se créent depuis la fiche client (onglet Clients).
+            </p>
+          )}
+          {projetsFiltres.map((p) => (
+            <CarteProjet
+              key={p.id}
+              p={p}
+              client={clients.find((c) => c.id === p.clientId)}
+              travaux={travaux}
+              transactionsQb={transactionsQb}
+              utilisateurs={utilisateurs}
+              tauxMetiers={tauxMetiers}
+              onOuvrir={setProjetOuvertId}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+          <div className="flex gap-3" style={{ minWidth: STATUTS_PROJET.length * 220 }}>
+            {STATUTS_PROJET.map((statutColonne) => {
+              const projetsColonne = projetsFiltres.filter((p) => p.statut === statutColonne);
+              return (
+                <div
+                  key={statutColonne}
+                  onDragOver={(e) => { e.preventDefault(); setColonneSurvolee(statutColonne); }}
+                  onDragLeave={() => setColonneSurvolee(null)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const projetId = e.dataTransfer.getData("text/plain");
+                    if (projetId) changerStatutProjet(projetId, statutColonne);
+                    setColonneSurvolee(null);
+                  }}
+                  className={`w-[220px] shrink-0 rounded-xl p-2 ${colonneSurvolee === statutColonne ? "bg-orange-50" : "bg-slate-50"}`}
+                >
+                  <p className="mb-2 flex items-center justify-between px-1 text-xs font-bold text-slate-600">
+                    {statutColonne}
+                    <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] tabular-nums">{projetsColonne.length}</span>
+                  </p>
+                  <div className="space-y-2">
+                    {projetsColonne.map((p) => (
+                      <CarteProjet
+                        key={p.id}
+                        p={p}
+                        client={clients.find((c) => c.id === p.clientId)}
+                        travaux={travaux}
+                        transactionsQb={transactionsQb}
+                        utilisateurs={utilisateurs}
+                        tauxMetiers={tauxMetiers}
+                        onOuvrir={setProjetOuvertId}
+                        draggable
+                        onDragStart={(e) => e.dataTransfer.setData("text/plain", p.id)}
+                        compact
+                      />
+                    ))}
+                    {projetsColonne.length === 0 && (
+                      <p className="rounded-lg border border-dashed border-slate-200 p-3 text-center text-[10px] text-slate-400">
+                        Glisse un projet ici
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {projetOuvert && (
+        <ModalDetailProjet
+          inspections={inspections}
+          projet={projetOuvert}
+          travaux={travaux}
+          devisListe={devisListe}
+          transactionsQb={transactionsQb}
+          clients={clients}
+          utilisateurs={utilisateurs}
+          tauxMetiers={tauxMetiers}
+          onFermer={() => setProjetOuvertId(null)}
+          onAjouterBC={ajouterBonCommandeProjet}
+          onChangerStatut={changerStatutProjet}
+          onSyncQuickBooks={onSyncQuickBooks}
+          peutSyncQb={peutSyncQb}
+          syncQbEnCours={syncQbEnCours}
+          fournisseurs={fournisseurs}
+          setFournisseurs={setFournisseurs}
+          ajouterJournal={ajouterJournal}
+        />
+      )}
+    </div>
+  );
+}
+
+function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, bons, inspections }) {
+  const [formulaireOuvert, setFormulaireOuvert] = useState(false);
+  const [entreprise, setEntreprise] = useState("");
+  const [prenom, setPrenom] = useState("");
+  const [nomFamille, setNomFamille] = useState("");
+  const [courriel, setCourriel] = useState("");
+  const [telephone, setTelephone] = useState("");
+  const [termeFacturation, setTermeFacturation] = useState(TERMES_FACTURATION[0]);
+  const [adresseFacturation, setAdresseFacturation] = useState(null);
+  const [dejaSyncQb, setDejaSyncQb] = useState(false);
+  const [syncEnCours, setSyncEnCours] = useState(false);
+  const [clientOuvertId, setClientOuvertId] = useState(null);
+  // Arrivée depuis la RECHERCHE RAPIDE : le dossier du client visé
+  // s'ouvre tout seul (et son devis est mis en évidence par DevisDuClient).
+  useEffect(() => {
+    if (clientCible) setClientOuvertId(clientCible);
+  }, [clientCible, devisCible]);
+  // Recherche rapide dans la liste des clients (nom, entreprise,
+  // courriel, téléphone, adresse, nº QuickBooks).
+  const [rechercheClients, setRechercheClients] = useState("");
+  const qClients = rechercheClients.trim().toLowerCase();
+  const clientsFiltres = !qClients
+    ? clients
+    : clients.filter((c) =>
+        [
+          c.nom,
+          c.entreprise,
+          c.telephone,
+          c.quickbooksCustomerId,
+          ...(c.courriels || []).map((cc) => cc.email),
+          ...(c.adresses || []).map((a) => `${a.nom} ${a.ligne1}`),
+        ]
+          .filter(Boolean)
+          .some((champ) => String(champ).toLowerCase().includes(qClients))
+      );
+  // Recherche rapide dans « Travaux (passés et à venir) » du client ouvert.
+  const [rechercheTravaux, setRechercheTravaux] = useState("");
+  const [filtreTravauxStatut, setFiltreTravauxStatut] = useState("tous"); // "tous" | "a_venir" | "complete"
+  // Repart à neuf quand on change de client ouvert.
+  useEffect(() => {
+    setRechercheTravaux("");
+    setFiltreTravauxStatut("tous");
+  }, [clientOuvertId]);
+  const [nouveauCourrielLabel, setNouveauCourrielLabel] = useState("");
+  const [nouveauCourrielEmail, setNouveauCourrielEmail] = useState("");
+
+  const ajouterCourrielClient = (clientId) => {
+    if (!nouveauCourrielEmail.trim()) return;
+    setClients((prev) =>
+      prev.map((c) =>
+        c.id === clientId
+          ? {
+              ...c,
+              courriels: [
+                ...(c.courriels || []),
+                {
+                  id: `cc-${Date.now()}`,
+                  label: nouveauCourrielLabel.trim() || "Autre",
+                  email: nouveauCourrielEmail.trim(),
+                  defaut: (c.courriels || []).length === 0,
+                },
+              ],
+            }
+          : c
+      )
+    );
+    const c = clients.find((x) => x.id === clientId);
+    ajouterJournal(`📧 Courriel "${nouveauCourrielLabel.trim() || "Autre"}" ajouté pour ${c?.nom} (${nouveauCourrielEmail.trim()})`);
+    setNouveauCourrielLabel("");
+    setNouveauCourrielEmail("");
+  };
+
+  const retirerCourrielClient = (clientId, courrielId) => {
+    setClients((prev) =>
+      prev.map((c) => {
+        if (c.id !== clientId) return c;
+        const restants = (c.courriels || []).filter((cc) => cc.id !== courrielId);
+        // Si on retire celui marqué par défaut, le premier restant
+        // reprend automatiquement ce rôle — jamais 0 courriel par
+        // défaut tant qu'il en reste au moins un.
+        if (restants.length > 0 && !restants.some((cc) => cc.defaut)) restants[0].defaut = true;
+        return { ...c, courriels: restants };
+      })
+    );
+  };
+
+  const definirCourrielDefaut = (clientId, courrielId) => {
+    setClients((prev) =>
+      prev.map((c) =>
+        c.id === clientId
+          ? { ...c, courriels: (c.courriels || []).map((cc) => ({ ...cc, defaut: cc.id === courrielId })) }
+          : c
+      )
+    );
+  };
+
+  const [travailOuvertId, setTravailOuvertId] = useState(null);
+  const travailOuvert = travaux.find((t) => t.id === travailOuvertId) || null;
+  const [projetOuvertId, setProjetOuvertId] = useState(null);
+  const projetOuvert = projets.find((p) => p.id === projetOuvertId) || null;
+  const [formulaireProjetPourClient, setFormulaireProjetPourClient] = useState(null); // clientId ou null
+  const [nouveauProjetNom, setNouveauProjetNom] = useState("");
+  const [nouveauProjetDebut, setNouveauProjetDebut] = useState(todayISO());
+  const [nouveauProjetFin, setNouveauProjetFin] = useState("");
+  const [nouveauProjetAdresseId, setNouveauProjetAdresseId] = useState("");
+  const [nouveauProjetNouvelleAdresse, setNouveauProjetNouvelleAdresse] = useState(null);
+  // Ventilation du budget PRÉVU (Étape A). Le RÉEL viendra plus tard :
+  // les heures depuis l'app employé (travaux), et les coûts matériaux /
+  // sous-traitance depuis QuickBooks (rattachés par numéro de projet).
+  const [nouveauProjetMoHeures, setNouveauProjetMoHeures] = useState("");
+  const [nouveauProjetMoFacture, setNouveauProjetMoFacture] = useState("");
+  const [nouveauProjetMoCoutant, setNouveauProjetMoCoutant] = useState("");
+  const [nouveauProjetTrHeures, setNouveauProjetTrHeures] = useState("");
+  const [nouveauProjetTrFacture, setNouveauProjetTrFacture] = useState("");
+  const [nouveauProjetTrCoutant, setNouveauProjetTrCoutant] = useState("");
+  const [nouveauProjetMatFacture, setNouveauProjetMatFacture] = useState("");
+  const [nouveauProjetMatCoutant, setNouveauProjetMatCoutant] = useState("");
+  const [nouveauProjetSousTraitants, setNouveauProjetSousTraitants] = useState([]);
+  const nb = (v) => parseFloat(v) || 0;
+  const ajouterSousTraitant = () =>
+    setNouveauProjetSousTraitants((p) => [...p, { id: `st-${Date.now()}`, nom: "", facture: "", coutant: "" }]);
+  const majSousTraitant = (id, champ, val) =>
+    setNouveauProjetSousTraitants((p) => p.map((st) => (st.id === id ? { ...st, [champ]: val } : st)));
+  const retirerSousTraitant = (id) =>
+    setNouveauProjetSousTraitants((p) => p.filter((st) => st.id !== id));
+  const totalFactureProjet =
+    nb(nouveauProjetMoFacture) + nb(nouveauProjetTrFacture) + nb(nouveauProjetMatFacture) +
+    nouveauProjetSousTraitants.reduce((s, st) => s + nb(st.facture), 0);
+  const totalCoutantProjet =
+    nb(nouveauProjetMoCoutant) + nb(nouveauProjetTrCoutant) + nb(nouveauProjetMatCoutant) +
+    nouveauProjetSousTraitants.reduce((s, st) => s + nb(st.coutant), 0);
+  const margeProjet = totalFactureProjet - totalCoutantProjet;
+  const margePctProjet = totalFactureProjet > 0 ? (margeProjet / totalFactureProjet) * 100 : 0;
+
+  const creerProjet = (clientId) => {
+    if (!nouveauProjetNom.trim() || totalFactureProjet <= 0) return;
+    const client = clients.find((c) => c.id === clientId);
+    let adresseTravaux = null;
+    if (nouveauProjetNouvelleAdresse) {
+      adresseTravaux = nouveauProjetNouvelleAdresse.label;
+    } else if (nouveauProjetAdresseId) {
+      const a = client?.adresses?.find((x) => x.id === nouveauProjetAdresseId);
+      if (a) adresseTravaux = `${a.nom} — ${a.ligne1}`;
+    }
+    const moHeures = nb(nouveauProjetMoHeures);
+    const moCoutant = nb(nouveauProjetMoCoutant);
+    const nouveau = {
+      id: `projet-${Date.now()}`,
+      nom: nouveauProjetNom.trim(),
+      clientId,
+      adresseTravaux,
+      dateDebut: nouveauProjetDebut,
+      dateFin: nouveauProjetFin,
+      statut: "À planifier",
+      // budgetTotal et tauxHoraireCoutant sont dérivés de la ventilation
+      // ci-dessous (le calcul de rentabilité existant s'en sert toujours).
+      budgetTotal: totalFactureProjet,
+      tauxHoraireCoutant: moHeures > 0 ? moCoutant / moHeures : 45,
+      bonsCommande: [],
+      // Ventilation du budget PRÉVU. Le RÉEL viendra de l'app employé
+      // (heures) et de QuickBooks (matériaux / sous-traitance).
+      budgetPrevu: {
+        mainOeuvreChantier: { heures: moHeures, facture: nb(nouveauProjetMoFacture), coutant: moCoutant },
+        transport: { heures: nb(nouveauProjetTrHeures), facture: nb(nouveauProjetTrFacture), coutant: nb(nouveauProjetTrCoutant) },
+        materiaux: { facture: nb(nouveauProjetMatFacture), coutant: nb(nouveauProjetMatCoutant) },
+        sousTraitants: nouveauProjetSousTraitants.map((st) => ({ nom: st.nom.trim(), facture: nb(st.facture), coutant: nb(st.coutant) })),
+        totalFacture: totalFactureProjet,
+        totalCoutant: totalCoutantProjet,
+        marge: margeProjet,
+      },
+    };
+    setProjets((prev) => [...prev, nouveau]);
+    ajouterJournal(`🏗️ Projet "${nouveau.nom}" créé pour ${client?.nom} — budget ${totalFactureProjet.toFixed(2)} $, marge prévue ${margeProjet.toFixed(2)} $`);
+    setNouveauProjetNom("");
+    setNouveauProjetDebut(todayISO());
+    setNouveauProjetFin("");
+    setNouveauProjetMoHeures(""); setNouveauProjetMoFacture(""); setNouveauProjetMoCoutant("");
+    setNouveauProjetTrHeures(""); setNouveauProjetTrFacture(""); setNouveauProjetTrCoutant("");
+    setNouveauProjetMatFacture(""); setNouveauProjetMatCoutant("");
+    setNouveauProjetSousTraitants([]);
+    setNouveauProjetAdresseId("");
+    setNouveauProjetNouvelleAdresse(null);
+    setFormulaireProjetPourClient(null);
+  };
+
+  const ajouterBonCommandeProjet = (projetId, bc) => {
+    setProjets((prev) => prev.map((p) => (p.id === projetId ? { ...p, bonsCommande: [...(p.bonsCommande || []), bc] } : p)));
+    const p = projets.find((x) => x.id === projetId);
+    ajouterJournal(`📦 BC ${bc.numeroBC} (${bc.montantHT.toFixed(2)} $) ajouté au projet "${p?.nom}"`);
+  };
+
+  const changerStatutProjet = (projetId, statut) => {
+    setProjets((prev) => prev.map((p) => (p.id === projetId ? { ...p, statut } : p)));
+  };
+
+  const reactiverModification = (id, actif) => {
+    setTravaux((prev) => prev.map((t) => (t.id === id ? { ...t, modifReactivee: actif } : t)));
+    const t = travaux.find((x) => x.id === id);
+    ajouterJournal(
+      actif
+        ? `🔓 Modification réactivée pour l'employé sur « ${t?.titre} »`
+        : `🔒 Réactivation retirée sur « ${t?.titre} »`
+    );
+  };
+
+  const reinitialiserFormulaire = () => {
+    setEntreprise("");
+    setPrenom("");
+    setNomFamille("");
+    setCourriel("");
+    setTelephone("");
+    setTermeFacturation(TERMES_FACTURATION[0]);
+    setAdresseFacturation(null);
+  };
+
+  const peutCreer = prenom.trim() && nomFamille.trim() && courriel.trim();
+  // Erreurs de validation bloquantes avant le transfert vers QuickBooks.
+  const [erreursCreation, setErreursCreation] = useState([]);
+
+  const creerClient = () => {
+    if (!peutCreer) return;
+    // Conformité : aucune donnée invalide ne part vers QuickBooks —
+    // courriel au bon format et adresse complète (ligne + ville) exigés.
+    const erreurs = erreursClientPourQuickBooks({ courriel, adresse: adresseFacturation });
+    if (erreurs.length > 0) {
+      setErreursCreation(erreurs);
+      return;
+    }
+    setErreursCreation([]);
+    const id = `c-${Date.now()}`;
+    const nouveauClient = {
+      id,
+      entreprise: entreprise.trim(),
+      nom: `${prenom.trim()} ${nomFamille.trim()}`,
+      courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: courriel.trim(), defaut: true }],
+      telephone: telephone.trim(),
+      termeFacturation,
+      adresseFacturation: adresseFacturation?.label || "",
+      adresses: adresseFacturation
+        ? [{ id: `a-${Date.now()}`, nom: "Facturation", ligne1: adresseFacturation.label, codePostal: adresseFacturation.codePostal }]
+        : [],
+      quickbooksCustomerId: null,
+      syncQb: "en_cours",
+    };
+    setClients((prev) => [...prev, nouveauClient]);
+    ajouterJournal(`👤 Client "${nouveauClient.nom}" créé — transfert vers QuickBooks en cours...`);
+    setFormulaireOuvert(false);
+    reinitialiserFormulaire();
+
+    // ------------------------------------------------------------
+    // AUTOMATISATION : transfert vers la base clients QuickBooks
+    // En prod : appel à l'API QuickBooks (endpoint Customer) via une
+    // fonction backend, déclenché juste après l'insertion Supabase.
+    // ------------------------------------------------------------
+    setTimeout(() => {
+      const qbId = `QBO-${Math.floor(2000 + Math.random() * 8000)}`;
+      setClients((prev) => prev.map((c) => (c.id === id ? { ...c, quickbooksCustomerId: qbId, syncQb: "synchronise" } : c)));
+      ajouterJournal(`🔄 Client "${nouveauClient.nom}" transféré vers QuickBooks — ID ${qbId}`);
+    }, 900);
+  };
+
+  const synchroniserDepuisQuickbooks = () => {
+    if (dejaSyncQb) return;
+    setSyncEnCours(true);
+    // ------------------------------------------------------------
+    // AUTOMATISATION : télécharge les clients créés directement dans
+    // QuickBooks (pas via notre appli) pour garder les deux bases
+    // alignées. En prod : requête périodique (ou webhook QuickBooks)
+    // sur l'endpoint Customer, filtrée sur les enregistrements créés
+    // depuis la dernière synchronisation.
+    // ------------------------------------------------------------
+    setTimeout(() => {
+      setClients((prev) => {
+        // Déduplication par id ET par quickbooksCustomerId — même si
+        // cette fonction venait à être appelée plusieurs fois (sync
+        // périodique en prod), un même client ne doit jamais être
+        // ajouté deux fois. Ne dépend pas du drapeau `dejaSyncQb` seul.
+        const idsExistants = new Set(prev.map((c) => c.id));
+        const qbIdsExistants = new Set(prev.map((c) => c.quickbooksCustomerId).filter(Boolean));
+        const nouveaux = NOUVEAUX_CLIENTS_QUICKBOOKS.filter(
+          (c) => !idsExistants.has(c.id) && !(c.quickbooksCustomerId && qbIdsExistants.has(c.quickbooksCustomerId))
+        );
+        nouveaux.forEach((c) => ajouterJournal(`⬇️ Client "${c.nom}" téléchargé depuis QuickBooks (${c.quickbooksCustomerId})`));
+        if (nouveaux.length === 0) return prev;
+        return [...prev, ...nouveaux];
+      });
+      setDejaSyncQb(true);
+      setSyncEnCours(false);
+    }, 900);
+  };
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-3 p-4 md:p-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Clients</h2>
+        <Button
+          variant="outline"
+          onClick={synchroniserDepuisQuickbooks}
+          loading={syncEnCours}
+          disabled={dejaSyncQb}
+          className="min-h-0 px-3 py-1.5 text-xs"
+        >
+          {!syncEnCours && <RefreshCw size={13} />}
+          {dejaSyncQb ? "À jour avec QuickBooks" : "Synchroniser depuis QuickBooks"}
+        </Button>
+      </div>
+
+      {/* "NOUVEAU CLIENT" — toujours en premier dans la liste */}
+      <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white">
+        <button
+          onClick={() => setFormulaireOuvert((v) => !v)}
+          className="flex w-full items-center gap-3 p-4 text-left"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FF6A13]/10">
+            <UserPlus size={18} className="text-[#FF6A13]" />
+          </div>
+          <span className="font-bold text-slate-800">Nouveau client</span>
+        </button>
+
+        {formulaireOuvert && (
+          <div className="space-y-3 border-t border-slate-200 p-4">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Nom d'entreprise (optionnel)</label>
+              <input
+                value={entreprise}
+                onChange={(e) => setEntreprise(e.target.value)}
+                placeholder="Ex: Toitures Lavallée inc."
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Prénom</label>
+                <input
+                  value={prenom}
+                  onChange={(e) => setPrenom(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Nom</label>
+                <input
+                  value={nomFamille}
+                  onChange={(e) => setNomFamille(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Adresse de facturation</label>
+              <AutocompleteAdresse onSelection={setAdresseFacturation} />
+              {adresseFacturation && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] text-emerald-600">
+                  <Check size={12} /> {adresseFacturation.label}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Terme de facturation</label>
+              <select
+                value={termeFacturation}
+                onChange={(e) => setTermeFacturation(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold"
+              >
+                {TERMES_FACTURATION.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Courriel</label>
+                <input
+                  type="email"
+                  value={courriel}
+                  onChange={(e) => setCourriel(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Téléphone</label>
+                <input
+                  type="tel"
+                  value={telephone}
+                  onChange={(e) => setTelephone(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            {erreursCreation.length > 0 && (
+              <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+                <p className="mb-1 flex items-center gap-1.5 text-xs font-bold text-red-700">
+                  <AlertCircle size={14} /> Envoi vers QuickBooks bloqué — corrige d'abord :
+                </p>
+                <ul className="ml-5 list-disc space-y-0.5 text-xs text-red-700">
+                  {erreursCreation.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+            )}
+
+            <Button onClick={creerClient} disabled={!peutCreer} className="w-full">
+              Créer le client et transférer vers QuickBooks
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* RECHERCHE RAPIDE DE CLIENTS */}
+      <div className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2.5">
+        <Search size={15} className="shrink-0 text-slate-400" />
+        <input
+          value={rechercheClients}
+          onChange={(e) => setRechercheClients(e.target.value)}
+          placeholder="Rechercher un client (nom, entreprise, courriel, téléphone, adresse…)"
+          className="w-full text-sm outline-none"
+        />
+        {rechercheClients && (
+          <button onClick={() => setRechercheClients("")} aria-label="Effacer la recherche">
+            <X size={14} className="text-slate-400" />
+          </button>
+        )}
+        {qClients && (
+          <span className="shrink-0 text-[10px] font-bold tabular-nums text-slate-400">
+            {clientsFiltres.length}/{clients.length}
+          </span>
+        )}
+      </div>
+
+      {/* LISTE DES CLIENTS EXISTANTS */}
+      <div className="space-y-2">
+        {qClients && clientsFiltres.length === 0 && (
+          <p className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-400">
+            Aucun client ne correspond à « {rechercheClients.trim()} ».
+          </p>
+        )}
+        {clientsFiltres.map((c) => {
+          const ouvert = clientOuvertId === c.id;
+          return (
+            <div key={c.id} className="rounded-xl border border-slate-200 bg-white">
+              <button
+                onClick={() => setClientOuvertId(ouvert ? null : c.id)}
+                className="flex w-full items-start justify-between gap-2 p-3.5 text-left"
+              >
+                <p className="text-sm font-bold text-slate-900">{c.nom}</p>
+                {c.quickbooksCustomerId ? (
+                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                    {c.quickbooksCustomerId}
+                  </span>
+                ) : (
+                  <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                    Synchronisation...
+                  </span>
+                )}
+              </button>
+
+              {ouvert && (
+                <div className="space-y-1.5 border-t border-slate-100 px-3.5 pb-3.5 pt-2 text-xs text-slate-500">
+                  <p className="text-sm font-extrabold text-[#131B2E]">{c.entreprise || "Particulier (aucune entreprise)"}</p>
+
+                  <div className="space-y-1 rounded-lg bg-slate-50 p-2">
+                    <p className="text-[10px] font-bold uppercase text-slate-400">Courriels ({(c.courriels || []).length})</p>
+                    {(c.courriels || []).map((cc) => (
+                      <div key={cc.id} className="flex items-center justify-between gap-1.5 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <Mail size={11} className="shrink-0" />
+                          <span>{cc.email}</span>
+                          <span className="text-[10px] text-slate-400">({cc.label})</span>
+                          {cc.defaut && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Défaut</span>}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {!cc.defaut && (
+                            <button onClick={() => definirCourrielDefaut(c.id, cc.id)} className="text-[10px] font-semibold text-blue-600">
+                              Définir par défaut
+                            </button>
+                          )}
+                          {(c.courriels || []).length > 1 && (
+                            <button onClick={() => retirerCourrielClient(c.id, cc.id)} className="text-slate-300 hover:text-red-500">
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="mt-1.5 grid grid-cols-3 gap-1">
+                      <input
+                        value={nouveauCourrielLabel}
+                        onChange={(e) => setNouveauCourrielLabel(e.target.value)}
+                        placeholder="Ex: Projet X"
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
+                      />
+                      <input
+                        type="email"
+                        value={nouveauCourrielEmail}
+                        onChange={(e) => setNouveauCourrielEmail(e.target.value)}
+                        placeholder="courriel@..."
+                        className="col-span-1 rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
+                      />
+                      <Button variant="outline" onClick={() => ajouterCourrielClient(c.id)} className="min-h-0 gap-1 py-1 text-[10px]">
+                        <Plus size={10} /> Ajouter
+                      </Button>
+                    </div>
+                  </div>
+
+                  {c.telephone && (
+                    <div className="flex items-center gap-1.5"><Phone size={11} /> {c.telephone}</div>
+                  )}
+                  {c.termeFacturation && (
+                    <div className="flex items-center gap-1.5"><CreditCard size={11} /> {c.termeFacturation}</div>
+                  )}
+
+                  <div className="mt-2 border-t border-slate-100 pt-2">
+                    <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase text-slate-400">
+                      <ClipboardList size={12} /> Travaux (passés et à venir)
+                    </p>
+                    {travaux.filter((t) => t.clientId === c.id || (t.clientNom && t.clientNom === c.nom)).length === 0 ? (
+                      <p className="text-xs text-slate-400">Aucun travail enregistré pour ce client.</p>
+                    ) : (
+                      <>
+                        {/* RECHERCHE RAPIDE dans les travaux du client */}
+                        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                          <div className="flex min-w-[160px] flex-1 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5">
+                            <Search size={12} className="shrink-0 text-slate-400" />
+                            <input
+                              value={rechercheTravaux}
+                              onChange={(e) => setRechercheTravaux(e.target.value)}
+                              placeholder="Rechercher un travail (titre, date, note…)"
+                              className="w-full text-xs outline-none"
+                            />
+                            {rechercheTravaux && (
+                              <button onClick={() => setRechercheTravaux("")} aria-label="Effacer la recherche">
+                                <X size={12} className="text-slate-400" />
+                              </button>
+                            )}
+                          </div>
+                          {[["tous", "Tous"], ["a_venir", "À venir"], ["complete", "Complétés"]].map(([val, label]) => (
+                            <button
+                              key={val}
+                              onClick={() => setFiltreTravauxStatut(val)}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                                filtreTravauxStatut === val ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        {(() => {
+                          const q = rechercheTravaux.trim().toLowerCase();
+                          const listeFiltree = travaux
+                            .filter((t) => t.clientId === c.id || (t.clientNom && t.clientNom === c.nom))
+                            .filter((t) =>
+                              filtreTravauxStatut === "tous"
+                                ? true
+                                : filtreTravauxStatut === "complete"
+                                ? t.statut === "complete"
+                                : t.statut !== "complete"
+                            )
+                            .filter((t) =>
+                              !q
+                                ? true
+                                : [t.titre, t.date, t.noteTerrain, t.noteInterne]
+                                    .filter(Boolean)
+                                    .some((champ) => champ.toLowerCase().includes(q))
+                            )
+                            .sort((a, b) => a.date.localeCompare(b.date));
+                          if (listeFiltree.length === 0) {
+                            return (
+                              <p className="rounded-lg border border-dashed border-slate-200 px-2.5 py-2 text-center text-xs text-slate-400">
+                                Aucun travail ne correspond à la recherche.
+                              </p>
+                            );
+                          }
+                          return (
+                            <div className="overflow-hidden rounded-lg border border-slate-100">
+                              {listeFiltree.map((t) => (
+                            <button
+                              key={t.id}
+                              onClick={() => setTravailOuvertId(t.id)}
+                              className="flex w-full items-center justify-between gap-2 border-b border-slate-100 bg-white px-2.5 py-2 text-left last:border-0 hover:bg-slate-50"
+                            >
+                              <div>
+                                <p className="text-xs font-bold text-slate-800">{t.titre}</p>
+                                <p className="text-[10px] text-slate-400">{t.date}</p>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[9px] font-bold ${
+                                    t.statut === "complete"
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : "bg-orange-100 text-[#B14E0E]"
+                                  }`}
+                                >
+                                  {t.statut === "complete" ? "COMPLÉTÉ" : "À VENIR"}
+                                </span>
+                                <ChevronRight size={13} className="text-slate-300" />
+                              </div>
+                            </button>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="mt-2 border-t border-slate-100 pt-2">
+                    <div className="mb-1 flex items-center justify-between">
+                      <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-slate-400">
+                        <Briefcase size={12} /> Projets / chantiers
+                      </p>
+                      <Button
+                        variant="outline"
+                        onClick={() => setFormulaireProjetPourClient(formulaireProjetPourClient === c.id ? null : c.id)}
+                        className="min-h-0 gap-1 px-2 py-1 text-[10px]"
+                      >
+                        <Plus size={10} /> Créer un projet
+                      </Button>
+                    </div>
+
+                    {formulaireProjetPourClient === c.id && (
+                      <div className="mb-2 space-y-1.5 rounded-lg bg-slate-50 p-2">
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Nom du projet</label>
+                          <input value={nouveauProjetNom} onChange={(e) => setNouveauProjetNom(e.target.value)} placeholder="Nom du projet" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                        </div>
+
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse des travaux</label>
+                          {(c.adresses || []).length > 0 && (
+                            <select
+                              value={nouveauProjetAdresseId}
+                              onChange={(e) => { setNouveauProjetAdresseId(e.target.value); setNouveauProjetNouvelleAdresse(null); }}
+                              className="mb-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                            >
+                              <option value="">— Choisir une adresse enregistrée —</option>
+                              {(c.adresses || []).map((a) => (
+                                <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
+                              ))}
+                            </select>
+                          )}
+                          <AutocompleteAdresse
+                            onSelection={(place) => { setNouveauProjetNouvelleAdresse(place); setNouveauProjetAdresseId(""); }}
+                          />
+                          {nouveauProjetNouvelleAdresse && (
+                            <p className="mt-1 flex items-center gap-1 text-[10px] text-emerald-600">
+                              <Check size={10} /> {nouveauProjetNouvelleAdresse.label}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Date de début</label>
+                            <input type="date" value={nouveauProjetDebut} onChange={(e) => setNouveauProjetDebut(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Date de fin</label>
+                            <input type="date" value={nouveauProjetFin} onChange={(e) => setNouveauProjetFin(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                          </div>
+                        </div>
+                        <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50 p-2">
+                          <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-700">Heures — prévu vs réel (suivi)</p>
+                          <p className="mb-1.5 text-[9px] text-blue-500">Le réel se remplit au fur et à mesure que les techniciens pointent (app employé). Aucun impact sur les montants $.</p>
+                          <div className="grid grid-cols-[1fr_3rem_3rem_2.75rem] items-center gap-1.5">
+                            <span></span>
+                            <span className="text-center text-[9px] font-bold uppercase text-blue-600">Prévu</span>
+                            <span className="text-center text-[9px] font-bold uppercase text-blue-600">Réel</span>
+                            <span className="text-center text-[9px] font-bold uppercase text-blue-600">Reste</span>
+
+                            <span className="text-[10px] font-bold text-blue-900">Chantier</span>
+                            <input type="number" min={0} step="0.5" value={nouveauProjetMoHeures} onChange={(e) => setNouveauProjetMoHeures(e.target.value)} className="w-full rounded-lg border border-blue-200 bg-white px-1.5 py-1 text-center text-xs" />
+                            <input value="0" readOnly className="w-full rounded-lg border border-slate-200 bg-slate-100 px-1.5 py-1 text-center text-xs text-slate-500" />
+                            <span className="text-center text-[11px] font-bold text-emerald-600">{nb(nouveauProjetMoHeures)} h</span>
+
+                            <span className="text-[10px] font-bold text-blue-900">Transport</span>
+                            <input type="number" min={0} step="0.5" value={nouveauProjetTrHeures} onChange={(e) => setNouveauProjetTrHeures(e.target.value)} className="w-full rounded-lg border border-blue-200 bg-white px-1.5 py-1 text-center text-xs" />
+                            <input value="0" readOnly className="w-full rounded-lg border border-slate-200 bg-slate-100 px-1.5 py-1 text-center text-xs text-slate-500" />
+                            <span className="text-center text-[11px] font-bold text-emerald-600">{nb(nouveauProjetTrHeures)} h</span>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg border border-slate-200 bg-white p-2">
+                          <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Ventilation du budget ($)</p>
+
+                          <div className="mb-2">
+                            <p className="text-[11px] font-bold text-slate-700">Main d'œuvre chantier</p>
+                            <div className="mt-1 grid grid-cols-2 gap-1.5">
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-slate-400">Facturé $</label>
+                                <input type="number" min={0} step="0.01" value={nouveauProjetMoFacture} onChange={(e) => setNouveauProjetMoFacture(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-orange-500">Coûtant $</label>
+                                <input type="number" min={0} step="0.01" value={nouveauProjetMoCoutant} onChange={(e) => setNouveauProjetMoCoutant(e.target.value)} className="w-full rounded-lg border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs" />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-2">
+                            <p className="text-[11px] font-bold text-slate-700">Transport</p>
+                            <div className="mt-1 grid grid-cols-2 gap-1.5">
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-slate-400">Facturé $</label>
+                                <input type="number" min={0} step="0.01" value={nouveauProjetTrFacture} onChange={(e) => setNouveauProjetTrFacture(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-orange-500">Coûtant $</label>
+                                <input type="number" min={0} step="0.01" value={nouveauProjetTrCoutant} onChange={(e) => setNouveauProjetTrCoutant(e.target.value)} className="w-full rounded-lg border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs" />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-2">
+                            <p className="text-[11px] font-bold text-slate-700">Matériaux</p>
+                            <p className="text-[9px] text-slate-400">Coût réel à venir depuis QuickBooks (nº de projet).</p>
+                            <div className="mt-1 grid grid-cols-2 gap-1.5">
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-slate-400">Facturé $</label>
+                                <input type="number" min={0} step="0.01" value={nouveauProjetMatFacture} onChange={(e) => setNouveauProjetMatFacture(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-orange-500">Coûtant $</label>
+                                <input type="number" min={0} step="0.01" value={nouveauProjetMatCoutant} onChange={(e) => setNouveauProjetMatCoutant(e.target.value)} className="w-full rounded-lg border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs" />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mb-2">
+                            <p className="text-[11px] font-bold text-slate-700">Sous-traitants</p>
+                            <p className="text-[9px] text-slate-400">Coût réel à venir depuis QuickBooks (nº de projet).</p>
+                            {nouveauProjetSousTraitants.map((st) => (
+                              <div key={st.id} className="mt-1.5 rounded-md bg-slate-50 p-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <input value={st.nom} onChange={(e) => majSousTraitant(st.id, "nom", e.target.value)} placeholder="Nom de l'entreprise" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                                  <button type="button" onClick={() => retirerSousTraitant(st.id)} className="shrink-0 rounded-md p-1 text-red-500 hover:bg-red-50" aria-label="Retirer le sous-traitant">
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                                <div className="mt-1 grid grid-cols-2 gap-1.5">
+                                  <div>
+                                    <label className="mb-0.5 block text-[9px] font-bold text-slate-400">Facturé $</label>
+                                    <input type="number" min={0} step="0.01" value={st.facture} onChange={(e) => majSousTraitant(st.id, "facture", e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                                  </div>
+                                  <div>
+                                    <label className="mb-0.5 block text-[9px] font-bold text-orange-500">Coûtant $</label>
+                                    <input type="number" min={0} step="0.01" value={st.coutant} onChange={(e) => majSousTraitant(st.id, "coutant", e.target.value)} className="w-full rounded-lg border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs" />
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                            <button type="button" onClick={ajouterSousTraitant} className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-slate-300 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50">
+                              <Plus size={11} /> Ajouter un sous-traitant
+                            </button>
+                          </div>
+
+                          <div className="mt-2 grid grid-cols-3 gap-1.5 border-t border-slate-200 pt-2 text-center">
+                            <div>
+                              <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">Facturé</p>
+                              <p className="text-xs font-extrabold text-slate-800 tabular-nums">{totalFactureProjet.toFixed(0)} $</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase tracking-wide text-orange-500">Coûtant</p>
+                              <p className="text-xs font-extrabold text-orange-700 tabular-nums">{totalCoutantProjet.toFixed(0)} $</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase tracking-wide text-emerald-600">Marge</p>
+                              <p className="text-xs font-extrabold text-emerald-700 tabular-nums">{margeProjet.toFixed(0)} $ · {margePctProjet.toFixed(0)} %</p>
+                            </div>
+                          </div>
+                        </div>
+                        <Button onClick={() => creerProjet(c.id)} disabled={!nouveauProjetNom.trim() || totalFactureProjet <= 0} className="w-full min-h-0 py-1.5 text-xs">
+                          Créer le projet
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* REGISTRE D'ÉQUIPEMENTS — se remplit tout seul à
+                        partir des appels de service : le technicien
+                        relève modèle et numéro de série, ils atterrissent
+                        ici. Dans deux ans, quand ce client rappelle, on
+                        sait déjà ce qu'il a. Sert aussi à partir avec la
+                        bonne pièce et à retrouver les clients touchés par
+                        un rappel de fabricant. */}
+                    {(() => {
+                      const unites = [];
+                      (bons || [])
+                        .filter((b) => b.client === c.nom && (b.modeleUnite || b.serieUnite))
+                        .forEach((b) => {
+                          const cle = `${b.modeleUnite}|${b.serieUnite}`;
+                          const existe = unites.find((u) => `${u.modele}|${u.serie}` === cle);
+                          if (existe) {
+                            if (b.date > existe.derniereVisite) existe.derniereVisite = b.date;
+                          } else {
+                            unites.push({ modele: b.modeleUnite, serie: b.serieUnite, derniereVisite: b.date });
+                          }
+                        });
+                      if (unites.length === 0) return null;
+                      return (
+                        <div className="mb-2 rounded-xl border border-slate-200 bg-white p-2.5">
+                          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                            <Cloud size={11} /> Équipements relevés ({unites.length})
+                          </p>
+                          <div className="space-y-1">
+                            {unites.map((u, i) => (
+                              <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1">
+                                <span className="text-[11px] font-bold text-slate-700">
+                                  {u.modele || "Modèle non relevé"}
+                                  {u.serie ? <span className="ml-1.5 font-normal text-slate-500">Nº {u.serie}</span> : null}
+                                </span>
+                                <span className="text-[10px] text-slate-400">vu le {u.derniereVisite}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* RENTABILITÉ DU CLIENT — coûtant vs vendant sur
+                        l'ensemble de ses projets. Le coûtant vient des
+                        heures réelles à taux FIGÉ + les matériaux (bons
+                        de commande et dépenses QuickBooks, sans double
+                        comptage) ; le vendant, du montant vendu.
+                        Écran ADMIN uniquement : ces chiffres ne sortent
+                        jamais sur un devis ni sur un bon de travail. */}
+                    {(() => {
+                      const projetsDuClient = projets.filter((p) => p.clientId === c.id);
+                      if (projetsDuClient.length === 0) return null;
+                      const cumul = projetsDuClient.reduce(
+                        (acc, p) => {
+                          const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers);
+                          acc.vendant += Number(p.budgetTotal) || 0;
+                          acc.coutant += r.coutTotalReel || 0;
+                          return acc;
+                        },
+                        { vendant: 0, coutant: 0 }
+                      );
+                      const profit = cumul.vendant - cumul.coutant;
+                      const marge = cumul.vendant > 0 ? (profit / cumul.vendant) * 100 : null;
+                      const bon = profit >= 0;
+                      return (
+                        <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                            <BarChart3 size={11} /> Rentabilité — {projetsDuClient.length} projet{projetsDuClient.length > 1 ? "s" : ""}
+                          </p>
+                          <div className="grid grid-cols-4 gap-2">
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-slate-400">Vendant</p>
+                              <p className="text-xs font-bold tabular-nums text-slate-800">{cumul.vendant.toFixed(2)} $</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-orange-500">Coûtant</p>
+                              <p className="text-xs font-bold tabular-nums text-orange-600">{cumul.coutant.toFixed(2)} $</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-slate-400">Profit</p>
+                              <p className={`text-xs font-extrabold tabular-nums ${bon ? "text-emerald-600" : "text-red-600"}`}>
+                                {profit.toFixed(2)} $
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-slate-400">Marge</p>
+                              <p className={`text-xs font-extrabold tabular-nums ${bon ? "text-emerald-600" : "text-red-600"}`}>
+                                {marge != null ? `${marge.toFixed(1)} %` : "—"}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="mt-1 text-[9px] text-slate-400">
+                            Marge = (vendant − coûtant) ÷ vendant · coûtant calculé aux taux figés à la saisie
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {(() => {
+                      const projetsDuClient = projets.filter((p) => p.clientId === c.id);
+                      return projetsDuClient.length === 0 ? (
+                        <p className="text-xs text-slate-400">Aucun projet pour ce client.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {projetsDuClient.map((p) => (
+                            <LigneProjetClient
+                              key={p.id}
+                              p={p}
+                              travaux={travaux}
+                              transactionsQb={transactionsQb}
+                              utilisateurs={utilisateurs}
+                              tauxMetiers={tauxMetiers}
+                              onOuvrir={setProjetOuvertId}
+                            />
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    {/* DEVIS DU CLIENT — chaque dossier avec ses versions.
+                        C'est ici qu'on retrouve les devis, plutôt que dans
+                        une grande liste générale qui devient vite illisible. */}
+                    <div className="mt-4 border-t border-slate-100 pt-3">
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                          Devis ({(devisListe || []).filter((d) => d.clientId === c.id).length})
+                        </p>
+                        {/* Amène à l'éditeur de devis avec CE client déjà
+                            choisi. On n'y recopie pas un mini-formulaire :
+                            l'éditeur porte la recherche dans le catalogue,
+                            les marges, les versions et les conditions —
+                            deux copies finiraient par ne plus donner le
+                            même prix selon la porte d'entrée utilisée. */}
+                        <Button
+                          variant="outline"
+                          onClick={() => onCreerDevis?.(c.id)}
+                          className="min-h-0 gap-1 px-2 py-1 text-[10px]"
+                        >
+                          <Plus size={10} /> Créer un devis
+                        </Button>
+                      </div>
+                      <DevisDuClient devisListe={devisListe} clientId={c.id} surlignerNumero={devisCible} compact />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {travailOuvert && (
+        <DetailTravail
+          travail={travailOuvert}
+          clients={clients}
+          onFermer={() => setTravailOuvertId(null)}
+          onReactiver={reactiverModification}
+        />
+      )}
+      {projetOuvert && (
+        <ModalDetailProjet
+          inspections={inspections}
+          projet={projetOuvert}
+          travaux={travaux}
+          devisListe={devisListe}
+          transactionsQb={transactionsQb}
+          clients={clients}
+          utilisateurs={utilisateurs}
+          tauxMetiers={tauxMetiers}
+          onFermer={() => setProjetOuvertId(null)}
+          onAjouterBC={ajouterBonCommandeProjet}
+          onChangerStatut={changerStatutProjet}
+          onSyncQuickBooks={onSyncQuickBooksProjets}
+          peutSyncQb={peutSyncQb}
+          syncQbEnCours={syncQbEnCours}
+          fournisseurs={fournisseurs}
+          setFournisseurs={setFournisseurs}
+          ajouterJournal={ajouterJournal}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// SÉLECTION DU COURRIEL DE DESTINATION — affichée avant chaque envoi
+// (devis, bon de travail, facture) quand le client a plusieurs
+// courriels enregistrés. Le choix par défaut est pré-sélectionné mais
+// toujours modifiable.
+// ============================================================
+// Sélection des courriels de destination — CHOIX MULTIPLE : un même
+// client peut avoir plusieurs contacts (propriétaire, gestionnaire,
+// comptabilité...) et recevoir le document à plusieurs adresses d'un
+// coup. `onConfirmer` reçoit la LISTE des courriels cochés (le premier
+// sert d'affichage principal pour la compatibilité).
+function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
+  const courriels = client?.courriels || [];
+  const [selectionIds, setSelectionIds] = useState(() => {
+    const parDefaut = courrielDefautClient(client);
+    return parDefaut ? [parDefaut.id] : [];
+  });
+  const basculer = (id) =>
+    setSelectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const selection = courriels.filter((cc) => selectionIds.includes(cc.id));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Choisir les courriels de destination</h3>
+            <p className="text-xs text-slate-500">{contexte}</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        {courriels.length === 0 ? (
+          <p className="rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-700">
+            {client?.nom} n'a aucun courriel enregistré — ajoute-en un dans sa fiche (onglet Clients) avant l'envoi.
+          </p>
+        ) : (
+          <>
+            <p className="mb-1.5 text-[11px] text-slate-400">Coche une ou plusieurs adresses — le document part à toutes en même temps.</p>
+            <div className="space-y-1.5">
+              {courriels.map((cc) => (
+                <label
+                  key={cc.id}
+                  className={`flex cursor-pointer items-start gap-2 rounded-xl border p-2.5 ${
+                    selectionIds.includes(cc.id) ? "border-[#FF6A13] bg-orange-50" : "border-slate-200"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectionIds.includes(cc.id)}
+                    onChange={() => basculer(cc.id)}
+                    className="mt-0.5 h-4 w-4 accent-[#FF6A13]"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800">{cc.email}</p>
+                    <p className="text-[11px] text-slate-500">{cc.label}{cc.defaut ? " · défaut" : ""}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            {courriels.length > 1 && (
+              <button
+                onClick={() => setSelectionIds(selectionIds.length === courriels.length ? [] : courriels.map((cc) => cc.id))}
+                className="mt-2 text-[11px] font-bold text-slate-500 underline underline-offset-2"
+              >
+                {selectionIds.length === courriels.length ? "Tout décocher" : "Tout cocher"}
+              </button>
+            )}
+          </>
+        )}
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={onFermer}>Annuler</Button>
+          <Button disabled={selection.length === 0} onClick={() => onConfirmer(selection)}>
+            Envoyer{selection.length > 1 ? ` (${selection.length})` : ""}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// TRAITEMENT D'UN DEVIS ACCEPTÉ — choix explicite entre intervention
+// directe (bon de travail unique) et nouveau projet d'envergure
+// (le devis devient le budget initial + une tâche par ligne).
+// ============================================================
+function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravail, onChoisirProjet }) {
+  const [option, setOption] = useState(null); // "bon_travail" | "projet" | null
+  const client = clients.find((c) => c.id === devis.clientId);
+  const [adresseTravauxId, setAdresseTravauxId] = useState("");
+  const [tauxHoraireCoutant, setTauxHoraireCoutant] = useState("45");
+  const [dateFin, setDateFin] = useState("");
+
+  const adresseChoisie = () => {
+    const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
+    return a ? `${a.nom} — ${a.ligne1}` : null;
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Traiter le devis {devis.numero}</h3>
+            <p className="text-xs text-slate-500">{devis.clientNom} · {devis.totalVendant.toFixed(2)} $</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        {!option && (
+          <div className="space-y-2.5">
+            <p className="text-xs text-slate-500">Comment ce devis accepté doit-il être converti ?</p>
+            <button
+              onClick={() => setOption("bon_travail")}
+              className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3.5 text-left hover:border-slate-300"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100">
+                <ClipboardList size={16} className="text-blue-700" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Intervention directe (Bon de travail)</p>
+                <p className="text-xs text-slate-500">Convertit le devis en un seul bon de travail pré-rempli, prêt à être assigné et planifié dans l'agenda.</p>
+              </div>
+            </button>
+            <button
+              onClick={() => setOption("projet")}
+              className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3.5 text-left hover:border-slate-300"
+            >
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-purple-100">
+                <Briefcase size={16} className="text-purple-700" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-800">Nouveau projet d'envergure</p>
+                <p className="text-xs text-slate-500">Le montant du devis devient le budget initial ; chaque ligne devient une étape/tâche du projet, dans le Hub Projets.</p>
+              </div>
+            </button>
+            <p className="text-[10px] text-slate-400">Dans les deux cas, le lien avec QuickBooks est conservé — la facturation finale se fait via l'onglet Facturation.</p>
+          </div>
+        )}
+
+        {option === "bon_travail" && (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Adresse des travaux</label>
+              {(client?.adresses || []).length > 0 ? (
+                <select
+                  value={adresseTravauxId}
+                  onChange={(e) => setAdresseTravauxId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">— Adresse de facturation par défaut —</option>
+                  {client.adresses.map((a) => (
+                    <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-slate-400">Aucune adresse enregistrée pour ce client — l'adresse de facturation sera utilisée par défaut.</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setOption(null)}>Retour</Button>
+              <Button onClick={() => onChoisirBonTravail(devis, adresseChoisie())}>Convertir et assigner</Button>
+            </div>
+          </div>
+        )}
+
+        {option === "projet" && (
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Adresse des travaux</label>
+              {(client?.adresses || []).length > 0 ? (
+                <select
+                  value={adresseTravauxId}
+                  onChange={(e) => setAdresseTravauxId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">— Adresse de facturation par défaut —</option>
+                  {client.adresses.map((a) => (
+                    <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
+                  ))}
+                </select>
+              ) : (
+                <p className="text-xs text-slate-400">Aucune adresse enregistrée pour ce client.</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Taux horaire coûtant</label>
+                <input
+                  type="number" min={0} step="0.01" value={tauxHoraireCoutant}
+                  onChange={(e) => setTauxHoraireCoutant(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Date de fin prévue</label>
+                <input
+                  type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+              Budget initial du projet : <span className="font-bold text-slate-800">{devis.totalVendant.toFixed(2)} $</span> ·{" "}
+              {devis.lignes.length} étape{devis.lignes.length > 1 ? "s" : ""} seront créées dans l'agenda
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setOption(null)}>Retour</Button>
+              <Button onClick={() => onChoisirProjet(devis, { tauxHoraireCoutant, dateFin, adresseTravaux: adresseChoisie() })}>
+                Créer le projet
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// FENÊTRE « NOUVEAU CLIENT » PARTAGÉE — ouverte depuis le devis OU la
+// création de tâche (agenda). Mêmes validations que l'onglet Clients
+// (courriel valide + adresse complète, exigences QuickBooks), avec
+// avertissement anti-doublon. `onSelection(id)` est rappelé avec le
+// client créé (ou l'existant choisi) pour le sélectionner sur place.
+// ============================================================
+// L'enregistrement des clients est assuré par la sauvegarde automatique
+// de l'App (voir « SAUVEGARDE AUTOMATIQUE ») — aucun appel à faire ici.
+function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onSelection }) {
+  const [ncPrenom, setNcPrenom] = useState("");
+  const [ncNomFamille, setNcNomFamille] = useState("");
+  const [ncEntreprise, setNcEntreprise] = useState("");
+  const [ncCourriel, setNcCourriel] = useState("");
+  const [ncTelephone, setNcTelephone] = useState("");
+  const [ncAdresse, setNcAdresse] = useState(null);
+  const [ncErreurs, setNcErreurs] = useState([]);
+  // Doublon probable : même courriel, ou nom identique à un client existant.
+  const doublonPossible = (clients || []).find((c) => {
+    const courrielSaisi = ncCourriel.trim().toLowerCase();
+    const nomSaisi = `${ncPrenom.trim()} ${ncNomFamille.trim()}`.trim().toLowerCase();
+    if (courrielSaisi && (c.courriels || []).some((cc) => cc.email.toLowerCase() === courrielSaisi)) return true;
+    return nomSaisi.length > 3 && c.nom.toLowerCase() === nomSaisi;
+  });
+  const creer = () => {
+    if (!(ncPrenom.trim() && ncNomFamille.trim() && ncCourriel.trim())) return;
+    // Conformité : aucune donnée invalide ne part vers QuickBooks.
+    const erreurs = erreursClientPourQuickBooks({ courriel: ncCourriel, adresse: ncAdresse });
+    if (erreurs.length > 0) {
+      setNcErreurs(erreurs);
+      return;
+    }
+    const id = `c-${Date.now()}`;
+    const nouveauClient = {
+      id,
+      entreprise: ncEntreprise.trim(),
+      nom: `${ncPrenom.trim()} ${ncNomFamille.trim()}`,
+      courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: ncCourriel.trim(), defaut: true }],
+      telephone: ncTelephone.trim(),
+      termeFacturation: TERMES_FACTURATION[0],
+      adresseFacturation: ncAdresse?.label || "",
+      adresses: ncAdresse
+        ? [{ id: `a-${Date.now()}`, nom: "Facturation", ligne1: ncAdresse.label, codePostal: ncAdresse.codePostal }]
+        : [],
+      quickbooksCustomerId: null,
+      syncQb: "en_cours",
+    };
+    setClients((prev) => [...prev, nouveauClient]);
+    ajouterJournal(`👤 Client "${nouveauClient.nom}" créé — transfert vers QuickBooks en cours...`);
+    onSelection?.(id);
+    onFermer();
+    // Simulation du transfert QuickBooks (mode test) — même flux que
+    // l'onglet Clients.
+    setTimeout(() => {
+      const qbId = `QBO-${Math.floor(2000 + Math.random() * 8000)}`;
+      setClients((prev) => prev.map((c) => (c.id === id ? { ...c, quickbooksCustomerId: qbId, syncQb: "synchronise" } : c)));
+      ajouterJournal(`🔄 Client "${nouveauClient.nom}" transféré vers QuickBooks — ID ${qbId}`);
+    }, 900);
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">➕ Nouveau client</h3>
+            <p className="text-xs text-slate-500">Créé au répertoire clients et sélectionné sur place.</p>
+          </div>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <input value={ncPrenom} onChange={(e) => setNcPrenom(e.target.value)} placeholder="Prénom *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            <input value={ncNomFamille} onChange={(e) => setNcNomFamille(e.target.value)} placeholder="Nom *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          </div>
+          <input value={ncEntreprise} onChange={(e) => setNcEntreprise(e.target.value)} placeholder="Entreprise (optionnel)" className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={ncCourriel} onChange={(e) => setNcCourriel(e.target.value)} placeholder="Courriel *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            <input value={ncTelephone} onChange={(e) => setNcTelephone(e.target.value)} placeholder="Téléphone" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse de facturation *</label>
+            <AutocompleteAdresse onSelection={(place) => setNcAdresse(place)} />
+            {ncAdresse ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
+                <Check size={11} className="shrink-0" /> {ncAdresse.label}
+                <button onClick={() => setNcAdresse(null)} aria-label="Retirer l'adresse" className="ml-1 text-slate-400 hover:text-red-500"><X size={11} /></button>
+              </p>
+            ) : (
+              <p className="mt-1 text-[10px] text-slate-400">Écris le numéro et la rue, puis précise la ville et clique « Utiliser cette adresse ».</p>
+            )}
+          </div>
+          {doublonPossible && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">
+              ⚠️ Un client semblable existe déjà : <span className="font-bold">{doublonPossible.nom}</span>.
+              <button
+                onClick={() => { onSelection?.(doublonPossible.id); onFermer(); }}
+                className="ml-1 underline"
+              >
+                L'utiliser plutôt
+              </button>
+            </div>
+          )}
+          {ncErreurs.length > 0 && (
+            <ul className="space-y-0.5 rounded-lg border border-red-200 bg-red-50 p-2 text-[11px] font-semibold text-red-600">
+              {ncErreurs.map((e, i) => <li key={i}>• {e}</li>)}
+            </ul>
+          )}
+          <Button
+            onClick={creer}
+            disabled={!(ncPrenom.trim() && ncNomFamille.trim() && ncCourriel.trim())}
+            className="w-full"
+          >
+            Créer le client et l'utiliser
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// FENÊTRE « NOUVEAU FOURNISSEUR » — ouverte depuis le formulaire de bon
+// de commande. Plusieurs adresses courriel possibles (achats,
+// comptabilité, représentant) : le BC peut partir à plusieurs d'un coup.
+// `onSelection(id)` sélectionne le fournisseur créé sur place.
+// ============================================================
+function ModalNouveauFournisseur({ fournisseurs, setFournisseurs, ajouterJournal, onFermer, onSelection }) {
+  const [nom, setNom] = useState("");
+  const [courrielsTexte, setCourrielsTexte] = useState("");
+  const [telephone, setTelephone] = useState("");
+  const [adresse, setAdresse] = useState("");
+  const [erreurs, setErreurs] = useState([]);
+  const doublon = (fournisseurs || []).find((f) => f.nom.trim().toLowerCase() === nom.trim().toLowerCase() && nom.trim().length > 2);
+
+  const creer = () => {
+    if (!nom.trim()) return;
+    // Une adresse par ligne (ou séparées par des virgules) — la première
+    // devient l'adresse par défaut du fournisseur.
+    const liste = courrielsTexte
+      .split(/[\n,;]+/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const invalides = liste.filter((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c));
+    if (invalides.length > 0) {
+      setErreurs([`Adresse(s) invalide(s) : ${invalides.join(", ")}`]);
+      return;
+    }
+    const id = `f-${Date.now()}`;
+    const nouveau = {
+      id,
+      nom: nom.trim(),
+      courriels: liste.map((email, i) => ({ id: `fc-${Date.now()}-${i}`, email, label: i === 0 ? "Principal" : "Autre", defaut: i === 0 })),
+      telephone: telephone.trim(),
+      adresse: adresse.trim(),
+      notes: "",
+    };
+    setFournisseurs((prev) => [...prev, nouveau]);
+    sauvegarderFournisseur(nouveau).catch(() =>
+      ajouterJournal(`⚠️ Fournisseur « ${nouveau.nom} » créé localement, mais NON enregistré (table fournisseurs absente ?).`)
+    );
+    ajouterJournal(`🏭 Fournisseur « ${nouveau.nom} » ajouté au répertoire${liste.length > 0 ? ` (${liste.length} adresse${liste.length > 1 ? "s" : ""} courriel)` : ""}`);
+    onSelection?.(id);
+    onFermer();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">🏭 Nouveau fournisseur</h3>
+            <p className="text-xs text-slate-500">Ajouté au répertoire et sélectionné pour ce bon de commande.</p>
+          </div>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+        <div className="space-y-2">
+          <input value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Nom du fournisseur *" className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Courriels — une adresse par ligne</label>
+            <textarea
+              value={courrielsTexte}
+              onChange={(e) => setCourrielsTexte(e.target.value)}
+              rows={3}
+              placeholder={"achats@fournisseur.com\ncomptabilite@fournisseur.com"}
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+            />
+            <p className="mt-0.5 text-[10px] text-slate-400">La première adresse sera cochée par défaut à l'envoi des bons de commande.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input value={telephone} onChange={(e) => setTelephone(e.target.value)} placeholder="Téléphone" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            <input value={adresse} onChange={(e) => setAdresse(e.target.value)} placeholder="Adresse (optionnel)" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          </div>
+          {doublon && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">
+              ⚠️ « {doublon.nom} » existe déjà.
+              <button onClick={() => { onSelection?.(doublon.id); onFermer(); }} className="ml-1 underline">L'utiliser plutôt</button>
+            </div>
+          )}
+          {erreurs.length > 0 && (
+            <ul className="space-y-0.5 rounded-lg border border-red-200 bg-red-50 p-2 text-[11px] font-semibold text-red-600">
+              {erreurs.map((e, i) => <li key={i}>• {e}</li>)}
+            </ul>
+          )}
+          <Button onClick={creer} disabled={!nom.trim()} className="w-full">Créer le fournisseur et l'utiliser</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Fenêtre proposant de reporter au catalogue le coût saisi sur une
+// ligne de devis. Le report est un geste qui touche TOUS les futurs
+// devis de l'entreprise — d'où la confirmation explicite plutôt qu'un
+// enregistrement silencieux.
+function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, onConfirmer }) {
+  const [reporter, setReporter] = useState(false);
+  const { item, saisi, auCatalogue } = info;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-extrabold text-slate-900">Coût saisi sur cette ligne</h3>
+        <p className="mt-1 text-xs font-semibold text-slate-700">{item.nom}</p>
+
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs">
+          <span className="text-slate-500">
+            Catalogue : <span className="tabular-nums font-semibold">{auCatalogue == null ? "aucun coût" : `${auCatalogue.toFixed(2)} $`}</span>
+          </span>
+          <span className="font-extrabold tabular-nums text-slate-900">→ {saisi.toFixed(2)} $</span>
+        </div>
+
+        {peutModifierListePrix ? (
+          <label className="mt-3 flex items-start gap-2 rounded-xl border border-slate-200 p-2.5">
+            <input
+              type="checkbox"
+              checked={reporter}
+              onChange={(e) => setReporter(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-[#131B2E]"
+            />
+            <span className="text-[11px] leading-snug text-slate-600">
+              <span className="font-bold text-slate-800">Mettre à jour la liste de prix</span> (onglet Tarifs)
+              <br />
+              Le coût servira à tous les prochains devis. Les devis déjà créés gardent leur prix d&apos;origine.
+            </span>
+          </label>
+        ) : (
+          <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-snug text-slate-500">
+            Ce coût s&apos;applique <span className="font-bold">à ce devis seulement</span>. La modification de la liste de prix
+            demande une autorisation particulière.
+          </p>
+        )}
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={onFermer} className="min-h-0 py-2 text-xs">Annuler</Button>
+          <Button onClick={() => onConfirmer(peutModifierListePrix && reporter)} className="min-h-0 py-2 text-xs">
+            Confirmer
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue }) {
+  // Liste de prix (289 items) — sert au sélecteur de lignes de devis.
+  const catalogue = useCatalogue();
+  // Taux de taxes des Paramètres — pour afficher le total client.
+  const configEnt = useEntreprise();
+  const [clientId, setClientId] = useState(clients[0].id);
+  // ARRIVÉE DEPUIS UNE FICHE CLIENT (bouton « + Créer un devis ») :
+  // le client est déjà choisi, on ne le redemande pas. Même mécanisme
+  // que la recherche rapide qui ouvre la bonne fiche.
+  useEffect(() => {
+    if (clientCible && clients.some((c) => c.id === clientCible)) setClientId(clientCible);
+  }, [clientCible, clients]);
+  const [nouvelleAdresseNom, setNouvelleAdresseNom] = useState("");
+  const [lignes, setLignes] = useState([]);
+  const [pdfAperçu, setPdfAperçu] = useState(null);
+  const [devisAperçu, setDevisAperçu] = useState(null);
+  // Contrat d'entretien : le devis est facturé progressivement (2, 3 ou
+  // 4 factures par an) — marqué dès sa création, repris automatiquement
+  // à la création de la tâche « Entretien selon contrat ».
+  const [estContrat, setEstContrat] = useState(false);
+  const [frequenceContrat, setFrequenceContrat] = useState(4);
+  // « ➕ Nouveau client » directement depuis le devis — fenêtre partagée
+  // ModalNouveauClient (mêmes validations que l'onglet Clients). Le devis
+  // en cours (lignes déjà saisies) reste intact derrière.
+  const [modalNouveauClient, setModalNouveauClient] = useState(false);
+
+  const client = clients.find((c) => c.id === clientId);
+
+  const totaux = lignes.reduce(
+    (acc, l) => ({
+      coutant: acc.coutant + (Number(l.prix_coutant) || 0) * l.quantite,
+      vendant: acc.vendant + (Number(l.prix_vendant) || 0) * l.quantite,
+    }),
+    { coutant: 0, vendant: 0 }
+  );
+  // MARGE CALCULÉE SUR LES SEULES LIGNES COMPLÈTES.
+  //
+  // Une ligne sans prix coûtant (tes forfaits d'installation, que
+  // QuickBooks ne chiffre pas) est EXCLUE du calcul au lieu de le
+  // fausser. Sinon un devis de 8 110 $ dont 8 100 $ ne sont pas évalués
+  // affichait fièrement « 100 % de marge » — un chiffre faux et
+  // rassurant, le pire mélange pour décider d'accepter un contrat.
+  //
+  // Le total VENDANT, lui, reste complet : c'est bien ce que le client
+  // paiera. On ne cache rien, on refuse juste de calculer un
+  // pourcentage sur du vide.
+  const lignesEvaluees = lignes.filter((l) => (Number(l.prix_coutant) || 0) > 0);
+  // Un RABAIS n'a pas de coût — ce n'est pas une donnée manquante, c'est
+  // sa nature. Il ne doit donc jamais apparaître dans « coût manquant ».
+  const lignesNonEvaluees = lignes.filter(
+    (l) => !l.estRabais && (Number(l.prix_coutant) || 0) === 0 && (Number(l.prix_vendant) || 0) > 0
+  );
+  const evalues = lignesEvaluees.reduce(
+    (acc, l) => ({
+      coutant: acc.coutant + (Number(l.prix_coutant) || 0) * l.quantite,
+      vendant: acc.vendant + (Number(l.prix_vendant) || 0) * l.quantite,
+    }),
+    { coutant: 0, vendant: 0 }
+  );
+  const montantNonEvalue = lignesNonEvaluees.reduce(
+    (s, l) => s + (Number(l.prix_vendant) || 0) * l.quantite,
+    0
+  );
+  const marge = evalues.vendant - evalues.coutant;
+  const margePct = evalues.vendant > 0 ? (marge / evalues.vendant) * 100 : 0;
+
+  // REPORT AU CATALOGUE — proposé quand le coûtant saisi sur une ligne
+  // diffère de celui du catalogue, et seulement pour un item QUI VIENT
+  // du catalogue : une ligne « sur mesure » ne doit jamais polluer la
+  // liste de prix de l'entreprise.
+  const [reportCatalogue, setReportCatalogue] = useState(null);
+  const proposerReportCatalogue = (ligne) => {
+    if (ligne.surMesure || !ligne.id) return;
+    const item = (catalogue || []).find((i) => i.id === ligne.id);
+    if (!item) return;
+    const saisi = Number(ligne.prix_coutant) || 0;
+    const auCatalogue = item.prix_coutant == null ? null : Number(item.prix_coutant);
+    if (saisi <= 0) return;                       // rien de neuf à proposer
+    if (auCatalogue != null && Math.abs(auCatalogue - saisi) < 0.005) return; // inchangé
+    setReportCatalogue({ ligne, item, saisi, auCatalogue });
+  };
+
+  const ajouterLigne = (produit) => {
+    // PRIX TOUJOURS NUMÉRIQUES SUR UNE LIGNE DE DEVIS.
+    //
+    // Dans le catalogue, un prix coûtant absent veut dire INCONNU — et
+    // c'est le cas de tes 71 forfaits d'installation, que QuickBooks ne
+    // chiffre pas. Mais une ligne de devis doit calculer : sans nombre,
+    // l'affichage plantait dès l'ajout de l'item.
+    //
+    // On met donc 0, et la ligne est SIGNALÉE plus bas (« coût à
+    // compléter ») : un 0 silencieux afficherait 100 % de marge sur un
+    // forfait de 6 450 $, exactement le chiffre trompeur qu'on veut
+    // éviter.
+    const coutantInconnu = produit.prix_coutant == null;
+    setLignes((prev) => [
+      ...prev,
+      {
+        ...produit,
+        uid: `${produit.id}-${Date.now()}`,
+        quantite: 1,
+        prix_coutant: Number(produit.prix_coutant) || 0,
+        prix_vendant: Number(produit.prix_vendant) || 0,
+        coutantInconnu,
+      },
+    ]);
+  };
+  const ajouterLignePersonnalisee = () => {
+    setLignes((prev) => [
+      ...prev,
+      {
+        uid: `perso-${Date.now()}`,
+        nom: "",
+        unite: "unité",
+        quantite: 1,
+        prix_coutant: 0,
+        prix_vendant: 0,
+        surMesure: true,
+      },
+    ]);
+  };
+  // LIEN D'ACCEPTATION — crée le jeton au premier clic (pas à la
+  // création du devis : inutile d'exposer un lien qu'on n'enverra
+  // peut-être jamais), puis le copie dans le presse-papier.
+  // Expiration à 30 jours, comme la clause 1 sur la validité des prix.
+  const [lienCopie, setLienCopie] = useState(null);
+  const creerLienAcceptation = async (devis) => {
+    let jeton = devis.jetonPublic;
+    // ON REGÉNÈRE AUSSI UN JETON EXPIRÉ. Sans ça, recopier le lien d'un
+    // devis de plus de 30 jours redonnait l'ancien jeton : le client
+    // cliquait et tombait sur « Ce devis est expiré ». Quand on clique
+    // pour envoyer un lien, on veut un lien qui MARCHE.
+    const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
+    if (!jeton || perime) {
+      jeton = genererJeton();
+      const expire = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
+      setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
+      try {
+        await persisterDevis(maj);
+      } catch {
+        ajouterJournal(`⚠️ Lien d'acceptation de ${devis.numero} créé localement mais NON enregistré — le client verrait une page invalide.`);
+        return;
+      }
+      ajouterJournal(
+        perime
+          ? `🔗 Lien d'acceptation de ${devis.numero} EXPIRÉ — un nouveau lien a été créé (valide 30 jours). L'ancien ne fonctionne plus.`
+          : `🔗 Lien d'acceptation créé pour ${devis.numero} (valide 30 jours).`
+      );
+    }
+    try {
+      await navigator.clipboard?.writeText(lienDevisPublic(jeton));
+      setLienCopie(devis.id);
+      setTimeout(() => setLienCopie(null), 3000);
+    } catch {
+      // Presse-papier refusé — on montre le lien pour copie manuelle.
+      window.prompt("Copie ce lien et envoie-le au client :", lienDevisPublic(jeton));
+    }
+  };
+
+  // ------------------------------------------------------------
+  // ENVOI DU DEVIS PAR COURRIEL — le client reçoit le lien
+  // d'acceptation dans sa boîte : il clique, lit, accepte ou refuse.
+  // ------------------------------------------------------------
+  // Même règle de jeton que la copie du lien (expiré = régénéré), même
+  // porte d'envoi que le reste du système (/api/courriel). Tant que le
+  // service n'est pas configuré, le journal explique quoi faire — rien
+  // n'échoue en silence.
+  const [envoiDevis, setEnvoiDevis] = useState(null); // { devisId, choisis: [...], extra: "" }
+  const [envoiDevisEnCours, setEnvoiDevisEnCours] = useState(false);
+  const ficheClientDe = (devis) =>
+    clients.find((c) => c.id === devis.clientId) ||
+    clients.find((c) => (c.nom || "").trim().toLowerCase() === (devis.clientNom || "").trim().toLowerCase());
+  const ouvrirEnvoiDevis = (devis) => {
+    const fiche = ficheClientDe(devis);
+    const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
+    const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
+    // Pré-coche l'adresse par défaut ; à défaut la première ; sinon rien
+    // (le champ libre prend le relais pour un client sans courriel).
+    setEnvoiDevis({ devisId: devis.id, choisis: defauts.length > 0 ? defauts : tous.slice(0, 1), extra: "" });
+  };
+  const envoyerDevisParCourriel = async (devis) => {
+    const extra = (envoiDevis?.extra || "").trim();
+    const adresses = [...new Set([...(envoiDevis?.choisis || []), ...(extra ? [extra] : [])])];
+    if (adresses.length === 0) return;
+    setEnvoiDevisEnCours(true);
+    // Jeton valide — régénéré s'il est expiré, comme pour la copie.
+    let jeton = devis.jetonPublic;
+    const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
+    if (!jeton || perime) {
+      jeton = genererJeton();
+      const expire = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
+      setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
+      try {
+        await persisterDevis(maj);
+      } catch {
+        ajouterJournal(`⚠️ Devis ${devis.numero} NON envoyé — le lien n'a pas pu être enregistré. Réessaie.`);
+        setEnvoiDevisEnCours(false);
+        return;
+      }
+    }
+    const r = await envoyerCourriel({
+      a: adresses,
+      sujet: `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      html: gabaritDevis({
+        config: configEnt,
+        numero: devis.numero,
+        clientNom: devis.clientNom,
+        total: null,
+        lien: lienDevisPublic(jeton),
+      }),
+    });
+    setEnvoiDevisEnCours(false);
+    if (r.envoye) {
+      ajouterJournal(`✉️ Devis ${devis.numero} ENVOYÉ à ${adresses.join(", ")} — le client peut répondre en ligne.`);
+      setEnvoiDevis(null);
+    } else if (r.simule) {
+      ajouterJournal(
+        `🔧 Envoi SIMULÉ du devis ${devis.numero} — le service de courriels n'est pas encore configuré (clé Resend absente dans Vercel). En attendant, « Copier le lien » et colle-le dans ton propre courriel.`
+      );
+      setEnvoiDevis(null);
+    } else {
+      ajouterJournal(`⚠️ Devis ${devis.numero} NON envoyé — ${r.erreur}`);
+    }
+  };
+
+  // RABAIS — une ligne sur mesure au montant négatif, prête à remplir.
+  // Le coûtant reste à 0 et la ligne est marquée `estRabais` pour ne
+  // jamais être comptée comme « coût manquant » : un rabais n'a pas de
+  // coût, ce n'est pas une donnée qui manque.
+  const ajouterRabais = () => {
+    setLignes((prev) => [
+      ...prev,
+      {
+        uid: `rabais-${Date.now()}`,
+        nom: "Rabais",
+        unite: "unité",
+        quantite: 1,
+        prix_coutant: 0,
+        prix_vendant: 0,
+        surMesure: true,
+        estRabais: true,
+      },
+    ]);
+  };
+  const majLigne = (uid, n) => setLignes((prev) => prev.map((l) => (l.uid === uid ? n : l)));
+  const supprimerLigne = (uid) => setLignes((prev) => prev.filter((l) => l.uid !== uid));
+
+  const enregistrerAdresse = (place) => {
+    if (!nouvelleAdresseNom.trim()) return;
+    const nouvelle = { id: `a-${Date.now()}`, nom: nouvelleAdresseNom, ligne1: place.label, codePostal: place.codePostal };
+    setClients((prev) =>
+      prev.map((c) => (c.id === clientId ? { ...c, adresses: [...(c.adresses || []), nouvelle] } : c))
+    );
+    setNouvelleAdresseNom("");
+    ajouterJournal(`Nouvelle adresse enregistrée au dossier de ${client.nom} : ${nouvelle.ligne1}`);
+  };
+
+  const [courrielModalOuvert, setCourrielModalOuvert] = useState(false);
+  // ------------------------------------------------------------
+  // VERSIONS DE DEVIS — un même dossier (numeroBase) peut avoir
+  // plusieurs révisions. Une seule est ACTIVE ; les autres restent
+  // consultables en lecture seule (on doit pouvoir revoir exactement ce
+  // que le client avait reçu).
+  // ------------------------------------------------------------
+  // Dossier ouvert (numeroBase) + version affichée dans ses onglets.
+  const [dossierOuvert, setDossierOuvert] = useState(null);
+  const [versionAffichee, setVersionAffichee] = useState(null);
+  const [noteNouvelleVersion, setNoteNouvelleVersion] = useState("");
+  const [creationVersionPour, setCreationVersionPour] = useState(null);
+
+  const versionsDuDossier = (numeroBase) =>
+    devisListe.filter((d) => (d.numeroBase || d.numero) === numeroBase).sort((a, b) => (a.version ?? 0) - (b.version ?? 0));
+
+  // Un seul enregistrement par DOSSIER dans la liste : la version active
+  // (ou la plus récente à défaut). Sinon la liste triplerait.
+  const dossiersDevis = (() => {
+    const parBase = {};
+    devisListe.forEach((d) => {
+      const base = d.numeroBase || d.numero;
+      (parBase[base] = parBase[base] || []).push(d);
+    });
+    return Object.entries(parBase)
+      .map(([base, versions]) => {
+        const triees = versions.sort((a, b) => (a.version ?? 0) - (b.version ?? 0));
+        const active = triees.find((v) => v.versionActive !== false) || triees[triees.length - 1];
+        return { base, versions: triees, active };
+      })
+      .sort((a, b) => (b.active.creeLe || b.active.date || "").localeCompare(a.active.creeLe || a.active.date || ""));
+  })();
+
+  // ÉDITION D'UNE VERSION : { source, note } — les lignes du devis
+  // source sont chargées dans le constructeur pour être modifiées
+  // (ajout/retrait de produits, quantités, prix) avant enregistrement.
+  const [editionVersion, setEditionVersion] = useState(null);
+
+  // Étape 1 : charger la version source dans le constructeur. Le devis
+  // d'origine reste INTACT tant que rien n'est enregistré (règle A :
+  // un devis envoyé ne se modifie jamais, il se révise).
+  const demarrerNouvelleVersion = (source, note) => {
+    setLignes(
+      (source.lignes || []).map((l, i) => ({ ...l, uid: `${l.uid || "l"}-copie-${Date.now()}-${i}` }))
+    );
+    setClientId(source.clientId || clientId);
+    setEstContrat(!!source.estContrat);
+    setFrequenceContrat(source.frequenceFacturationAnnuelle || 4);
+    setEditionVersion({ source, note: (note || "").trim() });
+    setCreationVersionPour(null);
+    setNoteNouvelleVersion("");
+    // Remonte au constructeur (il est en haut de la colonne de gauche).
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const annulerEdition = () => {
+    setEditionVersion(null);
+    setLignes([]);
+    setEstContrat(false);
+    setFrequenceContrat(4);
+  };
+
+  // Étape 2 : enregistrer la révision AVEC les lignes modifiées.
+  // Incrémente le suffixe et archive les versions précédentes.
+  const enregistrerVersion = () => {
+    if (!editionVersion) return;
+    const { source, note } = editionVersion;
+    const base = source.numeroBase || source.numero;
+    const versions = versionsDuDossier(base);
+    const prochaineVersion = Math.max(...versions.map((v) => v.version ?? 0)) + 1;
+    const numero = `${base}-${prochaineVersion}`;
+    const revision = {
+      ...source,
+      id: numero,
+      numero,
+      numeroBase: base,
+      version: prochaineVersion,
+      versionActive: true,
+      // La révision repart « envoyée » : elle n'est ni acceptée ni traitée.
+      statut: "envoye",
+      traite: false,
+      modeTraitement: null,
+      projetId: null,
+      date: todayISO(),
+      courrielEnvoi: null,
+      courrielsEnvoi: [],
+      noteVersion: note,
+      creeLe: new Date().toISOString(),
+      // Les lignes MODIFIÉES dans le constructeur — la version d'origine
+      // n'est jamais touchée.
+      lignes,
+      totalCoutant: totaux.coutant,
+      totalVendant: totaux.vendant,
+      estContrat,
+      frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
+    };
+    setDevisListe((prev) => [revision, ...prev.map((d) => ((d.numeroBase || d.numero) === base ? { ...d, versionActive: false } : d))]);
+    persisterDevis?.(revision);
+    activerVersionDevis(base, numero).catch(() => {});
+    ajouterJournal(
+      `📄 Version ${numero} enregistrée à partir de ${source.numero}${note ? ` — ${note}` : ""} · ${totaux.vendant.toFixed(2)} $ (les versions précédentes restent consultables)`
+    );
+    setEditionVersion(null);
+    setLignes([]);
+    setEstContrat(false);
+    setFrequenceContrat(4);
+    setDossierOuvert(base);
+    setVersionAffichee(numero);
+  };
+
+  const demarrerCreationDevis = () => {
+    if (lignes.length === 0) return;
+    setCourrielModalOuvert(true);
+  };
+
+  const creerDevis = async (choixCourriels) => {
+    // Choix MULTIPLE : le devis peut partir à plusieurs contacts du client.
+    const destinataires = listeDestinataires(choixCourriels);
+    // Numéro SÉQUENTIEL attribué par la base (aucun doublon possible).
+    let numero;
+    try {
+      numero = await numeroDevis();
+    } catch {
+      numero = genererNumeroSecours("DEV");
+      ajouterJournal("⚠️ Numéro de devis séquentiel indisponible — numéro de secours attribué, à corriger manuellement.");
+    }
+    const nouveauDevis = {
+      id: numero,
+      numero,
+      // Nouveau dossier : version 0, active. Les révisions à venir
+      // partageront ce numeroBase (DEV-3500 → DEV-3500-1, -2 …).
+      numeroBase: numero,
+      version: 0,
+      versionActive: true,
+      clientId,
+      clientNom: client.nom,
+      lignes,
+      totalCoutant: totaux.coutant,
+      totalVendant: totaux.vendant,
+      statut: "envoye",
+      date: todayISO(),
+      courrielEnvoi: destinataires[0]?.email || null,
+      courrielsEnvoi: destinataires.map((c) => c.email),
+      // Contrat d'entretien : fréquence portée par le devis lui-même,
+      // reprise automatiquement à la création de la tâche.
+      estContrat,
+      frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
+    };
+    setDevisListe((prev) => [nouveauDevis, ...prev]);
+    persisterDevis?.(nouveauDevis);
+    setLignes([]);
+    setEstContrat(false);
+    setFrequenceContrat(4);
+    setCourrielModalOuvert(false);
+    ajouterJournal(
+      destinataires.length > 0
+        ? `Devis ${numero} créé et envoyé à ${libelleDestinataires(destinataires)} pour ${client.nom} (${totaux.vendant.toFixed(2)} $)`
+        : `Devis ${numero} créé pour ${client.nom} (${totaux.vendant.toFixed(2)} $) — aucun courriel disponible pour l'envoi`
+    );
+  };
+
+  const [devisATraiterId, setDevisATraiterId] = useState(null);
+  const devisATraiter = devisListe.find((d) => d.id === devisATraiterId) || null;
+
+  // "Marquer accepté" ne fait plus QUE changer le statut — l'admin
+  // choisit ENSUITE explicitement, via "Traiter le devis", comment ce
+  // devis accepté doit être converti (bon de travail direct ou
+  // nouveau projet d'envergure). `traite` distingue un devis accepté
+  // mais pas encore converti d'un devis déjà traité.
+  const accepterDevis = (devis) => {
+    setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? { ...d, statut: "accepte", traite: false } : d)));
+    persisterDevis?.({ ...devis, statut: "accepte", traite: false });
+    ajouterJournal(`✅ Devis ${devis.numero} marqué accepté — prêt à être traité ("Traiter le devis")`);
+  };
+
+  // OPTION A — Intervention directe : le devis devient un bon de
+  // travail unique, pré-rempli, envoyé directement dans l'agenda pour
+  // attribution à un technicien. Conserve l'automatisation BC/achats
+  // (du matériel est probablement encore nécessaire pour intervenir),
+  // et surtout `devisNumero` — c'est ce lien qui permet à ce travail
+  // d'apparaître ensuite dans l'onglet Facturation (facturation
+  // progressive plafonnée au devis) puis d'être converti en facture
+  // QuickBooks, exactement comme les devis traités par l'ancien flux.
+  const traiterCommeBonDeTravail = async (devis, adresseTravaux) => {
+    let numeroBc;
+    try {
+      numeroBc = await numeroBonCommande();
+    } catch {
+      numeroBc = genererNumeroSecours("BC");
+      ajouterJournal("⚠️ Numéro de BC séquentiel indisponible — numéro de secours attribué, à corriger manuellement.");
+    }
+    const materiaux = devis.lignes.map((l) => ({ description: l.nom, quantite: l.quantite, unite: l.unite || "unité" }));
+
+    setPdfAperçu({ numero: numeroBc, client: devis.clientNom, materiaux, date: todayISO() });
+    ajouterJournal(`📄 Bon de commande ${numeroBc} généré (PDF, sans prix de vente)`);
+    ajouterJournal(`📧 Courriel envoyé à achats@ventilationdgl.com — pièce jointe : ${numeroBc}.pdf`);
+
+    ajouterTacheAgenda({
+      id: `tache-${devis.id}`,
+      clientId: devis.clientId,
+      clientNom: devis.clientNom,
+      titre: `Devis ${devis.numero} — Intervention`,
+      description: materiaux.map((m) => `${m.quantite} × ${m.description}`).join(", "),
+      statut: "a_planifier",
+      heures: 1,
+      jours: 0,
+      sauterWeekend: false,
+      typeTache: "devis",
+      devisNumero: devis.numero,
+      adresseTravaux: adresseTravaux || null,
+    });
+
+    setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? { ...d, traite: true, modeTraitement: "bon_travail" } : d)));
+    persisterDevis?.({ ...devis, traite: true, modeTraitement: "bon_travail" });
+    ajouterJournal(`🔧 Devis ${devis.numero} converti en bon de travail — prêt pour attribution dans l'agenda. Lien QuickBooks conservé (facturation finale via l'onglet Facturation).`);
+    setDevisATraiterId(null);
+    onDevisTraite?.("agenda");
+  };
+
+  // OPTION B — Nouveau projet d'envergure : le montant du devis
+  // devient le budget initial du projet, et chaque ligne du devis
+  // devient une tâche/étape distincte dans l'agenda, rattachée au
+  // projet via projetId — pour un suivi de rentabilité dès le départ.
+  const traiterCommeProjet = (devis, { tauxHoraireCoutant, dateFin, adresseTravaux }) => {
+    const nouveauProjetId = `projet-${Date.now()}`;
+    const nouveauProjet = {
+      id: nouveauProjetId,
+      nom: `Devis ${devis.numero} — ${devis.clientNom}`,
+      clientId: devis.clientId,
+      adresseTravaux: adresseTravaux || null,
+      dateDebut: todayISO(),
+      dateFin: dateFin || "",
+      statut: "a_planifier",
+      budgetTotal: devis.totalVendant,
+      tauxHoraireCoutant: parseFloat(tauxHoraireCoutant) || 45,
+      bonsCommande: [],
+    };
+    setProjets((prev) => [...prev, nouveauProjet]);
+
+    // Chaque ligne du devis devient une étape/tâche distincte, déjà
+    // rattachée au nouveau projet — l'admin n'a plus qu'à les
+    // assigner dans l'agenda au fur et à mesure de l'avancement.
+    devis.lignes.forEach((ligne, i) => {
+      ajouterTacheAgenda({
+        id: `tache-${devis.id}-etape-${i}`,
+        clientId: devis.clientId,
+        clientNom: devis.clientNom,
+        titre: `${devis.numero} — ${ligne.nom}`,
+        description: `${ligne.quantite} × ${ligne.nom}`,
+        statut: "a_planifier",
+        heures: 1,
+        jours: 0,
+        sauterWeekend: false,
+        typeTache: "devis",
+        devisNumero: devis.numero,
+        projetId: nouveauProjetId,
+        adresseTravaux: adresseTravaux || null,
+      });
+    });
+
+    setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? { ...d, traite: true, modeTraitement: "projet", projetId: nouveauProjetId } : d)));
+    persisterDevis?.({ ...devis, traite: true, modeTraitement: "projet", projetId: nouveauProjetId });
+    ajouterJournal(
+      `🏗️ Devis ${devis.numero} converti en projet "${nouveauProjet.nom}" (budget initial ${devis.totalVendant.toFixed(2)} $, ${devis.lignes.length} étape${devis.lignes.length > 1 ? "s" : ""} ajoutée${devis.lignes.length > 1 ? "s" : ""} à l'agenda). Lien QuickBooks conservé (facturation progressive via l'onglet Facturation).`
+    );
+    setDevisATraiterId(null);
+    onDevisTraite?.("projets");
+  };
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+      <div className="grid gap-6 md:grid-cols-5">
+        {/* CONSTRUCTEUR DE DEVIS */}
+        <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 md:col-span-3 md:p-5">
+          <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">
+            {editionVersion ? "Modification en cours" : "Nouveau devis"}
+          </h2>
+          {/* MODE ÉDITION — les lignes de la version source sont chargées
+              ici. Le devis d'origine reste INTACT : l'enregistrement crée
+              une NOUVELLE version (règle validée : un devis envoyé ne se
+              modifie jamais, il se révise). */}
+          {editionVersion && (
+            <div className="rounded-xl border border-blue-300 bg-blue-50 p-2.5">
+              <p className="text-xs font-bold text-blue-900">
+                ✏️ Nouvelle version à partir de {editionVersion.source.numero}
+              </p>
+              <p className="mt-0.5 text-[10px] text-blue-700">
+                Ajoute ou retire des produits, change les quantités et les prix. {editionVersion.source.numero} ne sera pas modifié — une nouvelle version sera créée à l'enregistrement.
+              </p>
+              {editionVersion.note && <p className="mt-1 text-[10px] italic text-blue-600">Raison : {editionVersion.note}</p>}
+              <Button variant="outline" onClick={annulerEdition} className="mt-2 w-full min-h-0 py-1.5 text-[11px]">
+                Annuler la modification
+              </Button>
+            </div>
+          )}
+
+          {/* TYPE DE DEVIS — choisi dès le départ, bien visible (comme les
+              boutons Jour/Semaine/Mois de l'agenda) : travaux réguliers, ou
+              entretien périodique facturé selon contrat (1 à 4 fois/an). */}
+          <div className="flex rounded-xl border border-slate-200 p-0.5">
+            <button
+              onClick={() => setEstContrat(false)}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold ${!estContrat ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+            >
+              Travaux réguliers
+            </button>
+            <button
+              onClick={() => setEstContrat(true)}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-bold ${estContrat ? "bg-purple-700 text-white" : "text-slate-500"}`}
+            >
+              📄 Entretien périodique
+            </button>
+          </div>
+          {estContrat && (
+            <div className="rounded-xl border border-purple-200 bg-purple-50 p-2.5">
+              <label className="mb-0.5 block text-[10px] font-bold text-purple-800">Fréquence de facturation du contrat</label>
+              <select
+                value={frequenceContrat}
+                onChange={(e) => setFrequenceContrat(parseInt(e.target.value))}
+                className="w-full rounded-lg border border-purple-300 bg-white px-2 py-1.5 text-xs font-semibold"
+              >
+                {FREQUENCES_CONTRAT.map((f) => (
+                  <option key={f} value={f}>
+                    {f === 1 ? "1 facture par an (montant complet payé en une fois)" : `${f} factures par an (1/${f} du montant à chaque échéance)`}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">Client</label>
+            <select
+              value={clientId}
+              onChange={(e) => {
+                // « ➕ Nouveau client » ouvre la fenêtre de création rapide
+                // sans toucher au client actuellement sélectionné.
+                if (e.target.value === "__nouveau__") {
+                  setModalNouveauClient(true);
+                  return;
+                }
+                setClientId(e.target.value);
+              }}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-semibold"
+            >
+              <option value="__nouveau__">➕ Nouveau client…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.nom}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="rounded-xl bg-slate-50 p-3">
+            <label className="mb-1 block text-xs font-bold text-slate-500">Ajouter une adresse au dossier client</label>
+            <input
+              value={nouvelleAdresseNom}
+              onChange={(e) => setNouvelleAdresseNom(e.target.value)}
+              placeholder="Nom de l'adresse (ex: Chantier Sud)"
+              className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <AutocompleteAdresse onSelection={enregistrerAdresse} />
+            <p className="mt-1 text-[11px] text-slate-400">Sélectionner un résultat enregistre l'adresse au dossier de {client.nom}.</p>
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <label className="text-xs font-bold text-slate-500">Lignes du devis</label>
+              <div className="flex gap-1.5">
+                <SelecteurItem catalogue={catalogue} onChoisir={(p) => ajouterLigne(p)} />
+                <Button variant="outline" onClick={ajouterLignePersonnalisee} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
+                  <Plus size={12} /> Ligne sur mesure
+                </Button>
+                {/* RABAIS — une ligne au montant NÉGATIF. Rien
+                    n'empêchait d'en saisir une à la main, mais il
+                    fallait deviner qu'un prix pouvait être négatif.
+                    Le rabais s'applique AVANT les taxes, comme il se
+                    doit : on ne facture pas de taxes sur un montant
+                    que le client ne paie pas. */}
+                <Button variant="outline" onClick={ajouterRabais} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
+                  − Rabais
+                </Button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-400">
+                    <th className="pb-1.5 font-semibold">Produit</th>
+                    <th className="pb-1.5 text-center font-semibold">Qté</th>
+                    <th className="pb-1.5 text-right font-semibold">Coûtant</th>
+                    <th className="pb-1.5 text-right font-semibold">Vendant</th>
+                    <th className="pb-1.5"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lignes.map((l) => (
+                    <tr key={l.uid} className="border-t border-slate-100">
+                      <td className="py-1.5 pr-2 font-semibold text-slate-800">
+                        {l.surMesure ? (
+                          <input
+                            type="text"
+                            value={l.nom}
+                            onChange={(e) => majLigne(l.uid, { ...l, nom: e.target.value })}
+                            placeholder="Détail de l'item..."
+                            className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs"
+                          />
+                        ) : (
+                          l.nom
+                        )}
+                        {/* DESCRIPTION DE L'ITEM — modèles, garantie,
+                            numéros AHRI, subventions… Elle vient du
+                            catalogue (importée de QuickBooks) et part
+                            SUR LE DEVIS DU CLIENT : c'est l'argumentaire
+                            de vente, il n'a rien à faire caché au fond
+                            de la base de données.
+                            Modifiable ici : on l'ajuste pour CE devis
+                            sans toucher au catalogue. */}
+                        <textarea
+                          rows={hauteurDescription(l.description)}
+                          value={l.description || ""}
+                          onChange={(e) => majLigne(l.uid, { ...l, description: e.target.value })}
+                          placeholder="Description visible par le client (modèles, garantie, ce qui est inclus…)"
+                          className="mt-1 w-full resize-y rounded border border-slate-200 bg-slate-50 px-1.5 py-1 text-[11px] font-normal leading-snug text-slate-600 outline-none focus:border-slate-400"
+                        />
+                        <p className="mt-0.5 text-[9px] italic text-slate-400">
+                          Modifiable — n&apos;affecte que ce devis, pas le catalogue.
+                        </p>
+                      </td>
+                      <td className="py-1.5 text-center">
+                        <input
+                          type="number"
+                          min={1}
+                          value={l.quantite}
+                          onChange={(e) => majLigne(l.uid, { ...l, quantite: parseFloat(e.target.value) || 1 })}
+                          className="w-12 rounded border border-slate-300 px-1 py-0.5 text-center tabular-nums"
+                        />
+                      </td>
+                      {/* COÛTANT TOUJOURS MODIFIABLE — c'est ici qu'on
+                          complète un forfait dont QuickBooks ne connaît
+                          pas le coût, au moment où on monte le devis.
+                          En sortant du champ, une fenêtre propose de
+                          reporter le prix au catalogue (si le droit
+                          l'autorise). Encadré en ambre tant qu'il est à
+                          zéro : la ligne n'entre pas dans la marge. */}
+                      <td className="py-1.5 text-right tabular-nums text-slate-500">
+                        <InputNombreDecimal
+                          valeur={l.prix_coutant}
+                          onChange={(v) => majLigne(l.uid, { ...l, prix_coutant: v })}
+                          onBlur={() => proposerReportCatalogue(l)}
+                          className={`w-16 rounded border px-1 py-0.5 text-right tabular-nums ${
+                            (Number(l.prix_coutant) || 0) === 0
+                              ? "border-amber-400 bg-amber-50"
+                              : "border-slate-300"
+                          }`}
+                        />
+                      </td>
+                      {/* PRIX DE VENTE TOUJOURS MODIFIABLE — il ne
+                          l'était que sur les lignes « sur mesure » :
+                          sur un item du catalogue, c'était du texte
+                          figé. Impossible d'ajuster un prix pour un
+                          client, ni de saisir un rabais.
+                          Les valeurs NÉGATIVES sont acceptées (rabais,
+                          crédit) : le champ et les totaux les gèrent. */}
+                      <td className="py-1.5 text-right tabular-nums font-semibold text-slate-900">
+                        <InputNombreDecimal
+                          valeur={l.prix_vendant}
+                          onChange={(v) => majLigne(l.uid, { ...l, prix_vendant: v })}
+                          className={`w-20 rounded border px-1 py-0.5 text-right tabular-nums font-semibold ${
+                            (Number(l.prix_vendant) || 0) < 0
+                              ? "border-rose-300 bg-rose-50 text-rose-700"
+                              : "border-slate-300"
+                          }`}
+                        />
+                      </td>
+                      <td className="py-1.5 text-right">
+                        <button onClick={() => supprimerLigne(l.uid)} className="text-slate-300 hover:text-red-500">
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {lignes.length === 0 && <p className="py-4 text-center text-xs text-slate-400">Aucune ligne — ajoute un produit du catalogue.</p>}
+            </div>
+          </div>
+
+          {lignes.length > 0 && (
+            <div className="space-y-1 rounded-xl bg-slate-50 p-3 text-sm">
+              <div className="flex justify-between text-slate-500"><span>Total coûtant</span><span className="tabular-nums">{totaux.coutant.toFixed(2)} $</span></div>
+              <div className="flex justify-between font-bold text-slate-900"><span>Sous-total (HT)</span><span className="tabular-nums">{totaux.vendant.toFixed(2)} $</span></div>
+
+              {/* TAXES — elles n'apparaissaient qu'au moment de l'aperçu
+                  client. Or c'est le TOTAL TTC que le client compare et
+                  retient : il doit être visible pendant qu'on monte le
+                  devis, pas seulement à la fin. Taux lus dans les
+                  Paramètres de l'entreprise. */}
+              {(() => {
+                const { tps, tvq, total } = calculerTaxes(totaux.vendant, configEnt);
+                return (
+                  <>
+                    <div className="flex justify-between text-[11px] text-slate-400">
+                      <span>TPS ({tauxAffiche(configEnt.tauxTps)}%)</span>
+                      <span className="tabular-nums">{tps.toFixed(2)} $</span>
+                    </div>
+                    <div className="flex justify-between text-[11px] text-slate-400">
+                      <span>TVQ ({tauxAffiche(configEnt.tauxTvq)}%)</span>
+                      <span className="tabular-nums">{tvq.toFixed(2)} $</span>
+                    </div>
+                    <div className="flex justify-between border-t border-slate-200 pt-1 text-base font-extrabold text-slate-900">
+                      <span>Total client</span>
+                      <span className="tabular-nums">{total.toFixed(2)} $</span>
+                    </div>
+                  </>
+                );
+              })()}
+              <div className={`flex justify-between ${lignesNonEvaluees.length > 0 ? "text-slate-600" : "text-emerald-600"}`}>
+                <span>
+                  Marge
+                  {lignesNonEvaluees.length > 0 && (
+                    <span className="ml-1 text-[10px] font-normal text-slate-400">
+                      sur {lignesEvaluees.length} ligne{lignesEvaluees.length > 1 ? "s" : ""} sur {lignes.length}
+                    </span>
+                  )}
+                </span>
+                <span className="tabular-nums">
+                  {lignesEvaluees.length === 0
+                    ? "— non évaluable"
+                    : `${marge.toFixed(2)} $ (${margePct.toFixed(0)}%)`}
+                </span>
+              </div>
+
+              {/* CE QUI N'EST PAS ÉVALUÉ — en DOLLARS, pas en nombre de
+                  lignes : « 1 ligne incomplète » ne dit pas s'il s'agit
+                  d'un bouchon à 10 $ ou d'un contrat à 8 100 $. */}
+              {lignesNonEvaluees.length > 0 && (
+                <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2">
+                  <p className="text-[11px] font-extrabold tabular-nums text-amber-800">
+                    ⚠️ {montantNonEvalue.toFixed(2)} $ non évalués sur {totaux.vendant.toFixed(2)} $
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {lignesNonEvaluees.slice(0, 4).map((l) => (
+                      <li key={l.uid} className="text-[10px] leading-snug text-amber-700">
+                        • {l.nom || "Ligne sans nom"} — coût manquant
+                      </li>
+                    ))}
+                    {lignesNonEvaluees.length > 4 && (
+                      <li className="text-[10px] text-amber-700">• +{lignesNonEvaluees.length - 4} autre(s)</li>
+                    )}
+                  </ul>
+                  <p className="mt-1 text-[10px] leading-snug text-amber-700">
+                    Entre le coûtant directement dans la colonne pour compléter la marge.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <Button
+            onClick={editionVersion ? enregistrerVersion : demarrerCreationDevis}
+            disabled={lignes.length === 0}
+            className="w-full"
+          >
+            {editionVersion
+              ? "Enregistrer la nouvelle version"
+              : estContrat
+              ? "Créer le contrat d'entretien périodique"
+              : "Créer le devis"}
+          </Button>
+        </div>
+
+        {/* LISTE DES DEVIS */}
+        <div className="space-y-2 md:col-span-2">
+          <h2 className="px-1 text-sm font-extrabold uppercase tracking-wide text-slate-500">Devis récents</h2>
+          <p className="px-1 text-[11px] text-slate-400">
+            Les 10 derniers. Tous les devis d'un client sont dans <span className="font-bold">son dossier</span> (onglet Clients), et la{" "}
+            <span className="font-bold">recherche rapide</span> les trouve par numéro, client ou produit.
+          </p>
+          {dossiersDevis.length === 0 && <p className="px-1 text-xs text-slate-400">Aucun devis pour le moment.</p>}
+          {/* UNE CARTE PAR DOSSIER — la version active est affichée ; les
+              révisions précédentes s'atteignent par les onglets. */}
+          {dossiersDevis.slice(0, 10).map(({ base, versions, active }) => {
+            const ouvert = dossierOuvert === base;
+            const affichee = ouvert ? versions.find((v) => v.numero === versionAffichee) || active : active;
+            const estActive = affichee.numero === active.numero;
+            return (
+              <div key={base} className="rounded-xl border border-slate-200 bg-white p-3.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
+                      {affichee.numero}
+                      {versions.length > 1 && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">
+                          {versions.length} versions
+                        </span>
+                      )}
+                      {affichee.estContrat && (
+                        <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700">
+                          CONTRAT · {affichee.frequenceFacturationAnnuelle}×/an
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-500">{affichee.clientNom}</p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      affichee.statut === "accepte" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-black"
+                    }`}
+                  >
+                    {affichee.statut === "accepte" ? "ACCEPTÉ" : "ENVOYÉ"}
+                  </span>
+                </div>
+
+                {/* ONGLETS DES VERSIONS — visibles dès qu'il y a une révision. */}
+                {versions.length > 1 && (
+                  <div className="mt-2 flex flex-wrap gap-1 rounded-lg border border-slate-200 p-0.5">
+                    {versions.map((v) => {
+                      const selectionne = v.numero === affichee.numero;
+                      return (
+                        <button
+                          key={v.numero}
+                          onClick={() => {
+                            setDossierOuvert(base);
+                            setVersionAffichee(v.numero);
+                          }}
+                          className={`rounded-md px-2 py-1 text-[10px] font-extrabold ${
+                            selectionne ? "bg-[#131B2E] text-white" : "text-slate-500 hover:bg-slate-50"
+                          }`}
+                          title={v.noteVersion || undefined}
+                        >
+                          {v.version === 0 ? "Originale" : `v${v.version}`}
+                          {v.numero === active.numero ? " ★" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <p className="mt-1.5 text-sm font-bold tabular-nums text-slate-800">{affichee.totalVendant.toFixed(2)} $</p>
+                <p className="text-[10px] text-slate-400">
+                  {affichee.date}
+                  {affichee.noteVersion ? ` · ${affichee.noteVersion}` : ""}
+                </p>
+
+                {!estActive && (
+                  <p className="mt-1.5 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-bold text-slate-500">
+                    🔒 Version archivée — lecture seule. La version courante est {active.numero}.
+                  </p>
+                )}
+                {affichee.traite && (
+                  <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                    <CheckCircle2 size={11} /> Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
+                  </span>
+                )}
+
+                <Button variant="outline" onClick={() => setDevisAperçu(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                  <FileText size={13} /> Voir version client
+                </Button>
+
+                {/* RÉPONSE DU CLIENT — la preuve. Nom saisi, date, heure,
+                    et la version des conditions qu'il a lues ce jour-là.
+                    C'est ce qui répond à « je n'ai jamais été avisé ». */}
+                {affichee.reponseClient && (
+                  <div className={`mt-2 rounded-lg border p-2.5 ${
+                    affichee.reponseClient === "accepte" ? "border-emerald-300 bg-emerald-50"
+                      : affichee.reponseClient === "modification" ? "border-blue-300 bg-blue-50"
+                      : "border-slate-300 bg-slate-50"
+                  }`}>
+                    <p className="text-[11px] font-extrabold text-slate-800">
+                      {affichee.reponseClient === "accepte" ? "✅ Accepté par le client"
+                        : affichee.reponseClient === "modification" ? "✏️ Modification demandée"
+                        : "❌ Refusé par le client"}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-slate-600">
+                      {affichee.reponduParNom}
+                      {affichee.reponduLe ? ` · ${new Date(affichee.reponduLe).toLocaleString("fr-CA")}` : ""}
+                    </p>
+                    {affichee.messageClient && (
+                      <p className="mt-1 whitespace-pre-line rounded bg-white/70 px-2 py-1 text-[10px] italic text-slate-700">
+                        « {affichee.messageClient} »
+                      </p>
+                    )}
+                    {affichee.conditionsVersion && (
+                      <p className="mt-1 text-[9px] text-slate-400">
+                        Conditions version {affichee.conditionsVersion} — texte exact conservé
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* ENVOI AU CLIENT — le courriel avec le lien d'acceptation.
+                    « Copier le lien » reste là comme plan B (téléphone,
+                    texto, ou service d'envoi pas encore configuré). */}
+                {estActive && !affichee.reponseClient && envoiDevis?.devisId !== affichee.id && (
+                  <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                    ✉️ Envoyer au client
+                  </Button>
+                )}
+                {estActive && !affichee.reponseClient && envoiDevis?.devisId === affichee.id && (
+                  <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
+                    <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">Envoyer le devis à :</p>
+                    {(ficheClientDe(affichee)?.courriels || []).map((c) => {
+                      const adresse = typeof c === "string" ? c : c.email;
+                      if (!adresse) return null;
+                      const coche = envoiDevis.choisis.includes(adresse);
+                      return (
+                        <label key={adresse} className="mb-1 flex items-center gap-1.5 text-xs text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={coche}
+                            onChange={() =>
+                              setEnvoiDevis((prev) => ({
+                                ...prev,
+                                choisis: coche ? prev.choisis.filter((a) => a !== adresse) : [...prev.choisis, adresse],
+                              }))
+                            }
+                          />
+                          {adresse}
+                          {typeof c === "object" && c.label ? <span className="text-[10px] text-slate-400">({c.label})</span> : null}
+                        </label>
+                      );
+                    })}
+                    <input
+                      value={envoiDevis.extra}
+                      onChange={(e) => setEnvoiDevis((prev) => ({ ...prev, extra: e.target.value }))}
+                      placeholder="Autre adresse (optionnel)"
+                      className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <div className="flex gap-1.5">
+                      <Button
+                        onClick={() => envoyerDevisParCourriel(affichee)}
+                        disabled={envoiDevisEnCours || (envoiDevis.choisis.length === 0 && !envoiDevis.extra.trim())}
+                        className="min-h-0 flex-1 py-1.5 text-xs"
+                      >
+                        {envoiDevisEnCours ? "Envoi…" : "Envoyer"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setEnvoiDevis(null)} className="min-h-0 py-1.5 text-xs">
+                        Annuler
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {estActive && !affichee.reponseClient && (
+                  <Button
+                    variant="outline"
+                    onClick={() => creerLienAcceptation(affichee)}
+                    className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
+                  >
+                    <Copy size={13} /> {lienCopie === affichee.id ? "Lien copié ✓" : "Copier le lien d'acceptation"}
+                  </Button>
+                )}
+
+                {/* Actions réservées à la version ACTIVE — on ne traite
+                    jamais une révision archivée par erreur. */}
+                {estActive && affichee.statut !== "accepte" && (
+                  <Button onClick={() => accepterDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                    <Check size={13} /> Marquer accepté
+                  </Button>
+                )}
+                {estActive && affichee.statut === "accepte" && !affichee.traite && (
+                  <Button onClick={() => setDevisATraiterId(affichee.id)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                    <ClipboardList size={13} /> Traiter le devis
+                  </Button>
+                )}
+
+                {/* NOUVELLE VERSION — depuis la version affichée. C'est ce
+                    qui permet de « repartir d'une ancienne version ». */}
+                {creationVersionPour === affichee.numero ? (
+                  <div className="mt-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5">
+                    <p className="text-[11px] font-bold text-slate-800">Nouvelle version à partir de {affichee.numero}</p>
+                    <input
+                      value={noteNouvelleVersion}
+                      onChange={(e) => setNoteNouvelleVersion(e.target.value)}
+                      placeholder="Raison (ex : le client retire le rooftop)"
+                      className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <div className="mt-1.5 flex gap-1.5">
+                      <Button onClick={() => demarrerNouvelleVersion(affichee, noteNouvelleVersion)} className="min-h-0 flex-1 py-1.5 text-[11px]">
+                        Modifier et créer
+                      </Button>
+                      <Button variant="outline" onClick={() => setCreationVersionPour(null)} className="min-h-0 py-1.5 text-[11px]">
+                        Annuler
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  !affichee.traite && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setCreationVersionPour(affichee.numero);
+                        setNoteNouvelleVersion("");
+                      }}
+                      className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
+                    >
+                      <Plus size={13} /> {estActive ? "Nouvelle version" : "Repartir de cette version"}
+                    </Button>
+                  )
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {pdfAperçu && <ApercuBonCommande data={pdfAperçu} onFermer={() => setPdfAperçu(null)} />}
+      {devisAperçu && <ApercuDevisClient devis={devisAperçu} onFermer={() => setDevisAperçu(null)} />}
+      {courrielModalOuvert && (
+        <ModalSelectionCourriel
+          client={client}
+          contexte={`Devis pour ${client.nom} — ${totaux.vendant.toFixed(2)} $`}
+          onFermer={() => setCourrielModalOuvert(false)}
+          onConfirmer={(choix) => creerDevis(choix)}
+        />
+      )}
+      {/* FENÊTRE — NOUVEAU CLIENT depuis le devis (composant partagé). */}
+      {/* REPORT DU COÛT AU CATALOGUE — fenêtre de confirmation.
+          Sans le droit « Modifier la liste de prix », la case n'est pas
+          proposée : on l'annonce clairement plutôt que d'afficher un
+          bouton grisé que personne ne comprend. */}
+      {reportCatalogue && (
+        <ModalReportCatalogue
+          info={reportCatalogue}
+          peutModifierListePrix={peutModifierListePrix}
+          onFermer={() => setReportCatalogue(null)}
+          onConfirmer={async (reporter) => {
+            const { item, saisi } = reportCatalogue;
+            setReportCatalogue(null);
+            if (!reporter) return;
+            try {
+              await onMajCoutCatalogue?.({ ...item, prix_coutant: saisi });
+            } catch {
+              // L'échec ne doit pas faire perdre le devis en cours : le
+              // prix reste bon sur la ligne, seul le catalogue n'a pas suivi.
+              ajouterJournal(`⚠️ Coût de « ${item.nom} » appliqué au devis mais NON enregistré au catalogue — réessaie depuis l'onglet Tarifs.`);
+            }
+          }}
+        />
+      )}
+
+      {modalNouveauClient && (
+        <ModalNouveauClient
+          clients={clients}
+          setClients={setClients}
+          ajouterJournal={ajouterJournal}
+          onFermer={() => setModalNouveauClient(false)}
+          onSelection={(id) => setClientId(id)}
+        />
+      )}
+      {devisATraiter && (
+        <ModalTraiterDevis
+          devis={devisATraiter}
+          clients={clients}
+          onFermer={() => setDevisATraiterId(null)}
+          onChoisirBonTravail={traiterCommeBonDeTravail}
+          onChoisirProjet={traiterCommeProjet}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// EN-TÊTE D'ENTREPRISE — coordonnées officielles affichées sur tous
+// les documents envoyés au client (devis, bons de travail/commande).
+// ------------------------------------------------------------
+// LOGO CMMTQ : fichier officiel fourni par l'utilisateur (membre
+// CMMTQ), placé dans /public/logo-cmmtq.png. Le fond blanc a été
+// rendu transparent pour une intégration propre sur fond blanc comme
+// coloré. Si le fichier venait à changer (ex. mise à jour du logo par
+// la CMMTQ), il suffit de remplacer /public/logo-cmmtq.png par le
+// nouveau fichier — aucun changement de code nécessaire.
+// ============================================================
+function EnTeteEntreprise({ compact, config }) {
+  // `config` permet de forcer une configuration (aperçu en direct dans
+  // les Paramètres) ; sinon on prend celle de l'entreprise connectée.
+  const ctx = useEntreprise();
+  const e = config || ctx;
+  return (
+    <div className={`border-b border-slate-200 ${compact ? "pb-2" : "pb-3"}`}>
+      {/* LOGO DE L'ENTREPRISE + raison sociale. Fichier fourni par
+          l'entreprise dans /public/logo-dgl.png — pour le changer, il
+          suffit de remplacer le fichier, aucun code à modifier. */}
+      <div className="flex items-center gap-2.5">
+        <img
+          src="/logo-dgl.png"
+          alt={e.nomLegal}
+          className={`${compact ? "h-8" : "h-11"} w-auto shrink-0`}
+          onError={(ev) => { ev.currentTarget.style.display = "none"; }}
+        />
+        <p className="text-sm font-extrabold text-[#131B2E]">{e.nomLegal}</p>
+      </div>
+      <div className={`mt-1.5 grid ${compact ? "grid-cols-1" : "grid-cols-2"} gap-x-4 gap-y-0.5 text-[10px] text-slate-500`}>
+        {e.adresse ? <p>{e.adresse}</p> : null}
+        {(e.telephone || e.courriel) ? <p>{[e.telephone, e.courriel].filter(Boolean).join(" · ")}</p> : null}
+        {e.numeroTps ? <p>Nº d'inscription TPS/TVH : {e.numeroTps}</p> : null}
+        {e.numeroTvq ? <p>Nº d'enregistrement TVQ : {e.numeroTvq}</p> : null}
+        {e.numeroRbq ? <p>RBQ# {e.numeroRbq}</p> : null}
+        {e.membreCmmtq ? (
+          <div className="flex items-center gap-1.5">
+            {/* Le logo officiel (fourni par l'utilisateur, fond rendu
+                transparent) inclut déjà le mot-symbole "CMMTQ" — on ne
+                répète donc pas le nom en toutes lettres à côté, pour
+                éviter la redondance. Hauteur alignée sur le reste du
+                texte de l'en-tête (10px) plutôt que dominer visuellement. */}
+            <span>Membre de la</span>
+            <img
+              src="/logo-cmmtq.png"
+              alt="CMMTQ"
+              className="h-3.5 w-auto align-middle"
+              onError={(ev) => { ev.currentTarget.style.display = "none"; }}
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ADRESSES SUR UN DOCUMENT CLIENT
+// ------------------------------------------------------------
+// Deux adresses, deux rôles différents :
+//   • FACTURÉ À  — où part la facture (siège social, comptabilité)
+//   • TRAVAUX    — où l'équipe se rend
+//
+// Elles sont souvent différentes (un entrepreneur général facturé à
+// Laval pour un chantier à Mirabel), et aucune n'apparaissait sur les
+// devis, bons de travail ni factures. Un document sans adresse de
+// facturation se fait retourner par la comptabilité du client.
+//
+// L'adresse des travaux ne s'affiche que si elle diffère : la répéter
+// deux fois n'ajoute rien et allonge le document.
+function AdressesDocument({ clientNom, adresseFacturation, adresseTravaux }) {
+  const differente =
+    adresseTravaux && adresseTravaux.trim() && adresseTravaux.trim() !== (adresseFacturation || "").trim();
+  return (
+    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Facturé à</p>
+        <p className="text-sm font-bold text-slate-800">{clientNom || "—"}</p>
+        {adresseFacturation ? (
+          <p className="whitespace-pre-line text-[11px] leading-snug text-slate-600">{adresseFacturation}</p>
+        ) : (
+          <p className="text-[11px] italic text-amber-600">Adresse de facturation manquante</p>
+        )}
+      </div>
+      {differente && (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Adresse des travaux</p>
+          <p className="whitespace-pre-line text-[11px] leading-snug text-slate-600">{adresseTravaux}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Bas de page des documents — même raison sociale que l'en-tête.
+function PiedDocument({ config }) {
+  const ctx = useEntreprise();
+  const e = config || ctx;
+  return (
+    <p className="mt-3 text-center text-[10px] text-slate-400">
+      © {new Date().getFullYear()} {e.nomLegal} — Tous droits réservés.
+    </p>
+  );
+}
+
+function ApercuDevisClient({ devis, onFermer }) {
+  // Adresses lues dans la fiche du client au moment de l'affichage —
+  // elles ne sont pas figées sur le devis. Une correction d'adresse se
+  // reflète donc sur une réimpression, ce qui est souhaitable pour un
+  // renvoi. Le devis reste inchangé pour tout le reste.
+  const fiche = (useClients() || []).find((c) => c.id === devis.clientId || c.nom === devis.clientNom);
+  // Taux de taxes lus dans les Paramètres de l'entreprise (plus codés
+  // en dur : si Québec change la TVQ, on l'ajuste dans l'écran).
+  const configEnt = useEntreprise();
+  const sousTotal = devis.totalVendant;
+  const { tps, tvq, total } = calculerTaxes(sousTotal, configEnt);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-5 text-sm">
+          <EnTeteEntreprise />
+          <p className="mt-3 text-lg font-extrabold text-[#131B2E]">DEVIS {devis.numero}</p>
+          <p className="text-xs text-slate-500">Date : {devis.date}</p>
+          {/* Exactement la même source que le PDF (AdressesPDF) : cet écran
+              s'annonce comme « la version envoyée au client », il ne doit
+              rien afficher que le PDF n'aurait pas. */}
+          <AdressesDocument
+            clientNom={devis.clientNom}
+            adresseFacturation={fiche?.adresseFacturation}
+            adresseTravaux={devis.adresseTravaux}
+          />
+
+          <table className="mt-4 w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-400">
+                <th className="pb-1.5 font-semibold">Description</th>
+                <th className="pb-1.5 text-center font-semibold">Qté</th>
+                <th className="pb-1.5 text-right font-semibold">Prix</th>
+                <th className="pb-1.5 text-right font-semibold">Montant</th>
+              </tr>
+            </thead>
+            <tbody>
+              {devis.lignes.map((l) => (
+                <tr key={l.uid} className="border-b border-slate-100">
+                  <td className="py-1.5 pr-2 text-slate-700">
+                    <span className="font-semibold">{l.nom || "—"}</span>
+                    {/* La description part chez le client : modèles,
+                        garantie, ce qui est inclus. `whitespace-pre-line`
+                        respecte les sauts de ligne de QuickBooks. */}
+                    {l.description ? (
+                      <span className="mt-0.5 block whitespace-pre-line text-[10px] leading-snug text-slate-500">
+                        {l.description}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="py-1.5 text-center tabular-nums text-slate-500">{l.quantite}</td>
+                  <td className="py-1.5 text-right tabular-nums text-slate-500">{(Number(l.prix_vendant) || 0).toFixed(2)} $</td>
+                  <td className="py-1.5 text-right tabular-nums font-semibold text-slate-800">
+                    {((Number(l.prix_vendant) || 0) * l.quantite).toFixed(2)} $
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="mt-3 space-y-1 text-xs">
+            <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">{sousTotal.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TPS ({tauxAffiche(configEnt.tauxTps)}%)</span><span className="tabular-nums">{tps.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TVQ ({tauxAffiche(configEnt.tauxTvq)}%)</span><span className="tabular-nums">{tvq.toFixed(2)} $</span></div>
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm font-extrabold text-slate-900">
+              <span>Total</span><span className="tabular-nums">{total.toFixed(2)} $</span>
+            </div>
+          </div>
+
+          <TermesConditions signature />
+
+          <p className="mt-4 text-[10px] italic text-slate-400">
+            Devis valide 30 jours. Aucune information de coût interne n'apparaît sur ce document.
+          </p>
+          <PiedDocument />
+        </div>
+
+        <BoutonPDF type="devis" devis={devis} />
+
+        <p className="mt-2 text-[11px] text-slate-400">
+          Aperçu de démonstration — le PDF réel envoyé par courriel au client se génère et s'expédie via une fonction backend, avec ce même contenu.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ApercuBonCommande({ data, onFermer }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            <FileCheck2 size={18} className="text-[#FF6A13]" />
+            <h3 className="text-sm font-extrabold">Bon de commande généré</h3>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-4 text-sm">
+          <p className="font-bold">BON DE COMMANDE — {data.numero}</p>
+          <p className="text-xs text-slate-500">Client : {data.client} · {data.date}</p>
+          <p className="mt-2 text-xs font-bold uppercase text-slate-400">Matériaux requis</p>
+          <ul className="mt-1 space-y-1 text-xs text-slate-700">
+            {data.materiaux.map((m, i) => (
+              <li key={i}>• {m.quantite} × {m.description} ({m.unite})</li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[10px] italic text-slate-400">Aucun prix de vente inclus — document destiné aux achats uniquement.</p>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+          <Mail size={15} className="shrink-0 text-slate-400" />
+          Envoyé automatiquement à <span className="font-semibold">achats@ventilationdgl.com</span>
+        </div>
+        <p className="mt-2 text-[11px] text-slate-400">
+          Aperçu de démonstration — la génération réelle du PDF et l'envoi du courriel se font via une fonction backend (ex. Supabase Edge Function + service courriel transactionnel).
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ONGLET AGENDA
+// ============================================================
+function joursDuMois(date) {
+  const annee = date.getFullYear();
+  const mois = date.getMonth();
+  const nbJours = new Date(annee, mois + 1, 0).getDate();
+  return Array.from({ length: nbJours }, (_, i) => new Date(annee, mois, i + 1));
+}
+
+function calculerJoursCibles(dateDepart, nbJours, sauterWeekend) {
+  const resultat = [];
+  let curseur = new Date(dateDepart);
+  let securite = 0;
+  while (resultat.length < Math.max(1, nbJours) && securite < 60) {
+    const jourSemaine = curseur.getDay(); // 0 = dimanche, 6 = samedi
+    if (!sauterWeekend || (jourSemaine !== 0 && jourSemaine !== 6)) {
+      resultat.push(new Date(curseur));
+    }
+    curseur = ajouterJours(curseur, 1);
+    securite += 1;
+  }
+  return resultat;
+}
+
+// Utilisée par les vues Semaine/Mois : retrouve la tâche assignée à un
+// employé pour une date donnée, peu importe à quelle heure précise
+// elle a été déposée (une seule source de vérité — les clés horaires
+// de `planning` — pour que toutes les vues restent synchronisées).
+function tachesDuJourPourEmploye(planning, dateStr, employeId) {
+  // TOUTES les tâches du jour (uniques, dans l'ordre de leur première
+  // heure) — les vues Semaine/Mois les empilent pour n'en perdre aucune.
+  const vues = new Set();
+  const liste = [];
+  for (const h of HEURES) {
+    listeCellule(planning[`${dateStr}|${employeId}|${h}`]).forEach((t) => {
+      if (t && !vues.has(t.id)) {
+        vues.add(t.id);
+        liste.push(t);
+      }
+    });
+  }
+  return liste;
+}
+
+const TYPES_TACHE = [
+  { id: "appel_service", label: "Appel de service", description: "Facturation automatique depuis le bon de commande" },
+  { id: "devis", label: "Travaux avec devis", description: "Facturation uniquement à partir d'un devis — validation admin requise" },
+  { id: "temps_materiel", label: "Travaux en temps et matériel", description: "Facturation automatique depuis le bon de commande" },
+  { id: "entretien_contrat", label: "Entretien selon contrat", description: "Facturation selon contrat — 1 à 4 factures par an" },
+  // ---- TYPES NON FACTURABLES ----
+  // Rien ne part en facturation : ces tâches n'apparaissent jamais dans
+  // l'onglet Facturation, il n'y a donc rien à refuser ni à oublier.
+  // Les heures restent PAYÉES — c'est la facturation qui change, pas la paie.
+  { id: "visite_chantier", label: "Visite de chantier", description: "Non facturable — heures aux frais administratifs (ou au projet, au choix)", nonFacturable: true, admin: true },
+  { id: "visite_soumission", label: "Visite pour soumission", description: "Non facturable — reste en attente tant qu'aucun devis n'y est rattaché", nonFacturable: true, admin: true, suiviDevis: true },
+  { id: "divers", label: "Divers", description: "Non facturable — heures payées, hors projet et hors administratif", nonFacturable: true },
+  // CONGÉ : ce n'est pas du travail. Aucun chronomètre, aucune heure —
+  // seulement un marqueur qui bloque la journée dans l'agenda pour
+  // qu'on n'y place pas de travail par erreur.
+  { id: "conge", label: "Congé / absence", description: "Bloque l'agenda — aucune heure, aucun chronomètre", nonFacturable: true, sansHeures: true },
+];
+
+// Raccourcis lisibles, utilisés partout plutôt que de répéter les listes.
+const TYPE_INFO = (id) => TYPES_TACHE.find((t) => t.id === id) || null;
+const estTypeNonFacturable = (id) => !!TYPE_INFO(id)?.nonFacturable;
+const estTypeSansHeures = (id) => !!TYPE_INFO(id)?.sansHeures;
+const estTypeAdministratif = (id) => !!TYPE_INFO(id)?.admin;
+
+const FREQUENCES_CONTRAT = [1, 2, 3, 4];
+
+// Couleurs distinctes par type de tâche, utilisées dans les cartes en
+// attente et les cases du calendrier, pour les différencier d'un
+// coup d'œil.
+const COULEUR_TYPE_TACHE = {
+  // Turquoise VIF : lisible avec le texte noir (l'ancien gris foncé ne se
+  // lisait pas) et bien distinct des transports gris, du bleu des devis,
+  // de l'orange temps & matériel et du mauve des contrats.
+  appel_service: { fond: "bg-teal-400", pastille: "bg-teal-500", bordurePastille: "border-teal-500", texte: "text-teal-700", clair: "bg-teal-100" },
+  devis: { fond: "bg-blue-600", pastille: "bg-blue-500", bordurePastille: "border-blue-500", texte: "text-blue-700", clair: "bg-blue-100" },
+  temps_materiel: { fond: "bg-[#FF6A13]", pastille: "bg-[#FF6A13]", bordurePastille: "border-[#FF6A13]", texte: "text-[#B14E0E]", clair: "bg-orange-100" },
+  entretien_contrat: { fond: "bg-purple-600", pastille: "bg-purple-500", bordurePastille: "border-purple-500", texte: "text-purple-700", clair: "bg-purple-100" },
+  // NON FACTURABLES — teintes volontairement sourdes : elles ne
+  // rapportent rien, elles ne doivent pas attirer l'œil comme un
+  // contrat. Le congé est le plus effacé de tous : c'est une absence.
+  visite_chantier: { fond: "bg-sky-500", pastille: "bg-sky-500", bordurePastille: "border-sky-500", texte: "text-sky-700", clair: "bg-sky-100" },
+  visite_soumission: { fond: "bg-indigo-500", pastille: "bg-indigo-500", bordurePastille: "border-indigo-500", texte: "text-indigo-700", clair: "bg-indigo-100" },
+  divers: { fond: "bg-stone-400", pastille: "bg-stone-400", bordurePastille: "border-stone-400", texte: "text-stone-700", clair: "bg-stone-100" },
+  conge: { fond: "bg-zinc-300", pastille: "bg-zinc-400", bordurePastille: "border-zinc-400", texte: "text-zinc-600", clair: "bg-zinc-100" },
+};
+const COULEUR_TYPE_DEFAUT = COULEUR_TYPE_TACHE.temps_materiel;
+
+// ============================================================
+// MODAL DE DÉTAIL D'UNE TÂCHE DE L'AGENDA
+// ============================================================
+function ModalDetailTache({ info, onFermer }) {
+  const { tache, employe, date, heure } = info;
+  const couleur = COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT;
+  const typeLabel = TYPES_TACHE.find((t) => t.id === tache.typeTache)?.label || "Type non spécifié";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold text-white ${couleur.fond}`}>
+              {typeLabel}
+            </span>
+            <h3 className="mt-1.5 text-sm font-extrabold text-slate-900">{tache.titre || tache.clientNom}</h3>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="space-y-2.5 text-xs">
+          <div className="flex items-center gap-2 text-slate-600">
+            <Users size={13} className="shrink-0 text-slate-400" />
+            <span>Assignée à <span className="font-semibold text-slate-800">{employe.nom}</span></span>
+          </div>
+          <div className="flex items-center gap-2 text-slate-600">
+            <Calendar size={13} className="shrink-0 text-slate-400" />
+            <span>
+              {date}
+              {heure && <> à <span className="font-semibold text-slate-800">{heure}</span></>}
+            </span>
+          </div>
+          {tache.clientNom && (
+            <div className="flex items-center gap-2 text-slate-600">
+              <User size={13} className="shrink-0 text-slate-400" />
+              <span className="font-semibold text-slate-800">{tache.clientNom}</span>
+            </div>
+          )}
+          {tache.adresseTravaux && (
+            <div className="flex items-start gap-2 text-slate-600">
+              <MapPin size={13} className="mt-0.5 shrink-0 text-slate-400" />
+              <span>Travaux : {tache.adresseTravaux}</span>
+            </div>
+          )}
+          {tache.devisNumero && (
+            <div className="flex items-center gap-2 text-slate-600">
+              <FileText size={13} className="shrink-0 text-slate-400" />
+              <span>
+                {tache.typeTache === "entretien_contrat" ? "Contrat" : "Devis"} #{tache.devisNumero}
+                {tache.frequenceFacturationAnnuelle && ` — ${tache.frequenceFacturationAnnuelle} factures/an`}
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-slate-600">
+            <Clock size={13} className="shrink-0 text-slate-400" />
+            <span>
+              {(tache.jours ?? 0) >= 1
+                ? `${tache.jours} jour${tache.jours > 1 ? "s" : ""} (journée complète bloquée)`
+                : `${tache.heures ?? 1} heure${(tache.heures ?? 1) > 1 ? "s" : ""}`}
+            </span>
+          </div>
+          {tache.sauterWeekend && (
+            <p className="text-[11px] text-slate-400">Fins de semaine sautées dans le calcul des jours.</p>
+          )}
+          {tache.description && (
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="mb-1 text-[10px] font-bold uppercase text-slate-400">Description</p>
+              <p className="whitespace-pre-line text-slate-700">{tache.description}</p>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase text-slate-400">Statut :</span>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+              {tache.statut === "en_attente_materiel" ? "En attente de matériel" : "Planifiée"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ÉDITION RAPIDE D'UNE TÂCHE EN ATTENTE — ouverte au clic sur une
+// carte de la section "Tâches en attente". Permet de fixer d'un coup
+// la date, l'heure de début, la durée (heures/jours) et le technicien
+// attribué. Si un technicien ET une date sont choisis, "Enregistrer"
+// assigne directement la tâche dans l'horaire (même logique que le
+// glisser-déposer) ; sinon, seule la durée est mise à jour et la
+// tâche reste dans "Tâches en attente".
+// ============================================================
+// Reconstruit la grille `planning` de l'agenda à partir des assignations
+// Supabase (taches_assignees) — l'horaire survit ainsi aux rechargements.
+// Même logique de placement que assigner() : jours >= 1 bloque la journée
+// complète, sinon N cases horaires à partir de l'heure de début.
+function reconstruirePlanning(rows, employesRef) {
+  const planning = {};
+  rows.forEach((r) => {
+    const courriel = (r.employe_email || "").toLowerCase();
+    const emp = employesRef.find((e) => (e.courriel || "").toLowerCase() === courriel);
+    if (!emp || !r.date_debut) return; // employé introuvable — ligne ignorée
+    // Fiche complète si disponible (colonne `donnees`) — la tâche
+    // reconstruite est identique à l'originale et reste modifiable.
+    // Repli sur les colonnes simples pour les assignations plus anciennes.
+    const base = r.donnees && typeof r.donnees === "object" ? r.donnees : {
+      titre: r.titre || undefined,
+      clientNom: r.client_nom || undefined,
+      description: r.description || "",
+      typeTache: r.type_tache || undefined,
+      projetId: r.projet_id || null,
+      heures: r.heures ?? 1,
+      jours: r.jours ?? 1,
+      sauterWeekend: false,
+    };
+    const tache = {
+      ...base,
+      id: r.tache_id,
+      heures: r.heures ?? base.heures ?? 1,
+      jours: r.jours ?? base.jours ?? 1,
+      statut: "planifiee",
+      employeId: emp.id,
+    };
+    const nbJours = Math.max(0, tache.jours);
+    const blocJourComplet = nbJours >= 1;
+    const joursCibles = calculerJoursCibles(new Date(`${r.date_debut}T00:00:00`), nbJours, !!tache.sauterWeekend);
+    const indexDepart = r.heure_debut ? Math.max(0, HEURES.indexOf(r.heure_debut)) : 0;
+    const nbHeures = Math.max(0, Math.min(tache.heures ?? 1, HEURES.length - indexDepart));
+    const heuresCibles = blocJourComplet ? HEURES : HEURES.slice(indexDepart, indexDepart + nbHeures);
+    joursCibles.forEach((d) => {
+      heuresCibles.forEach((h) => {
+        const cle = `${dateISO(d)}|${emp.id}|${h}`;
+        // AJOUT à la case (jamais d'écrasement) : deux tâches sur la même
+        // plage horaire coexistent et s'empilent à l'écran.
+        planning[cle] = [...listeCellule(planning[cle]).filter((x) => x.id !== tache.id), tache];
+      });
+    });
+  });
+  return recalculerTransports(planning);
+}
+
+// Techniciens actuellement assignés à une tâche (balayage du planning),
+// avec un résumé lisible de l'horaire propre de chacun — alimente la
+// section « Appliquer la modification à… » de la modale d'édition.
+function techniciensPourTache(planning, tacheId, employes) {
+  const infos = {};
+  Object.entries(planning).forEach(([cle, valeur]) => {
+    if (!listeCellule(valeur).some((t) => t?.id === tacheId)) return;
+    const [dateCle, empId, heure] = cle.split("|");
+    const e = (infos[empId] = infos[empId] || { employeId: empId, dates: new Set(), premiereHeure: heure, nbCases: 0 });
+    e.dates.add(dateCle);
+    if (heure < e.premiereHeure) e.premiereHeure = heure;
+    e.nbCases++;
+  });
+  return Object.values(infos).map((e) => {
+    const nbJours = e.dates.size;
+    const heuresParJour = nbJours > 0 ? Math.round(e.nbCases / nbJours) : 0;
+    const premiereDate = [...e.dates].sort()[0];
+    return {
+      employeId: e.employeId,
+      nom: employes.find((x) => x.id === e.employeId)?.nom || e.employeId,
+      detail: `${premiereDate} · ${e.premiereHeure} · ${heuresParJour >= HEURES.length ? "journée complète" : `${heuresParJour} h/jour`} · ${nbJours} jour${nbJours > 1 ? "s" : ""}`,
+    };
+  });
+}
+
+function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait }) {
+  const [date, setDate] = useState(dateInitiale || todayISO());
+  const [heureDebut, setHeureDebut] = useState(heureInitiale || HEURE_PAR_DEFAUT);
+  const [heures, setHeures] = useState(tache.heures ?? 1);
+  const [jours, setJours] = useState(tache.jours ?? 1);
+  const [sauterWeekend, setSauterWeekend] = useState(!!tache.sauterWeekend);
+  const [employeId, setEmployeId] = useState(employeIdInitial || "");
+  const [description, setDescription] = useState(tache.description || "");
+  const dejaPlanifiee = !!employeIdInitial;
+  // Assignation MULTIPLE à la création (édition rapide) : tous les
+  // techniciens cochés reçoivent la tâche avec la même date/heure/durée
+  // — chacun reste ensuite ajustable individuellement via la modale.
+  const [employeIds, setEmployeIds] = useState([]);
+  const basculerEmploye = (id) =>
+    setEmployeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // Techniciens (autres que celui ouvert ici) qui recevront AUSSI la
+  // modification — cases cochées dans « Appliquer la modification à… ».
+  const [autresCibles, setAutresCibles] = useState([]);
+  const basculerCible = (id) =>
+    setAutresCibles((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // Formulaire « Ajouter / dupliquer vers un technicien ».
+  const dejaAssignes = (techniciensSurTache || []).map((t) => t.employeId);
+  const [ajoutEmployeId, setAjoutEmployeId] = useState(
+    () => (employes?.find((e) => !dejaAssignes.includes(e.id)) || employes?.[0])?.id || ""
+  );
+  const [ajoutDate, setAjoutDate] = useState(dateInitiale || todayISO());
+  const [ajoutHeure, setAjoutHeure] = useState(heureInitiale || HEURE_PAR_DEFAUT);
+  const [ajoutHeures, setAjoutHeures] = useState(tache.heures ?? 1);
+  const [ajoutJours, setAjoutJours] = useState(tache.jours ?? 1);
+  const lancerAjout = (dupliquer) =>
+    onAjouterTechnicien?.({
+      employeId: ajoutEmployeId,
+      date: ajoutDate,
+      heureDebut: ajoutHeure,
+      heures: ajoutHeures,
+      jours: ajoutJours,
+      dupliquer,
+    });
+
+  // Fiche client complète — via clientId si disponible (tâches créées
+  // récemment), sinon repli sur une recherche par nom (tâches plus
+  // anciennes qui n'avaient que clientNom).
+  const client = (clients || []).find((c) => c.id === tache.clientId) || (clients || []).find((c) => c.nom === tache.clientNom);
+  const courrielClient = client ? courrielDefautClient(client) : null;
+  // Adresse des TRAVAUX — jamais confondue avec l'adresse de
+  // FACTURATION du client : `tache.adresseTravaux` est explicitement
+  // distincte (voir sa création dans le formulaire "Nouvelle tâche").
+  // Si aucune adresse de travaux propre n'a été fixée pour cette
+  // tâche, on retombe sur l'adresse de facturation par défaut du
+  // client, mais l'étiquette le précise sans ambiguïté.
+  const adresseFacturationDefaut = client?.adresses?.[0];
+
+  const enregistrer = () => {
+    onEnregistrer({
+      heures: Math.max(0, heures),
+      jours: Math.max(0, jours),
+      sauterWeekend,
+      // Assignation immédiate seulement si un/des technicien(s) choisis —
+      // sinon la tâche reste "en attente" avec sa durée mise à jour.
+      employeId: dejaPlanifiee ? employeId || null : employeIds[0] || null,
+      employeIds: dejaPlanifiee ? undefined : employeIds,
+      date,
+      heureDebut,
+      description,
+      // Autres techniciens cochés dans « Appliquer la modification à… » —
+      // ils reçoivent les mêmes date/heure/durée/description sur leurs plages.
+      autresCibles,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">{dejaPlanifiee ? "Modifier la tâche" : "Édition rapide"}</h3>
+            <p className="text-xs text-slate-500">{tache.titre || tache.clientNom}</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        {/* CLIENT & ADRESSE DES TRAVAUX — l'adresse des travaux (où le
+            technicien doit se rendre) n'est JAMAIS la même chose que
+            l'adresse de facturation du client ; les deux sont
+            affichées séparément, avec des étiquettes explicites, pour
+            ne jamais les confondre au moment de l'envoi. */}
+        <div className="mb-4 space-y-2 rounded-xl bg-slate-50 p-3">
+          <div className="flex items-center gap-2">
+            <User size={13} className="shrink-0 text-slate-400" />
+            <div>
+              <p className="text-xs font-bold text-slate-800">{client?.nom || tache.clientNom || "Client non spécifié"}</p>
+              {client?.entreprise && client.entreprise !== client.nom && (
+                <p className="text-[11px] text-slate-500">{client.entreprise}</p>
+              )}
+            </div>
+          </div>
+          {client?.telephone && (
+            <p className="flex items-center gap-2 text-[11px] text-slate-500">
+              <Phone size={12} className="shrink-0 text-slate-400" /> {client.telephone}
+            </p>
+          )}
+          {courrielClient && (
+            <p className="flex items-center gap-2 text-[11px] text-slate-500">
+              <Mail size={12} className="shrink-0 text-slate-400" /> {courrielClient.email}
+            </p>
+          )}
+
+          <div className="border-t border-slate-200 pt-2">
+            {tache.adresseTravaux ? (
+              <>
+                <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                  <MapPin size={11} /> Adresse des travaux
+                </p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-800">{tache.adresseTravaux}</p>
+              </>
+            ) : adresseFacturationDefaut ? (
+              <>
+                <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+                  <MapPin size={11} /> Adresse de facturation (par défaut — aucune adresse de travaux distincte définie)
+                </p>
+                <p className="mt-0.5 text-xs font-semibold text-slate-800">
+                  {adresseFacturationDefaut.nom} — {adresseFacturationDefaut.ligne1}
+                </p>
+              </>
+            ) : (
+              <p className="text-[11px] text-slate-400">Aucune adresse disponible pour ce client.</p>
+            )}
+          </div>
+        </div>
+
+        {/* NOTES DU TECHNICIEN (travail complété) — pour retrouver vite
+            l'information quand le client rappelle pour des détails. */}
+        {travailFait && (travailFait.noteTerrain || travailFait.noteInterne) && (
+          <div className="mb-4 space-y-2">
+            {travailFait.noteTerrain && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">
+                  📝 Note de terrain du technicien <span className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 font-bold normal-case">visible au client</span>
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-emerald-900">{travailFait.noteTerrain}</p>
+              </div>
+            )}
+            {travailFait.noteInterne && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  🔒 Note interne du technicien <span className="ml-1 rounded-full bg-slate-200 px-1.5 py-0.5 font-bold normal-case">non visible au client</span>
+                </p>
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{travailFait.noteInterne}</p>
+              </div>
+            )}
+          </div>
+        )}
+        {/* PHOTOS DU CHANTIER prises par le technicien (avant/après) —
+            cliquer une vignette ouvre la photo pleine grandeur. */}
+        {travailFait && (travailFait.photosAvantUrls?.length > 0 || travailFait.photosApresUrls?.length > 0) && (
+          <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+            {[
+              ["📷 Photos avant travaux", travailFait.photosAvantUrls],
+              ["📷 Photos après travaux", travailFait.photosApresUrls],
+            ].map(([titre, urls]) =>
+              urls?.length > 0 ? (
+                <div key={titre}>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{titre}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {urls.map((u, i) => (
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block h-20 w-20 overflow-hidden rounded-lg border border-slate-200">
+                        <img src={u} alt={`${titre} ${i + 1}`} className="h-full w-full object-cover" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null
+            )}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Date</label>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Heure de début</label>
+              <select value={heureDebut} onChange={(e) => setHeureDebut(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm">
+                {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Heures / jour</label>
+              <input
+                type="number" min={0} max={HEURES.length} value={heures}
+                onChange={(e) => { const v = parseInt(e.target.value); setHeures(Number.isNaN(v) ? 0 : Math.max(0, v)); }}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm tabular-nums"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Nombre de jours</label>
+              <input
+                type="number" min={0} value={jours}
+                onChange={(e) => { const v = parseInt(e.target.value); setJours(Number.isNaN(v) ? 0 : Math.max(0, v)); }}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm tabular-nums"
+              />
+            </div>
+          </div>
+
+          {jours >= 1 && (
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <input type="checkbox" checked={sauterWeekend} onChange={(e) => setSauterWeekend(e.target.checked)} className="h-3.5 w-3.5 accent-[#FF6A13]" />
+              Sauter les samedis et dimanches
+            </label>
+          )}
+
+          {dejaPlanifiee ? (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Technicien attribué</label>
+              <select value={employeId} onChange={(e) => setEmployeId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm">
+                <option value="">— Laisser en attente (ne pas assigner) —</option>
+                {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">
+                {employeId
+                  ? "Enregistrer déplacera la tâche à cette date/heure/technicien dans l'horaire."
+                  : "Sans technicien, la tâche retournera dans les tâches en attente."}
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Assigner à… (un ou plusieurs techniciens)</label>
+              <div className="space-y-1.5">
+                {employes.map((e) => (
+                  <label key={e.id} className={`flex items-center gap-2.5 rounded-lg border p-2 ${employeIds.includes(e.id) ? "border-[#131B2E] bg-slate-50" : "border-slate-200"}`}>
+                    <input
+                      type="checkbox"
+                      checked={employeIds.includes(e.id)}
+                      onChange={() => basculerEmploye(e.id)}
+                      className="h-4 w-4 shrink-0 accent-[#131B2E]"
+                    />
+                    <span className="text-xs font-bold text-slate-800">{e.nom}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="mt-1 text-[10px] text-slate-400">
+                {employeIds.length === 0
+                  ? "Aucun technicien coché — seule la durée est enregistrée, la tâche reste en attente."
+                  : employeIds.length === 1
+                  ? "La tâche sera placée dans l'horaire de ce technicien."
+                  : `La tâche sera placée chez ${employeIds.length} techniciens (même date/heure/durée) — ajuste ensuite chacun individuellement en cliquant son bloc.`}
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">
+              Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Ce qu'il y a à faire sur cette tâche, instructions particulières..."
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+            />
+          </div>
+
+          {/* APPLIQUER LA MODIFICATION À… — visible dès que la tâche est
+              partagée entre plusieurs techniciens. */}
+          {dejaPlanifiee && (techniciensSurTache || []).length > 1 && (
+            <div>
+              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Appliquer la modification à…</p>
+              <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+                Coche les techniciens dont les plages recevront ces changements (date, heures, durée, description).
+              </p>
+              <div className="space-y-1.5">
+                {(techniciensSurTache || []).map((t) => {
+                  const estOuvert = t.employeId === employeIdInitial;
+                  const coche = estOuvert || autresCibles.includes(t.employeId);
+                  return (
+                    <label key={t.employeId} className={`flex items-center gap-2.5 rounded-lg border p-2 ${estOuvert ? "border-[#131B2E] bg-slate-50" : "border-slate-200"}`}>
+                      <input
+                        type="checkbox"
+                        checked={coche}
+                        disabled={estOuvert}
+                        onChange={() => basculerCible(t.employeId)}
+                        className="h-4 w-4 shrink-0 accent-[#131B2E]"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-800">{t.nom}</p>
+                        <p className="text-[10px] text-slate-400">{t.detail}</p>
+                      </div>
+                      {estOuvert && (
+                        <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[9px] font-bold text-slate-600">OUVERT ICI</span>
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* AJOUTER / DUPLIQUER VERS UN TECHNICIEN */}
+          {dejaPlanifiee && onAjouterTechnicien && (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Ajouter ou dupliquer vers un technicien</p>
+              <div className="mb-2 grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Technicien</label>
+                  <select value={ajoutEmployeId} onChange={(e) => setAjoutEmployeId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+                    {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Date</label>
+                  <input type="date" value={ajoutDate} onChange={(e) => setAjoutDate(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                </div>
+              </div>
+              <div className="mb-2 grid grid-cols-3 gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Heure début</label>
+                  <select value={ajoutHeure} onChange={(e) => setAjoutHeure(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+                    {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Heures / jour</label>
+                  <input type="number" min={0} max={HEURES.length} value={ajoutHeures} onChange={(e) => { const v = parseInt(e.target.value); setAjoutHeures(Number.isNaN(v) ? 0 : Math.max(0, v)); }} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Jours</label>
+                  <input type="number" min={0} value={ajoutJours} onChange={(e) => { const v = parseInt(e.target.value); setAjoutJours(Number.isNaN(v) ? 0 : Math.max(0, v)); }} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button onClick={() => lancerAjout(false)} className="min-h-0 py-2 text-xs">
+                  <Plus size={12} /> Ajouter à cette tâche
+                </Button>
+                <Button variant="outline" onClick={() => lancerAjout(true)} className="min-h-0 py-2 text-xs">
+                  Dupliquer (copie)
+                </Button>
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-400">
+                « Ajouter » = même tâche partagée, avec son propre horaire. « Dupliquer » = copie indépendante. Les transports Début/Fin se créent automatiquement.
+              </p>
+            </div>
+          )}
+
+          <Button onClick={enregistrer} className="w-full">
+            {dejaPlanifiee ? "Enregistrer les modifications" : employeId ? "Enregistrer et assigner" : "Enregistrer"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece }) {
+  // Taux de taxes des Paramètres — dépôts affichés taxes incluses.
+  const configEnt = useEntreprise();
+  // Statut du dépôt d'une tâche : bloque la planification tant que le
+  // dépôt n'est pas payé (ou payé manuellement) — annulé après 24 h.
+  const depotDe = (tacheId) => depots?.[tacheId];
+  const depotBloque = (tacheId) => {
+    const d = depotDe(tacheId);
+    return !!d && (d.statut === "en_attente_paiement" || d.statut === "annule_delai");
+  };
+  // Modale « Dépôt reçu manuellement » : { tacheId } ou null.
+  const [depotModal, setDepotModal] = useState(null);
+  const [depotMode, setDepotMode] = useState("Comptant");
+  // Tâches TERMINÉES par les techniciens (via travaux_effectues) — la clé
+  // `tacheId|courriel` colore le bloc du bon technicien en vert ET donne
+  // accès au travail complété (note de terrain, heures réelles).
+  // Sur un chantier de PLUSIEURS JOURS, chaque journée enregistre ses
+  // heures sous une clé « tacheId::date » (sinon mardi écraserait
+  // lundi). On rattache donc l'heure à la tâche par le préfixe.
+  const cleTacheDesHeures = (tacheIdBrut) => String(tacheIdBrut || "").split("::")[0];
+  const travauxParCle = new Map(
+    (travaux || [])
+      .filter((t) => t.supabase && t.tacheId && t.employeEmail)
+      .map((t) => [`${cleTacheDesHeures(t.tacheId)}|${t.employeEmail.toLowerCase()}`, t])
+  );
+  // Nombre de JOURNÉES déjà pointées sur un chantier — sert au « 2/3 »
+  // affiché sur le bloc : un bloc gris trois jours de suite ne dit pas
+  // si le technicien y est allé.
+  const joursPointes = (tache, emp) => {
+    const courriel = (emp?.courriel || "").toLowerCase();
+    return (travaux || []).filter(
+      (t) => t.supabase && cleTacheDesHeures(t.tacheId) === tache.id && (t.employeEmail || "").toLowerCase() === courriel
+    ).length;
+  };
+  const travailTermine = (tache, emp) =>
+    travauxParCle.get(`${tache.id}|${(emp?.courriel || "").toLowerCase()}`);
+  // VERT = TRAVAUX FERMÉS, pas « une journée pointée ». Sur un chantier
+  // de 3 jours, les trois blocs passent au vert ensemble, quand le
+  // technicien a déclaré les travaux terminés (bon de travail envoyé).
+  const estTerminee = (tache, emp) => {
+    const t = travailTermine(tache, emp);
+    if (!t) return false;
+    if (!(Number(tache.jours) > 1)) return true;
+    return (bons || []).some((b) => b.tacheId === tache.id);
+  };
+  const [jourAffiche, setJourAffiche] = useState(new Date());
+  const [vue, setVue] = useState("jour"); // "jour" | "semaine" | "mois"
+  const grilleScrollRef = useRef(null);
+
+  // ------------------------------------------------------------
+  // REDIMENSIONNEMENT D'UNE TÂCHE À LA SOURIS (vue Jour) — on suit le
+  // pointeur via `document.elementFromPoint` plutôt qu'un calcul en
+  // pixels : les colonnes horaires ont une largeur variable
+  // (`minmax(52px, 1fr)`), donc lire directement la case survolée
+  // (via l'attribut `data-heure-index`) reste fiable peu importe le
+  // zoom, la largeur d'écran ou le défilement horizontal en cours.
+  // ------------------------------------------------------------
+  const [redim, setRedim] = useState(null); // { tache, employeId, jourCible, indexDebut, spanInitial, spanActuel }
+  const [survol, setSurvol] = useState(null); // { tache, employe, x, y }
+
+  useEffect(() => {
+    if (!redim) return;
+
+    const surDeplacement = (e) => {
+      // Calcul GÉOMÉTRIQUE : la durée découle de la distance parcourue
+      // par la souris depuis le bord gauche du bloc (mesuré au moment où
+      // la poignée est attrapée). On ne lit plus « l'élément sous le
+      // curseur » : passer au-dessus du bloc lui-même ou d'un bloc voisin
+      // renvoyait le numéro de SA première case → la tâche sautait à
+      // 1 h puis se ré-étirait d'un coup.
+      const maxSpan = HEURES.length - redim.indexDebut;
+      const nouveauSpan = Math.max(1, Math.min(maxSpan, Math.ceil((e.clientX - redim.origineX) / redim.largeurCase)));
+      setRedim((prev) => (prev && prev.spanActuel !== nouveauSpan ? { ...prev, spanActuel: nouveauSpan } : prev));
+    };
+
+    const surRelachement = () => {
+      setRedim((actuel) => {
+        if (actuel && actuel.spanActuel !== actuel.spanInitial) {
+          redimensionnerTache(actuel.tache, actuel.employeId, actuel.jourCible, actuel.heureDebut, actuel.spanActuel);
+        }
+        return null;
+      });
+    };
+
+    window.addEventListener("pointermove", surDeplacement);
+    window.addEventListener("pointerup", surRelachement);
+    return () => {
+      window.removeEventListener("pointermove", surDeplacement);
+      window.removeEventListener("pointerup", surRelachement);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!redim]);
+
+  // Au chargement (et à chaque retour en vue Jour), fait défiler la
+  // grille horizontalement pour que 7h00 soit la première plage
+  // visible à l'écran — sans retirer les heures avant 7h ni changer
+  // leur ordre : l'admin peut toujours se déplacer librement vers la
+  // gauche (heures plus tôt) ou la droite (heures plus tard) au besoin.
+  useEffect(() => {
+    if (vue !== "jour") return;
+    // requestAnimationFrame plutôt qu'un calcul immédiat : au tout
+    // premier rendu, la grille peut ne pas avoir encore sa largeur
+    // intrinsèque finale (min-w-[640px]) au moment où l'effet
+    // s'exécute — sans ce délai, scrollWidth === clientWidth et il
+    // n'y a alors rien à faire défiler.
+    const id = requestAnimationFrame(() => {
+      if (!grilleScrollRef.current) return;
+      // La colonne des noms est maintenant collante (sticky) : elle
+      // occupe en permanence les 120 premiers pixels à gauche. Pour que
+      // 07:00 apparaisse juste APRÈS elle (et non caché dessous), le
+      // défilement ne compte plus la largeur de cette colonne.
+      const LARGEUR_MIN_COLONNE_HEURE = 52;
+      const indexSeptHeures = HEURES.indexOf("07:00");
+      grilleScrollRef.current.scrollLeft = indexSeptHeures * LARGEUR_MIN_COLONNE_HEURE;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [vue]);
+
+  const [tacheSurvolee, setTacheSurvolee] = useState(null);
+  const [tacheDetailOuverte, setTacheDetailOuverte] = useState(null); // { tache, employe, date, heure }
+  const [tacheEnEditionId, setTacheEnEditionId] = useState(null);
+  const [assignationMobile, setAssignationMobile] = useState(null); // {tacheId, employeId, heure, date}
+  const [formulaireOuvert, setFormulaireOuvert] = useState(false);
+  // « ➕ Nouveau client » depuis la création de tâche (fenêtre partagée).
+  const [modalNouveauClientTache, setModalNouveauClientTache] = useState(false);
+  // Onglets du panneau « Tâches en attente » : PRÊTES à planifier
+  // (glissables maintenant) vs EN ATTENTE (bloquées par un dépôt non
+  // payé/annulé). Une tâche change d'onglet automatiquement dès que son
+  // dépôt est payé.
+  const [ongletAttente, setOngletAttente] = useState("pretes");
+  // Une tache de RETOUR attend sa piece : elle ne peut pas aller a
+  // l'horaire tant que la piece n'est pas recue (et payee si exige).
+  // Meme mecanique que les depots — on reutilise la meme pile bloquee.
+  const pieceBloque = (tacheId) => {
+    const p = (pieces || []).find((x) => x.tacheRetourId === tacheId);
+    return pieceBloqueLaTache(p);
+  };
+  const estBloquee = (t) => depotBloque(t.id) || pieceBloque(t.id);
+  const tachesPretes = tachesAttente.filter((t) => !estBloquee(t));
+  // TROIS PILES, PAS DEUX — parce que le GESTE diffère.
+  //
+  // Un dépôt impayé, on rappelle le CLIENT pour de l'argent. Une pièce
+  // qui n'arrive pas, on rappelle le FOURNISSEUR. Ce n'est pas la même
+  // personne au bureau qui décroche, et les mélanger obligeait à lire
+  // chaque carte pour savoir laquelle des deux on regarde.
+  const tachesPiece = tachesAttente.filter((t) => pieceBloque(t.id));
+  const tachesBloquees = tachesAttente.filter((t) => depotBloque(t.id) && !pieceBloque(t.id));
+  const tachesAttenteAffichees =
+    ongletAttente === "bloquees" ? tachesBloquees : ongletAttente === "pieces" ? tachesPiece : tachesPretes;
+  // Une date promise déjà dépassée : le compteur de l'onglet vire au
+  // rouge pour que personne n'ait à ouvrir la pile pour le découvrir.
+  const piecesEnRetard = (pieces || []).filter((p) => p.enRetard).length;
+  const [nouveauTitre, setNouveauTitre] = useState("");
+  // 📎 PIÈCES JOINTES (photos du site, plans PDF) — téléversées dès la
+  // sélection, transmises au technicien AVEC la tâche (via donnees).
+  const [nouvellesPiecesJointes, setNouvellesPiecesJointes] = useState([]);
+  const [televersementJointe, setTeleversementJointe] = useState(false);
+  const ajouterPiecesJointes = async (fichiers) => {
+    setTeleversementJointe(true);
+    for (const fichier of fichiers) {
+      try {
+        if (fichier.type === "application/pdf") {
+          if (fichier.size > 15 * 1024 * 1024) {
+            ajouterJournal(`⚠️ « ${fichier.name} » dépasse 15 Mo — allège le PDF avant de le joindre.`);
+            continue;
+          }
+          const url = await televerserPieceJointeTache(fichier);
+          setNouvellesPiecesJointes((prev) => [...prev, { url, nom: fichier.name, type: "pdf" }]);
+        } else if (fichier.type.startsWith("image/")) {
+          const { blob } = await compresserImageJointe(fichier);
+          const url = await televerserPieceJointeTache(fichier, { blob, contentType: "image/jpeg" });
+          setNouvellesPiecesJointes((prev) => [...prev, { url, nom: fichier.name, type: "image" }]);
+        } else {
+          ajouterJournal(`⚠️ « ${fichier.name} » ignoré — seuls les images et les PDF sont acceptés.`);
+        }
+      } catch {
+        ajouterJournal(`⚠️ Téléversement de « ${fichier.name} » échoué — réessaie.`);
+      }
+    }
+    setTeleversementJointe(false);
+  };
+  const [nouveauClientId, setNouveauClientId] = useState(clients[0]?.id || "");
+  const [nouveauType, setNouveauType] = useState("appel_service");
+  // TEMPS SUR LE PROJET, OU FRAIS ADMINISTRATIFS ?
+  //
+  // La même visite n'a pas le même sens selon le moment : préparer une
+  // soumission qu'on ne remportera peut-être pas est un coût de VENTE,
+  // alors qu'une visite sur un chantier en cours est un coût de CE
+  // projet. Aucun automatisme ne peut trancher — c'est un choix humain,
+  // fait au moment de créer la tâche.
+  //
+  // Par défaut décoché (= administratif), comme le propriétaire l'a
+  // décrit : ces visites sont normalement faites par l'administration.
+  const [tempsSurProjet, setTempsSurProjet] = useState(false);
+  // --- Dépôt préalable (coché d'office pour les appels de service) ---
+  const [depotRequis, setDepotRequis] = useState(true);
+  const [depotMontant, setDepotMontant] = useState("");
+  const [depotChoixPrix, setDepotChoixPrix] = useState(""); // "", montant de la liste, ou "hors_liste"
+  // Le défaut suit le type : appel de service = dépôt suggéré d'office.
+  useEffect(() => {
+    setDepotRequis(nouveauType === "appel_service");
+  }, [nouveauType]);
+  const [nouveauDevisId, setNouveauDevisId] = useState("");
+  const [nouvelleFrequence, setNouvelleFrequence] = useState(4);
+  const [nouveauProjetId, setNouveauProjetId] = useState(""); // "" = Aucun / Projet général
+  const [adresseTravauxDifferente, setAdresseTravauxDifferente] = useState(false);
+  const [adresseTravauxId, setAdresseTravauxId] = useState("");
+  const [nouvelleAdresseTravaux, setNouvelleAdresseTravaux] = useState(null); // résultat de l'autocomplétion
+  // Planification directe dès la création — si date + technicien sont
+  // tous les deux renseignés, la tâche se positionne immédiatement
+  // dans la grille plutôt que d'atterrir dans "Tâches en attente".
+  const [nouvelleDate, setNouvelleDate] = useState("");
+  const [nouvelleHeureDebut, setNouvelleHeureDebut] = useState(HEURE_PAR_DEFAUT);
+  const [nouveauEmployeId, setNouveauEmployeId] = useState("");
+  const [nouvelleDureeHeures, setNouvelleDureeHeures] = useState(1);
+  const [nouvelleDureeJours, setNouvelleDureeJours] = useState(0);
+  const [nouveauSauterWeekend, setNouveauSauterWeekend] = useState(false);
+  // Description des travaux — saisissable dès la création (avant, il
+  // fallait rouvrir la fenêtre d'édition pour en écrire une).
+  const [nouvelleDescription, setNouvelleDescription] = useState("");
+
+  // Filtrage dynamique : si un client est choisi, ne montrer que SES
+  // projets ; sinon, montrer tous les projets actifs (on exclut
+  // "Terminé" — un projet clos n'a plus de raison de recevoir de
+  // nouvelles tâches).
+  const projetsDisponibles = (projets || []).filter((p) => {
+    if (p.statut === "Terminé") return false;
+    if (nouveauClientId) return p.clientId === nouveauClientId;
+    return true;
+  });
+
+  const jourKey = dateISO(jourAffiche);
+  const jourLabel = jourAffiche.toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
+  const moisLabel = jourAffiche.toLocaleDateString("fr-CA", { month: "long", year: "numeric" });
+
+  const semaine = Array.from({ length: 7 }, (_, i) => ajouterJours(jourAffiche, i - jourAffiche.getDay() + 1));
+  const mois = joursDuMois(jourAffiche);
+  const joursAffiches = vue === "semaine" ? semaine : vue === "mois" ? mois : [];
+
+  const reculer = () => setJourAffiche(vue === "mois" ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() - 1, 1) : ajouterJours(jourAffiche, vue === "semaine" ? -7 : -1));
+  const avancer = () => setJourAffiche(vue === "mois" ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() + 1, 1) : ajouterJours(jourAffiche, vue === "semaine" ? 7 : 1));
+
+  const majDureeTache = (id, champs) => {
+    setTachesAttente((prev) => prev.map((t) => (t.id === id ? { ...t, ...champs } : t)));
+  };
+
+  const creerTache = () => {
+    if (lectureSeule || !nouveauTitre.trim()) return;
+    const client = clients.find((c) => c.id === nouveauClientId);
+    const nouvelle = {
+      id: `tache-manuelle-${Date.now()}`,
+      clientId: nouveauClientId || null,
+      clientNom: client?.nom || "",
+      // Courriels du client transmis AVEC la tâche : le technicien peut
+      // ainsi choisir à quelles adresses envoyer le bon de travail signé
+      // (choix multiple) sans avoir accès au dossier client complet.
+      clientCourriels: (client?.courriels || []).map((c) => ({ id: c.id, email: c.email, label: c.label, defaut: !!c.defaut })),
+      titre: nouveauTitre.trim(),
+      typeTache: nouveauType,
+      statut: "a_planifier",
+      heures: nouvelleDureeHeures,
+      jours: nouvelleDureeJours,
+      sauterWeekend: nouveauSauterWeekend,
+      description: nouvelleDescription.trim(),
+      // 📎 Photos et plans joints par le bureau — le technicien les
+      // ouvre sur son téléphone, sans rappeler pour « c'est où déjà ? ».
+      piecesJointes: nouvellesPiecesJointes,
+      // Projet lié — optionnel ("" = Aucun / Projet général, hors
+      // rentabilité). Dès qu'un projet est choisi, cette tâche (et ses
+      // heures une fois travaillée) sera prise en compte par
+      // calculerRentabiliteProjet pour ce projet.
+      projetId: nouveauProjetId || null,
+      // Adresse des travaux — distincte de l'adresse de facturation du
+      // client quand ce n'est pas la même. `null` = même adresse que la
+      // facturation. Transmise à QuickBooks au moment de la facturation
+      // (champ "Ship To" / adresse de livraison de la facture).
+      adresseTravaux: null,
+      // ---- COMPTABILISATION DES HEURES ----
+      // `nonFacturable` : rien ne partira en facturation à la fin.
+      // `sansHeures`    : congé — aucun chronomètre, aucune heure.
+      // `categorieHeures` décide où le temps atterrit dans le coût :
+      //   "projet"      → coût direct du projet (comme un technicien)
+      //   "administratif" → frais généraux de l'entreprise
+      //   "divers"      → payé, mais ni projet ni administratif
+      nonFacturable: estTypeNonFacturable(nouveauType),
+      sansHeures: estTypeSansHeures(nouveauType),
+      categorieHeures: estTypeSansHeures(nouveauType)
+        ? "aucune"
+        : nouveauType === "divers"
+        ? "divers"
+        : estTypeAdministratif(nouveauType) && !tempsSurProjet
+        ? "administratif"
+        : "projet",
+    };
+
+    if (adresseTravauxDifferente) {
+      if (nouvelleAdresseTravaux) {
+        nouvelle.adresseTravaux = nouvelleAdresseTravaux.label;
+      } else if (adresseTravauxId) {
+        const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
+        if (a) nouvelle.adresseTravaux = `${a.nom} — ${a.ligne1}`;
+      }
+    }
+
+    // ADRESSE OÙ LE TECHNICIEN DOIT SE RENDRE — toujours remplie.
+    // `adresseTravaux` reste à null quand c'est la même que la
+    // facturation (c'est ce que QuickBooks attend), mais le technicien,
+    // lui, a besoin d'une adresse dans TOUS les cas : son app n'a pas
+    // accès au répertoire des clients pour aller la chercher.
+    // Sans ce champ, il partait le matin sans savoir où aller.
+    const adressePrincipale = client?.adresses?.[0];
+    nouvelle.adresseIntervention =
+      nouvelle.adresseTravaux ||
+      (adressePrincipale ? `${adressePrincipale.nom} — ${adressePrincipale.ligne1}` : null);
+
+    if (nouveauType === "devis" || nouveauType === "entretien_contrat") {
+      const devis = devisListe.find((d) => d.id === nouveauDevisId);
+      if (!devis) return; // un devis/contrat doit être sélectionné pour ces types
+      nouvelle.devisNumero = devis.numero;
+      // Texte du devis transmis sur la tâche, SANS les prix — ajouté à la
+      // suite de la description saisie manuellement (si elle existe).
+      // UN ITEM PAR LIGNE pour rester facile à lire.
+      const texteDevis = devis.lignes.map((l) => `${l.quantite} × ${l.nom}`).join("\n");
+      nouvelle.description = nouvelleDescription.trim() ? `${nouvelleDescription.trim()}\n${texteDevis}` : texteDevis;
+      // Lignes du devis SANS AUCUN PRIX ni total — pour la fenêtre
+      // « Voir le devis » de l'app technicien. Les montants ne quittent
+      // jamais l'admin : seuls nom, quantité et unité sont transmis.
+      nouvelle.devisLignes = devis.lignes.map((l) => ({ nom: l.nom, quantite: l.quantite, unite: l.unite || "" }));
+      if (nouveauType === "entretien_contrat") {
+        nouvelle.frequenceFacturationAnnuelle = nouvelleFrequence;
+      }
+    }
+
+    const projetLie = projetsDisponibles.find((p) => p.id === nouveauProjetId);
+    const suffixeProjet = projetLie ? ` — lié au projet "${projetLie.nom}"` : "";
+    const libelleType =
+      nouveauType === "devis"
+        ? `Travaux avec devis #${nouvelle.devisNumero}`
+        : nouveauType === "entretien_contrat"
+        ? `Entretien selon contrat #${nouvelle.devisNumero}, ${nouvelleFrequence} factures/an`
+        : TYPES_TACHE.find((t) => t.id === nouveauType).label;
+
+    // Dépôt préalable : la tâche porte l'info et le dépôt est créé
+    // (24 h pour payer). Une tâche avec dépôt en attente NE PEUT PAS
+    // être placée dans l'horaire — même si date/technicien sont saisis.
+    const montantDepot = parseFloat(depotMontant) || 0;
+    if (depotRequis && montantDepot > 0) {
+      nouvelle.depotRequis = true;
+      nouvelle.depotMontant = montantDepot;
+      // Zone de l'appel : détermine la règle du temps inclus (zones =
+      // temps chez le client seulement ; hors zone = transport compris).
+      nouvelle.zoneAppel = depotChoixPrix === "hors_liste" ? "hors_zone" : depotChoixPrix || null;
+      // Technicien / date souhaités par le client, MÉMORISÉS sur la tâche
+      // sans la placer : dès que le dépôt est payé, un clic suffit pour
+      // l'envoyer à l'horaire avec le bon technicien.
+      nouvelle.technicienPrevu = nouveauEmployeId || null;
+      nouvelle.datePrevue = nouvelleDate || null;
+      nouvelle.heurePrevue = nouvelleHeureDebut || null;
+      // Plus de « prospect » séparé : un client pas encore enregistré se
+      // crée via « ➕ Nouveau client… » en haut de la liste Client — sa
+      // fiche complète et validée sert au dépôt (et à QuickBooks).
+      onCreerDepot?.(nouvelle.id, {
+        montantHT: montantDepot,
+        isProspect: false,
+        prospect: null,
+      });
+      setTachesAttente((prev) => [nouvelle, ...prev]);
+      const nomPrevu = nouveauEmployeId ? employes.find((e) => e.id === nouveauEmployeId)?.nom : "";
+      ajouterJournal(
+        `📋 Tâche créée — ${libelleType} — EN ATTENTE DE DÉPÔT avant planification${nomPrevu ? ` (technicien prévu : ${nomPrevu})` : ""}`
+      );
+    } else if (nouvelleDate && nouveauEmployeId) {
+      // Positionnement direct dans la grille si DATE + TECHNICIEN sont
+      // tous les deux renseignés dès la création — sinon, comme avant,
+      // la tâche atterrit dans "Tâches en attente".
+      assigner(nouvelle, nouveauEmployeId, new Date(`${nouvelleDate}T00:00:00`), nouvelleHeureDebut);
+      ajouterJournal(`📋 Tâche créée et placée directement dans l'horaire — ${libelleType} (${client?.nom})${suffixeProjet}`);
+    } else {
+      setTachesAttente((prev) => [nouvelle, ...prev]);
+      ajouterJournal(`📋 Tâche créée — ${libelleType} (${client?.nom})${suffixeProjet}`);
+    }
+
+    setDepotMontant("");
+    setDepotChoixPrix("");
+    setNouveauTitre("");
+    setNouvellesPiecesJointes([]);
+    setNouvelleDescription("");
+    setNouveauDevisId("");
+    setNouvelleFrequence(4);
+    setNouveauProjetId("");
+    setAdresseTravauxDifferente(false);
+    setAdresseTravauxId("");
+    setNouvelleAdresseTravaux(null);
+    setNouvelleDate("");
+    setNouvelleHeureDebut(HEURE_PAR_DEFAUT);
+    setNouveauEmployeId("");
+    setNouvelleDureeHeures(1);
+    setNouvelleDureeJours(0);
+    setNouveauSauterWeekend(false);
+    setFormulaireOuvert(false);
+  };
+
+  // Fonction unique d'assignation — utilisée par la vue Jour (glisser-
+  // déposer sur une heure précise) ET les vues Semaine/Mois (glisser-
+  // déposer sur un jour). Respecte toujours tache.jours ET tache.heures,
+  // peu importe la vue utilisée pour l'assignation — avant ce correctif,
+  // seule assignerJours (Semaine/Mois) en tenait compte, donc assigner
+  // une tâche multi-jours depuis la vue Jour (la vue par défaut) la
+  // limitait silencieusement à une seule journée.
+  const assigner = (tache, employeId, dateDepart, heureDepart) => {
+    if (lectureSeule) return;
+    // Blocage strict : impossible d'assigner tant que le dépôt requis
+    // n'est pas payé (ou si le délai de 24 h l'a annulé).
+    if (depotBloque(tache.id)) {
+      const d = depotDe(tache.id);
+      ajouterJournal(
+        `⛔ "${tache.titre || tache.clientNom}" non planifiable — dépôt ${d?.statut === "annule_delai" ? "annulé (délai de 24 h dépassé)" : "en attente de paiement"}`
+      );
+      return;
+    }
+    // L'employé doit exister dans la grille : sinon les cases seraient
+    // écrites sur une ligne invisible (identifiant périmé) et la tâche
+    // « disparaîtrait » sans explication ni envoi au technicien.
+    const employe = employes.find((e) => e.id === employeId);
+    if (!employe) {
+      ajouterJournal(
+        `⚠️ "${tache.titre || tache.clientNom}" non planifiée — technicien introuvable dans l'agenda. Réassigne-la par glisser-déposer sur la bonne ligne.`
+      );
+      return;
+    }
+    // Nombre de jours choisi sur la tâche (0 = pas de jour "réservé" à
+    // l'avance ; 1 ou plus = un nombre de jours précis est sélectionné).
+    const nbJoursSpecifie = tache.jours ?? 1;
+    // Dès qu'un nombre de jours est sélectionné (>= 1), la tâche bloque
+    // TOUTES les cases horaires de la journée pour l'employé assigné —
+    // le champ "Heures / jour" ne sert alors qu'à titre indicatif. Le
+    // blocage partiel (seulement N heures) ne s'applique que si jours
+    // est explicitement mis à 0.
+    const blocageJourComplet = nbJoursSpecifie >= 1;
+    const joursCibles = calculerJoursCibles(dateDepart, nbJoursSpecifie, tache.sauterWeekend);
+    const indexDepart = heureDepart ? Math.max(0, HEURES.indexOf(heureDepart)) : 0;
+    // tache.heures peut valoir 0 (saisi explicitement) — on ne le
+    // remplace plus par 1 via `|| 1`. Math.max(0, ...) plutôt que
+    // Math.max(1, ...) : 0 case horaire bloquée est un résultat valide
+    // si l'utilisateur a choisi 0 heure et 0 jour.
+    const nbHeuresSpecifie = tache.heures ?? 1;
+    const nbHeures = Math.max(0, Math.min(nbHeuresSpecifie, HEURES.length - indexDepart));
+    const heuresCibles = blocageJourComplet ? HEURES : HEURES.slice(indexDepart, indexDepart + nbHeures);
+
+    setPlanning((prev) => {
+      const copie = { ...prev };
+      joursCibles.forEach((d) => {
+        heuresCibles.forEach((h) => {
+          // Statut explicite "planifiee" dès qu'une tâche atterrit dans
+          // l'horaire — que ce soit par glisser-déposer ou via la
+          // modale d'édition rapide, elle n'est plus "à planifier".
+          // AJOUT à la case (jamais d'écrasement) : une tâche déposée sur
+          // une plage occupée s'empile au lieu de faire disparaître
+          // l'autre.
+          const cle = `${dateISO(d)}|${employeId}|${h}`;
+          copie[cle] = [
+            ...listeCellule(copie[cle]).filter((x) => x.id !== tache.id),
+            { ...tache, employeId, statut: "planifiee" },
+          ];
+        });
+      });
+      return recalculerTransports(copie);
+    });
+    setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
+    const derniereDate = joursCibles[joursCibles.length - 1];
+    const detailJours = joursCibles.length > 1 ? `du ${dateISO(dateDepart)} au ${dateISO(derniereDate)}${tache.sauterWeekend ? " (fins de semaine sautées)" : ""}` : `le ${dateISO(dateDepart)}`;
+    const detailHeures = blocageJourComplet
+      ? "journée complète bloquée"
+      : nbHeures > 0
+      ? `à partir de ${heuresCibles[0]} (${nbHeures} h/jour)`
+      : "aucune case horaire bloquée (0 h)";
+    ajouterJournal(
+      `✅ "${tache.titre || tache.clientNom}" assignée à ${employe?.nom || employeId} ${detailJours} — ${detailHeures} — mise à jour envoyée à son app mobile`
+    );
+    // Écriture réelle dans Supabase (taches_assignees) : l'app technicien
+    // du courriel correspondant la voit en direct. Jamais pour les
+    // transports système (chaque app les génère localement).
+    if (!tache.est_tache_systeme) {
+      if (!employe?.courriel) {
+        // Sans courriel dans le Répertoire, impossible de savoir quelle
+        // app technicien doit recevoir la tâche — on le dit clairement.
+        ajouterJournal(
+          `⚠️ "${tache.titre || tache.clientNom}" reste dans l'agenda mais N'A PAS été envoyée à l'app technicien — ${employe?.nom || employeId} n'a pas de courriel dans le Répertoire`
+        );
+      } else {
+        assignerTacheSupabase(tache, employe, {
+          date: dateISO(dateDepart),
+          heureDebut: heuresCibles[0] || heureDepart || null,
+        }).catch((e) => {
+          // Échec d'écriture Supabase (hors-ligne, table/colonne absente,
+          // droits) — visible dans le Journal au lieu d'un silence total.
+          ajouterJournal(
+            `⚠️ "${tache.titre || tache.clientNom}" reste dans l'agenda mais N'A PAS été envoyée à l'app technicien — erreur de synchronisation : ${e?.message || "connexion impossible"}`
+          );
+        });
+      }
+    }
+  };
+
+  // Redimensionne une tâche déjà placée dans la grille (vue Jour) en
+  // faisant glisser la poignée à droite de son bloc — change le
+  // nombre d'heures qu'elle occupe pour CE technicien, ce jour-là,
+  // sans toucher aux autres jours si la tâche est aussi assignée
+  // ailleurs (contrats/multi-jours).
+  const redimensionnerTache = (tache, employeId, jourCible, heureDebut, nouvellesHeures) => {
+    if (lectureSeule) return;
+    const indexDepart = Math.max(0, HEURES.indexOf(heureDebut));
+    const nbHeures = Math.max(1, Math.min(nouvellesHeures, HEURES.length - indexDepart));
+    const heuresCibles = HEURES.slice(indexDepart, indexDepart + nbHeures);
+    setPlanning((prev) => {
+      const copie = { ...prev };
+      // Retire d'abord TOUTES les anciennes cases horaires de cette
+      // tâche pour ce technicien ce jour-là (elle pouvait occuper plus
+      // ou moins d'heures qu'après le redimensionnement) — sans toucher
+      // aux AUTRES tâches empilées sur les mêmes cases.
+      HEURES.forEach((h) => {
+        const cle = `${jourCible}|${employeId}|${h}`;
+        const restants = listeCellule(copie[cle]).filter((x) => x.id !== tache.id);
+        if (restants.length) copie[cle] = restants;
+        else delete copie[cle];
+      });
+      heuresCibles.forEach((h) => {
+        const cle = `${jourCible}|${employeId}|${h}`;
+        copie[cle] = [
+          ...listeCellule(copie[cle]),
+          { ...tache, employeId, heures: nbHeures, jours: 0, statut: "planifiee" },
+        ];
+      });
+      return recalculerTransports(copie);
+    });
+    const employe = employes.find((e) => e.id === employeId);
+    ajouterJournal(`↔️ "${tache.titre || tache.clientNom}" redimensionnée à ${nbHeures} h (${employe?.nom}, ${jourCible}) — mise à jour envoyée à son app mobile`);
+  };
+
+  // Modifie une tâche DÉJÀ planifiée, cliquée directement dans le
+  // calendrier — retire d'abord toutes ses anciennes cases horaires
+  // (chez l'ancien technicien, sur tous les jours qu'elle occupait si
+  // elle était multi-jours), puis la replace via assigner() avec les
+  // nouvelles valeurs. Fonctionne aussi pour un simple changement de
+  // détail/description sans déplacer la date ou l'heure.
+  const modifierTachePlanifiee = (tache, ancienEmployeId, champs) => {
+    if (lectureSeule) return;
+    // Synchro Supabase : si la tâche change de technicien (ou retourne en
+    // attente), on retire l'ancienne assignation. Si c'est le même
+    // technicien, l'upsert de assigner() écrasera simplement sa ligne.
+    if (champs.employeId !== ancienEmployeId) {
+      const ancienEmploye = employes.find((e) => e.id === ancienEmployeId);
+      retirerTacheSupabase(tache.id, ancienEmploye?.courriel).catch(() => {});
+    }
+    setPlanning((prev) => {
+      const copie = { ...prev };
+      Object.keys(copie).forEach((cle) => {
+        const [, empCle] = cle.split("|");
+        if (empCle !== ancienEmployeId) return;
+        const restants = listeCellule(copie[cle]).filter((x) => x.id !== tache.id);
+        if (restants.length) copie[cle] = restants;
+        else delete copie[cle];
+      });
+      return recalculerTransports(copie);
+    });
+    const tacheMiseAJour = {
+      ...tache,
+      heures: champs.heures,
+      jours: champs.jours,
+      sauterWeekend: champs.sauterWeekend,
+      description: champs.description,
+    };
+    if (champs.employeId) {
+      assigner(tacheMiseAJour, champs.employeId, new Date(`${champs.date}T00:00:00`), champs.heureDebut);
+    } else {
+      // Technicien retiré — la tâche retourne dans "Tâches en attente"
+      // plutôt que de disparaître.
+      setTachesAttente((prev) => [tacheMiseAJour, ...prev]);
+      ajouterJournal(`↩️ "${tache.titre || tache.clientNom}" retirée de l'horaire — retour dans les tâches en attente`);
+    }
+  };
+
+  // Enregistrement depuis la modale d'édition rapide (clic sur une
+  // carte "en attente"). Met toujours à jour la durée ; assigne EN
+  // PLUS dans l'horaire si un technicien a été choisi — même chemin
+  // que le glisser-déposer (assigner), donc même comportement garanti
+  // (statut "planifiee", retrait de la liste d'attente, journal).
+  // En prod : `setTachesAttente`/`setPlanning` seraient remplacés par
+  // les appels Supabase correspondants (voir lib/supabase/taches.js —
+  // creerTache/assignerTache), avec une synchronisation Realtime pour
+  // que l'app technicien voie la tâche apparaître instantanément.
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, employeId, employeIds, date, heureDebut, description }) => {
+    if (lectureSeule) return;
+    const tache = tachesAttente.find((t) => t.id === tacheId);
+    if (!tache) return;
+    const tacheMiseAJour = { ...tache, heures, jours, sauterWeekend, description: description ?? tache.description };
+    // Assignation multiple : tous les techniciens cochés reçoivent la
+    // tâche (même date/heure/durée) — chacun reste ensuite ajustable
+    // individuellement en cliquant son bloc dans la grille.
+    const cibles = employeIds && employeIds.length > 0 ? employeIds : employeId ? [employeId] : [];
+    if (cibles.length > 0) {
+      // assigner() retire déjà la tâche de tachesAttente et l'écrit
+      // dans planning — on lui passe la version à jour (nouvelle
+      // durée) pour que l'assignation reflète les derniers champs
+      // édités, pas l'ancienne durée.
+      cibles.forEach((id) => assigner(tacheMiseAJour, id, new Date(`${date}T00:00:00`), heureDebut));
+    } else {
+      setTachesAttente((prev) => prev.map((t) => (t.id === tacheId ? tacheMiseAJour : t)));
+      ajouterJournal(`✏️ Durée mise à jour pour "${tache.titre || tache.clientNom}" (${heures} h/jour, ${jours} jour${jours > 1 ? "s" : ""})`);
+    }
+    setTacheEnEditionId(null);
+  };
+
+  const onDropHeure = (e, employeId, heure) => {
+    e.preventDefault();
+    const data = e.dataTransfer.getData("text/plain");
+    if (!data) return;
+    assigner(JSON.parse(data), employeId, jourAffiche, heure);
+  };
+
+  const onDropJour = (e, employeId, date) => {
+    e.preventDefault();
+    const data = e.dataTransfer.getData("text/plain");
+    if (!data) return;
+    assigner(JSON.parse(data), employeId, date, HEURE_PAR_DEFAUT);
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button onClick={reculer} aria-label="Précédent" className="rounded-lg border border-slate-200 p-1.5"><ChevronLeft size={16} /></button>
+          {/* Largeur FIXE + texte centré : la longueur de la date varie
+              (« mardi 28 juillet » vs « mercredi 24 septembre ») et sans
+              largeur fixe, les flèches se déplaçaient à chaque clic. */}
+          <h2 className="min-w-[230px] text-center text-sm font-extrabold capitalize text-slate-800">{vue === "mois" ? moisLabel : jourLabel}</h2>
+          <button onClick={avancer} aria-label="Suivant" className="rounded-lg border border-slate-200 p-1.5"><ChevronRight size={16} /></button>
+        </div>
+        <div className="flex rounded-lg border border-slate-200 p-0.5">
+          {[["jour", "Jour"], ["semaine", "Semaine"], ["mois", "Mois"]].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setVue(id)}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold ${vue === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1">
+        {TYPES_TACHE.map((t) => (
+          <div key={t.id} className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+            <span className={`h-2.5 w-2.5 rounded-full ${COULEUR_TYPE_TACHE[t.id].pastille}`} />
+            {t.label}
+          </div>
+        ))}
+      </div>
+
+      {vue === "jour" && (
+        <div className="mb-4 flex gap-1.5 overflow-x-auto">
+          {semaine.map((d) => (
+            <button
+              key={dateISO(d)}
+              onClick={() => setJourAffiche(d)}
+              className={`flex min-w-[52px] flex-col items-center rounded-xl px-2 py-1.5 text-xs font-bold ${
+                dateISO(d) === jourKey ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-500"
+              }`}
+            >
+              <span>{d.toLocaleDateString("fr-CA", { weekday: "short" })}</span>
+              <span className="tabular-nums">{d.getDate()}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-4 lg:flex-row">
+        {/* PANNEAU TÂCHES EN ATTENTE */}
+        <div className="lg:w-80 lg:shrink-0">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+              Tâches en attente ({tachesAttente.length})
+            </h3>
+            {!lectureSeule && (
+              <Button onClick={() => setFormulaireOuvert((v) => !v)} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
+                <Plus size={12} /> Nouvelle tâche
+              </Button>
+            )}
+          </div>
+
+          {/* ONGLETS : prêtes / dépôt impayé / pièce en commande. */}
+          <div className="mb-2 flex rounded-xl border border-slate-200 bg-white p-0.5">
+            <button
+              onClick={() => setOngletAttente("pretes")}
+              className={`flex-1 rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
+                ongletAttente === "pretes" ? "bg-[#131B2E] text-white" : "text-slate-500"
+              }`}
+            >
+              ✅ Prêtes
+              <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${ongletAttente === "pretes" ? "bg-white/25" : "bg-slate-100 text-slate-600"}`}>
+                {tachesPretes.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setOngletAttente("bloquees")}
+              className={`flex-1 rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
+                ongletAttente === "bloquees" ? "bg-amber-600 text-white" : "text-slate-500"
+              }`}
+            >
+              🔒 Dépôt
+              <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${ongletAttente === "bloquees" ? "bg-white/25" : "bg-slate-100 text-slate-600"}`}>
+                {tachesBloquees.length}
+              </span>
+            </button>
+            <button
+              onClick={() => setOngletAttente("pieces")}
+              className={`flex-1 rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
+                ongletAttente === "pieces" ? "bg-sky-600 text-white" : piecesEnRetard > 0 ? "text-red-600" : "text-slate-500"
+              }`}
+            >
+              🔧 Pièces
+              <span
+                className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${
+                  ongletAttente === "pieces"
+                    ? "bg-white/25"
+                    : piecesEnRetard > 0
+                      ? "bg-red-100 text-red-700"
+                      : "bg-slate-100 text-slate-600"
+                }`}
+              >
+                {tachesPiece.length}
+              </span>
+            </button>
+          </div>
+
+          {lectureSeule && (
+            <p className="mb-3 flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-500">
+              <Lock size={12} className="shrink-0" /> Consultation seulement — ton rôle ne permet pas de modifier l'horaire.
+            </p>
+          )}
+
+          {formulaireOuvert && !lectureSeule && (
+            <div className="mb-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Titre / description courte</label>
+                <input
+                  value={nouveauTitre}
+                  onChange={(e) => setNouveauTitre(e.target.value)}
+                  placeholder="Ex: Appel de service — bruit anormal"
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                  Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span>
+                </label>
+                <textarea
+                  value={nouvelleDescription}
+                  onChange={(e) => setNouvelleDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Ce qu'il y a à faire sur cette tâche, instructions particulières..."
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                />
+                {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
+                  <p className="mt-0.5 text-[9px] text-slate-400">
+                    Le contenu du devis (quantités × items, sans les prix) s'ajoutera automatiquement à cette description.
+                  </p>
+                )}
+              </div>
+
+              {/* 📎 PHOTOS ET PLANS — le technicien les aura dans sa poche. */}
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                  📎 Photos et plans <span className="font-normal text-orange-600">(visibles au technicien)</span>
+                </label>
+                <label className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed px-2 py-2 text-[11px] font-semibold ${televersementJointe ? "border-slate-200 text-slate-300" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+                  {televersementJointe ? "Téléversement…" : "➕ Ajouter des images ou des PDF"}
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,application/pdf"
+                    disabled={televersementJointe}
+                    className="hidden"
+                    onChange={(e) => {
+                      const fichiers = Array.from(e.target.files || []);
+                      e.target.value = "";
+                      if (fichiers.length > 0) ajouterPiecesJointes(fichiers);
+                    }}
+                  />
+                </label>
+                {nouvellesPiecesJointes.length > 0 && (
+                  <div className="mt-1.5 space-y-1">
+                    {nouvellesPiecesJointes.map((pj, idx) => (
+                      <div key={pj.url} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1 text-[11px]">
+                        {pj.type === "image" ? (
+                          // Vignette cliquable — on vérifie ce qu'on envoie.
+                          <a href={pj.url} target="_blank" rel="noreferrer" className="shrink-0">
+                            <img src={pj.url} alt={pj.nom} className="h-8 w-8 rounded object-cover" />
+                          </a>
+                        ) : (
+                          <span className="shrink-0 text-base">📄</span>
+                        )}
+                        <a href={pj.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-semibold text-slate-600 hover:underline">
+                          {pj.nom}
+                        </a>
+                        <button
+                          onClick={() => setNouvellesPiecesJointes((prev) => prev.filter((_, i) => i !== idx))}
+                          className="shrink-0 text-slate-400 hover:text-red-600"
+                          aria-label="Retirer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Client</label>
+                <select
+                  value={nouveauClientId}
+                  onChange={(e) => {
+                    // « ➕ Nouveau client » ouvre la fenêtre de création
+                    // rapide sans toucher au client déjà sélectionné.
+                    if (e.target.value === "__nouveau__") {
+                      setModalNouveauClientTache(true);
+                      return;
+                    }
+                    setNouveauClientId(e.target.value);
+                    setAdresseTravauxId("");
+                    setNouvelleAdresseTravaux(null);
+                    setNouveauProjetId("");
+                  }}
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  <option value="__nouveau__">➕ Nouveau client…</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>{c.nom}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Projet lié (optionnel)</label>
+                <select
+                  value={nouveauProjetId}
+                  onChange={(e) => setNouveauProjetId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  <option value="">Aucun / Projet général</option>
+                  {projetsDisponibles.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nom}</option>
+                  ))}
+                </select>
+                {nouveauClientId && projetsDisponibles.length === 0 && (
+                  <p className="mt-1 text-[10px] text-slate-400">Ce client n'a aucun projet actif — la tâche restera hors-projet.</p>
+                )}
+                {nouveauProjetId && (
+                  <p className="mt-1 text-[10px] text-emerald-600">
+                    Les heures de cette tâche compteront dans la rentabilité de ce projet.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-1 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={adresseTravauxDifferente}
+                    onChange={(e) => {
+                      setAdresseTravauxDifferente(e.target.checked);
+                      setAdresseTravauxId("");
+                      setNouvelleAdresseTravaux(null);
+                    }}
+                    className="h-3.5 w-3.5 accent-[#FF6A13]"
+                  />
+                  Adresse des travaux différente de l'adresse de facturation
+                </label>
+                {adresseTravauxDifferente && (
+                  <div className="space-y-2 rounded-lg bg-slate-50 p-2">
+                    {(() => {
+                      const client = clients.find((c) => c.id === nouveauClientId);
+                      return (client?.adresses || []).length > 0 ? (
+                        <select
+                          value={adresseTravauxId}
+                          onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
+                          className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                        >
+                          <option value="">— Choisir une adresse enregistrée —</option>
+                          {client.adresses.map((a) => (
+                            <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
+                          ))}
+                        </select>
+                      ) : null;
+                    })()}
+                    <p className="text-[10px] text-slate-400">Ou saisir une nouvelle adresse :</p>
+                    <AutocompleteAdresse
+                      onSelection={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
+                    />
+                    {nouvelleAdresseTravaux && (
+                      <p className="flex items-center gap-1 text-[11px] text-emerald-600">
+                        <Check size={12} /> {nouvelleAdresseTravaux.label}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Type de tâche</label>
+                <select
+                  value={nouveauType}
+                  onChange={(e) => setNouveauType(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  {TYPES_TACHE.map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {TYPES_TACHE.find((t) => t.id === nouveauType)?.description}
+                </p>
+
+                {/* TEMPS SUR LE PROJET — seulement pour les visites.
+                    Une visite de soumission qu'on ne remporte pas est un
+                    coût de vente ; une visite sur un chantier en cours
+                    appartient à ce projet. Toi seul le sais. */}
+                {estTypeAdministratif(nouveauType) && (
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <input
+                      type="checkbox"
+                      checked={tempsSurProjet}
+                      onChange={(e) => setTempsSurProjet(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[#131B2E]"
+                    />
+                    <span className="text-[10px] leading-snug text-slate-600">
+                      <span className="font-bold text-slate-800">Temps comptabilisé sur le projet</span>
+                      <br />
+                      {tempsSurProjet
+                        ? "Ces heures entreront dans le coût du projet choisi."
+                        : "Décoché : les heures vont aux frais ADMINISTRATIFS de l'entreprise, pas au coût d'un projet."}
+                    </span>
+                  </label>
+                )}
+
+                {nouveauType === "conge" && (
+                  <p className="mt-2 rounded-lg bg-zinc-100 px-2 py-1.5 text-[10px] leading-snug text-zinc-600">
+                    🚫 Aucun chronomètre, aucune heure. La journée est simplement bloquée à l&apos;agenda pour qu&apos;on
+                    n&apos;y place pas de travail.
+                  </p>
+                )}
+              </div>
+
+              {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                    {nouveauType === "entretien_contrat" ? "Devis / contrat à facturer" : "Devis à facturer"}
+                  </label>
+                  <select
+                    value={nouveauDevisId}
+                    onChange={(e) => {
+                      setNouveauDevisId(e.target.value);
+                      // Contrat d'entretien : la fréquence choisie sur le
+                      // devis est reprise automatiquement (modifiable).
+                      const d = devisListe.find((x) => x.id === e.target.value);
+                      if (d?.estContrat && d.frequenceFacturationAnnuelle) setNouvelleFrequence(d.frequenceFacturationAnnuelle);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  >
+                    <option value="" disabled>Sélectionner un devis...</option>
+                    {devisListe
+                      .slice()
+                      // Pour une tâche « Entretien selon contrat », les
+                      // CONTRATS apparaissent en premier, clairement marqués.
+                      .sort((a, b) => (nouveauType === "entretien_contrat" ? (b.estContrat ? 1 : 0) - (a.estContrat ? 1 : 0) : 0))
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.estContrat ? `📄 CONTRAT ${d.frequenceFacturationAnnuelle}×/an — ` : ""}{d.numero} — {d.clientNom}
+                        </option>
+                      ))}
+                  </select>
+                  {devisListe.length === 0 && (
+                    <p className="mt-1 text-[10px] text-red-500">Aucun devis disponible — crée-en un dans l'onglet Devis.</p>
+                  )}
+                </div>
+              )}
+
+              {nouveauType === "entretien_contrat" && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Fréquence de facturation</label>
+                  <select
+                    value={nouvelleFrequence}
+                    onChange={(e) => setNouvelleFrequence(parseInt(e.target.value))}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  >
+                    {FREQUENCES_CONTRAT.map((f) => (
+                      <option key={f} value={f}>{f === 1 ? "1 facture par an (paiement complet)" : `${f} factures par an`}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="border-t border-slate-100 pt-2">
+                <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">Planification (optionnel)</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Date</label>
+                    <input
+                      type="date"
+                      value={nouvelleDate}
+                      onChange={(e) => setNouvelleDate(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Heure de début</label>
+                    <select
+                      value={nouvelleHeureDebut}
+                      onChange={(e) => setNouvelleHeureDebut(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    >
+                      {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Heures / jour</label>
+                    <input
+                      type="number" min={0} max={HEURES.length} value={nouvelleDureeHeures}
+                      onChange={(e) => { const v = parseInt(e.target.value); setNouvelleDureeHeures(Number.isNaN(v) ? 0 : Math.max(0, v)); }}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Nombre de jours</label>
+                    <input
+                      type="number" min={0} value={nouvelleDureeJours}
+                      onChange={(e) => { const v = parseInt(e.target.value); setNouvelleDureeJours(Number.isNaN(v) ? 0 : Math.max(0, v)); }}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
+                    />
+                  </div>
+                </div>
+                {nouvelleDureeJours > 1 && (
+                  <label className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={nouveauSauterWeekend}
+                      onChange={(e) => setNouveauSauterWeekend(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-[#FF6A13]"
+                    />
+                    Sauter les samedis et dimanches
+                  </label>
+                )}
+                <div className="mt-1.5">
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Technicien attribué</label>
+                  <select
+                    value={nouveauEmployeId}
+                    onChange={(e) => setNouveauEmployeId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  >
+                    <option value="">— Laisser en attente (ne pas assigner) —</option>
+                    {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                  </select>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {depotRequis
+                    ? nouveauEmployeId
+                      ? "Le technicien choisi sera RÉSERVÉ sur la tâche, mais elle restera en attente tant que le dépôt n'est pas payé."
+                      : "Dépôt requis : la tâche ira dans « Tâches en attente » jusqu'au paiement. Tu peux quand même choisir le technicien prévu ci-dessus."
+                    : nouvelleDate && nouveauEmployeId
+                    ? `Sera placée directement dans l'horaire à ${nouvelleHeureDebut}.`
+                    : "Sans date ET technicien, la tâche ira dans « Tâches en attente »."}
+                </p>
+              </div>
+
+              {/* DÉPÔT PRÉALABLE */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5">
+                <label className="flex items-center gap-2 text-xs font-bold text-amber-900">
+                  <input
+                    type="checkbox"
+                    checked={depotRequis}
+                    onChange={(e) => setDepotRequis(e.target.checked)}
+                    className="h-4 w-4 accent-[#131B2E]"
+                  />
+                  💰 Dépôt requis avant planification
+                </label>
+                {depotRequis && (
+                  <div className="mt-2 space-y-2">
+                    <div>
+                      <label className="mb-0.5 block text-[10px] font-bold text-amber-800">Montant du dépôt (HT $) — liste de prix</label>
+                      <select
+                        value={depotChoixPrix}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setDepotChoixPrix(v);
+                          // La zone choisie fixe le montant ; « hors_liste » ouvre la saisie.
+                          setDepotMontant(v === "hors_liste" || v === "" ? "" : String(Number(prixDepots?.[v]) || 0));
+                        }}
+                        className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs font-semibold"
+                      >
+                        <option value="">— Choisir dans la liste de prix —</option>
+                        {ZONES_DEPOTS.filter((z) => Number(prixDepots?.[z]) > 0).map((z) => {
+                          const p = Number(prixDepots[z]);
+                          return (
+                            <option key={z} value={z}>
+                              Appel de service — {z} — {p.toFixed(2)} $ HT ({taxesDepot(p, configEnt).total.toFixed(2)} $ taxes incl.) — transport inclus
+                            </option>
+                          );
+                        })}
+                        <option value="hors_liste">🗺️ Hors zone — tarif sur mesure (3 h incluses transport compris)</option>
+                      </select>
+                      {ZONES_DEPOTS.every((z) => !(Number(prixDepots?.[z]) > 0)) && (
+                        <p className="mt-1 text-[9px] text-amber-700">
+                          Aucun prix de zone configuré — l'Admin principal peut les définir dans Utilisateurs → « Liste de prix — dépôts ».
+                        </p>
+                      )}
+                      {depotChoixPrix === "hors_liste" && (
+                        <InputNombreDecimal
+                          valeur={depotMontant || 0}
+                          onChange={(v) => setDepotMontant(String(v))}
+                          className="mt-1.5 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs"
+                        />
+                      )}
+                      {parseFloat(depotMontant) > 0 && (() => {
+                        const t = taxesDepot(depotMontant, configEnt);
+                        return (
+                          <p className="mt-1 text-[10px] text-amber-800 tabular-nums">
+                            + TPS {t.tps.toFixed(2)} $ + TVQ {t.tvq.toFixed(2)} $ = <span className="font-bold">{t.total.toFixed(2)} $ à percevoir</span> · payable sous 24 h
+                          </p>
+                        );
+                      })()}
+                    </div>
+                    <p className="text-[10px] font-semibold text-amber-800">
+                      💡 Client pas encore enregistré ? Choisis <span className="font-bold">« ➕ Nouveau client… »</span> en haut de la liste Client — sa fiche complète sera créée et validée du même coup.
+                    </p>
+                    <p className="text-[9px] leading-snug text-amber-700">
+                      La tâche restera bloquée hors agenda tant que le dépôt n'est pas payé (ou confirmé manuellement). La facture de dépôt QuickBooks et son envoi automatique arrivent à la phase QuickBooks.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Garde-fou : dépôt coché SANS montant = création bloquée.
+                  Sinon la tâche filerait à l'agenda comme si aucun dépôt
+                  n'était exigé (c'est exactement le trou qui permettait de
+                  planifier un appel de service non payé). */}
+              {depotRequis && !(parseFloat(depotMontant) > 0) && (
+                <p className="text-[10px] font-semibold text-red-600">
+                  ⚠️ Choisis un montant de dépôt (liste de prix ou tarif sur mesure) pour pouvoir créer la tâche.
+                </p>
+              )}
+              <Button
+                onClick={creerTache}
+                disabled={
+                  !nouveauTitre.trim() ||
+                  ((nouveauType === "devis" || nouveauType === "entretien_contrat") && !nouveauDevisId) ||
+                  (depotRequis && !(parseFloat(depotMontant) > 0))
+                }
+                className="w-full min-h-0 py-2 text-xs"
+              >
+                Créer la tâche
+              </Button>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {tachesAttenteAffichees.map((t) => (
+              <div
+                key={t.id}
+                /* `estBloquee` couvre les DEUX raisons : dépôt impayé ET
+                   pièce pas encore reçue. Avec `depotBloque` seul, une
+                   tâche en attente de pièce restait glissable vers
+                   l'agenda — on aurait envoyé un technicien poser une
+                   pièce encore chez le fournisseur. */
+                draggable={!lectureSeule && !estBloquee(t)}
+                onDragStart={(e) => !lectureSeule && !estBloquee(t) && e.dataTransfer.setData("text/plain", JSON.stringify(t))}
+                className={`rounded-xl border border-l-4 bg-white p-3 ${
+                  depotDe(t.id)?.statut === "annule_delai"
+                    ? "border-red-300 opacity-60"
+                    : pieceBloque(t.id)
+                    ? "border-sky-400"
+                    : depotBloque(t.id)
+                    ? "border-amber-300"
+                    : "border-slate-200"
+                } ${lectureSeule || estBloquee(t) ? "" : "cursor-grab active:cursor-grabbing"}`}
+              >
+                <button
+                  onClick={() => !lectureSeule && setTacheEnEditionId(t.id)}
+                  className="-mx-1 -mt-1 w-[calc(100%+8px)] rounded-lg p-1 text-left hover:bg-slate-50"
+                  title="Cliquer pour l'édition rapide (date, heure, durée, technicien)"
+                >
+                <div className="flex items-center gap-1.5">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${(COULEUR_TYPE_TACHE[t.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
+                  <div className="flex flex-1 items-start justify-between gap-2">
+                    <p className="text-sm font-bold text-slate-900">{t.titre || t.clientNom}</p>
+                    {t.statut === "en_attente_materiel" && (
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">MATÉRIEL</span>
+                    )}
+                  </div>
+                </div>
+                {(t.piecesJointes || []).length > 0 && (
+                  <p className="mt-0.5 text-[10px] font-semibold text-slate-400">
+                    📎 {t.piecesJointes.length} document{t.piecesJointes.length > 1 ? "s" : ""} joint{t.piecesJointes.length > 1 ? "s" : ""} pour le technicien
+                  </p>
+                )}
+                {/* EN ATTENTE D'UNE PIÈCE — la raison du blocage doit
+                    être écrite sur la carte. Une tâche bloquée sans
+                    explication pousse à chercher pourquoi, ou pire à
+                    la débloquer de force. */}
+                {(() => {
+                  const pc = (pieces || []).find((x) => x.tacheRetourId === t.id);
+                  if (!pc) return null;
+                  // PIÈCE ANNULÉE : la tâche reste bloquée ICI jusqu'à ce
+                  // qu'un humain tranche — supprimer la tâche, ou la
+                  // garder sans pièce (le client a pu changer d'idée).
+                  // Avant, l'annulation déverrouillait la tâche : on
+                  // risquait de céduler la pose d'une pièce inexistante.
+                  if (pc.statut === "annulee") {
+                    return (
+                      <div className="mt-1.5 rounded-lg bg-red-50 px-2 py-1.5 text-[10px] font-bold leading-snug text-red-700">
+                        <p>❌ Pièce ANNULÉE{pc.annuleRaison ? ` — ${pc.annuleRaison}` : ""}</p>
+                        <p className="mt-0.5 font-semibold opacity-80">Que faire de cette tâche de retour ?</p>
+                        {!lectureSeule && (
+                          <div className="mt-1.5 flex gap-1.5">
+                            <button
+                              onClick={() => {
+                                setTachesAttente((prev) => prev.filter((x) => x.id !== t.id));
+                                ajouterJournal(`🗑️ Tâche de retour supprimée (pièce annulée) — ${t.titre} · ${t.clientNom}.`);
+                              }}
+                              className="rounded-lg bg-red-600 px-2 py-1 font-extrabold text-white hover:bg-red-700"
+                            >
+                              Supprimer la tâche
+                            </button>
+                            <button
+                              onClick={() => onDetacherPiece?.(pc.id, t)}
+                              className="rounded-lg border border-slate-300 bg-white px-2 py-1 font-extrabold text-slate-600 hover:bg-slate-50"
+                            >
+                              Garder (sans pièce)
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  const recue = pc.statut === "recue";
+                  const attendPaiement = recue && pc.paiementRequis && !pc.paiementRecu;
+                  const prevue = pc.dateReceptionPrevue
+                    ? new Date(`${pc.dateReceptionPrevue}T00:00:00`).toLocaleDateString("fr-CA", { day: "numeric", month: "long" })
+                    : null;
+                  return (
+                    <div
+                      className={`mt-1.5 rounded-lg px-2 py-1 text-[10px] font-bold leading-snug ${
+                        recue && !attendPaiement
+                          ? "bg-emerald-50 text-emerald-700"
+                          : pc.enRetard
+                            ? "bg-red-50 text-red-700"
+                            : "bg-sky-50 text-sky-800"
+                      }`}
+                    >
+                      <p>
+                        {attendPaiement
+                          ? `💰 Pièce reçue — en attente du PAIEMENT du client`
+                          : recue
+                          ? `📦 Pièce reçue — planifiable`
+                          : pc.statut === "commandee"
+                          ? `📦 COMMANDÉE — ${pc.pieceRequise}`
+                          : `🔧 À COMMANDER — ${pc.pieceRequise}`}
+                      </p>
+                      {/* LE DÉTAIL SUIT LA TÂCHE. C'est ici qu'on répond au
+                          client qui appelle « elle arrive quand, ma pièce ? »
+                          — sans avoir à ouvrir un autre onglet. */}
+                      {!recue && (
+                        <p className="mt-0.5 font-semibold opacity-80">
+                          {pc.fournisseurNom ? `${pc.fournisseurNom}` : "Fournisseur à choisir"}
+                          {pc.numeroBc ? ` · ${pc.numeroBc}` : ""}
+                          {prevue
+                            ? ` · ${pc.enRetard ? "⚠️ attendue le" : "prévue le"} ${prevue}`
+                            : pc.statut === "commandee"
+                              ? " · aucune date confirmée"
+                              : ""}
+                          {pc.jours > 0 ? ` · ${pc.jours} jour${pc.jours > 1 ? "s" : ""}` : ""}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* STATUT DU DÉPÔT */}
+                {depotDe(t.id) && (() => {
+                  const d = depotDe(t.id);
+                  const tD = taxesDepot(d.montantHT, configEnt);
+                  if (d.statut === "annule_delai") {
+                    return (
+                      <p className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-700">
+                        ⏰ ANNULÉE — dépôt non payé sous 24 h
+                      </p>
+                    );
+                  }
+                  if (d.statut === "paye" || d.statut === "paye_manuellement") {
+                    return (
+                      <p className="mt-1 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700">
+                        💰 DÉPÔT REÇU{d.modePaiement ? ` (${d.modePaiement})` : ""} — planifiable
+                      </p>
+                    );
+                  }
+                  const heuresRestantes = Math.max(0, Math.round((new Date(d.dateLimite).getTime() - Date.now()) / 3600000));
+                  return (
+                    <p className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">
+                      🔒 EN ATTENTE DE DÉPÔT — {tD.total.toFixed(2)} $ · expire dans ~{heuresRestantes} h
+                    </p>
+                  );
+                })()}
+                {/* TECHNICIEN RÉSERVÉ D'AVANCE (choisi à la création,
+                    en attendant le paiement du dépôt) */}
+                {t.technicienPrevu && (
+                  <p className="mt-1 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-[9px] font-bold text-blue-700">
+                    👤 Technicien prévu : {employes.find((e) => e.id === t.technicienPrevu)?.nom || "?"}
+                    {t.datePrevue ? ` · le ${t.datePrevue} à ${t.heurePrevue || "07:00"}` : ""}
+                  </p>
+                )}
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {t.typeTache === "entretien_contrat" ? (
+                    <span className="inline-block rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700">
+                      CONTRAT #{t.devisNumero} — {t.frequenceFacturationAnnuelle}×/an
+                    </span>
+                  ) : (
+                    t.devisNumero && (
+                      <span className="inline-block rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-bold text-blue-700">
+                        DEVIS #{t.devisNumero}
+                      </span>
+                    )
+                  )}
+                  {t.projetId && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">
+                      <Briefcase size={9} /> {(projets || []).find((p) => p.id === t.projetId)?.nom || "Projet"}
+                    </span>
+                  )}
+                </div>
+                {t.adresseTravaux && (
+                  <div className="mt-1 flex items-start gap-1 text-[10px] text-slate-500">
+                    <MapPin size={11} className="mt-0.5 shrink-0" />
+                    <span>Travaux : {t.adresseTravaux}</span>
+                  </div>
+                )}
+                <p className="mt-1 whitespace-pre-line text-xs text-slate-500">{t.description}</p>
+                </button>
+
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Heures / jour</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={HEURES.length}
+                      value={t.heures ?? 1}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        majDureeTache(t.id, { heures: Number.isNaN(val) ? 1 : Math.max(0, val) });
+                      }}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Nombre de jours</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={t.jours ?? 1}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value);
+                        majDureeTache(t.id, { jours: Number.isNaN(val) ? 1 : Math.max(0, val) });
+                      }}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs tabular-nums"
+                    />
+                  </div>
+                </div>
+
+                {(t.jours ?? 1) >= 1 && (
+                  <p className="mt-1.5 flex items-center gap-1 text-[10px] font-semibold text-blue-600">
+                    <Lock size={10} /> Bloque la journée complète de chaque technicien assigné
+                  </p>
+                )}
+
+                {(t.jours ?? 1) > 1 && (
+                  <label className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={!!t.sauterWeekend}
+                      onChange={(e) => majDureeTache(t.id, { sauterWeekend: e.target.checked })}
+                      className="h-3.5 w-3.5 accent-[#FF6A13]"
+                    />
+                    Sauter les samedis et dimanches
+                  </label>
+                )}
+
+                {/* DÉBLOCAGE MANUEL DU DÉPÔT (admin) */}
+                {!lectureSeule && depotDe(t.id)?.statut === "en_attente_paiement" && (
+                  <Button
+                    onClick={() => { setDepotModal({ tacheId: t.id, titre: t.titre || t.clientNom }); setDepotMode("Comptant"); }}
+                    className="mt-2 w-full min-h-0 py-1.5 text-xs"
+                  >
+                    💰 Dépôt reçu manuellement…
+                  </Button>
+                )}
+                {/* DÉPÔT PAYÉ + TECHNICIEN/DATE RÉSERVÉS D'AVANCE :
+                    placement à l'horaire en un seul clic. */}
+                {!lectureSeule &&
+                  t.technicienPrevu &&
+                  t.datePrevue &&
+                  ["paye", "paye_manuellement"].includes(depotDe(t.id)?.statut) && (
+                    <Button
+                      onClick={() => {
+                        assigner(t, t.technicienPrevu, new Date(`${t.datePrevue}T00:00:00`), t.heurePrevue || "07:00");
+                        // Affiche tout de suite le jour où la tâche vient
+                        // d'être placée — sinon l'agenda reste sur
+                        // aujourd'hui et la tâche semble avoir disparu.
+                        setJourAffiche(new Date(`${t.datePrevue}T00:00:00`));
+                      }}
+                      className="mt-2 w-full min-h-0 py-1.5 text-xs"
+                    >
+                      📅 Placer à l'horaire — {employes.find((e) => e.id === t.technicienPrevu)?.nom || "technicien prévu"} le {t.datePrevue}
+                    </Button>
+                  )}
+                {!lectureSeule &&
+                  t.technicienPrevu &&
+                  !t.datePrevue &&
+                  ["paye", "paye_manuellement"].includes(depotDe(t.id)?.statut) && (
+                    <p className="mt-2 text-[10px] font-semibold text-emerald-700">
+                      💰 Dépôt reçu — glisse la tâche sur la ligne de {employes.find((e) => e.id === t.technicienPrevu)?.nom || "son technicien"} dans l'agenda.
+                    </p>
+                  )}
+                {/* RELANCE APRÈS ANNULATION — le client a rappelé : nouveau
+                    dépôt, nouveau délai de 24 h (nouvelle facture QBO en Phase 4). */}
+                {!lectureSeule && depotDe(t.id)?.statut === "annule_delai" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const d = depotDe(t.id);
+                      onCreerDepot?.(t.id, {
+                        montantHT: d.montantHT,
+                        isProspect: d.isProspect,
+                        prospect: d.isProspect
+                          ? { nom: d.prospectNom, courriel: d.prospectCourriel, telephone: d.prospectTelephone, adresse: d.prospectAdresse }
+                          : null,
+                      });
+                      ajouterJournal(`🔄 Dépôt relancé pour « ${t.titre || t.clientNom} » — nouveau délai de 24 h`);
+                    }}
+                    className="mt-2 w-full min-h-0 py-1.5 text-xs"
+                  >
+                    🔄 Relancer le dépôt (nouveau 24 h)
+                  </Button>
+                )}
+
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setAssignationMobile(
+                      assignationMobile?.tacheId === t.id
+                        ? null
+                        : { tacheId: t.id, employeId: employes[0].id, heure: HEURE_PAR_DEFAUT, date: jourKey }
+                    )
+                  }
+                  className="mt-2 w-full min-h-0 py-1.5 text-xs lg:hidden"
+                >
+                  Assigner
+                </Button>
+
+                {assignationMobile?.tacheId === t.id && (
+                  <div className="mt-2 space-y-2 rounded-lg bg-slate-50 p-2 lg:hidden">
+                    <select
+                      value={assignationMobile.employeId}
+                      onChange={(e) => setAssignationMobile({ ...assignationMobile, employeId: e.target.value })}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    >
+                      {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                    </select>
+                    {vue === "jour" ? (
+                      <select
+                        value={assignationMobile.heure}
+                        onChange={(e) => setAssignationMobile({ ...assignationMobile, heure: e.target.value })}
+                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                      >
+                        {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        type="date"
+                        value={assignationMobile.date}
+                        onChange={(e) => setAssignationMobile({ ...assignationMobile, date: e.target.value })}
+                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                      />
+                    )}
+                    <Button
+                      onClick={() => {
+                        if (vue === "jour") assigner(t, assignationMobile.employeId, jourAffiche, assignationMobile.heure);
+                        // `T00:00:00` force l'interprétation en heure LOCALE :
+                        // sans lui, "AAAA-MM-JJ" est lu en UTC et la tâche
+                        // atterrirait la veille au Québec.
+                        else assigner(t, assignationMobile.employeId, new Date(`${assignationMobile.date}T00:00:00`), HEURE_PAR_DEFAUT);
+                        setAssignationMobile(null);
+                      }}
+                      className="w-full min-h-0 py-1.5 text-xs"
+                    >
+                      Confirmer l'assignation
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {tachesAttenteAffichees.length === 0 && (
+              <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+                {tachesAttente.length === 0
+                  ? "Aucune tâche en attente. Les devis acceptés apparaissent ici."
+                  : ongletAttente === "bloquees"
+                  ? "Aucune tâche bloquée par un dépôt — dès qu'un dépôt est payé, sa tâche passe dans « ✅ Prêtes »."
+                  : ongletAttente === "pieces"
+                  ? "Aucune pièce en commande. Quand un technicien coche « pièce à commander » sur un appel de service, le retour se range ici jusqu'à la réception."
+                  : "Aucune tâche prête — regarde les onglets « 🔒 Dépôt » et « 🔧 Pièces »."}
+              </p>
+            )}
+          </div>
+          <p className="mt-3 hidden text-[11px] text-slate-400 lg:block">
+            Glisse une tâche vers une case du calendrier pour l'assigner.
+          </p>
+        </div>
+
+        {/* GRILLE CALENDRIER — un technicien par rangée */}
+        <div ref={grilleScrollRef} className="flex-1 overflow-x-auto">
+          {vue === "jour" ? (
+            <div className="min-w-[640px]">
+              <div className="grid" style={{ gridTemplateColumns: `120px repeat(${HEURES.length}, minmax(52px, 1fr))` }}>
+                <div className="sticky left-0 z-10 bg-white" />
+                {HEURES.map((h) => (
+                  <div key={h} className="border-b border-slate-200 px-1 py-2 text-center text-[10px] font-semibold text-slate-400 tabular-nums">{h}</div>
+                ))}
+              </div>
+              {employes.map((emp) => {
+                // SEGMENTS : une entrée par tâche (id unique) de la journée,
+                // avec sa case de départ (index) et sa durée (span) — les
+                // cases contiennent maintenant des LISTES de tâches, donc
+                // plusieurs segments peuvent se chevaucher.
+                const segments = [];
+                const parId = new Map();
+                for (let i = 0; i < HEURES.length; i++) {
+                  listeCellule(planning[`${jourKey}|${emp.id}|${HEURES[i]}`]).forEach((t) => {
+                    const seg = parId.get(t.id);
+                    if (seg) {
+                      seg.fin = i;
+                      seg.span = i - seg.index + 1;
+                    } else {
+                      const nouveau = { tache: t, index: i, fin: i, span: 1 };
+                      parId.set(t.id, nouveau);
+                      segments.push(nouveau);
+                    }
+                  });
+                }
+                // PISTES : les tâches qui se chevauchent s'empilent — chaque
+                // segment prend la première piste libre. La rangée s'étire
+                // en hauteur selon le nombre de pistes : AUCUNE tâche ne
+                // peut être cachée, peu importe combien partagent la plage.
+                const finsParPiste = [];
+                segments.sort((a, b) => a.index - b.index || b.span - a.span);
+                segments.forEach((seg) => {
+                  let p = finsParPiste.findIndex((fin) => fin < seg.index);
+                  if (p === -1) {
+                    p = finsParPiste.length;
+                    finsParPiste.push(seg.fin);
+                  } else {
+                    finsParPiste[p] = Math.max(finsParPiste[p], seg.fin);
+                  }
+                  seg.piste = p;
+                });
+                const nbPistes = Math.max(1, finsParPiste.length);
+
+                return (
+                  <div
+                    key={emp.id}
+                    className="grid border-t border-slate-100"
+                    style={{
+                      gridTemplateColumns: `120px repeat(${HEURES.length}, minmax(52px, 1fr))`,
+                      gridTemplateRows: `repeat(${nbPistes}, minmax(52px, auto))`,
+                    }}
+                  >
+                    <div
+                      style={{ gridColumn: "1", gridRow: `1 / ${nbPistes + 1}` }}
+                      className="sticky left-0 z-10 flex items-center border-r border-slate-100 bg-white px-2 py-2 text-xs font-bold text-slate-700"
+                    >
+                      {emp.nom}
+                    </div>
+                    {/* CASES DE FOND — cibles de dépôt pleine hauteur, toujours
+                        présentes même sous les blocs. */}
+                    {HEURES.map((h, index) => {
+                      const cle = `${jourKey}|${emp.id}|${h}`;
+                      return (
+                        <div
+                          key={h}
+                          data-heure-index={index}
+                          data-emp={emp.id}
+                          style={{ gridColumn: `${index + 2}`, gridRow: `1 / ${nbPistes + 1}` }}
+                          onDragOver={(ev) => { ev.preventDefault(); setTacheSurvolee(cle); }}
+                          onDragLeave={() => setTacheSurvolee(null)}
+                          onDrop={(ev) => { onDropHeure(ev, emp.id, h); setTacheSurvolee(null); }}
+                          className={`border-l border-slate-100 ${tacheSurvolee === cle ? "bg-orange-50" : ""}`}
+                        />
+                      );
+                    })}
+                    {/* BLOCS DE TÂCHES — par-dessus les cases, un par segment,
+                        chacun sur SA piste. */}
+                    {segments.map((seg) => {
+                      const h = HEURES[seg.index];
+                      const enRedimensionnement =
+                        redim && redim.tache.id === seg.tache.id && redim.employeId === emp.id && redim.jourCible === jourKey;
+                      const spanAffiche = enRedimensionnement ? redim.spanActuel : seg.span;
+                      const peutRedimensionner = !lectureSeule && !seg.tache.est_tache_systeme && (seg.tache.jours ?? 0) < 1; // ni journée complète, ni tâche système, ni lecture seule
+                      return (
+                        <div
+                          key={seg.tache.id}
+                          style={{ gridColumn: `${seg.index + 2} / span ${spanAffiche}`, gridRow: `${seg.piste + 1}` }}
+                          onMouseMove={(e) => setSurvol({ tache: seg.tache, employe: emp, heure: h, x: e.clientX, y: e.clientY })}
+                          onMouseLeave={() => setSurvol(null)}
+                          onDragOver={(ev) => ev.preventDefault()}
+                          onDrop={(ev) => {
+                            // Dépôt PAR-DESSUS un bloc existant : la tâche
+                            // déposée s'empile sur la case horaire visée
+                            // (calculée depuis la position de la souris).
+                            const rect = ev.currentTarget.getBoundingClientRect();
+                            const largeurCase = rect.width / spanAffiche;
+                            const idx = Math.min(
+                              HEURES.length - 1,
+                              seg.index + Math.max(0, Math.floor((ev.clientX - rect.left) / largeurCase))
+                            );
+                            onDropHeure(ev, emp.id, HEURES[idx]);
+                            setTacheSurvolee(null);
+                          }}
+                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
+                        >
+                          <button
+                            onClick={() => !redim && !lectureSeule && !seg.tache.est_tache_systeme && setTacheDetailOuverte({ tache: seg.tache, employe: emp, date: jourKey, heure: h })}
+                            className={`flex h-full w-full items-start gap-1 rounded-lg p-1 text-left text-[9px] font-semibold leading-tight ${
+                              estTerminee(seg.tache, emp)
+                                ? "bg-emerald-100 text-emerald-900"
+                                : seg.tache.est_tache_systeme
+                                ? "bg-slate-200 text-slate-600"
+                                : `text-black ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
+                            } ${enRedimensionnement ? "ring-2 ring-[#FF6A13]" : ""}`}
+                          >
+                            {estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
+                            {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
+                            <span className="min-w-0">
+                              {seg.tache.titre || seg.tache.clientNom}
+                              {spanAffiche > 1 && <span className="ml-1 opacity-60">· {spanAffiche} h</span>}
+                              {seg.tache.description && spanAffiche >= 2 && (
+                                <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal leading-tight opacity-75">
+                                  {seg.tache.description}
+                                </span>
+                              )}
+                              {travailTermine(seg.tache, emp)?.noteTerrain && spanAffiche >= 2 && (
+                                <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal italic leading-tight text-emerald-800">
+                                  📝 Note du technicien : {travailTermine(seg.tache, emp).noteTerrain}
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                          {peutRedimensionner && (
+                            <div
+                              onPointerDown={(e) => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                // Mesure RÉELLE du bloc à l'écran : la durée suit
+                                // ensuite la distance parcourue par la souris.
+                                const rect = e.currentTarget.parentElement.getBoundingClientRect();
+                                setRedim({
+                                  tache: seg.tache,
+                                  employeId: emp.id,
+                                  jourCible: jourKey,
+                                  heureDebut: h,
+                                  indexDebut: seg.index,
+                                  spanInitial: seg.span,
+                                  spanActuel: seg.span,
+                                  origineX: rect.left,
+                                  largeurCase: rect.width / seg.span,
+                                });
+                              }}
+                              title="Glisser pour changer la durée"
+                              className="absolute right-0 top-0 h-full w-2.5 cursor-ew-resize touch-none rounded-r-lg hover:bg-black/10"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className={vue === "mois" ? "min-w-[900px]" : "min-w-[640px]"}>
+              <div className="grid" style={{ gridTemplateColumns: `120px repeat(${joursAffiches.length}, minmax(${vue === "mois" ? 34 : 84}px, 1fr))` }}>
+                <div className="sticky left-0 z-10 bg-white" />
+                {joursAffiches.map((d) => {
+                  const weekend = d.getDay() === 0 || d.getDay() === 6;
+                  return (
+                    <div key={dateISO(d)} className={`border-b border-slate-200 px-1 py-2 text-center text-[10px] font-semibold tabular-nums ${weekend ? "text-orange-400" : "text-slate-400"}`}>
+                      {vue === "semaine" ? d.toLocaleDateString("fr-CA", { weekday: "short" }) : ""}
+                      <div>{d.getDate()}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              {employes.map((emp) => (
+                <div key={emp.id} className="grid border-t border-slate-100" style={{ gridTemplateColumns: `120px repeat(${joursAffiches.length}, minmax(${vue === "mois" ? 34 : 84}px, 1fr))` }}>
+                  <div className="sticky left-0 z-10 flex items-center border-r border-slate-100 bg-white px-2 py-2 text-xs font-bold text-slate-700">{emp.nom}</div>
+                  {joursAffiches.map((d) => {
+                    const cleSurvol = `${dateISO(d)}|${emp.id}|jour`;
+                    // TOUTES les tâches du jour — empilées verticalement en
+                    // vue Semaine, pastilles côte à côte en vue Mois : aucune
+                    // tâche n'est cachée quand elles partagent la journée.
+                    const tachesJour = tachesDuJourPourEmploye(planning, dateISO(d), emp.id);
+                    const weekend = d.getDay() === 0 || d.getDay() === 6;
+                    return (
+                      <div
+                        key={dateISO(d)}
+                        onDragOver={(ev) => { ev.preventDefault(); setTacheSurvolee(cleSurvol); }}
+                        onDragLeave={() => setTacheSurvolee(null)}
+                        onDrop={(ev) => { onDropJour(ev, emp.id, d); setTacheSurvolee(null); }}
+                        onMouseLeave={() => setSurvol(null)}
+                        className={`min-h-[44px] border-l border-slate-100 p-1 ${
+                          tacheSurvolee === cleSurvol ? "bg-orange-50" : tachesJour.length === 0 && weekend ? "bg-slate-50" : ""
+                        } ${vue === "mois" ? "flex flex-wrap content-center items-center justify-center gap-0.5" : "space-y-0.5"}`}
+                      >
+                        {tachesJour.map((tache) =>
+                          vue === "mois" ? (
+                            <button
+                              key={tache.id}
+                              onClick={() => !lectureSeule && !tache.est_tache_systeme && setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT })}
+                              onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
+                              className="p-0.5"
+                            >
+                              <span className={`block h-2 w-2 rounded-full ${estTerminee(tache, emp) ? "bg-emerald-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
+                            </button>
+                          ) : (
+                            <button
+                              key={tache.id}
+                              onClick={() => !lectureSeule && !tache.est_tache_systeme && setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT })}
+                              onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
+                              className={`block w-full rounded-lg border-l-4 p-1 text-left text-[9px] font-semibold leading-tight ${
+                                estTerminee(tache, emp)
+                                  ? "border-emerald-500 bg-emerald-100 text-emerald-900"
+                                  : tache.est_tache_systeme
+                                  ? "border-slate-400 bg-slate-200 text-slate-600"
+                                  : `border-transparent text-black ${(COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
+                              }`}
+                            >
+                              <span className="flex items-start gap-1">
+                                {estTerminee(tache, emp) && <Check size={9} className="mt-px shrink-0 text-emerald-600" />}
+                                {tache.est_tache_systeme && <Car size={9} className="mt-px shrink-0" />}
+                                <span className="min-w-0">
+                                  {tache.titre || tache.clientNom}
+                                  {tache.description && (
+                                    <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal leading-tight opacity-75">
+                                      {tache.description}
+                                    </span>
+                                  )}
+                                  {travailTermine(tache, emp)?.noteTerrain && (
+                                    <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal italic leading-tight text-emerald-800">
+                                      📝 Note du technicien : {travailTermine(tache, emp).noteTerrain}
+                                    </span>
+                                  )}
+                                </span>
+                              </span>
+                            </button>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {survol && !redim && (() => {
+        const client = (clients || []).find((c) => c.id === survol.tache.clientId) || (clients || []).find((c) => c.nom === survol.tache.clientNom);
+        const adresse = survol.tache.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${client.adresses[0].ligne1}` : null);
+        const couleur = COULEUR_TYPE_TACHE[survol.tache.typeTache] || COULEUR_TYPE_DEFAUT;
+        // Décale l'infobulle du curseur (jamais pile dessous) et
+        // l'empêche de sortir de l'écran à droite/en bas.
+        const decalage = 14;
+        const largeurEstimee = 240;
+        const gauche = Math.min(survol.x + decalage, window.innerWidth - largeurEstimee - 12);
+        return (
+          <div
+            className="pointer-events-none fixed z-[60] w-60 rounded-xl border border-slate-200 bg-white p-3 shadow-lg"
+            style={{ left: gauche, top: survol.y + decalage }}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${couleur.pastille}`} />
+              <p className="text-xs font-bold text-slate-900">{survol.tache.titre || survol.tache.clientNom}</p>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {survol.employe.nom}
+              {vue === "jour" && <> · {survol.heure}</>}
+              {(survol.tache.heures ?? 1) > 1 ? ` (${survol.tache.heures} h)` : ""}
+            </p>
+            {(client?.nom || survol.tache.clientNom) && (
+              <p className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-600">
+                <User size={11} className="shrink-0 text-slate-400" /> {client?.nom || survol.tache.clientNom}
+              </p>
+            )}
+            {adresse && (
+              <p className="mt-0.5 flex items-start gap-1 text-[11px] text-slate-600">
+                <MapPin size={11} className="mt-0.5 shrink-0 text-slate-400" /> {adresse}
+              </p>
+            )}
+            {survol.tache.description && (
+              <p className="mt-1.5 whitespace-pre-line border-t border-slate-100 pt-1.5 text-[11px] text-slate-500">{survol.tache.description}</p>
+            )}
+            {(() => {
+              const tr = travailTermine(survol.tache, survol.employe);
+              if (!tr) return null;
+              return (
+                <div className="mt-1.5 border-t border-emerald-100 pt-1.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                    Terminée · {tr.heures?.toFixed ? tr.heures.toFixed(2) : tr.heures} h réelles
+                  </p>
+                  {survol.tache.typeTache === "appel_service" && (() => {
+                    // Zones 1-2-3 : temps chez le client seulement (transport
+                    // inclus dans le prix). Hors zone : transport aller-retour
+                    // (entrepôt) + sur place comptent dans le temps inclus.
+                    const horsZone = survol.tache.zoneAppel === "hors_zone";
+                    const inclusH = (horsZone ? Number(prixDepots?.minutes_incluses_hors_zone) || 180 : Number(prixDepots?.minutes_incluses) || 90) / 60;
+                    const tauxV = Number(prixDepots?.taux_horaire_vendant) || 0;
+                    const heuresTransport = horsZone
+                      ? (travaux || [])
+                          .filter((t) => t.supabase && t.estTransport && t.employeEmail === tr.employeEmail && t.date === tr.date)
+                          .reduce((s, t) => s + (t.heures || 0), 0)
+                      : 0;
+                    const totalH = (tr.heures || 0) + heuresTransport;
+                    // Dépassement facturé par TRANCHES DE 15 MIN entamées —
+                    // même règle que la boîte en direct de l'app technicien.
+                    const extraMinReel = Math.max(0, Math.round((totalH - inclusH) * 60 * 100) / 100);
+                    const extraFactMin = Math.ceil(extraMinReel / 15) * 15;
+                    const extraFactH = extraFactMin / 60;
+                    const detail = horsZone ? ` (total ${totalH.toFixed(2)} h dont ${heuresTransport.toFixed(2)} h transport)` : "";
+                    if (extraMinReel <= 0) {
+                      return <p className="mt-0.5 text-[10px] text-emerald-700">✔ Dans le temps inclus ({Math.round(inclusH * 60)} min{horsZone ? ", transport compris" : ""}){detail}</p>;
+                    }
+                    return (
+                      <p className="mt-0.5 text-[10px] font-bold text-amber-700 tabular-nums">
+                        ⏱️ Dépassement : {Math.ceil(extraMinReel)} min → facturable {extraFactMin} min (tranches de 15)
+                        {tauxV > 0
+                          ? ` × ${tauxV.toFixed(2)} $/h = ${(extraFactH * tauxV).toFixed(2)} $ HT (${taxesDepot(extraFactH * tauxV, configEnt).total.toFixed(2)} $ taxes incl.)`
+                          : " — définis le taux vendant dans Tarifs"}
+                        {detail}
+                      </p>
+                    );
+                  })()}
+                  {tr.noteTerrain && (
+                    <p className="mt-0.5 text-[11px] italic text-emerald-800">
+                      📝 <span className="font-bold not-italic">Note du technicien :</span> {tr.noteTerrain}
+                    </p>
+                  )}
+                  {tr.noteInterne && (
+                    <p className="mt-0.5 text-[11px] italic text-slate-600">
+                      🔒 <span className="font-bold not-italic">Note interne :</span> {tr.noteInterne}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
+
+      {/* MODALE — DÉPÔT REÇU MANUELLEMENT */}
+      {depotModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDepotModal(null)}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-extrabold text-slate-900">Dépôt reçu manuellement</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              « {depotModal.titre} » — confirme le paiement reçu hors QuickBooks. L'action sera consignée au journal (avec ton nom).
+            </p>
+            {depotDe(depotModal.tacheId) && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 tabular-nums">
+                Montant attendu : {taxesDepot(depotDe(depotModal.tacheId).montantHT, configEnt).total.toFixed(2)} $ (taxes incluses)
+              </p>
+            )}
+            <label className="mt-3 mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Mode de paiement</label>
+            <select value={depotMode} onChange={(e) => setDepotMode(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm font-semibold">
+              <option>Comptant</option>
+              <option>Chèque</option>
+              <option>Interac</option>
+            </select>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setDepotModal(null)} className="min-h-0 py-2 text-xs">Annuler</Button>
+              <Button
+                onClick={() => { onDepotPaye?.(depotModal.tacheId, depotMode); setDepotModal(null); }}
+                className="min-h-0 py-2 text-xs"
+              >
+                Confirmer — débloquer la tâche
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tacheDetailOuverte && (
+        <ModalEditionTache
+          tache={tacheDetailOuverte.tache}
+          clients={clients}
+          dateInitiale={tacheDetailOuverte.date}
+          heureInitiale={tacheDetailOuverte.heure}
+          employeIdInitial={tacheDetailOuverte.employe.id}
+          employes={employes}
+          travailFait={travailTermine(tacheDetailOuverte.tache, tacheDetailOuverte.employe)}
+          techniciensSurTache={techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes)}
+          onAjouterTechnicien={({ employeId, date, heureDebut, heures, jours, dupliquer }) => {
+            // « Ajouter » = même tâche partagée (id identique) ; « Dupliquer »
+            // = copie indépendante (nouvel id). Dans les deux cas, le
+            // technicien reçoit SON horaire (date/heure/durée saisis), et
+            // les transports Début/Fin se recalculent automatiquement.
+            const base = dupliquer
+              ? { ...tacheDetailOuverte.tache, id: `${tacheDetailOuverte.tache.id}-copie-${Date.now()}` }
+              : tacheDetailOuverte.tache;
+            assigner({ ...base, heures, jours }, employeId, new Date(`${date}T00:00:00`), heureDebut);
+            setTacheDetailOuverte(null);
+          }}
+          onFermer={() => setTacheDetailOuverte(null)}
+          onEnregistrer={(champs) => {
+            modifierTachePlanifiee(tacheDetailOuverte.tache, tacheDetailOuverte.employe.id, champs);
+            // Modification groupée : chaque technicien coché reçoit les
+            // mêmes date/heure/durée/description — sur SES plages (son
+            // instance est déplacée/mise à jour, pas celle des autres).
+            (champs.autresCibles || []).forEach((empId) => {
+              if (empId === tacheDetailOuverte.employe.id) return;
+              modifierTachePlanifiee(tacheDetailOuverte.tache, empId, { ...champs, employeId: empId });
+            });
+            setTacheDetailOuverte(null);
+          }}
+        />
+      )}
+      {tacheEnEditionId && (
+        <ModalEditionTache
+          employes={employes}
+          tache={tachesAttente.find((t) => t.id === tacheEnEditionId)}
+          clients={clients}
+          onFermer={() => setTacheEnEditionId(null)}
+          onEnregistrer={(champs) => enregistrerEditionRapide(tacheEnEditionId, champs)}
+        />
+      )}
+      {/* FENÊTRE — NOUVEAU CLIENT depuis la création de tâche (composant
+          partagé avec l'onglet Devis, mêmes validations QuickBooks). */}
+      {modalNouveauClientTache && (
+        <ModalNouveauClient
+          clients={clients}
+          setClients={setClients}
+          ajouterJournal={ajouterJournal}
+          onFermer={() => setModalNouveauClientTache(false)}
+          onSelection={(id) => {
+            setNouveauClientId(id);
+            setAdresseTravauxId("");
+            setNouvelleAdresseTravaux(null);
+            setNouveauProjetId("");
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// ONGLET FACTURATION
+// ============================================================
+// ============================================================
+// MODAL DE FACTURATION PROGRESSIVE (travaux avec devis)
+// ============================================================
+function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons }) {
+  const contrat = bon.type === "entretien_contrat";
+  const [type, setType] = useState(contrat ? "echeance" : "complete");
+  const [pourcentage, setPourcentage] = useState(100);
+  // Progression par ligne du devis — clé = ligne.uid, valeur =
+  // { progressType: 'percent' | 'amount', progressPercent, billedAmount }.
+  // Chaque ligne a son propre mode d'ajustement, indépendant des autres.
+  const [lignesProgression, setLignesProgression] = useState({});
+
+  // ============================================================
+  // LE SOLDE SUIT LE DEVIS, PAS LE BON DE TRAVAIL
+  // ------------------------------------------------------------
+  // Avant, le cumul se lisait sur CE bon uniquement. Conséquence : un
+  // chantier facturé 6 000 $ à la première visite, puis repris plus
+  // tard par quelqu'un d'autre, créait un NOUVEAU bon sans historique —
+  // qui proposait de facturer les 10 000 $ du devis une deuxième fois.
+  // 16 000 $ facturés pour un contrat de 10 000 $.
+  //
+  // On additionne donc TOUT ce qui a été facturé contre ce devis, quelle
+  // que soit la tâche, le technicien ou la date.
+  const montantCumule = devis?.numero
+    ? (tousLesBons || [])
+        .filter((b) => b.devisNumero === devis.numero)
+        .reduce((s, b) => s + (b.facturesEmises || []).reduce((x, f) => x + f.montant, 0), 0)
+    : (bon.facturesEmises || []).reduce((s, f) => s + f.montant, 0);
+  const montantDevis = devis ? devis.totalVendant : bon.montant;
+  const montantRestant = Math.max(0, montantDevis - montantCumule);
+  const frequence = bon.frequenceFacturationAnnuelle || 4;
+  const montantEcheance = Math.min(montantRestant, montantDevis / frequence);
+
+  // Récupère (ou initialise) l'état de progression d'une ligne.
+  const progressionLigne = (l) =>
+    lignesProgression[l.uid] || { progressType: "percent", progressPercent: 0, billedAmount: 0 };
+
+  // Règle de calcul bidirectionnelle (section 2 des règles de gestion) :
+  // modifier le % recalcule le montant, modifier le montant recalcule
+  // le %. Chacun est plafonné à la valeur totale HT de SA PROPRE ligne
+  // (totalHT = quantite × prix_vendant), jamais au-delà.
+  const majPourcentageLigne = (l, pctBrut) => {
+    const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
+    const progressPercent = Math.max(0, Math.min(100, pctBrut));
+    const billedAmount = Math.round(totalHT * (progressPercent / 100) * 100) / 100;
+    setLignesProgression((prev) => ({ ...prev, [l.uid]: { progressType: "percent", progressPercent, billedAmount } }));
+  };
+
+  const majMontantLigne = (l, montantBrut) => {
+    const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
+    const billedAmount = Math.max(0, Math.min(totalHT, montantBrut));
+    const progressPercent = totalHT > 0 ? Math.round((billedAmount / totalHT) * 10000) / 100 : 0;
+    setLignesProgression((prev) => ({ ...prev, [l.uid]: { progressType: "amount", progressPercent, billedAmount } }));
+  };
+
+  const montantSurMesure = devis
+    ? devis.lignes.reduce((s, l) => s + progressionLigne(l).billedAmount, 0)
+    : 0;
+
+  const montantCalcule =
+    type === "complete"
+      ? montantRestant
+      : type === "echeance"
+      ? montantEcheance
+      : type === "pourcentage"
+      ? Math.min(montantRestant, (pourcentage / 100) * montantDevis)
+      : montantSurMesure;
+
+  // Le montant à facturer ne peut jamais dépasser le solde restant du
+  // devis/contrat, quelle que soit l'option choisie — c'est ce qui
+  // garantit qu'on ne dépasse jamais le montant initial, même en
+  // cumulant plusieurs factures progressives dans le temps.
+  const depasse = montantCalcule > montantRestant + 0.01;
+  const peutEmettre = montantCalcule > 0.005 && !depasse;
+
+  // Taxes affichées à titre indicatif sur cette facture progressive
+  // (mêmes taux que partout : ceux des Paramètres de l'entreprise).
+  const configEnt = useEntreprise();
+  const { tps: tpsCalculee, tvq: tvqCalculee, total: totalTtcCalcule } = calculerTaxes(montantCalcule, configEnt);
+
+  const confirmer = () => {
+    if (!peutEmettre) return;
+    onEmettre({
+      montant: Math.round(montantCalcule * 100) / 100,
+      type,
+      detail:
+        type === "pourcentage"
+          ? `${pourcentage}%`
+          : type === "echeance"
+          ? `1/${frequence}`
+          : type === "sur_mesure"
+          ? "Items sélectionnés"
+          : "Complète",
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Facturation — {bon.projet}</h3>
+            <p className="text-xs text-slate-500">
+              {contrat ? `Contrat #${bon.devisNumero} — ${frequence} factures/an` : `Devis #${bon.devisNumero}`}
+            </p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        {!devis && (
+          <div className="mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-700">
+            {contrat ? "Contrat" : "Devis"} #{bon.devisNumero} introuvable dans l'onglet Devis — plafond basé sur le montant du bon de travail ({bon.montant.toFixed(2)} $) à la place.
+          </div>
+        )}
+
+        <div className="mb-4 space-y-1 rounded-xl bg-slate-50 p-3 text-xs">
+          <div className="flex justify-between text-slate-500">
+            <span>Montant total du {contrat ? "contrat" : "devis"}</span>
+            <span className="tabular-nums font-semibold">{montantDevis.toFixed(2)} $</span>
+          </div>
+          <div className="flex justify-between text-slate-500">
+            <span>Cumul déjà facturé</span>
+            <span className="tabular-nums font-semibold">{montantCumule.toFixed(2)} $</span>
+          </div>
+          <div className="flex justify-between border-t border-slate-200 pt-1 font-bold text-slate-800">
+            <span>Solde restant disponible</span>
+            <span className="tabular-nums">{montantRestant.toFixed(2)} $</span>
+          </div>
+        </div>
+
+        <div className="mb-3 space-y-2">
+          <label className="block text-xs font-bold text-slate-500">Option de facturation</label>
+          {[
+            ...(contrat
+              ? [[
+                  "echeance",
+                  "Facturation selon échéance du contrat",
+                  frequence === 1
+                    ? "montant complet en une seule facture annuelle"
+                    : `1/${frequence} du montant total (${frequence} factures par an)`,
+                ]]
+              : []),
+            ["complete", "Facturation complète", "Facture le solde restant en une fois"],
+            ["pourcentage", "Facturation par pourcentage", `Facture un % du montant total du ${contrat ? "contrat" : "devis"}`],
+            ["sur_mesure", "Facturation sur mesure par item", "Choisir les items et quantités à facturer"],
+          ].map(([id, label, desc]) => (
+            <label
+              key={id}
+              className={`flex cursor-pointer items-start gap-2 rounded-xl border p-2.5 ${
+                type === id ? "border-[#FF6A13] bg-orange-50" : "border-slate-200"
+              }`}
+            >
+              <input
+                type="radio"
+                name="typeFacturation"
+                checked={type === id}
+                onChange={() => setType(id)}
+                className="mt-0.5 accent-[#FF6A13]"
+              />
+              <div>
+                <p className="text-xs font-bold text-slate-800">{label}</p>
+                <p className="text-[11px] text-slate-500">{desc}</p>
+                {id === "echeance" && <p className="mt-0.5 text-xs font-bold tabular-nums text-slate-800">{montantEcheance.toFixed(2)} $</p>}
+              </div>
+            </label>
+          ))}
+        </div>
+
+        {type === "pourcentage" && (
+          <div className="mb-3">
+            <label className="mb-1 block text-xs font-bold text-slate-500">Pourcentage à facturer</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step="1"
+                value={pourcentage}
+                onChange={(e) => setPourcentage(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
+                className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm font-bold tabular-nums"
+              />
+              <span className="text-sm text-slate-500">% du devis</span>
+              <span className="ml-auto text-sm font-bold tabular-nums text-slate-800">{montantCalcule.toFixed(2)} $</span>
+            </div>
+          </div>
+        )}
+
+        {type === "sur_mesure" && (
+          <div className="mb-3 space-y-2">
+            {!devis ? (
+              <p className="text-xs text-slate-400">Détail des items indisponible — devis introuvable.</p>
+            ) : (
+              <>
+                {devis.lignes.map((l) => {
+                  const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
+                  const prog = progressionLigne(l);
+                  return (
+                    <div key={l.uid} className="rounded-lg border border-slate-200 p-2.5 text-xs">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-slate-800">{l.nom}</p>
+                          <p className="text-[10px] text-slate-400">
+                            {(Number(l.prix_vendant) || 0).toFixed(2)} $ × {l.quantite} — Total ligne : <span className="font-semibold text-slate-600">{totalHT.toFixed(2)} $</span>
+                          </p>
+                        </div>
+                        {/* Bascule du mode d'ajustement de CETTE ligne */}
+                        <div className="flex shrink-0 rounded-lg border border-slate-200 p-0.5">
+                          {["percent", "amount"].map((m) => (
+                            <button
+                              key={m}
+                              onClick={() =>
+                                m === "percent" ? majPourcentageLigne(l, prog.progressPercent) : majMontantLigne(l, prog.billedAmount)
+                              }
+                              className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                                prog.progressType === m ? "bg-[#131B2E] text-white" : "text-slate-400"
+                              }`}
+                            >
+                              {m === "percent" ? "%" : "$"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step="1"
+                          value={prog.progressPercent}
+                          onChange={(e) => majPourcentageLigne(l, parseFloat(e.target.value) || 0)}
+                          className="flex-1 accent-[#131B2E]"
+                        />
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="1"
+                          value={prog.progressPercent}
+                          onChange={(e) => majPourcentageLigne(l, parseFloat(e.target.value) || 0)}
+                          className="w-14 rounded-lg border border-slate-300 px-1.5 py-1 text-right tabular-nums"
+                        />
+                        <span className="text-slate-400">%</span>
+                      </div>
+
+                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                        <span className="text-[10px] text-slate-400">Montant HT facturé pour cette situation</span>
+                        <div className="flex w-24 items-center gap-0.5">
+                          <span className="text-slate-400">$</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={totalHT}
+                            step="0.01"
+                            value={prog.billedAmount}
+                            onChange={(e) => majMontantLigne(l, parseFloat(e.target.value) || 0)}
+                            className="w-full rounded-lg border border-slate-300 px-1.5 py-1 text-right font-bold tabular-nums"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="px-1 text-[10px] text-slate-400">
+                  Ajuster le % ou le montant recalcule automatiquement l'autre — chaque ligne est plafonnée à son propre montant total.
+                </p>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm font-bold text-slate-800">
+                  <span>Sous-total HT sélectionné</span>
+                  <span className="tabular-nums">{montantSurMesure.toFixed(2)} $</span>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {depasse && (
+          <p className="mb-2 text-xs font-semibold text-red-600">
+            Ce montant dépasse le solde restant du devis ({montantRestant.toFixed(2)} $) — impossible de dépasser le montant initial du devis.
+          </p>
+        )}
+
+        {montantCalcule > 0 && (
+          <div className="mb-3 space-y-1 rounded-xl bg-slate-50 p-3 text-xs">
+            <div className="flex justify-between text-slate-500"><span>Sous-total HT facturé</span><span className="tabular-nums">{montantCalcule.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TPS ({tauxAffiche(configEnt.tauxTps)}%)</span><span className="tabular-nums">{tpsCalculee.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TVQ ({tauxAffiche(configEnt.tauxTvq)}%)</span><span className="tabular-nums">{tvqCalculee.toFixed(2)} $</span></div>
+            <div className="flex justify-between border-t border-slate-200 pt-1 text-sm font-bold text-slate-800">
+              <span>Total TTC facturé</span><span className="tabular-nums">{totalTtcCalcule.toFixed(2)} $</span>
+            </div>
+          </div>
+        )}
+
+        <Button disabled={!peutEmettre} onClick={confirmer} className="w-full">
+          Valider et envoyer cette facture ({montantCalcule.toFixed(2)} $ HT)
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// RÉVISION D'UN PRIX NON LISTÉ — l'admin ouvre la tâche
+// manuellement, ajuste le prix ET la description, puis doit
+// explicitement attester avoir tout validé avant que la tâche ne
+// devienne éligible à l'envoi au client (fenêtre contextuelle de
+// confirmation obligatoire — pas de déblocage silencieux).
+// ============================================================
+function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees }) {
+  // Liste de prix — le sélecteur d'items en a besoin. Elle manquait :
+  // ouvrir la révision de prix plantait l'écran.
+  const catalogue = useCatalogue();
+  // Items séparés, chacun avec sa propre description et son propre
+  // prix — au démarrage, soit les items déjà enregistrés sur ce bon
+  // (s'il a déjà été révisé une fois), soit une seule ligne de départ
+  // pré-remplie avec le montant global existant.
+  //
+  // APPEL PAYÉ D'AVANCE : la ligne de déduction du dépôt s'ajoute toute
+  // seule (en négatif, hors taxes — les taxes du dépôt ont déjà été
+  // perçues sur ce montant, celles de la facture se calculeront sur le
+  // net). Compter sur la mémoire de la personne pour la taper à la
+  // main, c'est exactement comme ça qu'un client paie deux fois.
+  const [items, setItems] = useState(() => {
+    if (bon.lignesNonListees?.length) return bon.lignesNonListees;
+    const base = [{ id: `item-${Date.now()}`, description: bon.description || "", prix: bon.montant }];
+    // BLOC 4 — temps supplémentaire calculé d'avance (heures réelles,
+    // tranches de 15 min, taux réduit du passager). Le détail du calcul
+    // est ÉCRIT dans la description : un client qui voit le calcul
+    // conteste moins qu'un client qui voit un montant sorti de nulle part.
+    (lignesSuggerees || []).forEach((l, i) => {
+      base.push({ id: `supp-${Date.now()}-${i}`, description: l.description, prix: l.prix });
+    });
+    if (depotPaye) {
+      base.push({
+        id: `depot-${Date.now()}`,
+        description: `Dépôt perçu d'avance${depotPaye.payeLe ? ` le ${new Date(depotPaye.payeLe).toLocaleDateString("fr-CA")}` : ""} — appel de service payé d'avance`,
+        prix: -(Number(depotPaye.montantHT) || 0),
+      });
+    }
+    // BLOC 3 — pièce déjà payée par le client (option « payer avant la
+    // commande ») : déduite d'office pour ne JAMAIS être chargée deux fois.
+    if (piecePrepayee) {
+      base.push({
+        id: `piece-${Date.now()}`,
+        description: `Pièce payée d'avance par le client — ${piecePrepayee.pieceRequise}`,
+        prix: -(Number(piecePrepayee.montantPiece) || 0),
+      });
+    }
+    return base;
+  });
+  const [attestation, setAttestation] = useState(false);
+
+  const total = items.reduce((s, it) => s + (parseFloat(it.prix) || 0), 0);
+  // Un prix NÉGATIF est permis (déduction de dépôt, rabais) — seul un
+  // prix à zéro ou une description vide bloquent la validation.
+  const tousRemplis = items.every((it) => it.description.trim().length > 0 && (parseFloat(it.prix) || 0) !== 0);
+  const peutValider = items.length > 0 && tousRemplis && attestation;
+
+  const majItem = (id, champs) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...champs } : it)));
+  };
+
+  const ajouterItem = () => {
+    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: "", prix: 0 }]);
+  };
+
+  // Ajoute un item pré-rempli à partir du catalogue de produits
+  // existant — l'admin peut ensuite ajuster la description ou le prix
+  // au besoin, sans repartir d'une case vide.
+  const ajouterDepuisCatalogue = (produit) => {
+    if (!produit) return;
+    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: produit.nom, prix: produit.prix_vendant ?? 0 }]);
+  };
+
+  const retirerItem = (id) => {
+    setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.id !== id) : prev));
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Réviser le prix non listé</h3>
+            <p className="text-xs text-slate-500">{bon.projet} · {bon.client}</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="mb-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">
+          Ce travail contient un prix qui n'existe pas dans le catalogue — vérifie chaque item avant d'autoriser l'envoi au client.
+        </div>
+
+        {depotPaye && (
+          <div className="mb-3 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+            💰 Ce client a DÉJÀ payé un dépôt de {(Number(depotPaye.montantHT) || 0).toFixed(2)} $ + taxes
+            {depotPaye.payeLe ? ` le ${new Date(depotPaye.payeLe).toLocaleDateString("fr-CA")}` : ""} (appel payé d'avance).
+            La ligne de déduction a été ajoutée automatiquement — ne l'enlève pas, sinon le client paierait deux fois.
+          </div>
+        )}
+        {piecePrepayee && (
+          <div className="mb-3 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+            💰 La pièce « {piecePrepayee.pieceRequise} » a DÉJÀ été payée par le client
+            ({(Number(piecePrepayee.montantPiece) || 0).toFixed(2)} $ HT) avant la commande.
+            La déduction est ajoutée automatiquement — ne facture pas la pièce une deuxième fois.
+          </div>
+        )}
+        {(lignesSuggerees || []).length > 0 && !bon.lignesNonListees?.length && (
+          <div className="mb-3 rounded-xl bg-sky-50 p-3 text-xs font-semibold text-sky-800">
+            ⏱️ Le temps au-delà du temps inclus a été calculé automatiquement (tranches de 15 min entamées,
+            taux réduit pour un passager du même camion). Les lignes sont modifiables ou effaçables — c'est toi qui as le dernier mot.
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-500">Items à facturer (description + prix séparés)</label>
+            {items.map((it, i) => (
+              <div key={it.id} className="rounded-xl border border-slate-200 p-2.5">
+                <div className="flex items-start gap-2">
+                  <textarea
+                    value={it.description}
+                    onChange={(e) => majItem(it.id, { description: e.target.value })}
+                    rows={2}
+                    placeholder={`Description de l'item ${i + 1}...`}
+                    className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                  />
+                  {items.length > 1 && (
+                    <button onClick={() => retirerItem(it.id)} className="mt-1 shrink-0 text-slate-300 hover:text-red-500">
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span className="text-xs text-slate-400">Prix ($)</span>
+                  <input
+                    type="number" min={0} step="0.01" value={it.prix}
+                    onChange={(e) => majItem(it.id, { prix: parseFloat(e.target.value) || 0 })}
+                    className="w-28 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm font-bold tabular-nums"
+                  />
+                </div>
+              </div>
+            ))}
+            <div className="grid grid-cols-2 gap-1.5">
+              <SelecteurItem catalogue={catalogue} onChoisir={ajouterDepuisCatalogue} libelle="Depuis le catalogue…" />
+              <Button variant="outline" onClick={ajouterItem} className="min-h-0 gap-1.5 py-2 text-xs">
+                <Plus size={13} /> Item personnalisé
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex justify-between rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-800">
+            <span>Total à facturer (HT)</span>
+            <span className="tabular-nums">{total.toFixed(2)} $</span>
+          </div>
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+            <input type="checkbox" checked={attestation} onChange={(e) => setAttestation(e.target.checked)} className="mt-0.5 accent-[#131B2E]" />
+            <span className="text-xs font-semibold text-amber-800">
+              Je confirme avoir vérifié et validé chaque item et son prix — prêt pour l'envoi au client.
+            </span>
+          </label>
+
+          <Button disabled={!peutValider} onClick={() => onConfirmer(items, total)} className="w-full">
+            Valider et débloquer pour l'envoi
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// APERÇU DE LA FACTURE — VERSION CLIENT
+// ------------------------------------------------------------
+// Même principe que le devis et le bon de travail : coordonnées
+// d'entreprise complètes, description du travail facturé, ventilation
+// TPS/TVQ. S'il y a des factures progressives déjà émises, montre la
+// dernière ; sinon, montre le montant total à facturer.
+// ============================================================
+function ApercuFactureClient({ bon, onFermer }) {
+  const fiche = (useClients() || []).find((c) => c.nom === bon.client);
+  // Devis d'origine — c'est lui qui porte le détail que le client a
+  // accepté. Sans ça, la facture ne montrait qu'un montant global.
+  const devisFacture = (useDevis() || []).find((d) => d.numero === bon.devisNumero);
+  const derniereFacture = (bon.facturesEmises || [])[bon.facturesEmises?.length - 1];
+  const montant = derniereFacture?.montant ?? bon.montant;
+  const numero = derniereFacture?.numeroFactureQb || "À émettre";
+  const date = derniereFacture?.date || bon.date;
+  const configEnt = useEntreprise();
+  const { tps, tvq, total } = calculerTaxes(montant, configEnt);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-5 text-sm">
+          <EnTeteEntreprise />
+          <p className="mt-3 text-lg font-extrabold text-[#131B2E]">FACTURE {numero}</p>
+          <p className="text-xs text-slate-500">Date : {date}</p>
+          <AdressesDocument
+            clientNom={bon.client}
+            adresseFacturation={fiche?.adresseFacturation}
+            adresseTravaux={bon.adresseTravaux}
+          />
+
+          <div className="mt-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Description</p>
+            {/* FACTURE ISSUE D'UN DEVIS : on reprend LES LIGNES DU DEVIS.
+                La facture n'affichait qu'un mot tapé au moment de
+                facturer (« Complète ») et un montant. Le client
+                recevait 19 430 $ sans savoir pour quoi — alors qu'il
+                avait accepté un devis détaillé. Reprendre ses lignes,
+                c'est lui montrer exactement ce qu'il a approuvé. */}
+            {devisFacture?.lignes?.length > 0 && !(bon.lignesNonListees?.length > 0) ? (
+              <table className="mt-1 w-full text-xs">
+                <tbody>
+                  {devisFacture.lignes.map((l) => (
+                    <tr key={l.uid} className="border-b border-slate-100 align-top">
+                      <td className="py-1.5 pr-2 text-slate-700">
+                        <span className="font-semibold">{l.nom}</span>
+                        {l.description ? (
+                          <span className="mt-0.5 block whitespace-pre-line text-[10px] leading-snug text-slate-500">
+                            {l.description}
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-1.5 text-center tabular-nums text-slate-500">{l.quantite}</td>
+                      <td className="py-1.5 text-right tabular-nums font-semibold text-slate-800">
+                        {((Number(l.prix_vendant) || 0) * (Number(l.quantite) || 0)).toFixed(2)} $
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : bon.lignesNonListees?.length > 0 ? (
+              <table className="mt-1 w-full text-xs">
+                <tbody>
+                  {bon.lignesNonListees.map((it) => (
+                    <tr key={it.id} className="border-b border-slate-100">
+                      <td className="py-1 pr-2 text-slate-700">{it.description}</td>
+                      <td className="py-1 text-right tabular-nums font-semibold text-slate-800">{parseFloat(it.prix).toFixed(2)} $</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="mt-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+                {derniereFacture?.detail || bon.description || bon.projet}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-3 space-y-1 text-xs">
+            <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">{montant.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TPS ({tauxAffiche(configEnt.tauxTps)}%)</span><span className="tabular-nums">{tps.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TVQ ({tauxAffiche(configEnt.tauxTvq)}%)</span><span className="tabular-nums">{tvq.toFixed(2)} $</span></div>
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm font-extrabold text-slate-900">
+              <span>Total</span><span className="tabular-nums">{total.toFixed(2)} $</span>
+            </div>
+          </div>
+
+          <TermesConditions />
+
+          <PiedDocument />
+        </div>
+
+        <BoutonPDF type="facture" bon={bon} />
+
+        <p className="mt-2 text-[11px] text-slate-400">
+          Aperçu de démonstration — la facture réelle est générée et envoyée via QuickBooks, avec ce même contenu.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots }) {
+  // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
+  // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
+  // Sans ce raccord, la révision de prix demandait le PLEIN montant
+  // comme si rien n'avait été payé — le client risquait de payer deux
+  // fois. Le dépôt et le bon partagent le même identifiant de tâche.
+  // `depots` est un ANNUAIRE par tâche ({ tacheId: depot }), pas une
+  // liste — même lecture que depotDe() dans l'agenda. Le traiter comme
+  // une liste plantait tout l'onglet Facturation.
+  const depotPayePour = (tacheId) => {
+    if (!tacheId) return null;
+    const d = depots?.[tacheId];
+    return d && (d.payeLe || String(d.statut || "").startsWith("paye")) ? d : null;
+  };
+  // PIÈCE PAYÉE D'AVANCE par le client (option « payer avant la
+  // commande ») — même logique que le dépôt : déduite automatiquement
+  // de la facture du retour pour ne JAMAIS être chargée deux fois.
+  const piecePrepayeePour = (tacheId) => {
+    if (!tacheId) return null;
+    const p = (pieces || []).find((x) => x.tacheRetourId === tacheId);
+    return p && p.paiementAvantCommande && p.paiementRecu && Number(p.montantPiece) > 0 ? p : null;
+  };
+  // BLOC 4 — TEMPS SUPPLÉMENTAIRE calculé d'avance pour les appels de
+  // service : heures réelles de CHAQUE technicien, temps inclus du
+  // dépôt, tranches de 15 minutes entamées, et taux réduit pour le
+  // passager (il n'amène pas de camion — l'inspection du matin nous le
+  // dit). Les lignes arrivent PRÉ-REMPLIES dans la révision, jamais
+  // verrouillées : la machine calcule, l'humain décide.
+  const lignesTempsSupp = (b) => {
+    if (!b || b.type !== "appel_service") return [];
+    const tauxV = Number(prixDepots?.taux_horaire_vendant) || 0;
+    if (tauxV <= 0) return [];
+    const camion = Number(configEnt?.coutCamionHoraire) || 0;
+    const sources = (b.lignesSource || [b]).filter((s) => (Number(s.heures) || 0) > 0);
+    if (sources.length === 0) return [];
+    // Passager ce jour-là ? (déclaré le matin, pas déduit) → taux réduit.
+    const estPassager = (nom, date) =>
+      (inspections || []).some((i) => i.date === date && i.passagerDeNom && i.technicienNom === nom);
+    // Le temps inclus appartient à L'APPEL, pas à chaque technicien : il
+    // se consomme d'abord sur les heures au PLEIN taux (avantage client).
+    const tries = sources
+      .map((s) => ({
+        nom: s.employeNom || "",
+        heures: Number(s.heures) || 0,
+        passager: estPassager(s.employeNom, s.date || b.date),
+      }))
+      .sort((a, x) => (a.passager ? 1 : 0) - (x.passager ? 1 : 0));
+    let inclusRestant = (Number(prixDepots?.minutes_incluses) || 90) / 60;
+    const lignes = [];
+    tries.forEach((s) => {
+      const consomme = Math.min(inclusRestant, s.heures);
+      inclusRestant -= consomme;
+      const extraH = s.heures - consomme;
+      if (extraH <= 0.0001) return;
+      // Tranches de 15 minutes ENTAMÉES — la règle validée.
+      const factH = Math.ceil(Math.round(extraH * 60) / 15) * 15 / 60;
+      const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
+      lignes.push({
+        description:
+          `Temps supplémentaire${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""} : ` +
+          `${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
+        prix: Math.round(factH * taux * 100) / 100,
+      });
+    });
+    return lignes;
+  };
+  const configEnt = useEntreprise();
+  const [bonFacturationId, setBonFacturationId] = useState(null);
+  // Bon en attente d'un envoi simple à QB ("Envoyer à QB") — le
+  // sélecteur de courriel s'ouvre avant l'envoi réel.
+  const [bonEnvoiCourrielId, setBonEnvoiCourrielId] = useState(null);
+  // Détails d'une facture progressive déjà configurée dans
+  // ModalFacturationDevis, en attente du choix du courriel avant
+  // l'émission réelle vers QuickBooks.
+  const [factureEnAttenteCourriel, setFactureEnAttenteCourriel] = useState(null); // { bonId, montant, type, detail }
+  // Bon "prix non listé" en cours de révision manuelle par l'admin.
+  const [bonAReviserId, setBonAReviserId] = useState(null);
+  const [factureAperçuId, setFactureAperçuId] = useState(null);
+  const bonAReviser = bons.find((b) => b.id === bonAReviserId) || null;
+
+  const reviserPrixNonListe = (bonId, items, total) => {
+    const b = bons.find((x) => x.id === bonId);
+    setBons((prev) =>
+      prev.map((x) =>
+        x.id === bonId
+          ? { ...x, montant: total, lignesNonListees: items, description: items.map((it) => it.description).join(" · "), prixNonListe: false }
+          : x
+      )
+    );
+    ajouterJournal(
+      `✍️ Prix révisé et validé pour "${b?.projet}" — ${items.length} item${items.length > 1 ? "s" : ""} séparé${items.length > 1 ? "s" : ""}, total ${total.toFixed(2)} $. Débloqué pour l'envoi au client.`
+    );
+    setBonAReviserId(null);
+  };
+
+  // ============================================================
+  // UN TRAVAIL = UNE FACTURE, MÊME À PLUSIEURS TECHNICIENS
+  // ------------------------------------------------------------
+  // La table des bons de travail porte une ligne PAR TECHNICIEN
+  // (contrainte tache_id × employe_email). Marc et Sophie sur le même
+  // appel de service produisaient donc DEUX demandes de facturation :
+  // rien n'empêchait de facturer deux fois le même travail.
+  //
+  // On regroupe ici par tâche. Le client paie un TRAVAIL, pas des
+  // techniciens : les heures s'additionnent, le montant reste unique.
+  //
+  // Au passage, une tâche rattachée à un DEVIS récupère le montant
+  // déjà négocié — elle n'a rien à faire dans la pile « prix à réviser ».
+  const bonsGroupes = useMemo(() => {
+    const parTache = new Map();
+    (bons || []).forEach((b) => {
+      const cle = b.tacheId || b.id;
+      const existant = parTache.get(cle);
+      if (!existant) {
+        parTache.set(cle, {
+          ...b,
+          lignesSource: [b],
+          heures: Number(b.heures) || 0,
+          equipe: b.employeNom ? [{ nom: b.employeNom, heures: Number(b.heures) || 0 }] : [],
+        });
+        return;
+      }
+      // Heures cumulées de toute l'équipe, un seul montant.
+      existant.heures += Number(b.heures) || 0;
+      existant.lignesSource.push(b);
+      if (b.employeNom) existant.equipe.push({ nom: b.employeNom, heures: Number(b.heures) || 0 });
+      // Photos et signatures : on garde tout ce qui existe.
+      existant.photosAvantUrls = [...(existant.photosAvantUrls || []), ...(b.photosAvantUrls || [])];
+      existant.photosApresUrls = [...(existant.photosApresUrls || []), ...(b.photosApresUrls || [])];
+      existant.signeParNom = existant.signeParNom || b.signeParNom;
+      // Si UNE des lignes est déjà facturée, le travail l'est.
+      if (b.statutQb !== "en_attente") existant.statutQb = b.statutQb;
+    });
+
+    // Le montant d'un devis accepté est déjà connu — on le reprend.
+    return [...parTache.values()].map((b) => {
+      if (!b.devisNumero || !b.prixNonListe) return b;
+      const devis = (devisListe || []).find((d) => d.numero === b.devisNumero);
+      if (!devis) return b;
+      return { ...b, montant: Number(devis.totalVendant) || 0, prixNonListe: false };
+    });
+  }, [bons, devisListe]);
+
+  const enAttente = bonsGroupes.filter((b) => b.statutQb === "en_attente");
+  const rouges = enAttente.filter((b) => b.prixNonListe).length;
+  const bleus = enAttente.filter((b) => !b.prixNonListe && b.type === "devis").length;
+  const violets = enAttente.filter((b) => !b.prixNonListe && b.type === "entretien_contrat").length;
+  const gris = enAttente.filter((b) => !b.prixNonListe && b.type === "appel_service").length;
+  const jaunes = enAttente.filter((b) => !b.prixNonListe && b.type !== "devis" && b.type !== "entretien_contrat" && b.type !== "appel_service").length;
+
+  // Catégorie d'un bon — reprend exactement la même logique que les 5
+  // encadrés ci-dessus, pour que le filtrage par clic reste toujours
+  // cohérent avec les compteurs affichés.
+  const categorieBon = (b) => {
+    if (b.prixNonListe) return "rouge";
+    if (b.type === "entretien_contrat") return "violet";
+    if (b.type === "devis") return "bleu";
+    if (b.type === "appel_service") return "gris";
+    return "jaune";
+  };
+
+  // Filtre multi-sélection sur les encadrés — clic pour activer/
+  // désactiver une catégorie, plusieurs en même temps possible (union :
+  // montre tout ce qui correspond à AU MOINS une des catégories
+  // cochées). Aucun filtre actif = tout s'affiche, comme avant.
+  const [filtresActifs, setFiltresActifs] = useState([]);
+  const basculerFiltre = (categorie) => {
+    setFiltresActifs((prev) => (prev.includes(categorie) ? prev.filter((c) => c !== categorie) : [...prev, categorie]));
+  };
+  const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
+
+  const bonFacturation = bons.find((b) => b.id === bonFacturationId) || null;
+  const devisFacturation = bonFacturation ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) : null;
+  const bonEnvoiCourriel = bons.find((b) => b.id === bonEnvoiCourrielId) || null;
+  const bonFactureEnAttente = factureEnAttenteCourriel ? bons.find((b) => b.id === factureEnAttenteCourriel.bonId) : null;
+
+  // Trouve le client d'un bon par son NOM (ces bons de démo n'ont
+  // qu'un nom de client, pas d'id — en prod, `bons` porterait un vrai
+  // clientId et cette étape de recherche par nom disparaîtrait).
+  const trouverClientDuBon = (bon) => clients.find((c) => c.nom === bon?.client);
+
+  const envoyerQb = (id, choixCourriels) => {
+    const destinataires = listeDestinataires(choixCourriels);
+    const b = bons.find((x) => x.id === id);
+    setBons((prev) =>
+      prev.map((x) =>
+        x.id === id
+          ? { ...x, statutQb: "envoye", courrielFacturation: destinataires[0]?.email || null, courrielsFacturation: destinataires.map((c) => c.email) }
+          : x
+      )
+    );
+    ajouterJournal(
+      `🔄 "${b?.projet}" envoyé à QuickBooks${destinataires.length > 0 ? ` — facture transmise à ${libelleDestinataires(destinataires)}` : ""}` +
+        (b?.adresseTravaux ? ` — adresse des travaux transmise (${b.adresseTravaux})` : "")
+    );
+    setBonEnvoiCourrielId(null);
+  };
+
+  // Émet une facture progressive pour un travail « avec devis » ou
+  // « entretien selon contrat ». Le solde restant plafonne toujours le
+  // montant possible (voir ModalFacturationDevis) — le statut ne passe
+  // à « envoyé » que lorsque le cumul atteint le montant total du
+  // devis/contrat.
+  const emettreFacture = (bonId, { montant, type, detail }, choixCourriels) => {
+    const destinataires = listeDestinataires(choixCourriels);
+    const devisCourant = devisListe.find((d) => d.numero === bons.find((b) => b.id === bonId)?.devisNumero);
+    // Chaque facture — complète OU partielle (par pourcentage, par item,
+    // ou par échéance de contrat) — est envoyée individuellement à
+    // QuickBooks et y crée sa propre facture, avec son propre numéro.
+    // Une tâche facturée en plusieurs fois génère donc plusieurs
+    // factures QuickBooks distinctes, toutes rattachées au même devis.
+    const numeroFactureQb = `QBINV-${Math.floor(10000 + Math.random() * 90000)}`;
+    setBons((prev) =>
+      prev.map((b) => {
+        if (b.id !== bonId) return b;
+        const nouvelles = [
+          ...(b.facturesEmises || []),
+          {
+            id: `fact-${Date.now()}`,
+            montant,
+            type,
+            detail,
+            date: dateISO(new Date()),
+            numeroFactureQb,
+            courrielEnvoi: destinataires[0]?.email || null,
+            courrielsEnvoi: destinataires.map((c) => c.email),
+          },
+        ];
+        const cumul = nouvelles.reduce((s, f) => s + f.montant, 0);
+        const total = devisCourant ? devisCourant.totalVendant : b.montant;
+        const complet = cumul >= total - 0.01;
+        return { ...b, facturesEmises: nouvelles, statutQb: complet ? "envoye" : "en_attente" };
+      })
+    );
+    const b = bons.find((x) => x.id === bonId);
+    const libelleType = type === "pourcentage" ? `${detail}` : type === "echeance" ? `échéance (${detail})` : type === "sur_mesure" ? "sur mesure par item" : "complète";
+    ajouterJournal(
+      `✅ Facture ${numeroFactureQb} de ${montant.toFixed(2)} $ (${libelleType}) créée et envoyée à QuickBooks pour "${b?.projet}" — ${b?.type === "entretien_contrat" ? "contrat" : "devis"} #${b?.devisNumero}` +
+        (destinataires.length > 0 ? ` — transmise à ${libelleDestinataires(destinataires)}` : "")
+    );
+    setBonFacturationId(null);
+    setFactureEnAttenteCourriel(null);
+  };
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <button
+          onClick={() => basculerFiltre("rouge")}
+          className={`rounded-xl border p-3 text-left transition-shadow ${
+            filtresActifs.includes("rouge") ? "border-red-400 bg-red-50 ring-2 ring-red-300" : "border-red-100 bg-red-50"
+          }`}
+        >
+          <p className="text-2xl font-extrabold text-red-600 tabular-nums">{rouges}</p>
+          <p className="text-xs font-semibold text-red-600">À réviser — prix non listé</p>
+        </button>
+        <button
+          onClick={() => basculerFiltre("bleu")}
+          className={`rounded-xl border p-3 text-left transition-shadow ${
+            filtresActifs.includes("bleu") ? "border-blue-400 bg-blue-50 ring-2 ring-blue-300" : "border-blue-100 bg-blue-50"
+          }`}
+        >
+          <p className="text-2xl font-extrabold text-blue-600 tabular-nums">{bleus}</p>
+          <p className="text-xs font-semibold text-blue-600">À valider — selon devis</p>
+        </button>
+        <button
+          onClick={() => basculerFiltre("violet")}
+          className={`rounded-xl border p-3 text-left transition-shadow ${
+            filtresActifs.includes("violet") ? "border-purple-400 bg-purple-50 ring-2 ring-purple-300" : "border-purple-100 bg-purple-50"
+          }`}
+        >
+          <p className="text-2xl font-extrabold text-purple-600 tabular-nums">{violets}</p>
+          <p className="text-xs font-semibold text-purple-600">À valider — contrat</p>
+        </button>
+        <button
+          onClick={() => basculerFiltre("jaune")}
+          className={`rounded-xl border p-3 text-left transition-shadow ${
+            filtresActifs.includes("jaune") ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300" : "border-amber-100 bg-amber-50"
+          }`}
+        >
+          <p className="text-2xl font-extrabold text-amber-600 tabular-nums">{jaunes}</p>
+          <p className="text-xs font-semibold text-amber-600">Prêts — bon de commande</p>
+        </button>
+        <button
+          onClick={() => basculerFiltre("gris")}
+          className={`rounded-xl border p-3 text-left transition-shadow ${
+            filtresActifs.includes("gris") ? "border-teal-400 bg-teal-100 ring-2 ring-teal-300" : "border-teal-200 bg-teal-50"
+          }`}
+        >
+          <p className="text-2xl font-extrabold text-teal-600 tabular-nums">{gris}</p>
+          <p className="text-xs font-semibold text-teal-700">Appels de service</p>
+        </button>
+      </div>
+
+      {filtresActifs.length > 0 && (
+        <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-1.5 text-xs text-slate-500">
+          <span>{bonsAffiches.length} résultat{bonsAffiches.length > 1 ? "s" : ""} filtré{bonsAffiches.length > 1 ? "s" : ""}</span>
+          <button onClick={() => setFiltresActifs([])} className="font-semibold text-slate-700 underline underline-offset-2">
+            Effacer les filtres
+          </button>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {bonsAffiches.map((b) => {
+          const contrat = b.type === "entretien_contrat";
+          const devisType = b.type === "devis";
+          const enAttenteValidation = !b.prixNonListe && (devisType || contrat) && b.statutQb === "en_attente";
+          const couleurPastille = b.prixNonListe
+            ? "bg-red-500"
+            : contrat
+            ? "bg-purple-500"
+            : devisType
+            ? "bg-blue-500"
+            : b.type === "appel_service"
+            ? "bg-teal-500"
+            : "bg-amber-400";
+          const montantCumule = (b.facturesEmises || []).reduce((s, f) => s + f.montant, 0);
+          const devisAssocie = devisType || contrat ? devisListe.find((d) => d.numero === b.devisNumero) : null;
+          const montantDevisTotal = devisAssocie ? devisAssocie.totalVendant : b.montant;
+          return (
+            <div key={b.id} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5">
+              <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${couleurPastille}`} />
+              <div className="flex-1">
+                <p className="text-sm font-bold text-slate-900">{b.projet}</p>
+                <p className="text-xs text-slate-500">{b.client} · {b.date}</p>
+                {/* ÉQUIPE — visible seulement quand ils sont plusieurs.
+                    Les heures s'additionnent (elles vont au coût du
+                    projet), mais le montant facturé reste unique : le
+                    client paie un travail, pas des techniciens. */}
+                {/* BON NON SIGNÉ — le filet. La signature est la preuve
+                    que le client accepte les travaux ; la perdre (parce
+                    qu'un collègue n'est pas venu, ou par oubli) doit
+                    sauter aux yeux AVANT la facturation, pas après une
+                    contestation. */}
+                {!b.signeParNom && (
+                  <p className="mt-1 flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                    <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                    Bon de travail NON SIGNÉ par le client — à valider avant de facturer.
+                  </p>
+                )}
+                {/* PIÈCE À COMMANDER — visible LÀ OÙ TU REGARDES DÉJÀ.
+                    La réparation n'est pas finie : une 2e visite sera
+                    facturée séparément, elle attend la pièce. */}
+                {b.pieceACommander && (
+                  <p className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900">
+                    🔧 <span className="font-extrabold">Pièce à commander :</span> {b.pieceRequise}
+                    {(b.modeleUnite || b.serieUnite) && (
+                      <span className="block text-[10px] text-amber-700">
+                        {b.modeleUnite}
+                        {b.modeleUnite && b.serieUnite ? " · " : ""}
+                        {b.serieUnite ? `Nº ${b.serieUnite}` : ""}
+                      </span>
+                    )}
+                    <span className="block text-[10px]">Suivi dans l&apos;onglet « Pièces en commande ».</span>
+                  </p>
+                )}
+                {/* Unité relevée sans pièce à commander — alimente quand
+                    même le registre d'équipements du client. */}
+                {!b.pieceACommander && (b.modeleUnite || b.serieUnite) && (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    Unité : {b.modeleUnite}
+                    {b.modeleUnite && b.serieUnite ? " · " : ""}
+                    {b.serieUnite ? `Nº ${b.serieUnite}` : ""}
+                  </p>
+                )}
+                {(b.equipe || []).length > 1 && (
+                  <p className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-600">
+                    <User size={11} className="shrink-0 text-slate-400" />
+                    {b.equipe.map((t, i) => (
+                      <span key={i} className="rounded-full bg-slate-100 px-1.5 py-0.5">
+                        {t.nom} <span className="tabular-nums text-slate-400">{t.heures.toFixed(2)} h</span>
+                      </span>
+                    ))}
+                    <span className="font-bold tabular-nums text-slate-700">= {b.heures.toFixed(2)} h au total</span>
+                  </p>
+                )}
+                {b.adresseTravaux && (
+                  <div className="mt-0.5 flex items-start gap-1 text-[11px] text-slate-400">
+                    <MapPin size={11} className="mt-0.5 shrink-0" />
+                    <span>Travaux : {b.adresseTravaux}</span>
+                  </div>
+                )}
+                {/* DÉPÔT DÉJÀ PERÇU — écrit sur la carte, pas seulement
+                    dans la fenêtre de révision : la personne qui balaie
+                    la pile doit le voir AVANT d'ouvrir quoi que ce soit. */}
+                {depotPayePour(b.tacheId) && (
+                  <p className="mt-1 rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">
+                    💰 Appel payé d'avance — dépôt de {depotPayePour(b.tacheId).montantHT.toFixed(2)} $ + taxes déjà perçu
+                    {depotPayePour(b.tacheId).payeLe ? ` le ${new Date(depotPayePour(b.tacheId).payeLe).toLocaleDateString("fr-CA")}` : ""} · sera déduit de la facture
+                  </p>
+                )}
+                <p className="mt-1 text-xs font-semibold">
+                  {b.prixNonListe ? (
+                    <span className="text-red-600">À facturer – Prix non listé</span>
+                  ) : contrat ? (
+                    <span className="text-purple-600">
+                      À valider – Entretien contrat #{b.devisNumero} ({b.frequenceFacturationAnnuelle || 4}×/an)
+                    </span>
+                  ) : devisType ? (
+                    <span className="text-blue-600">À valider – Selon devis #{b.devisNumero}</span>
+                  ) : (
+                    <span className="text-amber-600">À facturer – Selon bon de commande</span>
+                  )}
+                </p>
+                {b.lignesNonListees?.length > 0 ? (
+                  <div className="mt-1 space-y-0.5">
+                    {b.lignesNonListees.map((it) => (
+                      <div key={it.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                        <span>{it.description}</span>
+                        <span className="shrink-0 tabular-nums text-slate-600">{parseFloat(it.prix).toFixed(2)} $</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  b.description && <p className="mt-0.5 text-[11px] text-slate-500">{b.description}</p>
+                )}
+                {(devisType || contrat) && montantCumule > 0 && (
+                  <div className="mt-1.5 w-full max-w-[220px]">
+                    <p className="text-[10px] font-semibold text-slate-500">
+                      Cumul facturé : {montantCumule.toFixed(2)} $ / {montantDevisTotal.toFixed(2)} $
+                    </p>
+                    <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className={`h-full rounded-full ${contrat ? "bg-purple-500" : "bg-blue-500"}`}
+                        style={{ width: `${Math.min(100, (montantCumule / montantDevisTotal) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="mt-1.5 space-y-0.5">
+                      {(b.facturesEmises || []).map((f) => (
+                        <p key={f.id} className="text-[10px] text-slate-400">
+                          <span className="font-semibold text-slate-600">{f.numeroFactureQb}</span> — {f.montant.toFixed(2)} $ ({f.detail}) · envoyée à QuickBooks le {f.date}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-bold tabular-nums text-slate-900">{b.montant.toFixed(2)} $</p>
+                <div className="mt-0.5 space-y-0 text-[10px] text-slate-400">
+                  <p className="tabular-nums">TPS ({tauxAffiche(configEnt.tauxTps)}%) : {calculerTaxes(b.montant, configEnt).tps.toFixed(2)} $</p>
+                  <p className="tabular-nums">TVQ ({tauxAffiche(configEnt.tauxTvq)}%) : {calculerTaxes(b.montant, configEnt).tvq.toFixed(2)} $</p>
+                  <p className="font-semibold tabular-nums text-slate-600">Total TTC : {calculerTaxes(b.montant, configEnt).total.toFixed(2)} $</p>
+                </div>
+                <button
+                  onClick={() => setFactureAperçuId(b.id)}
+                  className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-slate-500 underline underline-offset-2"
+                >
+                  <FileText size={11} /> Voir version client
+                </button>
+                {b.statutQb === "envoye" ? (
+                  <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600">
+                    <CheckCircle2 size={12} /> Facturé
+                  </span>
+                ) : b.prixNonListe ? (
+                  <Button onClick={() => setBonAReviserId(b.id)} className="mt-1 min-h-0 gap-1 px-2 py-1 text-[10px]">
+                    <AlertCircle size={11} /> Réviser
+                  </Button>
+                ) : enAttenteValidation ? (
+                  <Button onClick={() => setBonFacturationId(b.id)} className="mt-1 min-h-0 gap-1 px-2 py-1 text-[10px]">
+                    <Check size={11} /> {montantCumule > 0 ? "Facturer le solde" : "Facturer"}
+                  </Button>
+                ) : (
+                  <>
+                    <span className="mb-1 flex items-center justify-end gap-1 text-[10px] font-bold text-amber-600">
+                      <Cloud size={12} /> En attente de synchro QB
+                    </span>
+                    <Button onClick={() => setBonEnvoiCourrielId(b.id)} className="min-h-0 gap-1 px-2 py-1 text-[10px]">
+                      <Send size={11} /> Envoyer à QB
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        {bonsAffiches.length === 0 && (
+          <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+            Aucun résultat pour {filtresActifs.length > 1 ? "ces catégories" : "cette catégorie"}.
+          </p>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-400">
+        Un bon de travail « Prix non listé » doit être ouvert et révisé manuellement par un admin (prix + description), avec confirmation explicite, avant de pouvoir être envoyé au client.
+        Un travail « Selon devis » exige toujours une validation manuelle de l'admin avant l'envoi, avec possibilité de facturation progressive plafonnée au montant initial du devis.
+      </p>
+
+      {bonFacturation && (
+        <ModalFacturationDevis
+          tousLesBons={bons}
+          bon={bonFacturation}
+          devis={devisFacturation}
+          onFermer={() => setBonFacturationId(null)}
+          onEmettre={(info) => {
+            setFactureEnAttenteCourriel({ bonId: bonFacturation.id, ...info });
+            setBonFacturationId(null);
+          }}
+        />
+      )}
+
+      {bonEnvoiCourriel && (
+        <ModalSelectionCourriel
+          client={trouverClientDuBon(bonEnvoiCourriel)}
+          contexte={`Facture — "${bonEnvoiCourriel.projet}" (${bonEnvoiCourriel.montant.toFixed(2)} $)`}
+          onFermer={() => setBonEnvoiCourrielId(null)}
+          onConfirmer={(choix) => envoyerQb(bonEnvoiCourriel.id, choix)}
+        />
+      )}
+
+      {bonFactureEnAttente && (
+        <ModalSelectionCourriel
+          client={trouverClientDuBon(bonFactureEnAttente)}
+          contexte={`Facture progressive — "${bonFactureEnAttente.projet}" (${factureEnAttenteCourriel.montant.toFixed(2)} $)`}
+          onFermer={() => setFactureEnAttenteCourriel(null)}
+          onConfirmer={(courrielChoisi) => {
+            const { bonId, ...info } = factureEnAttenteCourriel;
+            emettreFacture(bonId, info, courrielChoisi);
+          }}
+        />
+      )}
+
+      {bonAReviser && (
+        <ModalReviserPrixNonListe
+          bon={bonAReviser}
+          depotPaye={depotPayePour(bonAReviser.tacheId)}
+          piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
+          lignesSuggerees={lignesTempsSupp(bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser)}
+          onFermer={() => setBonAReviserId(null)}
+          onConfirmer={(items, total) => reviserPrixNonListe(bonAReviser.id, items, total)}
+        />
+      )}
+      {factureAperçuId && (
+        <ApercuFactureClient
+          bon={bons.find((b) => b.id === factureAperçuId)}
+          onFermer={() => setFactureAperçuId(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// JOURNAL D'AUTOMATISATION (visible en bas de l'app)
+// ============================================================
+function JournalAutomatisation({ entrees }) {
+  // REPLIÉ PAR DÉFAUT en une seule ligne (la dernière action) — le journal
+  // complet ne se déplie qu'à la demande, et la préférence est mémorisée.
+  // La barre passe à l'orange quand la dernière entrée est un problème
+  // (⚠️ erreur de synchro, ⛔ blocage) pour rester impossible à manquer.
+  const [ouvert, setOuvert] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("ventilationdgl_journal_ouvert") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const basculer = () =>
+    setOuvert((prev) => {
+      const suivant = !prev;
+      try {
+        localStorage.setItem("ventilationdgl_journal_ouvert", suivant ? "1" : "0");
+      } catch {}
+      return suivant;
+    });
+  if (entrees.length === 0) return null;
+  const aujourdhui = todayISO();
+  const derniere = entrees[0];
+  const alerte = /⚠️|⛔|❌/.test(derniere?.texte || "");
+  return (
+    <div className="mx-auto w-full max-w-5xl px-4 pb-4 md:px-6">
+      <button
+        onClick={basculer}
+        title={ouvert ? "Réduire le journal" : "Afficher le journal complet"}
+        className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
+          alerte ? "border-orange-300 bg-orange-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+        }`}
+      >
+        <span className={`shrink-0 text-[10px] font-extrabold uppercase tracking-wide ${alerte ? "text-orange-600" : "text-slate-400"}`}>
+          🕘 Journal
+        </span>
+        <span className={`min-w-0 flex-1 truncate text-xs ${alerte ? "font-semibold text-orange-800" : "text-slate-500"}`}>
+          <span className="tabular-nums">{derniere.date && derniere.date !== aujourdhui ? `${derniere.date} ` : ""}{derniere.heure}</span> — {derniere.texte}
+        </span>
+        <span className="flex shrink-0 items-center gap-1 text-[10px] font-bold text-slate-400">
+          {ouvert ? "Réduire" : "Afficher"}
+          {ouvert ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+        </span>
+      </button>
+      {ouvert && (
+        <div className="mt-1.5 max-h-48 space-y-1.5 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
+          {entrees.map((e) => (
+            <p key={e.id} className="text-xs text-slate-600">
+              <span className="tabular-nums text-slate-400">
+                {e.date && e.date !== aujourdhui ? `${e.date} ` : ""}{e.heure}
+              </span> — {e.texte}
+              {e.par && <span className="text-slate-400"> — par {e.par}</span>}
+            </p>
+          ))}
+          <p className="pt-1 text-right text-[10px] text-slate-400">
+            {entrees.length} entrée{entrees.length > 1 ? "s" : ""} conservée{entrees.length > 1 ? "s" : ""}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// APP PRINCIPALE
+// ============================================================
+export default function App() {
+  const [onglet, setOnglet] = useState("tableau-de-bord");
+  // RECHERCHE GLOBALE — tapée dans la barre d'en-tête (visible partout)
+  // ou dans la page Recherche : même valeur, deux endroits.
+  const [rechercheGlobale, setRechercheGlobale] = useState("");
+  // Liste déroulante des résultats sous la barre d'en-tête — on reste
+  // sur l'écran en cours, les résultats viennent à nous.
+  const [listeRechercheOuverte, setListeRechercheOuverte] = useState(false);
+  const [menuOuvert, setMenuOuvert] = useState(false); // tiroir mobile du menu latéral
+  // Menu latéral réduit (icônes seulement) — préférence mémorisée.
+  const [menuReduit, setMenuReduit] = useState(() => {
+    try {
+      return typeof window !== "undefined" && window.localStorage?.getItem("ventilationdgl_menu_reduit") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const basculerMenuReduit = () =>
+    setMenuReduit((v) => {
+      const nouveau = !v;
+      try {
+        window.localStorage?.setItem("ventilationdgl_menu_reduit", nouveau ? "1" : "0");
+      } catch {
+        // stockage indisponible — la préférence vaut pour la session
+      }
+      return nouveau;
+    });
+  const [clients, setClients] = useState(CLIENTS_INIT);
+  const [travaux, setTravaux] = useState(TRAVAUX_INIT);
+  const [projets, setProjets] = useState(PROJETS_INIT);
+  const [utilisateurs, setUtilisateurs] = useState(UTILISATEURS_INIT);
+  const [tauxMetiers, setTauxMetiers] = useState(TAUX_METIERS_INIT);
+  // Inspections & entretiens — VRAIES données Supabase (Phase 2). Le
+  // chargement se fait plus bas, une fois la session déclarée.
+  const [inspections, setInspections] = useState([]);
+  const [entretiens, setEntretiens] = useState([]);
+  const [devisListe, setDevisListe] = useState([]);
+  // Cible d'une navigation venant de la RECHERCHE RAPIDE :
+  // { clientId, numeroDevis } — ouvre le bon dossier et surligne le devis.
+  const [cibleRecherche, setCibleRecherche] = useState(null);
+  // Client visé par le bouton « + Créer un devis » d'une fiche client :
+  // l'éditeur de devis s'ouvre avec lui déjà sélectionné.
+  const [clientPourNouveauDevis, setClientPourNouveauDevis] = useState(null);
+
+  // VISITES DE SOUMISSION SANS DEVIS — le suivi qui empêche une vente
+  // de s'éteindre toute seule. Une visite est « réglée » dès qu'un devis
+  // existe pour ce client APRÈS la date de la visite : inutile de
+  // demander au technicien de rattacher quoi que ce soit à la main.
+  const soumissionsSansDevis = useMemo(() => {
+    const visites = (travaux || []).filter(
+      (t) => t.supabase && /soumission/i.test(t.titre || "") && (t.categorieHeures || "projet") === "administratif"
+    );
+    const aujourdhui = new Date(`${dateISO(new Date())}T00:00:00`);
+    return visites
+      .filter((v) => {
+        const devisApres = (devisListe || []).some(
+          (d) => (d.clientNom || "") === (v.clientNom || "") && d.date >= v.date
+        );
+        return !devisApres;
+      })
+      .map((v) => ({
+        id: v.id,
+        clientNom: v.clientNom,
+        titre: v.titre,
+        date: v.date,
+        jours: Math.max(0, Math.round((aujourdhui - new Date(`${v.date}T00:00:00`)) / 86400000)),
+      }))
+      .sort((a, b) => b.jours - a.jours);
+  }, [travaux, devisListe]);
+  const [tachesAttente, setTachesAttente] = useState([
+    { id: "tache-seed1", clientNom: "Toitures Lavallée inc.", titre: "Réfection toiture - Chantier Nord", description: "3 × Membrane élastomère, 12 × Bardeau architectural", statut: "a_planifier", heures: 4, jours: 2, sauterWeekend: true, typeTache: "temps_materiel" },
+  ]);
+  const [planning, setPlanning] = useState({});
+  const [bons, setBons] = useState(BONS_TRAVAIL_COMPLETES_INIT);
+  // Répertoire des fournisseurs (matériaux, location, sous-traitance) —
+  // sert à envoyer le bon de commande directement depuis l'app.
+  const [fournisseurs, setFournisseurs] = useState([]);
+  // Parc de véhicules — le technicien choisit son camion dans cette
+  // liste au lieu de l'écrire (plus de camions fantômes).
+  const [parcCamions, setParcCamions] = useState([]);
+  // Carnet d'entretien du parc : réparations + entretiens réalisés.
+  const [carnetVehicules, setCarnetVehicules] = useState([]);
+  const [journal, setJournal] = useState([]);
+  const journalInitialise = useRef(false);
+
+  // --- Authentification Supabase ---
+  const [session, setSession] = useState(null);
+  const [authVerifie, setAuthVerifie] = useState(false);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthVerifie(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // Accès personnalisés (table permissions_utilisateurs) — chargés à la
+  // connexion ; sans entrée (ou table absente), on retombe sur les
+  // défauts du rôle des métadonnées.
+  const [accesPerso, setAccesPerso] = useState(null);
+  const [accesCharge, setAccesCharge] = useState(false);
+  useEffect(() => {
+    if (!session?.user?.email) {
+      setAccesPerso(null);
+      setAccesCharge(false);
+      return;
+    }
+    let annule = false;
+    supabase
+      .from("permissions_utilisateurs")
+      .select("*")
+      .eq("email", session.user.email.toLowerCase())
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!annule) {
+          setAccesPerso(data || null);
+          setAccesCharge(true);
+        }
+      });
+    return () => {
+      annule = true;
+    };
+  }, [session]);
+
+  // Persistance de l'AGENDA : au démarrage (grille vide), l'horaire est
+  // reconstruit depuis les assignations Supabase. Re-tente à mesure que
+  // le répertoire d'employés se charge (les courriels servent de lien),
+  // mais ne touche JAMAIS une grille déjà remplie (pas d'écrasement).
+  // Signal « répertoire des employés chargé » — déclaré ICI car l'effet
+  // de reconstruction de l'agenda (juste dessous) en dépend.
+  const [repertoireCharge, setRepertoireCharge] = useState(false);
+  useEffect(() => {
+    // On attend que le répertoire des employés soit chargé : sans lui,
+    // les tâches se rattacheraient à une identité provisoire, puis
+    // deviendraient invisibles quand la vraie fiche arrive (course).
+    if (!session || !repertoireCharge) return;
+    let annule = false;
+    listerToutesAssignations()
+      .then((rows) => {
+        if (annule || rows.length === 0) return;
+        const courrielSession = session.user?.email?.toLowerCase();
+        const employesRef = [
+          ...utilisateurs.map((u) => ({ id: u.id, courriel: u.courriel })),
+          ...(courrielSession && !utilisateurs.some((u) => (u.courriel || "").toLowerCase() === courrielSession)
+            ? [{ id: "compte-connecte", courriel: courrielSession }]
+            : []),
+        ];
+        setPlanning((prev) => {
+          // Grille considérée valide seulement si TOUTES ses tâches
+          // réelles pointent vers une rangée existante — sinon on la
+          // reconstruit (répare aussi les cases orphelines).
+          const idsRoster = new Set(employesRef.map((e) => e.id));
+          const reelles = Object.values(prev)
+            .flatMap((v) => listeCellule(v))
+            .filter((t) => t && !t.est_tache_systeme);
+          const grilleValide = reelles.length > 0 && reelles.every((t) => idsRoster.has(t.employeId));
+          return grilleValide ? prev : reconstruirePlanning(rows, employesRef);
+        });
+        // Les tâches déjà planifiées ne restent pas dans « en attente ».
+        setTachesAttente((prev) => prev.filter((t) => !rows.some((r) => r.tache_id === t.id)));
+      })
+      .catch(() => {
+        // table absente — l'agenda local continue seul
+      });
+    return () => {
+      annule = true;
+    };
+  }, [session, repertoireCharge, utilisateurs]);
+
+  // Dépôts préalables — chargés depuis Supabase + Realtime. Un dépôt en
+  // attente BLOQUE la planification de sa tâche ; après 24 h sans
+  // paiement, il est annulé automatiquement (vérifié à l'ouverture puis
+  // chaque minute). Le paiement QuickBooks réel arrive en Phase 4.
+  const [depots, setDepots] = useState({});
+  const depotsRef = useRef(depots);
+  depotsRef.current = depots;
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    const charger = async () => {
+      try {
+        const d = await listerDepots();
+        if (!annule) setDepots(d);
+      } catch {
+        // table absente — le flux de dépôts reste local à la session
+      }
+    };
+    charger();
+    const desabonner = sAbonnerDepots(charger);
+    return () => {
+      annule = true;
+      desabonner();
+    };
+  }, [session]);
+  useEffect(() => {
+    if (!session) return;
+    const verifier = () => {
+      const maintenant = Date.now();
+      Object.values(depotsRef.current).forEach((d) => {
+        if (d.statut === "en_attente_paiement" && d.dateLimite && new Date(d.dateLimite).getTime() < maintenant) {
+          annulerDepotDelai(d.tacheId).catch(() => {});
+          setDepots((prev) => ({ ...prev, [d.tacheId]: { ...prev[d.tacheId], statut: "annule_delai" } }));
+          ajouterJournal(`⏰ Délai de 24 h dépassé — dépôt annulé, tâche non planifiable (annulation de la facture QuickBooks : Phase 4)`);
+        }
+      });
+    };
+    verifier();
+    const minuterie = setInterval(verifier, 60000);
+    return () => clearInterval(minuterie);
+  }, [session]);
+  // Liste de prix des dépôts (par zone) — chargée depuis Supabase,
+  // modifiable par l'Admin principal dans l'onglet Utilisateurs.
+  const [prixDepots, setPrixDepots] = useState({ "Zone 1": 0, "Zone 2": 0, "Zone 3": 0, taux_horaire_vendant: 0, minutes_incluses: 90, minutes_incluses_hors_zone: 180 });
+  useEffect(() => {
+    if (!session) return;
+    listerPrixDepots()
+      .then((parZone) => setPrixDepots((prev) => ({ ...prev, ...parZone })))
+      .catch(() => {
+        // table absente — liste locale seulement
+      });
+  }, [session]);
+
+  // PIÈCES EN COMMANDE — le pont entre le diagnostic et la réparation.
+  const [pieces, setPieces] = useState([]);
+  useEffect(() => {
+    if (!session) return;
+    const charger = () => listerPieces().then(setPieces).catch(() => {});
+    charger();
+    return sAbonnerPieces(charger);
+  }, [session]);
+
+  // CRÉATION AUTOMATIQUE depuis les bons de travail : quand un
+  // technicien coche « pièce à commander », la demande apparaît au
+  // bureau sans que personne n'ait à la ressaisir. Le garde sur
+  // `tacheOrigineId` empêche les doublons à chaque rechargement — et
+  // `dejaCreees` évite d'en créer deux si l'effet se rejoue avant que
+  // la liste ne soit rafraîchie.
+  const dejaCreees = useRef(new Set());
+  useEffect(() => {
+    if (!session) return;
+    const existantes = new Set(pieces.map((p) => p.tacheOrigineId).filter(Boolean));
+    (bons || [])
+      .filter((b) => b.pieceACommander && b.pieceRequise && b.tacheId)
+      .filter((b) => !existantes.has(b.tacheId) && !dejaCreees.current.has(b.tacheId))
+      .forEach((b) => {
+        dejaCreees.current.add(b.tacheId);
+        // TÂCHE DE RETOUR créée du même geste — un 2e appel de service,
+        // facturé séparément (règle validée). Elle part dans la file
+        // d'attente, BLOQUÉE tant que la pièce n'est pas reçue : le
+        // personnel n'a plus qu'à appeler le client et la placer dès
+        // que la pièce arrive. Sans ça, il fallait se souvenir de la
+        // recréer à la main — et on l'oublie.
+        const idRetour = `retour-${b.tacheId}-${Date.now()}`;
+        const clientFiche = clients.find((c) => c.nom === b.client);
+        const tacheRetour = {
+          id: idRetour,
+          titre: `Retour — ${b.pieceRequise}`,
+          clientId: clientFiche?.id || null,
+          clientNom: b.client,
+          typeTache: "appel_service",
+          description: `Pose de la pièce : ${b.pieceRequise}\nDiagnostic fait le ${b.date} par ${b.employeNom || "un technicien"}.`,
+          heures: 2,
+          jours: 0,
+          statut: "en_attente",
+          adresseTravaux: b.adresseTravaux || null,
+          adresseIntervention: b.adresseTravaux || null,
+          projetId: b.projetId || null,
+          unites: b.unites || [],
+          // COURRIELS DU CLIENT — sans eux, le technicien qui termine la
+          // pose ne peut pas envoyer le bon signé : son écran d'envoi
+          // serait vide. Toutes les tâches créées à la main les portent
+          // (même forme qu'à la création dans l'agenda) ; celle-ci doit
+          // les porter aussi.
+          clientCourriels: (clientFiche?.courriels || []).map((c) => ({ id: c.id, email: c.email, label: c.label, defaut: !!c.defaut })),
+          depotRequis: false,
+          // Trace : d'où vient cette tâche.
+          issueDePieceTacheId: b.tacheId,
+        };
+        setTachesAttente((prev) => [tacheRetour, ...prev]);
+
+        creerPiece(
+          {
+            tacheOrigineId: b.tacheId,
+            tacheRetourId: idRetour,
+            clientId: clientFiche?.id || null,
+            clientNom: b.client,
+            modele: b.unites?.[0]?.modele || b.modeleUnite,
+            numeroSerie: b.unites?.[0]?.serie || b.serieUnite,
+            pieceRequise: b.pieceRequise,
+          },
+          session
+        )
+          .then((p) => {
+            setPieces((prev) => [p, ...prev]);
+            ajouterJournal(
+              `🔧 Pièce à commander — ${b.pieceRequise} pour ${b.client} (demandée par ${b.employeNom || "technicien"}). Tâche de retour créée, en attente de la pièce.`
+            );
+          })
+          .catch(() => {
+            dejaCreees.current.delete(b.tacheId);
+            ajouterJournal(`⚠️ Demande de pièce NON enregistrée pour ${b.client} — vérifie que le SQL « 31 » a été lancé.`);
+          });
+      });
+  }, [session, bons, pieces]);
+
+  // CATALOGUE D'ITEMS — la liste de prix (289 items importés de
+  // QuickBooks). Rechargée en direct : deux admins peuvent tarifer en
+  // même temps sans s'écraser.
+  const [catalogue, setCatalogue] = useState(CATALOGUE_REPLI);
+  useEffect(() => {
+    if (!session) return;
+    const charger = () => listerCatalogue().then(setCatalogue).catch(() => {});
+    charger();
+    return sAbonnerCatalogue(charger);
+  }, [session]);
+
+  // CONFIGURATION DE L'ENTREPRISE (coordonnées, numéros officiels, taux
+  // de taxes, règles de paie). Elle descend dans toute l'application par
+  // le contexte, plus bas dans le rendu. Si la table n'existe pas encore
+  // (SQL 23 non lancé), on reste sur CONFIG_DEFAUT — rien ne casse.
+  const [configEntreprise, setConfigEntreprise] = useState(CONFIG_DEFAUT);
+  useEffect(() => {
+    if (!session) return;
+    chargerEntreprise()
+      .then(setConfigEntreprise)
+      .catch(() => {
+        // table absente — on garde les valeurs par défaut
+      });
+  }, [session]);
+
+  // Coût du camion — modifié depuis l'onglet Tarifs (rangé avec les
+  // autres coûtants), mais stocké avec la configuration d'entreprise.
+  const sauvegarderCoutCamion = async (valeur) => {
+    const nouvelle = { ...configEntreprise, coutCamionHoraire: valeur };
+    await sauvegarderEntreprise(nouvelle);
+    setConfigEntreprise(nouvelle);
+    ajouterJournal(`🚚 Coût du camion mis à ${valeur.toFixed(2)} $/h — appliqué aux journées à venir (les passées gardent leur taux figé).`);
+  };
+
+  const creerDepotPourTache = (tacheId, infos) => {
+    const repli = {
+      tacheId,
+      statut: "en_attente_paiement",
+      montantHT: Number(infos.montantHT) || 0,
+      dateLimite: new Date(Date.now() + (Number(infos.joursLimite) || 1) * 24 * 60 * 60 * 1000).toISOString(),
+      isProspect: !!infos.isProspect,
+      prospectNom: infos.prospect?.nom || "",
+      prospectCourriel: infos.prospect?.courriel || "",
+      prospectTelephone: infos.prospect?.telephone || "",
+      prospectAdresse: infos.prospect?.adresse || "",
+    };
+    setDepots((prev) => ({ ...prev, [tacheId]: repli }));
+    creerDepot(tacheId, infos).catch(() => {
+      // hors-ligne — le blocage local reste effectif pour la session
+    });
+    const t = taxesDepot(infos.montantHT, configEntreprise);
+    ajouterJournal(
+      `💰 Dépôt requis : ${t.ht.toFixed(2)} $ + taxes = ${t.total.toFixed(2)} $ — payable sous ${(Number(infos.joursLimite) || 1) === 1 ? "24 h" : `${infos.joursLimite} jours`} (facture et envoi QuickBooks : Phase 4)`
+    );
+  };
+  const depotPayeManuel = (tacheId, mode) => {
+    setDepots((prev) => ({ ...prev, [tacheId]: { ...(prev[tacheId] || { tacheId }), statut: "paye_manuellement", modePaiement: mode } }));
+    marquerDepotPayeManuellement(tacheId, mode, session?.user?.email).catch(() => {});
+    ajouterJournal(`💰 Dépôt reçu manuellement (${mode}) — tâche débloquée pour la planification`);
+  };
+
+  // Travaux effectués (terrain -> bureau) — les tâches terminées par les
+  // techniciens arrivent ici en direct (avec leur taux coûtant figé) et
+  // alimentent les coûts réels des projets + le dossier client.
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    const charger = async () => {
+      try {
+        const reels = await listerTravauxEffectues();
+        if (!annule) {
+          setTravaux((prev) => [...prev.filter((t) => !t.supabase), ...reels]);
+        }
+      } catch {
+        // table absente — les travaux de démo continuent seuls
+      }
+    };
+    charger();
+    const desabonner = sAbonnerTravauxEffectues(charger);
+    return () => {
+      annule = true;
+      desabonner();
+    };
+  }, [session]);
+
+  // BONS DE TRAVAIL signés sur le terrain (terrain -> bureau) : dès que
+  // le technicien clique « Terminer et envoyer », son bon arrive ici en
+  // direct comme DEMANDE DE FACTURATION (onglet Facturation).
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    const chargerBons = async () => {
+      try {
+        const reels = await listerBonsTravail();
+        if (!annule) setBons((prev) => [...reels, ...prev.filter((b) => !b.supabase)]);
+      } catch {
+        // table absente (snippet 16 non exécuté) — les bons de démo continuent seuls
+      }
+    };
+    chargerBons();
+    const desabonnerBons = sAbonnerBonsTravail(chargerBons);
+    return () => {
+      annule = true;
+      desabonnerBons();
+    };
+  }, [session]);
+
+  // Répertoire des fournisseurs — chargé à la connexion.
+  useEffect(() => {
+    if (!session) return;
+    listerFournisseurs()
+      .then(setFournisseurs)
+      .catch(() => {
+        // table absente (snippet 17 non exécuté) — la liste reste vide,
+        // le formulaire de BC permet quand même la saisie libre
+      });
+  }, [session]);
+
+  // Parc de véhicules — chargé à la connexion.
+  useEffect(() => {
+    if (!session) return;
+    listerCamions()
+      .then(setParcCamions)
+      .catch(() => {
+        // table absente (snippet 18 non exécuté) — la liste des camions
+        // reste déduite des inspections, comme avant
+      });
+  }, [session]);
+
+  // CLIENTS · PROJETS · TÂCHES EN ATTENTE — chargés depuis Supabase à la
+  // connexion + temps réel. Ces trois-là disparaissaient au rechargement.
+  // Les données de démonstration ne servent plus que de repli si la table
+  // est absente (snippet 22 non exécuté).
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    const charger = () => {
+      listerClients()
+        .then((liste) => {
+          if (!annule && liste.length > 0) setClients(liste);
+        })
+        .catch(() => {});
+      listerProjets()
+        .then((liste) => {
+          if (!annule && liste.length > 0) setProjets(liste);
+        })
+        .catch(() => {});
+      listerTachesAttente()
+        .then((liste) => {
+          if (!annule) setTachesAttente(liste);
+        })
+        .catch(() => {});
+    };
+    charger();
+    const d1 = sAbonnerClients(charger);
+    const d2 = sAbonnerProjets(charger);
+    const d3 = sAbonnerTachesAttente(charger);
+    return () => {
+      annule = true;
+      d1();
+      d2();
+      d3();
+    };
+  }, [session]);
+
+  // ------------------------------------------------------------
+  // SAUVEGARDE AUTOMATIQUE de clients / projets / tâches en attente.
+  // Plutôt que d'appeler la persistance à chaque endroit qui modifie ces
+  // listes (une dizaine), on compare ici avec le dernier état enregistré
+  // et on n'écrit QUE ce qui a réellement changé. Aucun point de
+  // mutation ne peut donc être oublié.
+  // ------------------------------------------------------------
+  const dejaEnregistre = useRef({ clients: {}, projets: {}, taches: {} });
+  // ÉTAT, PAS UN REF. Avec un ref, rien ne se re-rendait quand le délai
+  // de 2,5 s expirait : une tâche créée AVANT (typiquement la tâche de
+  // retour, générée dès que les bons de travail arrivent) était vue par
+  // l'effet alors qu'il refusait encore d'écrire, puis plus jamais —
+  // elle vivait à l'écran et disparaissait au rechargement. En état, le
+  // passage à `true` relance l'effet et rattrape tout ce qui attendait.
+  const [persistanceActive, setPersistanceActive] = useState(false);
+  useEffect(() => {
+    // Laisse le temps au chargement initial de se faire avant d'écrire.
+    if (!session) return;
+    const t = setTimeout(() => setPersistanceActive(true), 2500);
+    return () => clearTimeout(t);
+  }, [session]);
+
+  useEffect(() => {
+    if (!session || !persistanceActive) return;
+    const t = setTimeout(() => {
+      const memoire = dejaEnregistre.current;
+      const synchroniser = (liste, cle, sauvegarder, etiquette) => {
+        (liste || []).forEach((element) => {
+          const signature = JSON.stringify(element);
+          if (memoire[cle][element.id] === signature) return;
+          memoire[cle][element.id] = signature;
+          sauvegarder(element).catch(() =>
+            ajouterJournal(`⚠️ ${etiquette} « ${element.nom || element.titre || element.id} » affiché localement mais NON enregistré — vérifie la connexion.`)
+          );
+        });
+      };
+      synchroniser(clients, "clients", sauvegarderClient, "Client");
+      synchroniser(projets, "projets", sauvegarderProjet, "Projet");
+      synchroniser(tachesAttente, "taches", sauvegarderTacheAttente, "Tâche");
+      // Tâches sorties de la file (placées à l'horaire ou supprimées).
+      Object.keys(memoire.taches).forEach((id) => {
+        if (!(tachesAttente || []).some((t) => t.id === id)) {
+          delete memoire.taches[id];
+          retirerTacheAttente(id).catch(() => {});
+        }
+      });
+    }, 600); // regroupe les modifications rapprochées en une seule écriture
+    return () => clearTimeout(t);
+  }, [clients, projets, tachesAttente, session, persistanceActive]);
+
+  // JOURNAL D'ACTIVITÉ — piste d'audit partagée (avant : navigateur seul).
+  useEffect(() => {
+    if (!session) return;
+    listerJournal()
+      .then((liste) => {
+        if (liste.length > 0) setJournal(liste);
+      })
+      .catch(() => {
+        // table absente — le journal local (localStorage) continue seul
+      });
+  }, [session]);
+
+  // DEVIS — chargés depuis Supabase à la connexion + temps réel. Avant,
+  // ils vivaient seulement en mémoire et disparaissaient au rechargement.
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    const chargerDevis = () => {
+      listerDevis()
+        .then((liste) => {
+          if (!annule) setDevisListe(liste);
+        })
+        .catch(() => {
+          // table absente (snippet 21 non exécuté) — la liste reste locale
+        });
+    };
+    chargerDevis();
+    const desabonner = sAbonnerDevis(chargerDevis);
+    return () => {
+      annule = true;
+      desabonner();
+    };
+  }, [session]);
+
+  // Carnet d'entretien du parc — chargé à la connexion + temps réel.
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    const chargerCarnet = () => {
+      listerCarnetVehicules()
+        .then((liste) => {
+          if (!annule) setCarnetVehicules(liste);
+        })
+        .catch(() => {
+          // table absente (snippet 19 non exécuté) — carnet vide
+        });
+    };
+    chargerCarnet();
+    const desabonner = sAbonnerCarnetVehicules(chargerCarnet);
+    return () => {
+      annule = true;
+      desabonner();
+    };
+  }, [session]);
+
+  // Grille des taux — chargée depuis Supabase à la connexion. La
+  // sauvegarde est EXPLICITE (bouton « Sauvegarder les taux », réservé à
+  // l'Admin principal, dans l'onglet Utilisateurs).
+  useEffect(() => {
+    if (!session) return;
+    listerTaux()
+      .then((grille) => {
+        setTauxMetiers((prev) => {
+          const fusion = { ...prev };
+          Object.entries(grille).forEach(([m, niveaux]) => {
+            fusion[m] = { ...(fusion[m] || {}), ...niveaux };
+          });
+          return fusion;
+        });
+      })
+      .catch(() => {
+        // table absente — la grille locale continue seule
+      });
+  }, [session]);
+
+  // Répertoire des employés — chargé depuis Supabase (persistant à
+  // travers les rechargements) et fusionné avec les données de démo ;
+  // les employés réels priment sur les fiches de démo de même id.
+  // Le signal `repertoireCharge` (déclaré plus haut) est levé à la fin
+  // de ce chargement : la reconstruction de l'agenda l'attend pour
+  // rattacher les tâches aux bons employés (sinon course -> orphelines).
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    listerEmployes()
+      .then((reels) => {
+        if (annule) return;
+        setUtilisateurs((prev) => {
+          const idsReels = new Set(reels.map((r) => r.id));
+          let fusion = [...prev.filter((u) => !idsReels.has(u.id)), ...reels];
+          // Le compte CONNECTÉ obtient automatiquement sa fiche dans le
+          // répertoire (persistée) s'il n'en a pas — il apparaît ainsi
+          // dans l'onglet Utilisateurs ET dans l'agenda, et on peut lui
+          // définir un métier/niveau (nécessaire au taux figé).
+          const courrielSession = session.user?.email?.toLowerCase();
+          if (courrielSession && !fusion.some((u) => (u.courriel || "").toLowerCase() === courrielSession)) {
+            const fiche = {
+              id: `u-${courrielSession}`,
+              nom: session.user?.user_metadata?.nom || courrielSession.split("@")[0],
+              courriel: courrielSession,
+              telephone: "",
+              nomUtilisateur: courrielSession.split("@")[0],
+              typeAcces: "Admin principal",
+              motDePasseCree: true,
+            };
+            fusion = [fiche, ...fusion];
+            sauvegarderEmploye(fiche).catch(() => {});
+          }
+          return fusion;
+        });
+        setRepertoireCharge(true);
+      })
+      .catch(() => {
+        // table absente — le répertoire de démo continue en local
+        setRepertoireCharge(true);
+      });
+    return () => {
+      annule = true;
+    };
+  }, [session]);
+
+  // Chargement des inspections & entretiens depuis Supabase + mise à
+  // jour en direct (Realtime). Repli sur les données de démo si la
+  // table n'est pas accessible (policies pas encore lancées).
+  useEffect(() => {
+    if (!session) return;
+    let annule = false;
+    const charger = async () => {
+      try {
+        const [ins, ent] = await Promise.all([listerInspections(), listerEntretiens()]);
+        if (!annule) {
+          setInspections(ins);
+          setEntretiens(ent);
+        }
+      } catch {
+        if (!annule) {
+          setInspections(INSPECTIONS_INIT);
+          setEntretiens(ENTRETIENS_INIT);
+        }
+      }
+    };
+    charger();
+    const desabonner = sAbonnerInspections(charger);
+    return () => {
+      annule = true;
+      desabonner();
+    };
+  }, [session]);
+
+  const compteurJournal = useRef(0);
+  const ajouterJournal = (texte) => {
+    const maintenant = new Date();
+    const heure = maintenant.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
+    const date = dateISO(maintenant);
+    compteurJournal.current += 1;
+    const id = `${Date.now()}-${compteurJournal.current}`;
+    // Traçabilité (Loi 25) : chaque entrée consigne QUI a déclenché
+    // l'action — le nom (métadonnées) ou le courriel du compte connecté.
+    const par = session?.user?.user_metadata?.nom || session?.user?.email || "système";
+    setJournal((prev) => [{ id, texte, heure, date, par }, ...prev].slice(0, PLAFOND_JOURNAL));
+    // Piste d'audit PARTAGÉE : l'entrée part aussi en base (append-only),
+    // pour survivre au changement de poste et être visible par tous.
+    if (session) ajouterEntreeJournal({ texte, par, date, heure }, session).catch(() => {});
+  };
+
+  // Chargement de l'historique depuis localStorage APRÈS le montage.
+  // On n'initialise PAS l'état directement avec localStorage : sinon le
+  // serveur rend un journal vide et le client un journal plein → erreur
+  // d'hydratation. On le charge donc une fois monté, côté client.
+  useEffect(() => {
+    const stocke = chargerJournalDepuisStockage();
+    if (stocke.length > 0) setJournal(stocke);
+  }, []);
+
+  // Persistance de l'historique (audit trail) — jamais au tout premier
+  // rendu (sinon on écraserait le stockage avec un journal vide avant
+  // même de l'avoir chargé), puis à chaque changement réel ensuite.
+  useEffect(() => {
+    if (!journalInitialise.current) {
+      journalInitialise.current = true;
+      return;
+    }
+    sauvegarderJournal(journal);
+  }, [journal]);
+
+  const ajouterTacheAgenda = (tache) => {
+    setTachesAttente((prev) => [tache, ...prev]);
+  };
+
+  const compteAlertes = bons.filter((b) => b.statutQb === "en_attente").length;
+
+  // ------------------------------------------------------------
+  // SYNCHRONISATION QUICKBOOKS — factures & dépenses par projet
+  // Levé ici (plutôt que dans un onglet précis) pour que l'onglet
+  // Clients ET le Hub Projets partagent la même source de vérité.
+  // ------------------------------------------------------------
+  const [transactionsQb, setTransactionsQb] = useState([]);
+  const [syncQbEnCours, setSyncQbEnCours] = useState(false);
+
+  const synchroniserQuickBooksProjets = async () => {
+    // Conformité : la synchronisation QuickBooks est réservée aux rôles
+    // administrateurs — garde en profondeur même si un bouton restait
+    // cliquable par erreur (l'interface les désactive aussi).
+    if (!peutSynchroniserQb) {
+      ajouterJournal("⛔ Tentative de synchronisation QuickBooks refusée — rôle non autorisé");
+      return;
+    }
+    setSyncQbEnCours(true);
+    const brutes = await fetchQuickBooksTransactions();
+    const enrichies = brutes.map((t) => ({
+      ...t,
+      projectId: attribuerTransactionQuickBooks(t, projets, clients),
+      syncedAt: new Date().toISOString(),
+    }));
+    setTransactionsQb(enrichies);
+    const nbAssignees = enrichies.filter((t) => t.projectId).length;
+    const nbNonAssignees = enrichies.length - nbAssignees;
+    ajouterJournal(
+      `🔄 ${enrichies.length} transactions QuickBooks synchronisées — ${nbAssignees} attribuées automatiquement, ${nbNonAssignees} en attente d'attribution manuelle`
+    );
+    setSyncQbEnCours(false);
+  };
+
+  const assignerTransactionManuellement = (quickbooksId, projetId) => {
+    setTransactionsQb((prev) => prev.map((t) => (t.quickbooksId === quickbooksId ? { ...t, projectId: projetId } : t)));
+    const p = projets.find((x) => x.id === projetId);
+    ajouterJournal(`✋ Transaction QuickBooks ${quickbooksId} assignée manuellement au projet "${p?.nom}"`);
+  };
+
+  // Badge de la navigation : nombre de projets à risque (dépassement,
+  // perte, ou en retard). Mémorisé — sans quoi ce calcul (qui appelle
+  // calculerRentabiliteProjet pour CHAQUE projet) se refaisait à
+  // chaque rendu de App, même pour un changement sans rapport (changer
+  // d'onglet, taper dans un champ ailleurs, ouvrir une modale).
+  const compteRisqueProjets = useMemo(
+    () =>
+      projets.filter((p) => {
+        const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers);
+        return r.depassementBudget || r.profitReel < 0 || projetEnRetard(p);
+      }).length,
+    [projets, travaux, transactionsQb]
+  );
+
+  if (!authVerifie) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">Chargement…</div>;
+  }
+  if (!session) {
+    return <ConnexionAdmin />;
+  }
+  if (!accesCharge) {
+    return <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">Chargement…</div>;
+  }
+
+  // --- Rôle + permissions effectifs (accès personnalisés > défauts du rôle) ---
+  const { role, sousCategorie, sections: permissionsBrutes } = permissionsEffectives(accesPerso, session);
+  // PARAMÈTRES — RÉSERVÉ À L'ADMIN PRINCIPAL, sans exception.
+  // Verrou posé ici plutôt que dans la seule liste d'accès : même si la
+  // section se retrouvait cochée pour quelqu'un d'autre (à la main dans
+  // Gestion des accès, ou par une vieille ligne en base), elle reste
+  // hors de portée. L'écran des Paramètres touche les coordonnées
+  // envoyées aux clients, les taux de taxes et les règles de paie.
+  const permissions =
+    role === "Admin principal" ? permissionsBrutes : permissionsBrutes.filter((s) => s !== "parametres");
+  // AUTORISATION « modifier la liste de prix ». Verrou posé ici, et pas
+  // seulement dans l'écran des accès : même si la case se retrouvait
+  // cochée pour un autre rôle, elle reste sans effet. Les prix du
+  // catalogue servent à tous les devis de l'entreprise.
+  const peutModifierListePrix = aAutorisation(role, permissionsBrutes, "modifier-liste-prix");
+  // Synchronisation QuickBooks : réservée aux deux rôles administrateurs.
+  const peutSynchroniserQb = role === "Admin principal" || role === "Admin régulier";
+  const sectionsAdmin = ORDRE_SECTIONS.filter((s) => s !== "technicien" && permissions.includes(s));
+  // Onglet effectif : si l'onglet courant n'est pas permis, on retombe sur le 1er autorisé.
+  const vue = permissions.includes(onglet) && onglet !== "technicien" ? onglet : sectionsAdmin[0] || "tableau-de-bord";
+
+  if (sectionsAdmin.length === 0) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-slate-100 p-6 text-center">
+        <p className="text-lg font-extrabold text-slate-800">Accès refusé</p>
+        <p className="max-w-sm text-sm text-slate-500">Ton compte ({role}) n'a pas accès au panneau d'administration. Utilise plutôt l'application technicien.</p>
+        <button onClick={() => supabase.auth.signOut()} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50">Se déconnecter</button>
+      </div>
+    );
+  }
+
+  return (
+    // La configuration de l'entreprise est fournie ici une seule fois :
+    // tous les composants en dessous y accèdent par `useEntreprise()`.
+    <ContexteEntreprise.Provider value={configEntreprise}>
+    <ContexteCatalogue.Provider value={catalogue}>
+    <ContexteClients.Provider value={clients}>
+    <ContexteDevis.Provider value={devisListe}>
+    <div className="flex min-h-screen bg-slate-50">
+      <MenuLateral
+        vue={vue}
+        onChoisir={(id) => setOnglet(id)}
+        permissions={permissions}
+        badges={{
+          facturation: compteAlertes,
+          agenda: tachesAttente.length,
+          projets: compteRisqueProjets,
+          // Propositions d'ajustement d'heures en attente de validation.
+          // Propositions en attente + journées bloquées : les deux
+          // demandent une action de l'admin, les deux comptent au badge.
+          pieces: pieces.filter((p) => p.statut !== "recue" && p.statut !== "annulee").length,
+          paies:
+            travaux.filter((t) => t.supabase && t.heuresProposees != null).length +
+            joursBloques(travaux).size,
+        }}
+        courriel={session.user?.email}
+        role={role}
+        onDeconnexion={() => supabase.auth.signOut()}
+        ouvert={menuOuvert}
+        onFermer={() => setMenuOuvert(false)}
+        reduit={menuReduit}
+        onBasculerReduit={basculerMenuReduit}
+      />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6">
+        {/* ☰ mobile : ouvre le tiroir. Sur bureau, la bascule du menu se
+            fait via la flèche ‹/› dans le menu lui-même. */}
+        <button onClick={() => setMenuOuvert(true)} className="rounded-lg border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-50 md:hidden" aria-label="Ouvrir le menu">
+          <Menu size={18} />
+        </button>
+        <h1 className="shrink-0 text-lg font-extrabold text-[#131B2E]">{LIBELLES_SECTIONS[vue] || "Administration"}</h1>
+        {/* 🔍 RECHERCHE GLOBALE — accessible de partout, comme demandé
+            par le propriétaire : la recherche est une PORTE D'ENTRÉE,
+            pas une destination. Première frappe = la page Recherche
+            s'ouvre avec les résultats ; la barre reste sous les doigts
+            (elle vit dans l'en-tête, qui ne se démonte jamais). */}
+        {permissions.includes("recherche") && (
+          // CENTRÉE dans l'espace libre (demande du propriétaire) : au
+          // milieu de l'écran, l'œil la trouve sans la chercher — collée
+          // au titre, elle se fondait dans le décor.
+          <div className="flex min-w-0 flex-1 justify-center">
+            <div className="relative w-full max-w-lg">
+              <div className="flex items-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white px-3 py-2 shadow-sm focus-within:border-[#131B2E]">
+                <Search size={15} className="shrink-0 text-slate-400" />
+                <input
+                  value={rechercheGlobale}
+                  onChange={(e) => {
+                    setRechercheGlobale(e.target.value);
+                    setListeRechercheOuverte(!!e.target.value.trim());
+                  }}
+                  onFocus={() => setListeRechercheOuverte(!!rechercheGlobale.trim())}
+                  onBlur={() => setTimeout(() => setListeRechercheOuverte(false), 150)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") setListeRechercheOuverte(false);
+                    // Entrée = la page Recherche complète, pour qui aime ça.
+                    if (e.key === "Enter" && rechercheGlobale.trim()) {
+                      setListeRechercheOuverte(false);
+                      setOnglet("recherche");
+                    }
+                  }}
+                  placeholder="Recherche rapide — client, adresse, devis, produit…"
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                />
+                {rechercheGlobale && (
+                  <button
+                    onClick={() => {
+                      setRechercheGlobale("");
+                      setListeRechercheOuverte(false);
+                    }}
+                    aria-label="Effacer la recherche"
+                  >
+                    <X size={13} className="text-slate-400 hover:text-slate-600" />
+                  </button>
+                )}
+              </div>
+
+              {/* LISTE DÉROULANTE — les résultats viennent à toi, tu ne
+                  quittes pas l'écran où tu travailles. `onMouseDown`
+                  (pas onClick) : le clic doit gagner contre le blur du
+                  champ, sinon la liste se ferme avant d'enregistrer. */}
+              {listeRechercheOuverte && rechercheGlobale.trim() && (() => {
+                const q = rechercheGlobale.trim().toLowerCase();
+                const clientsTrouves = clients.filter((c) => correspond(c, rechercheGlobale)).slice(0, 6);
+                const devisTrouves = devisListe
+                  .filter(
+                    (d) =>
+                      (d.numero || "").toLowerCase().includes(q) ||
+                      (d.clientNom || "").toLowerCase().includes(q) ||
+                      (d.lignes || []).some((l) => (l.nom || "").toLowerCase().includes(q))
+                  )
+                  .slice(0, 4);
+                const ouvrirClient = (c) => {
+                  setCibleRecherche({ clientId: c.id, numeroDevis: null });
+                  setOnglet("clients");
+                  setListeRechercheOuverte(false);
+                };
+                const ouvrirDevis = (d) => {
+                  setCibleRecherche({ clientId: d.clientId, numeroDevis: d.numero });
+                  setOnglet("clients");
+                  setListeRechercheOuverte(false);
+                };
+                return (
+                  <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                    {clientsTrouves.length === 0 && devisTrouves.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-slate-400">Aucun résultat pour « {rechercheGlobale.trim()} »</p>
+                    ) : (
+                      <>
+                        {clientsTrouves.map((c) => (
+                          <button
+                            key={c.id}
+                            onMouseDown={() => ouvrirClient(c)}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+                          >
+                            <span className="shrink-0">👤</span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-bold text-slate-800">{c.nom}</span>
+                              <span className="block truncate text-[10px] text-slate-400">
+                                {c.telephone || c.adresses?.[0]?.ligne1 || c.courriels?.[0]?.email || "—"}
+                              </span>
+                            </span>
+                          </button>
+                        ))}
+                        {devisTrouves.map((d) => (
+                          <button
+                            key={d.id}
+                            onMouseDown={() => ouvrirDevis(d)}
+                            className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                          >
+                            <span className="shrink-0">📄</span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-bold text-slate-800">Devis {d.numero}</span>
+                              <span className="block truncate text-[10px] text-slate-400">{d.clientNom || "—"}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    <button
+                      onMouseDown={() => {
+                        setListeRechercheOuverte(false);
+                        setOnglet("recherche");
+                      }}
+                      className="w-full border-t border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] font-bold text-slate-500 hover:text-slate-800"
+                    >
+                      Voir tous les résultats →
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {vue === "tableau-de-bord" && (
+        <OngletTableauDeBord
+          projets={projets}
+          travaux={travaux}
+          transactionsQb={transactionsQb}
+          utilisateurs={utilisateurs}
+          tauxMetiers={tauxMetiers}
+          clients={clients}
+          compteAlertes={compteAlertes}
+          compteAttente={tachesAttente.length}
+          soumissionsSansDevis={soumissionsSansDevis}
+          journal={journal}
+          setOnglet={setOnglet}
+          inspections={inspections}
+          entretiens={entretiens}
+          bons={bons}
+          devisListe={devisListe}
+        />
+      )}
+
+      {vue === "inspections" && (
+        <OngletInspectionsVehicules
+          inspections={inspections}
+          setInspections={setInspections}
+          entretiens={entretiens}
+          setEntretiens={setEntretiens}
+          ajouterJournal={ajouterJournal}
+          persisterPriseEnCharge={(id, note) => prendreEnChargeInspection(id, note, session.user?.email).catch(() => {})}
+          persisterEntretien={({ camion, km }) => creerEntretien({ camion, km }).catch(() => {})}
+          parcCamions={parcCamions}
+          setParcCamions={setParcCamions}
+          carnet={carnetVehicules}
+          setCarnet={setCarnetVehicules}
+          onEntreeCarnet={(entree) => ajouterEntreeCarnet(entree, session)}
+          onAnomalieReparee={(id) => marquerAnomalieReparee(id).catch(() => {})}
+        />
+      )}
+
+      {vue === "recherche" && (
+        <OngletRecherche
+          clients={clients}
+          devisListe={devisListe}
+          terme={rechercheGlobale}
+          setTerme={setRechercheGlobale}
+          onOuvrirDevis={(d) => {
+            // Amène directement au devis : onglet Clients, dossier du
+            // client ouvert, devis mis en évidence dans sa section.
+            setCibleRecherche({ clientId: d.clientId, numeroDevis: d.numero });
+            setOnglet("clients");
+          }}
+        />
+      )}
+
+      {vue === "clients" && (
+        <OngletClients
+          clients={clients}
+          setClients={setClients}
+          ajouterJournal={ajouterJournal}
+          travaux={travaux}
+          setTravaux={setTravaux}
+          inspections={inspections}
+          projets={projets}
+          setProjets={setProjets}
+          devisListe={devisListe}
+          transactionsQb={transactionsQb}
+          utilisateurs={utilisateurs}
+          tauxMetiers={tauxMetiers}
+          syncQbEnCours={syncQbEnCours}
+          onSyncQuickBooksProjets={synchroniserQuickBooksProjets}
+          peutSyncQb={peutSynchroniserQb}
+          fournisseurs={fournisseurs}
+          setFournisseurs={setFournisseurs}
+          clientCible={cibleRecherche?.clientId}
+          devisCible={cibleRecherche?.numeroDevis}
+          onCreerDevis={(id) => { setClientPourNouveauDevis(id); setOnglet("devis"); }}
+          bons={bons}
+        />
+      )}
+
+      {vue === "projets" && (
+        <OngletProjetsHub
+          projets={projets}
+          setProjets={setProjets}
+          clients={clients}
+          travaux={travaux}
+          devisListe={devisListe}
+          transactionsQb={transactionsQb}
+          utilisateurs={utilisateurs}
+          tauxMetiers={tauxMetiers}
+          syncQbEnCours={syncQbEnCours}
+          onSyncQuickBooks={synchroniserQuickBooksProjets}
+          peutSyncQb={peutSynchroniserQb}
+          onAssignerTransaction={assignerTransactionManuellement}
+          ajouterJournal={ajouterJournal}
+          fournisseurs={fournisseurs}
+          setFournisseurs={setFournisseurs}
+          inspections={inspections}
+        />
+      )}
+
+      {vue === "devis" && (
+        <OngletDevis
+          clients={clients}
+          setClients={setClients}
+          devisListe={devisListe}
+          setDevisListe={setDevisListe}
+          persisterDevis={(d) =>
+            sauvegarderDevis(d).catch(() =>
+              ajouterJournal(`⚠️ Devis ${d.numero} affiché localement mais NON enregistré — vérifie la connexion (table devis_app absente ?).`)
+            )
+          }
+          ajouterJournal={ajouterJournal}
+          ajouterTacheAgenda={ajouterTacheAgenda}
+          setProjets={setProjets}
+          onDevisTraite={(destination) => setOnglet(destination)}
+          clientCible={clientPourNouveauDevis}
+          peutModifierListePrix={peutModifierListePrix}
+          onMajCoutCatalogue={async (item) => {
+            const sauve = await sauvegarderItem(item);
+            setCatalogue((prev) =>
+              [...prev.filter((x) => x.id !== sauve.id), sauve].sort((a, b) => a.nom.localeCompare(b.nom))
+            );
+            ajouterJournal(`💲 Coût de «  » mis à jour dans la liste de prix depuis un devis.`);
+          }}
+        />
+      )}
+      {vue === "agenda" && (
+        <OngletAgenda
+          tachesAttente={tachesAttente}
+          setTachesAttente={setTachesAttente}
+          planning={planning}
+          setPlanning={setPlanning}
+          ajouterJournal={ajouterJournal}
+          clients={clients}
+          setClients={setClients}
+          devisListe={devisListe}
+          projets={projets}
+          travaux={travaux}
+          depots={depots}
+          prixDepots={prixDepots}
+          onCreerDepot={creerDepotPourTache}
+          bons={bons}
+          pieces={pieces}
+          onDepotPaye={depotPayeManuel}
+          onDetacherPiece={(pieceId, tache) => {
+            // « Garder la tâche sans pièce » : le lien pièce→tâche est
+            // coupé, la tâche redevient une tâche normale (planifiable).
+            setPieces((prev) => prev.map((x) => (x.id === pieceId ? { ...x, tacheRetourId: null } : x)));
+            majPiece(pieceId, { tache_retour_id: null }).catch(() =>
+              ajouterJournal("⚠️ Détachement de la pièce non enregistré — réessaie.")
+            );
+            ajouterJournal(`✔️ Tâche « ${tache.titre} » conservée sans pièce — elle est de nouveau planifiable.`);
+          }}
+          lectureSeule={sousCategorie === "Chargé de projet"}
+          employes={(() => {
+            // Rangées de l'agenda : le répertoire des employés + le compte
+            // CONNECTÉ (ajouté d'office s'il n'a pas encore de fiche —
+            // pratique pour qu'un admin principal s'assigne des tâches).
+            const liste = utilisateurs.map((u) => ({ id: u.id, nom: u.nom, courriel: u.courriel }));
+            const courrielSession = session.user?.email?.toLowerCase();
+            if (courrielSession && !liste.some((e) => (e.courriel || "").toLowerCase() === courrielSession)) {
+              liste.unshift({
+                id: "compte-connecte",
+                nom: `${session.user?.user_metadata?.nom || courrielSession.split("@")[0]} (moi)`,
+                courriel: courrielSession,
+              });
+            }
+            return liste;
+          })()}
+        />
+      )}
+      {vue === "facturation" && (
+        <OngletFacturation
+          bons={bons}
+          setBons={setBons}
+          ajouterJournal={ajouterJournal}
+          devisListe={devisListe}
+          clients={clients}
+          depots={depots}
+          pieces={pieces}
+          inspections={inspections}
+          prixDepots={prixDepots}
+        />
+      )}
+      {vue === "paies" && (
+        <OngletPaies
+          travaux={travaux}
+          utilisateurs={utilisateurs}
+          // Droit sur les heures : admins = ajustement DIRECT ; répartiteur
+          // = PROPOSITION à valider par un admin ; sinon consultation.
+          droitHeures={
+            role === "Admin principal" || role === "Admin régulier"
+              ? "direct"
+              : sousCategorie === "Répartiteur"
+              ? "proposer"
+              : null
+          }
+          onAjusterPlan={(ajustements) => {
+            // `ajustements` = la ligne éditée + ses voisins réalloués
+            // (calculés dans OngletPaies). Un seul geste, tout cohérent.
+            // CORRECTION TARDIVE : si la ligne appartient à une semaine de
+            // paie déjà passée, on note la date de correction et les heures
+            // d'avant — la différence sera REPORTÉE sur la semaine courante
+            // (colonne « Report ± »).
+            const dimancheCourant = dimancheDeSemaineISO(new Date());
+            const enrichir = (a) => {
+              const t = a.travail;
+              if (!t.date || dimancheDeSemaineISO(t.date) >= dimancheCourant) return a;
+              const dejaCetteSemaine = t.corrigeLe && dimancheDeSemaineISO(t.corrigeLe) === dimancheCourant;
+              return {
+                ...a,
+                corrigeLe: new Date().toISOString(),
+                heuresAvantCorrection: dejaCetteSemaine && t.heuresAvantCorrection != null ? t.heuresAvantCorrection : Number(t.heures) || 0,
+              };
+            };
+            const resume = ajustements
+              .map((a) => `« ${a.travail.titre} » ${(Number(a.travail.heures) || 0).toFixed(2)} h → ${a.heures.toFixed(2)} h`)
+              .join(" · ");
+            const qui = `${ajustements[0]?.travail.employeNom || ajustements[0]?.travail.employeEmail} · ${ajustements[0]?.travail.date}`;
+            const tardive = ajustements.some((a) => a.travail.date && dimancheDeSemaineISO(a.travail.date) < dimancheCourant);
+            if (role === "Admin principal" || role === "Admin régulier") {
+              const plan = ajustements.map(enrichir);
+              setTravaux((prev) =>
+                prev.map((t) => {
+                  const a = plan.find((x) => x.travail.id === t.id);
+                  return a
+                    ? {
+                        ...t,
+                        heures: a.heures,
+                        debutReel: a.debutReel !== undefined ? a.debutReel : t.debutReel,
+                        finReelle: a.finReelle !== undefined ? a.finReelle : t.finReelle,
+                        corrigeLe: a.corrigeLe !== undefined ? a.corrigeLe : t.corrigeLe,
+                        heuresAvantCorrection: a.heuresAvantCorrection !== undefined ? a.heuresAvantCorrection : t.heuresAvantCorrection,
+                        heuresProposees: null,
+                        propositionPar: null,
+                        groupeProposition: null,
+                      }
+                    : t;
+                })
+              );
+              appliquerAjustementsHeures(plan.map((a) => ({ id: a.travail.id, heures: a.heures, debutReel: a.debutReel, finReelle: a.finReelle, corrigeLe: a.corrigeLe, heuresAvantCorrection: a.heuresAvantCorrection })))
+                .then(() => ajouterJournal(`✏️ Heures ajustées (${qui}) : ${resume}. Paie, coûts de projets et agenda mis à jour.${tardive ? " Semaine de paie déjà passée → la différence est REPORTÉE sur la semaine courante (colonne Report ±)." : ""}`))
+                .catch(() => ajouterJournal(`⚠️ Échec de l'ajustement d'heures (${qui}) — réessaie.`));
+            } else {
+              const nomEditeur = session?.user?.user_metadata?.nom || session?.user?.email || "répartiteur";
+              const groupeLocal = `grp-local-${Date.now()}`;
+              setTravaux((prev) =>
+                prev.map((t) => {
+                  const a = ajustements.find((x) => x.travail.id === t.id);
+                  return a
+                    ? { ...t, heuresProposees: a.heures, debutPropose: a.debutReel !== undefined ? a.debutReel : null, finPropose: a.finReelle !== undefined ? a.finReelle : null, propositionPar: nomEditeur, groupeProposition: groupeLocal }
+                    : t;
+                })
+              );
+              proposerAjustementsHeures(
+                ajustements.map((a) => ({ id: a.travail.id, heures: a.heures, debutReel: a.debutReel, finReelle: a.finReelle })),
+                nomEditeur
+              )
+                .then(() => ajouterJournal(`⏳ Modification d'heures PROPOSÉE par ${nomEditeur} (${qui}) : ${resume}. EN ATTENTE de validation par un administrateur.`))
+                .catch(() => ajouterJournal(`⚠️ Échec de l'envoi de la proposition d'heures (${qui}) — réessaie.`));
+            }
+          }}
+          onValiderGroupe={(lignes) => {
+            // CORRECTION TARDIVE : la date qui compte est celle de la
+            // VALIDATION — si la ligne appartient à une semaine de paie
+            // passée, la différence part en Report ± sur la semaine courante.
+            const dimancheCourant = dimancheDeSemaineISO(new Date());
+            const lignesEnrichies = lignes.map((l) => {
+              if (!l.date || dimancheDeSemaineISO(l.date) >= dimancheCourant) return l;
+              const dejaCetteSemaine = l.corrigeLe && dimancheDeSemaineISO(l.corrigeLe) === dimancheCourant;
+              return {
+                ...l,
+                corrigeLeAEcrire: new Date().toISOString(),
+                heuresAvantCorrectionAEcrire: dejaCetteSemaine && l.heuresAvantCorrection != null ? l.heuresAvantCorrection : Number(l.heures) || 0,
+              };
+            });
+            const tardive = lignesEnrichies.some((l) => l.corrigeLeAEcrire !== undefined && l.corrigeLeAEcrire !== null && l.corrigeLeAEcrire);
+            const resume = lignes
+              .map((l) => `« ${l.titre} » ${(Number(l.heures) || 0).toFixed(2)} h → ${(Number(l.heuresProposees) || 0).toFixed(2)} h`)
+              .join(" · ");
+            const qui = `${lignes[0]?.employeNom || lignes[0]?.employeEmail} · ${lignes[0]?.date}`;
+            setTravaux((prev) =>
+              prev.map((t) => {
+                const l = lignesEnrichies.find((x) => x.id === t.id);
+                return l
+                  ? {
+                      ...t,
+                      heures: Number(l.heuresProposees) || t.heures,
+                      debutReel: l.debutPropose || t.debutReel,
+                      finReelle: l.finPropose || t.finReelle,
+                      corrigeLe: l.corrigeLeAEcrire !== undefined ? l.corrigeLeAEcrire : t.corrigeLe,
+                      heuresAvantCorrection: l.heuresAvantCorrectionAEcrire !== undefined ? l.heuresAvantCorrectionAEcrire : t.heuresAvantCorrection,
+                      heuresProposees: null,
+                      propositionPar: null,
+                      debutPropose: null,
+                      finPropose: null,
+                      groupeProposition: null,
+                    }
+                  : t;
+              })
+            );
+            validerGroupePropositions(lignesEnrichies)
+              .then(() => ajouterJournal(`✅ Proposition VALIDÉE (${qui}) : ${resume} (proposée par ${lignes[0]?.propositionPar || "?"}).${tardive ? " Semaine de paie déjà passée → différence REPORTÉE sur la semaine courante (colonne Report ±)." : ""}`))
+              .catch(() => ajouterJournal(`⚠️ Échec de la validation de la proposition (${qui}) — réessaie.`));
+          }}
+          onRefuserGroupe={(lignes) => {
+            const qui = `${lignes[0]?.employeNom || lignes[0]?.employeEmail} · ${lignes[0]?.date}`;
+            setTravaux((prev) =>
+              prev.map((t) =>
+                lignes.some((x) => x.id === t.id)
+                  ? { ...t, heuresProposees: null, propositionPar: null, debutPropose: null, finPropose: null, groupeProposition: null }
+                  : t
+              )
+            );
+            refuserGroupePropositions(lignes)
+              .then(() => ajouterJournal(`❌ Proposition REFUSÉE (${qui}) : les heures originales sont conservées (proposée par ${lignes[0]?.propositionPar || "?"}).`))
+              .catch(() => ajouterJournal(`⚠️ Échec du refus de la proposition (${qui}) — réessaie.`));
+          }}
+          projets={projets}
+          onDebloquerJournee={(email, date) => {
+            // La journée redevient comptable. Geste tracé au journal :
+            // c'est une décision qui remet des heures dans une paie.
+            const nom = (utilisateurs || []).find((u) => (u.courriel || "").toLowerCase() === email)?.nom || email;
+            setTravaux((prev) =>
+              prev.map((t) =>
+                (t.employeEmail || "").toLowerCase() === email && t.date === date
+                  ? { ...t, jourBloque: false, bloqueRaison: "" }
+                  : t
+              )
+            );
+            debloquerJournee(email, date)
+              .then(() => ajouterJournal(`🔓 Journée DÉBLOQUÉE : ${nom} · ${date} — les heures comptent de nouveau dans la paie.`))
+              .catch(() => ajouterJournal(`⚠️ Échec du déblocage de la journée (${nom} · ${date}) — réessaie.`));
+          }}
+        />
+      )}
+      {vue === "tarifs" && (
+        <OngletTarifs
+          onSauvegarderCoutCamion={sauvegarderCoutCamion}
+          tauxMetiers={tauxMetiers}
+          setTauxMetiers={setTauxMetiers}
+          onSauvegarderTaux={() => sauvegarderTaux(tauxMetiers)}
+          prixDepots={prixDepots}
+          setPrixDepots={setPrixDepots}
+          onSauvegarderPrixDepots={() => sauvegarderPrixDepots(prixDepots)}
+          estAdminPrincipal={role === "Admin principal"}
+          ajouterJournal={ajouterJournal}
+          catalogue={catalogue}
+          onEnregistrerItem={async (item) => {
+            const sauve = await sauvegarderItem(item);
+            setCatalogue((prev) =>
+              [...prev.filter((x) => x.id !== sauve.id), sauve].sort((a, b) => a.nom.localeCompare(b.nom))
+            );
+            ajouterJournal(`💲 Item de catalogue enregistré : ${sauve.nom}`);
+          }}
+          onDesactiverItem={async (item) => {
+            await desactiverItem(item.id);
+            setCatalogue((prev) => prev.filter((x) => x.id !== item.id));
+            ajouterJournal(`🚫 Item retiré du catalogue : ${item.nom} (désactivé, jamais supprimé — récupérable dans « Items retirés »)`);
+          }}
+          onReactiverItem={async (item) => {
+            await reactiverItem(item.id);
+            setCatalogue((prev) =>
+              [...prev.filter((x) => x.id !== item.id), { ...item, actif: true }].sort((a, b) => a.nom.localeCompare(b.nom))
+            );
+            ajouterJournal(`↩️ Item REMIS au catalogue : ${item.nom} — de nouveau proposé dans les devis.`);
+          }}
+        />
+      )}
+
+      {vue === "pieces" && (
+        <OngletPieces
+          pieces={pieces}
+          clients={clients}
+          depots={depots}
+          prixDepots={prixDepots}
+          onCreerDepot={creerDepotPourTache}
+          fournisseurs={fournisseurs}
+          nomUtilisateur={session?.user?.user_metadata?.nom || session?.user?.email}
+          /* COMMANDER est réservé aux administrateurs. Répartiteur et
+             chargé de projet VOIENT la liste pour répondre au client,
+             mais ne commandent pas : deux personnes qui commandent,
+             c'est deux commandes. */
+          peutCommander={role === "Admin principal" || role === "Admin régulier"}
+          onMaj={(id, champs) => {
+            const p = pieces.find((x) => x.id === id);
+            // Miroir local des colonnes touchées : l'onglet Agenda lit le
+            // MÊME `pieces`, donc la carte de la tâche de retour affiche
+            // le fournisseur et la date sans attendre le rechargement.
+            const prevue = champs.date_reception_prevue;
+            setPieces((prev) =>
+              prev.map((x) =>
+                x.id === id
+                  ? {
+                      ...x,
+                      ...(champs.numero_bc !== undefined ? { numeroBc: champs.numero_bc || "" } : {}),
+                      ...(champs.fournisseur_nom !== undefined ? { fournisseurNom: champs.fournisseur_nom || "" } : {}),
+                      ...(prevue !== undefined
+                        ? {
+                            dateReceptionPrevue: prevue || null,
+                            enRetard: !!prevue && prevue < dateISO(new Date()),
+                          }
+                        : {}),
+                      ...(champs.statut ? { statut: champs.statut } : {}),
+                      ...(champs.paiement_avant_commande !== undefined ? { paiementAvantCommande: !!champs.paiement_avant_commande } : {}),
+                      ...(champs.paiement_requis !== undefined ? { paiementRequis: !!champs.paiement_requis } : {}),
+                      ...(champs.paiement_recu !== undefined ? { paiementRecu: !!champs.paiement_recu } : {}),
+                      ...(champs.montant_piece !== undefined ? { montantPiece: champs.montant_piece } : {}),
+                      ...(champs.bc_envoye_le !== undefined ? { bcEnvoyeLe: champs.bc_envoye_le } : {}),
+                      ...(champs.demande_paiement_le !== undefined ? { demandePaiementLe: champs.demande_paiement_le } : {}),
+                    }
+                  : x
+              )
+            );
+            majPiece(id, champs)
+              .then(() => {
+                if (champs.statut === "commandee") {
+                  ajouterJournal(
+                    `📦 Pièce COMMANDÉE : ${p?.pieceRequise} pour ${p?.clientNom}` +
+                      `${champs.fournisseur_nom ? ` chez ${champs.fournisseur_nom}` : ""}` +
+                      `${champs.numero_bc ? ` (${champs.numero_bc})` : ""}` +
+                      `${prevue ? ` — réception prévue le ${prevue}` : " — aucune date confirmée"}`
+                  );
+                }
+                if (champs.paiement_recu === true) {
+                  ajouterJournal(
+                    `💰 Paiement REÇU pour la pièce ${p?.pieceRequise} (${p?.clientNom})` +
+                      `${p?.paiementAvantCommande ? " — la commande est débloquée." : " — la planification est débloquée."}`
+                  );
+                }
+                if (champs.paiement_avant_commande === true) {
+                  ajouterJournal(`💰 Pièce ${p?.pieceRequise} (${p?.clientNom}) : paiement du client exigé AVANT la commande.`);
+                }
+                if (champs.bc_envoye_le) {
+                  ajouterJournal(`✉️ BC ${p?.numeroBc || ""} envoyé au fournisseur ${p?.fournisseurNom || ""} — ${p?.pieceRequise}.`);
+                }
+              })
+              .catch(() => ajouterJournal("⚠️ Mise à jour de la pièce non enregistrée — réessaie."));
+          }}
+          onRecue={(id, parNom) => {
+            const p = pieces.find((x) => x.id === id);
+            setPieces((prev) => prev.map((x) => (x.id === id ? { ...x, statut: "recue", recuParNom: parNom, recuVia: "manuel", recuLe: new Date().toISOString() } : x)));
+            marquerRecue(id, parNom, "manuel")
+              .then(() =>
+                ajouterJournal(
+                  `📦 Pièce REÇUE : ${p?.pieceRequise} pour ${p?.clientNom} — la tâche de retour peut être planifiée.`
+                )
+              )
+              .catch(() => ajouterJournal("⚠️ Réception non enregistrée — réessaie."));
+          }}
+          onAnnuler={(id, raison) => {
+            const p = pieces.find((x) => x.id === id);
+            setPieces((prev) => prev.map((x) => (x.id === id ? { ...x, statut: "annulee", annuleRaison: raison } : x)));
+            annulerPiece(id, raison)
+              .then(() => ajouterJournal(`❌ Pièce ANNULÉE : ${p?.pieceRequise} pour ${p?.clientNom} — ${raison}`))
+              .catch(() => ajouterJournal("⚠️ Annulation non enregistrée — réessaie."));
+          }}
+        />
+      )}
+
+      {vue === "parametres" && (
+        <OngletParametres
+          config={configEntreprise}
+          estAdminPrincipal={role === "Admin principal"}
+          ajouterJournal={ajouterJournal}
+          onSauvegarder={async (nouvelle) => {
+            await sauvegarderEntreprise(nouvelle);
+            setConfigEntreprise(nouvelle);
+          }}
+        />
+      )}
+
+      {vue === "utilisateurs" && (
+        <>
+          {(role === "Admin principal" || role === "Admin régulier") && (
+            <div className="mx-auto max-w-2xl px-4 pt-4 md:px-6">
+              <GestionAcces utilisateurs={utilisateurs} estAdminPrincipal={role === "Admin principal"} />
+            </div>
+          )}
+          <OngletUtilisateurs
+            utilisateurs={utilisateurs}
+            setUtilisateurs={setUtilisateurs}
+            ajouterJournal={ajouterJournal}
+            tauxMetiers={tauxMetiers}
+            estAdminPrincipal={role === "Admin principal"}
+            persisterUtilisateur={(u) => {
+              sauvegarderEmploye(u).catch(() => {});
+              // GESTION DES ACCÈS INTÉGRÉE À LA FICHE : le type d'accès +
+              // le métier (sous-catégorie) de la fiche écrivent directement
+              // l'entrée de permissions_utilisateurs — créer/modifier la
+              // fiche règle les accès du même geste. Les cases ajustées
+              // finement dans « Gestion des accès » sont conservées tant
+              // que le type/métier ne change pas.
+              (async () => {
+                try {
+                  const courriel = (u.courriel || "").trim().toLowerCase();
+                  if (!courriel || !TYPES_ACCES.includes(u.typeAcces)) return;
+                  // Un Admin régulier ne peut pas accorder un rôle d'administration.
+                  if (role !== "Admin principal" && (u.typeAcces === "Admin principal" || u.typeAcces === "Admin régulier")) {
+                    ajouterJournal(`⚠️ Accès NON modifiés pour ${u.nom} — seuls les Admins principaux peuvent accorder un rôle d'administration.`);
+                    return;
+                  }
+                  const sous = u.typeAcces === "Administration bureau" ? u.metier : null;
+                  // Les cases cochées DANS LA FICHE font foi ; à défaut,
+                  // on conserve les accès existants du compte (si le
+                  // type/métier n'a pas changé), sinon les défauts.
+                  let sections;
+                  if (Array.isArray(u.sectionsAcces)) {
+                    sections = u.sectionsAcces;
+                  } else {
+                    const { data: existante } = await supabase
+                      .from("permissions_utilisateurs")
+                      .select("role, sous_categorie, sections")
+                      .eq("email", courriel)
+                      .maybeSingle();
+                    const memeConfig = existante && existante.role === u.typeAcces && (existante.sous_categorie || null) === (sous || null);
+                    sections =
+                      memeConfig && Array.isArray(existante.sections) && existante.sections.length > 0
+                        ? existante.sections
+                        : permissionsPour(u.typeAcces, sous);
+                  }
+                  const { error } = await supabase.from("permissions_utilisateurs").upsert({
+                    email: courriel,
+                    role: u.typeAcces,
+                    sous_categorie: sous,
+                    sections,
+                    updated_at: new Date().toISOString(),
+                  });
+                  if (error) throw error;
+                  ajouterJournal(`🔐 Accès de ${u.nom} réglés depuis sa fiche : ${u.typeAcces}${sous ? ` · ${sous}` : ""} (effet à sa prochaine connexion)`);
+                } catch {
+                  ajouterJournal(`⚠️ Fiche de ${u.nom} enregistrée, mais la mise à jour de ses ACCÈS a échoué — vérifie la section Gestion des accès.`);
+                }
+              })();
+            }}
+            supprimerUtilisateur={(u) => {
+              // SUPPRESSION DE LA FICHE + RÉVOCATION IMMÉDIATE DES ACCÈS :
+              // la fiche disparaît du répertoire (et de l'agenda), et son
+              // entrée d'accès est remplacée par « aucune section » — le
+              // compte ne peut plus rien ouvrir dès sa prochaine connexion.
+              setUtilisateurs((prev) => prev.filter((x) => x.id !== u.id));
+              supprimerEmploye(u.id).catch(() => {});
+              const courriel = (u.courriel || "").trim().toLowerCase();
+              if (courriel) {
+                supabase
+                  .from("permissions_utilisateurs")
+                  .upsert({ email: courriel, role: "Technicien", sous_categorie: null, sections: [], updated_at: new Date().toISOString() })
+                  .then(({ error }) => {
+                    if (error) ajouterJournal(`⚠️ Fiche de ${u.nom} supprimée, mais la révocation de ses accès a ÉCHOUÉ — retire-les dans Gestion des accès.`);
+                  });
+              }
+              ajouterJournal(`🗑️ Fiche de ${u.nom} supprimée — tous ses accès sont révoqués (⛔ aucun accès).`);
+            }}
+          />
+        </>
+      )}
+
+      <JournalAutomatisation entrees={journal} />
+
+      <div className="py-3 text-center text-[11px] text-slate-400">
+        © {new Date().getFullYear()} {configEntreprise.nomLegal} — Tous droits réservés.
+      </div>
+      </div>
+    </div>
+    </ContexteDevis.Provider>
+    </ContexteClients.Provider>
+    </ContexteCatalogue.Provider>
+    </ContexteEntreprise.Provider>
+  );
+}

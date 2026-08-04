@@ -1,0 +1,36 @@
+# Ce qui NE monte PAS chez Vercel.
+#
+# Sans ce fichier, la commande `vercel` téléverse le dossier au complet —
+# incluant node_modules (des centaines de Mo), le cache de compilation,
+# et surtout .env.local qui contient tes clés. Les variables
+# d'environnement se configurent dans le tableau de bord Vercel, jamais
+# par un fichier téléversé.
+
+# Secrets — configurés dans le tableau de bord Vercel
+.env
+.env.local
+.env*.local
+
+# Réinstallé et recompilé par Vercel à chaque publication
+node_modules
+.next
+.turbo
+
+# Outils de développement local
+.claude
+tests-suite
+*.log
+
+# Anciens fichiers autonomes (avant le passage à Next.js)
+bundle.js
+index.html
+ventilationdgl-test.html
+mnt
+demarrage-claude-code.md
+
+# Scripts SQL — ils se lancent dans Supabase, pas sur le serveur web
+*.sql
+
+# Notes de travail
+AGENTS.md
+CLAUDE.md
