@@ -21,8 +21,18 @@
 - **Windows** : toujours `npm.cmd`, `npx.cmd`, `vercel.cmd` (les scripts .ps1 sont bloqués).
 - `npm.cmd run verifier` — ESLint étroit (uniquement ce qui plante). **Toujours avant de publier.**
 - `npm.cmd run publier` — vérifie → build → déploie en production.
-- `.env.local` (JAMAIS dans git) : NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY.
-  Sur un nouveau poste : copier ce fichier manuellement, puis `npm.cmd install`.
+- `.env.local` (JAMAIS dans git — règle absolue, même pour des clés « publiques » :
+  l'historique git est éternel et des clés vraiment secrètes s'ajouteront un jour).
+  **Sur un nouveau poste, RIEN à transporter** — reconstruire le fichier ainsi :
+  1. supabase.com → se connecter → projet Ventilation DGL → ⚙️ Settings → API
+  2. Copier « Project URL » et « anon public » dans un nouveau `.env.local` :
+     ```
+     NEXT_PUBLIC_SUPABASE_URL=<Project URL>
+     NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon public>
+     ```
+  3. `npm.cmd install`, et l'application démarre.
+  (Les clés serveur — RESEND_API_KEY, etc. — vivent dans Vercel → Settings →
+  Environment Variables du projet, jamais en local ni dans git.)
 
 ## Règles métier GELÉES (validées avec le propriétaire — ne pas re-débattre)
 
