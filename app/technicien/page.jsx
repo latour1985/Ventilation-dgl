@@ -2645,6 +2645,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // Acceptation des termes et conditions — verrouille la signature tant
   // qu'elle n'est pas cochée. Considérée acquise si le bon est déjà signé.
   const [accepteConditions, setAccepteConditions] = useState(!!tache.accepteConditions || !!tache.aSignature);
+  // CLIENT ABSENT à la fin des travaux (clause 10 des conditions) : la
+  // case remplace la signature — les travaux sont réputés reçus, et la
+  // mention suit le bon jusqu'à la facturation au bureau.
+  const [clientAbsent, setClientAbsent] = useState(!!tache.clientAbsent);
   const [modaleConditions, setModaleConditions] = useState(false);
   // Fenêtre « Voir le devis » — contenu du devis lié SANS prix ni totaux.
   const [modaleDevis, setModaleDevis] = useState(false);
@@ -2700,14 +2704,17 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // SIGNATURE DU CLIENT : exigée UNIQUEMENT du dernier à fermer.
   // Un technicien qui part avant ses collègues enregistre ses heures et
   // s'en va — c'est celui qui finit avec le client qui fait signer.
+  // CLIENT ABSENT (clause 10) : coché = la signature n'est plus exigée.
   const peutEnvoyerBase =
     !descriptionManquante &&
     !photoApresManquante &&
-    (jeSuisLeDernier ? nomMoule.trim().length > 2 && aSignature && accepteConditions : true);
+    (jeSuisLeDernier
+      ? clientAbsent || (nomMoule.trim().length > 2 && aSignature && accepteConditions)
+      : true);
   const peutEnvoyer =
     !lectureSeule &&
     peutEnvoyerBase &&
-    (!necessiteDeuxiemeSignature || (nomMoule2.trim().length > 2 && aSignature2));
+    (!necessiteDeuxiemeSignature || clientAbsent || (nomMoule2.trim().length > 2 && aSignature2));
 
   // ------------------------------------------------------------
   // ACTIONS DIRECTES → synchronisées immédiatement vers l'état
@@ -2932,7 +2939,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         photosAvant: (photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
         photosApres: (photosApres || []).map((p) => p.urlDistante).filter(Boolean),
         courrielsEnvoi: destinataires,
-        signeParNom: nomMoule.trim(),
+        signeParNom: clientAbsent ? "" : nomMoule.trim(),
+        // Clause 10 : client absent à la fin des travaux — la mention
+        // suit le bon jusqu'à la facturation.
+        clientAbsent,
         // Unité vérifiée + pièce manquante — remontent au bureau avec le
         // bon de travail : registre d'équipements du client et alerte
         // pour la personne des achats.
@@ -3553,21 +3563,51 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           </label>
         </div>
 
-        {/* SIGNATURE */}
+        {/* CLIENT ABSENT — clause 10 des conditions. La case remplace la
+            signature : le bouton d'envoi se débloque, la mention part au
+            bureau avec le bon et s'affiche en facturation. Les photos
+            « après » (déjà obligatoires) deviennent la preuve terrain. */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <label className="flex items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={clientAbsent}
+              onChange={(e) => {
+                setClientAbsent(e.target.checked);
+                onMajTache(tache.id, { clientAbsent: e.target.checked });
+              }}
+              disabled={lectureSeule}
+              className="mt-0.5 h-5 w-5 shrink-0 accent-[#131B2E]"
+            />
+            <span className="text-sm text-slate-700">
+              <span className="font-bold">Le client n&apos;était pas sur place à la fin des travaux</span> — impossible
+              de faire signer le bon.
+            </span>
+          </label>
+          {clientAbsent && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
+              La signature n&apos;est plus exigée : selon la clause 10 des conditions, les travaux sont
+              réputés reçus tels qu&apos;exécutés. La mention sera inscrite au dossier et visible au bureau.
+              Assure-toi que tes photos « après » montrent bien le travail terminé — c&apos;est ta preuve.
+            </p>
+          )}
+        </div>
+
+        {/* SIGNATURE */}
+        <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${clientAbsent ? "opacity-50" : ""}`}>
           <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-            Nom en lettres moulées *
+            Nom en lettres moulées {clientAbsent ? "(client absent)" : "*"}
           </label>
           <input
             type="text"
             value={nomMoule}
             onChange={(e) => setNomMoule(e.target.value)}
             onBlur={commettreNomMoule}
-            disabled={lectureSeule || !accepteConditions}
+            disabled={lectureSeule || !accepteConditions || clientAbsent}
             placeholder="Ex: JEAN TREMBLAY"
             className="mb-4 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-bold uppercase tracking-wide disabled:bg-slate-100 disabled:text-slate-500"
           />
-          {!accepteConditions && !lectureSeule && (
+          {!accepteConditions && !lectureSeule && !clientAbsent && (
             <p className="mb-3 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
               <Lock size={13} className="shrink-0" /> Accepte les termes et conditions ci-dessus pour débloquer la signature.
             </p>
@@ -3578,7 +3618,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             canvasRef={canvasRef}
             onSignatureCommencee={marquerSignature}
             onSignatureEffacee={effacerSignature}
-            lectureSeule={lectureSeule || !accepteConditions}
+            lectureSeule={lectureSeule || !accepteConditions || clientAbsent}
           />
         </div>
 

@@ -76,6 +76,12 @@ export async function POST(request) {
   if (destinataires.length === 0 || !sujet || !html) {
     return Response.json({ erreur: "Destinataire, sujet et contenu sont requis." }, { status: 400 });
   }
+  // COPIE À L'EXPÉDITEUR (bons de commande) : celui qui commande reçoit
+  // le courriel en copie, et la réponse du fournisseur lui revient
+  // DIRECTEMENT — c'est lui qui corrigera la date dans l'application.
+  // L'adresse vient du jeton de session validé, jamais du corps de la
+  // demande : impossible de mettre en copie une adresse arbitraire.
+  const copieExpediteur = corps?.copieExpediteur === true && courrielValide(utilisateur.email);
 
   // 3. Service configuré ? Sinon : mode simulé, honnête et sans échec.
   const cle = process.env.RESEND_API_KEY;
@@ -95,9 +101,13 @@ export async function POST(request) {
         to: destinataires,
         subject: sujet,
         html,
-        // Les réponses du client reviennent dans la vraie boîte de
-        // l'entreprise, pas dans un trou noir.
-        reply_to: process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
+        ...(copieExpediteur ? { cc: [utilisateur.email] } : {}),
+        // Les réponses reviennent dans une vraie boîte, pas dans un trou
+        // noir : celle de l'expéditeur (bons de commande — c'est lui qui
+        // ajuste la date), avec la boîte générale en filet de sécurité.
+        reply_to: copieExpediteur
+          ? [utilisateur.email, process.env.COURRIEL_REPONSE || "info@ventilationdgl.com"]
+          : process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
       }),
     });
     const resultat = await reponse.json().catch(() => ({}));

@@ -37,6 +37,7 @@ import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse 
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
+import { etatQuickbooks, listerTransactionsQuickbooks } from "@/lib/quickbooksClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
 import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
@@ -1276,6 +1277,9 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
       a: adresses,
       sujet: `Bon de commande ${p.numeroBc || ""} — ${configEnt.nomLegal}`,
       html: gabaritBonCommande({ config: configEnt, piece: p }),
+      // Celui qui commande reçoit la copie, et la réponse du fournisseur
+      // (« impossible le 14, je peux le 18 ») lui revient directement.
+      copieExpediteur: true,
     });
     setEnvoiBcEnCours(null);
     if (r.envoye) {
@@ -1411,13 +1415,27 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
     const lignesUnites = (p.unites || [])
       .map((u) => `- Modèle : ${u.modele || "—"} · Nº série : ${u.serie || "—"}`)
       .join("\n");
+    // Livraison demandée — même contenu que le courriel envoyé par
+    // l'application (date locale, jamais toISOString).
+    const dateLivraison = p.dateReceptionPrevue
+      ? new Date(`${p.dateReceptionPrevue}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+      : "";
+    const lignesLivraison =
+      (dateLivraison
+        ? p.livraisonFixe
+          ? `\nLivraison : le ${dateLivraison} EXACTEMENT — notre entrepôt n'a pas de personnel en permanence, une personne sera sur place ce jour-là pour recevoir.\n`
+          : `\nLivraison : au plus tard le ${dateLivraison} — avant si possible.\n`
+        : `\nLivraison : merci de nous indiquer votre date possible.\n`) +
+      (configEnt.adresse ? `À notre entrepôt — ${configEnt.adresse}.\n` : "") +
+      `Si cette date est impossible, répondez à ce courriel en indiquant vos dates possibles.\n`;
     const corps =
       `Bonjour,\n\nVeuillez trouver notre bon de commande ${p.numeroBc || ""} :\n\n` +
       `Pièce : ${p.pieceRequise}\n` +
       (p.modele || p.numeroSerie ? `Équipement : ${p.modele || "—"} · Nº série : ${p.numeroSerie || "—"}\n` : "") +
       (lignesUnites ? `${lignesUnites}\n` : "") +
       (p.note ? `Note : ${p.note}\n` : "") +
-      `\nMerci de confirmer la disponibilité et la date de livraison prévue.\n\n` +
+      lignesLivraison +
+      `\nMerci de confirmer la réception de cette commande et la date de livraison.\n\n` +
       `${configEnt.nomLegal}\n${configEnt.telephone || ""}`;
     return `mailto:${encodeURIComponent(adresse)}?subject=${encodeURIComponent(`Bon de commande ${p.numeroBc || ""} — ${configEnt.nomLegal}`)}&body=${encodeURIComponent(corps)}`;
   };
@@ -1426,7 +1444,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
   // ne s'engagent sur rien, et forcer une date inventée serait pire
   // que pas de date du tout : on planifierait dessus.
   const [editionBc, setEditionBc] = useState(null);
-  const [formBc, setFormBc] = useState({ fournisseurNom: "", numeroBc: "", datePrevue: "" });
+  const [formBc, setFormBc] = useState({ fournisseurNom: "", numeroBc: "", datePrevue: "", livraisonFixe: false });
 
   const ouvertes = (pieces || []).filter((p) => p.statut !== "recue" && p.statut !== "annulee");
   const affichees =
@@ -1508,10 +1526,30 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                 )}
                 {p.dateReceptionPrevue && p.statut !== "recue" && p.statut !== "annulee" && (
                   <p className={`mt-0.5 text-[11px] font-bold ${p.enRetard ? "text-red-600" : "text-sky-700"}`}>
-                    {p.enRetard ? "⚠️ Était attendue le " : "📅 Réception prévue le "}
+                    {p.enRetard ? "⚠️ Était attendue le " : "📅 Livraison demandée le "}
                     {new Date(`${p.dateReceptionPrevue}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" })}
+                    {!p.enRetard && p.livraisonFixe ? " — date FIXE (quelqu'un sera à l'entrepôt)" : ""}
                     {p.enRetard ? " — relancer le fournisseur" : ""}
                   </p>
+                )}
+                {/* HISTORIQUE DES REPORTS — visible seulement s'il y en a.
+                    Une commande qui se passe bien garde une carte propre ;
+                    un fournisseur qui repousse laisse des traces. */}
+                {(p.reportsDate || []).length > 0 && p.statut !== "recue" && p.statut !== "annulee" && (
+                  <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                      🕓 Reports de date ({p.reportsDate.length})
+                    </p>
+                    {p.reportsDate.map((r, i) => (
+                      <p key={i} className="mt-0.5 text-[11px] text-slate-600">
+                        Promis le {new Date(`${r.de}T00:00:00`).toLocaleDateString("fr-CA", { day: "numeric", month: "long" })}
+                        {r.a
+                          ? ` → reporté au ${new Date(`${r.a}T00:00:00`).toLocaleDateString("fr-CA", { day: "numeric", month: "long" })}`
+                          : " → date retirée"}
+                        {r.le ? <span className="text-slate-400"> (changé le {new Date(r.le).toLocaleDateString("fr-CA")}{r.par ? ` par ${r.par}` : ""})</span> : null}
+                      </p>
+                    ))}
+                  </div>
                 )}
                 {p.statut === "commandee" && !p.dateReceptionPrevue && (
                   <p className="mt-0.5 text-[11px] text-slate-400">Aucune date de réception confirmée par le fournisseur.</p>
@@ -1590,7 +1628,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                         </div>
                         <div>
                           <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">
-                            Date de réception prévue <span className="font-normal normal-case text-slate-400">(facultatif)</span>
+                            Livraison demandée pour le <span className="font-normal normal-case text-slate-400">(facultatif)</span>
                           </label>
                           <input
                             type="date"
@@ -1599,9 +1637,37 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                             className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
                           />
                           <p className="mt-0.5 text-[10px] text-slate-400">
-                            Si le fournisseur ne s&apos;engage pas, laisse vide — c&apos;est correct. La date sert à rappeler
-                            le client d&apos;avance, et vire au rouge si elle passe sans que la pièce arrive.
+                            Cette date part dans le courriel au fournisseur. Si tu n&apos;exiges rien, laisse vide — c&apos;est correct.
+                            Elle sert aussi à rappeler le client d&apos;avance, et vire au rouge si elle passe sans que la pièce arrive.
                           </p>
+                          {/* Livraison SOUPLE ou FIXE — l'entrepôt n'a pas de
+                              personnel en permanence : en mode fixe, quelqu'un
+                              se déplace pour recevoir CE jour-là, et le
+                              courriel au fournisseur le dit clairement. */}
+                          {formBc.datePrevue && (
+                            <div className="mt-1.5 space-y-1">
+                              <label className="flex cursor-pointer items-start gap-2 text-[11px] text-slate-600">
+                                <input
+                                  type="radio"
+                                  name={`mode-livraison-${p.id}`}
+                                  checked={!formBc.livraisonFixe}
+                                  onChange={() => setFormBc({ ...formBc, livraisonFixe: false })}
+                                  className="mt-0.5"
+                                />
+                                <span><span className="font-bold">Souple</span> — livrer au plus tard cette date, avant si possible</span>
+                              </label>
+                              <label className="flex cursor-pointer items-start gap-2 text-[11px] text-slate-600">
+                                <input
+                                  type="radio"
+                                  name={`mode-livraison-${p.id}`}
+                                  checked={formBc.livraisonFixe}
+                                  onChange={() => setFormBc({ ...formBc, livraisonFixe: true })}
+                                  className="mt-0.5"
+                                />
+                                <span><span className="font-bold">Date fixe</span> — livrer ce jour exactement : quelqu&apos;un sera présent à l&apos;entrepôt pour recevoir</span>
+                              </label>
+                            </div>
+                          )}
                         </div>
                         <div className="flex gap-2">
                           <Button
@@ -1620,10 +1686,23 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                                   numero = "";
                                 }
                               }
+                              // HISTORIQUE DES REPORTS — si une date existait
+                              // déjà et qu'elle change, on garde la trace :
+                              // « promis le 10 → reporté au 15, par qui,
+                              // quand ». C'est ce qui permet de relancer un
+                              // fournisseur avec des faits.
+                              const ancienneDate = p.dateReceptionPrevue || null;
+                              const nouvelleDate = formBc.datePrevue || null;
+                              const reportAjoute =
+                                ancienneDate && nouvelleDate !== ancienneDate
+                                  ? [...(p.reportsDate || []), { de: ancienneDate, a: nouvelleDate, le: new Date().toISOString(), par: nomUtilisateur || "" }]
+                                  : null;
                               onMaj(p.id, {
                                 fournisseur_nom: formBc.fournisseurNom.trim() || null,
                                 numero_bc: numero || null,
-                                date_reception_prevue: formBc.datePrevue || null,
+                                date_reception_prevue: nouvelleDate,
+                                livraison_fixe: !!(nouvelleDate && formBc.livraisonFixe),
+                                ...(reportAjoute ? { reports_date: reportAjoute } : {}),
                                 statut: "commandee",
                               });
                               setEditionBc(null);
@@ -1663,11 +1742,12 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                                 fournisseurNom: p.fournisseurNom || "",
                                 numeroBc: p.numeroBc || "",
                                 datePrevue: p.dateReceptionPrevue || "",
+                                livraisonFixe: !!p.livraisonFixe,
                               });
                             }}
                             className="min-h-0 px-3 py-1.5 text-xs"
                           >
-                            {p.statut === "commandee" ? "Modifier la commande" : "📦 Marquer commandée"}
+                            {p.statut === "commandee" ? "Modifier la commande" : "📦 Commander la pièce"}
                           </Button>
                         )}
                         {/* BLOC 2 — courriel du BC : ouvre le logiciel de
@@ -1937,6 +2017,15 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
             })()}
 
             <label className="mt-3 mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Envoyer à :</label>
+            {/* FICHE SANS COURRIEL — le dire tout de suite, pas au clic.
+                Le silence a déjà coûté une heure de test : fenêtre sans
+                adresse, bouton sans effet, personne ne sait pourquoi. */}
+            {(ficheClientPiece(demandePour)?.courriels || []).filter((c) => (typeof c === "string" ? c : c?.email)).length === 0 && (
+              <p className="mb-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold leading-snug text-amber-800">
+                Ce client n&apos;a aucun courriel dans sa fiche. Inscris une adresse ci-dessous — et pense à
+                compléter sa fiche dans l&apos;onglet Clients pour la prochaine fois.
+              </p>
+            )}
             {(ficheClientPiece(demandePour)?.courriels || []).map((c) => {
               const adresse = typeof c === "string" ? c : c.email;
               if (!adresse) return null;
@@ -1961,6 +2050,19 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
               placeholder="Autre adresse (optionnel)"
               className="mb-3 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
             />
+
+            {/* POURQUOI le bouton est gris — toujours l'expliquer. */}
+            {(demandeEmails.length === 0 && !demandeExtra.trim()) && (
+              <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800">
+                ✋ Aucun destinataire — coche une adresse ci-dessus ou tapes-en une dans « Autre adresse ».
+              </p>
+            )}
+            {((pieceEncoreAPayer(demandePour) ? parseFloat(demandeMontant) || 0 : 0) +
+              (demandeDeplacement ? parseFloat(demandeMontantDeplacement) || 0 : 0)) <= 0 && (
+              <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800">
+                ✋ Le montant est à zéro — inscris le montant à demander au client.
+              </p>
+            )}
 
             <div className="flex gap-2">
               <Button
@@ -6247,6 +6349,76 @@ function ChampParametre({ brouillon, champ, estAdminPrincipal, cle, libelle, aid
   );
 }
 
+// ------------------------------------------------------------
+// CONNEXION QUICKBOOKS (Paramètres → Connexions)
+// ------------------------------------------------------------
+// Affiche l'état réel (lu de la route /api/quickbooks/etat — jamais
+// les jetons) et le bouton de connexion. Le clic quitte l'application
+// vers l'écran d'autorisation d'Intuit, qui ramène sur /admin ensuite.
+// Défini au niveau MODULE (règle du fichier — jamais dans le rendu).
+function CarteConnexionQuickbooks({ estAdminPrincipal }) {
+  const [etatQb, setEtatQb] = useState(null); // null = vérification en cours
+  useEffect(() => {
+    let actif = true;
+    etatQuickbooks().then((e) => {
+      if (actif) setEtatQb(e || {});
+    });
+    return () => {
+      actif = false;
+    };
+  }, []);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">QuickBooks</p>
+      <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+        Synchronise les factures et dépenses de la comptabilité vers la rentabilité des projets. Sandbox
+        (entreprise de test Intuit) tant que tout n&apos;est pas validé — la vraie comptabilité n&apos;est jamais touchée.
+      </p>
+      {etatQb === null ? (
+        <p className="text-xs text-slate-400">Vérification de la connexion…</p>
+      ) : !etatQb.configure ? (
+        <p className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600">
+          🧪 <span className="font-bold">Mode simulé</span> — les clés QuickBooks ne sont pas encore posées sur le
+          serveur (variables QB_CLIENT_ID, QB_CLIENT_SECRET et SUPABASE_SERVICE_ROLE_KEY). La synchronisation
+          affiche des données de démonstration en attendant.
+        </p>
+      ) : etatQb.connecte ? (
+        <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          ✅ <span className="font-bold">Connecté</span> — environnement{" "}
+          <span className="font-bold">{etatQb.environnement === "production" ? "PRODUCTION" : "Sandbox (test)"}</span>
+          {etatQb.realmId ? <> · entreprise nº {etatQb.realmId}</> : null}
+          {etatQb.expireLe ? (
+            <>
+              <br />
+              Connexion valide jusqu&apos;au {new Date(etatQb.expireLe).toLocaleDateString("fr-CA")} — elle se
+              renouvelle toute seule à chaque synchronisation.
+            </>
+          ) : null}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+            🔌 Les clés sont posées, mais l&apos;entreprise n&apos;est pas encore reliée.
+          </p>
+          {estAdminPrincipal ? (
+            <a
+              href="/api/quickbooks/connexion"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#131B2E] px-4 py-2.5 text-sm font-extrabold text-white active:scale-[0.99]"
+            >
+              <RefreshCw size={14} /> Connecter QuickBooks
+            </a>
+          ) : (
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <Lock size={12} /> Connexion réservée à l&apos;Admin principal.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJournal }) {
   const [brouillon, setBrouillon] = useState(config);
   const [ongletActif, setOngletActif] = useState("entreprise");
@@ -6291,6 +6463,7 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
     { id: "entreprise", label: "Entreprise" },
     { id: "taxes", label: "Taxes & facturation" },
     { id: "paie", label: "Paie & heures" },
+    { id: "connexions", label: "Connexions" },
   ];
 
   return (
@@ -6518,6 +6691,13 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ---------------- 4. CONNEXIONS ---------------- */}
+      {ongletActif === "connexions" && (
+        <div className="space-y-3">
+          <CarteConnexionQuickbooks estAdminPrincipal={estAdminPrincipal} />
         </div>
       )}
 
@@ -9633,6 +9813,11 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
       numero = genererNumeroSecours("DEV");
       ajouterJournal("⚠️ Numéro de devis séquentiel indisponible — numéro de secours attribué, à corriger manuellement.");
     }
+    // ENVOI RÉEL À LA CRÉATION — le détour « aller dans Devis récents
+    // puis Envoyer par courriel » créait des oublis. Désormais : des
+    // destinataires choisis = le courriel part TOUT DE SUITE, avec le
+    // lien d'acceptation (jeton généré ici, 30 jours, comme partout).
+    const jeton = destinataires.length > 0 ? genererJeton() : null;
     const nouveauDevis = {
       id: numero,
       numero,
@@ -9650,6 +9835,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
       date: todayISO(),
       courrielEnvoi: destinataires[0]?.email || null,
       courrielsEnvoi: destinataires.map((c) => c.email),
+      ...(jeton ? { jetonPublic: jeton, jetonExpireLe: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() } : {}),
       // Contrat d'entretien : fréquence portée par le devis lui-même,
       // reprise automatiquement à la création de la tâche.
       estContrat,
@@ -9661,11 +9847,30 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
     setEstContrat(false);
     setFrequenceContrat(4);
     setCourrielModalOuvert(false);
-    ajouterJournal(
-      destinataires.length > 0
-        ? `Devis ${numero} créé et envoyé à ${libelleDestinataires(destinataires)} pour ${client.nom} (${totaux.vendant.toFixed(2)} $)`
-        : `Devis ${numero} créé pour ${client.nom} (${totaux.vendant.toFixed(2)} $) — aucun courriel disponible pour l'envoi`
-    );
+    if (destinataires.length === 0) {
+      ajouterJournal(`Devis ${numero} créé pour ${client.nom} (${totaux.vendant.toFixed(2)} $) — aucun courriel disponible pour l'envoi`);
+      return;
+    }
+    // Le journal ne dit « envoyé » QUE si c'est vrai — plus jamais de
+    // « créé et envoyé » fictif.
+    const r = await envoyerCourriel({
+      a: destinataires.map((c) => c.email),
+      sujet: `Devis ${numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      html: gabaritDevis({
+        config: configEnt,
+        numero,
+        clientNom: client.nom,
+        total: null,
+        lien: lienDevisPublic(jeton),
+      }),
+    });
+    if (r.envoye) {
+      ajouterJournal(`✉️ Devis ${numero} créé ET envoyé à ${libelleDestinataires(destinataires)} pour ${client.nom} (${totaux.vendant.toFixed(2)} $) — le client peut accepter en ligne.`);
+    } else if (r.simule) {
+      ajouterJournal(`Devis ${numero} créé (${totaux.vendant.toFixed(2)} $) — envoi SIMULÉ : le service de courriels n'est pas configuré ici. Utilise « Copier le lien » en attendant.`);
+    } else {
+      ajouterJournal(`⚠️ Devis ${numero} créé, mais courriel NON parti — ${r.erreur || "erreur d'envoi"}. Réessaie avec « Envoyer par courriel » dans Devis récents.`);
+    }
   };
 
   const [devisATraiterId, setDevisATraiterId] = useState(null);
@@ -13907,6 +14112,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       existant.photosAvantUrls = [...(existant.photosAvantUrls || []), ...(b.photosAvantUrls || [])];
       existant.photosApresUrls = [...(existant.photosApresUrls || []), ...(b.photosApresUrls || [])];
       existant.signeParNom = existant.signeParNom || b.signeParNom;
+      existant.clientAbsent = existant.clientAbsent || b.clientAbsent;
       // Si UNE des lignes est déjà facturée, le travail l'est.
       if (b.statutQb !== "en_attente") existant.statutQb = b.statutQb;
     });
@@ -14112,11 +14318,21 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     qu'un collègue n'est pas venu, ou par oubli) doit
                     sauter aux yeux AVANT la facturation, pas après une
                     contestation. */}
-                {!b.signeParNom && (
-                  <p className="mt-1 flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
-                    <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-                    Bon de travail NON SIGNÉ par le client — à valider avant de facturer.
+                {/* CLIENT ABSENT (clause 10) : ce n'est PAS un oubli de
+                    signature — les travaux sont réputés reçus. Info,
+                    pas alerte : on facture normalement. */}
+                {b.clientAbsent ? (
+                  <p className="mt-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">
+                    ℹ️ Client absent à la fin des travaux — travaux réputés reçus (clause 10 des conditions).
+                    Bon non signé, mention au dossier.
                   </p>
+                ) : (
+                  !b.signeParNom && (
+                    <p className="mt-1 flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                      Bon de travail NON SIGNÉ par le client — à valider avant de facturer.
+                    </p>
+                  )
                 )}
                 {/* PIÈCE À COMMANDER — visible LÀ OÙ TU REGARDES DÉJÀ.
                     La réparation n'est pas finie : une 2e visite sera
@@ -15118,7 +15334,27 @@ export default function App() {
       return;
     }
     setSyncQbEnCours(true);
-    const brutes = await fetchQuickBooksTransactions();
+    // VRAIES transactions d'abord (route serveur — Sandbox tant que la
+    // bascule production n'est pas faite). Repli honnête : tant que les
+    // clés ne sont pas posées, la démo continue de fonctionner.
+    const reponse = await listerTransactionsQuickbooks();
+    let brutes;
+    let sourceReelle = false;
+    if (Array.isArray(reponse.transactions)) {
+      brutes = reponse.transactions;
+      sourceReelle = true;
+    } else if (reponse.simule) {
+      brutes = await fetchQuickBooksTransactions();
+      ajouterJournal("🧪 QuickBooks en MODE SIMULÉ (clés serveur absentes) — données de démonstration affichées");
+    } else if (reponse.nonConnecte) {
+      setSyncQbEnCours(false);
+      ajouterJournal("🔌 QuickBooks n'est pas encore connecté — Paramètres → Connexions pour brancher l'entreprise");
+      return;
+    } else {
+      setSyncQbEnCours(false);
+      ajouterJournal(`⚠️ Synchronisation QuickBooks impossible : ${reponse.erreur || "erreur inconnue"}`);
+      return;
+    }
     const enrichies = brutes.map((t) => ({
       ...t,
       projectId: attribuerTransactionQuickBooks(t, projets, clients),
@@ -15128,7 +15364,7 @@ export default function App() {
     const nbAssignees = enrichies.filter((t) => t.projectId).length;
     const nbNonAssignees = enrichies.length - nbAssignees;
     ajouterJournal(
-      `🔄 ${enrichies.length} transactions QuickBooks synchronisées — ${nbAssignees} attribuées automatiquement, ${nbNonAssignees} en attente d'attribution manuelle`
+      `🔄 ${enrichies.length} transactions QuickBooks${sourceReelle ? "" : " (démo)"} synchronisées — ${nbAssignees} attribuées automatiquement, ${nbNonAssignees} en attente d'attribution manuelle`
     );
     setSyncQbEnCours(false);
   };
@@ -15768,6 +16004,8 @@ export default function App() {
                       ...(champs.montant_piece !== undefined ? { montantPiece: champs.montant_piece } : {}),
                       ...(champs.bc_envoye_le !== undefined ? { bcEnvoyeLe: champs.bc_envoye_le } : {}),
                       ...(champs.demande_paiement_le !== undefined ? { demandePaiementLe: champs.demande_paiement_le } : {}),
+                      ...(champs.livraison_fixe !== undefined ? { livraisonFixe: !!champs.livraison_fixe } : {}),
+                      ...(champs.reports_date !== undefined ? { reportsDate: champs.reports_date || [] } : {}),
                     }
                   : x
               )

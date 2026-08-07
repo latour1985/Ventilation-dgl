@@ -3,7 +3,7 @@
 > Ce fichier est le **briefing d'embarquement** pour une session de travail
 > sur un nouvel ordinateur (ou après une longue pause). Il résume ce qui ne
 > se devine pas en lisant le code. Mis à jour aux grandes étapes.
-> Dernière mise à jour : 2026-08-02.
+> Dernière mise à jour : 2026-08-07.
 
 ## Qui / quoi
 
@@ -55,22 +55,49 @@
 - Technicien : aucun montant d'argent visible sauf taux vendants d'appels ; jamais les coûtants.
 - QuickBooks : DERNIÈRE phase, Sandbox d'abord. Factures de dépôt annulées par VOID, jamais Delete.
 
-## Où en est-on (2026-08-02)
+## Où en est-on (2026-08-07)
 
 - **Fait et en ligne** : auth + rôles/permissions (Admin principal voit tout, toujours) ·
   agenda ↔ technicien temps réel · heures/paies · dépôts par zone · catalogue 289 items
   (retrait/réactivation) · devis (versions, acceptation publique avec T&C) · facturation
   (révision prix, temps supplémentaire auto, déductions auto) · pièces à commander (circuit
   complet, BC auto-numéroté, demandes de paiement) · inspections véhicules + passager ·
-  pièces jointes de tâches (photos/plans → téléphone) · analyse de rentabilité (tuile Marge
-  moyenne : période, année fiscale, comparatif an passé, estimé-vs-réel, top/flop,
-  coût invisible, seuil d'alerte) · recherche globale en-tête avec liste déroulante ·
-  courriels (route /api/courriel sécurisée, gabarits devis/BC/paiement) en MODE SIMULÉ.
-- **En attente du propriétaire** : clé Resend (compte créé, DNS chez la personne externe du
-  site web — domaine GoDaddy, courriels Google Workspace ; SPF cassé à réparer du même coup).
-- **Phase 4 (plus tard)** : QuickBooks Sandbox · envoi réel des bons signés + relances ·
-  durcissement RLS (35 politiques `using (true)` — OBLIGATOIRE avant une 2e entreprise) ·
-  textos « en route » (idée notée, propriétaire pas convaincu encore).
+  pièces jointes de tâches (photos/plans → téléphone) · analyse de rentabilité · recherche
+  globale · **COURRIELS RÉELS ACTIFS depuis le 2026-08-07** : domaine vérifié chez Resend,
+  RESEND_API_KEY dans Vercel, DKIM Resend + DKIM Google activés, DMARC en surveillance
+  (p=none). Envoi testé et reçu en production. Le poste de travail officiel est
+  `C:\Dev\Ventilation-dgl` (clone git ; l'ancien dossier OneDrive est mort). Node LTS +
+  Vercel CLI installés et connectés (projet lié).
+- **Fait en LOCAL, PAS ENCORE PUBLIÉ (commit du 2026-08-07)** :
+  1. Pièces : bouton « Commander la pièce » (ex-« Marquer commandée ») · date « Livraison
+     demandée » avec choix SOUPLE/FIXE (fixe = quelqu'un se déplace à l'entrepôt pour
+     recevoir) · historique des reports de date { de, a, le, par } affiché sur la carte ·
+     courriel BC enrichi (date, adresse d'entrepôt des Paramètres, invitation à répondre) ·
+     copie CC à l'expéditeur + réponses dirigées vers lui (route courriel, opt-in
+     `copieExpediteur` — l'adresse vient du jeton de session, jamais du corps).
+  2. Clause 10 des T&C (client absent à la fin des travaux / instructions verbales /
+     retour facturable min. 3 h) — VERSION_CONDITIONS passée à « 2026-08-06 ».
+  3. Technicien : case « Le client n'était pas sur place à la fin des travaux » —
+     débloque l'envoi sans signature ; mention claire (clause 10) en facturation admin
+     à la place de l'alerte « NON SIGNÉ ».
+  4. Demande de paiement : plus de silence — messages explicites quand la fiche client
+     n'a pas de courriel / aucun destinataire / montant à zéro.
+  5. Devis : l'ENVOI RÉEL part À LA CRÉATION (fenêtre de choix des destinataires =
+     vrai envoi avec lien d'acceptation). Le journal ne dit « envoyé » que si c'est vrai.
+  6. QuickBooks Sandbox COMPLET : `lib/quickbooksServeur.js` + routes
+     `/api/quickbooks/{connexion,callback,etat,transactions}` + `lib/quickbooksClient.js`
+     + carte Paramètres → Connexions + sync réelle (Invoice/Purchase/Bill 12 mois) avec
+     repli simulé. PAS ENCORE BRANCHÉ — il reste : Redirect URI
+     `http://localhost:3000/api/quickbooks/callback` (+ URL Vercel) dans le portail
+     développeur Intuit, et QB_CLIENT_ID / QB_CLIENT_SECRET / SUPABASE_SERVICE_ROLE_KEY
+     dans `.env.local` (local) et Vercel (prod). Compte développeur Intuit créé.
+- **Snippets SQL passés jusqu'au nº 38** (36 : livraison_fixe + reports_date ;
+  37 : client_absent ; 38 : table quickbooks_connexion — RLS sans politique, clé service
+  seulement).
+- **Phase suivante** : brancher QuickBooks Sandbox (voir 6) · facture de dépôt QuickBooks
+  avec envoi automatique (le dépôt d'appel de service N'ENVOIE PAS de courriel pour
+  l'instant — c'est voulu) · durcissement RLS (politiques `using (true)` — OBLIGATOIRE
+  avant une 2e entreprise) · textos « en route » (idée notée, propriétaire pas convaincu).
 
 ## Pièges connus (payés cher — ne pas répéter)
 
@@ -79,5 +106,10 @@
 - `app/admin/page.jsx` fait ~15 000 lignes : les composants et helpers sont au niveau MODULE
   (jamais définis dans le rendu — perte de focus). `depots` est un ANNUAIRE `{tacheId: depot}`,
   pas une liste.
-- Snippets SQL numérotés 01→35 dans l'éditeur Supabase du propriétaire — on s'y réfère par numéro.
+- Snippets SQL numérotés 01→38 dans l'éditeur Supabase du propriétaire — on s'y réfère par numéro.
 - Google Maps : chargeur officiel avec `callback` (un `<script>` nu ne donne pas `importLibrary`).
+- `vercel env pull` renvoie « [SENSITIVE] » pour toute variable sensible — INUTILISABLE pour
+  diagnostiquer une clé (une heure perdue à croire la clé mauvaise alors que c'était le
+  cache-écran). Tester les clés par le circuit réel, jamais par relecture du coffre.
+- Le propriétaire copie parfois le texte masqué « [SENSITIVE] » au lieu d'une vraie valeur —
+  toujours vérifier le préfixe attendu (re_ pour Resend, etc.) avant de conclure.

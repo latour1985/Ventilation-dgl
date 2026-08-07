@@ -27,3 +27,4 @@ Thumbs.db
 # Réglages locaux de CETTE machine (permissions Claude Code) — chaque
 # ordinateur a les siens, ils ne voyagent pas.
 .claude/settings.local.json
+.env*

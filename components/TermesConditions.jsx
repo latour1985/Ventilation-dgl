@@ -119,6 +119,20 @@ export default function TermesConditions({ signature = false }) {
           régir l'exécution des travaux, la facturation et le paiement, sans qu'il soit nécessaire de les
           rappeler sur chaque document subséquent.
         </li>
+
+        <li>
+          <span className="font-bold text-slate-800">10. Absence du client à la fin des travaux et instructions verbales.</span>{" "}
+          Lorsque le client, ou son représentant, est absent des lieux au moment où les travaux sont terminés
+          et ne peut signer le bon de travail, les travaux sont réputés reçus et exécutés conformément aux
+          instructions données, y compris les instructions verbales. Le client demeure entièrement responsable
+          de la clarté et de l'exactitude des instructions transmises à nos employés ; Ventilation DGL inc. ne
+          pourra être tenue responsable d'une interprétation découlant d'instructions verbales, incomplètes ou
+          transmises par un intermédiaire, dès lors que le client n'était pas présent pour valider le résultat
+          avant le départ de l'équipe. Toute visite de retour demandée à la suite de ces travaux — notamment
+          pour un ajustement ou une modification ne résultant pas d'une faute de l'entreprise — constituera une
+          nouvelle intervention facturable, comprenant le temps de transport ainsi que le temps sur place, pour
+          un minimum de trois (3) heures au tarif régulier en vigueur.
+        </li>
       </ol>
 
       <p className="mt-2 text-center text-[10px] italic text-slate-500">

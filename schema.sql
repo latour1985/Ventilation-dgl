@@ -1592,3 +1592,45 @@ alter table entreprises add column if not exists seuil_marge_alerte numeric;
 
 -- SNIPPET « 35 » — début de l'année fiscale (analyse de rentabilité).
 alter table entreprises add column if not exists debut_annee_fiscale text;
+
+-- ============================================================
+-- SNIPPET « 36 » — livraison demandée (souple ou fixe) et
+-- historique des reports de date sur les pièces commandées.
+-- ============================================================
+-- La date de réception devient une « livraison demandée » qui part
+-- dans le courriel au fournisseur. Mode FIXE : l'entrepôt n'a pas de
+-- personnel en permanence, quelqu'un se déplace pour recevoir ce
+-- jour-là — le fournisseur ne peut pas livrer n'importe quand.
+alter table pieces_commandees add column if not exists livraison_fixe boolean not null default false;
+-- Chaque changement de date garde une trace { de, a, le, par } :
+-- « vous aviez promis le 10, puis le 15… » — c'est ce qui permet de
+-- relancer un fournisseur avec des faits, et de savoir qui tient parole.
+alter table pieces_commandees add column if not exists reports_date jsonb not null default '[]'::jsonb;
+
+-- ============================================================
+-- SNIPPET « 37 » — client absent à la fin des travaux (clause 10).
+-- ============================================================
+-- Le technicien coche « client absent » au lieu de faire signer : le
+-- bon part sans signature, les travaux sont réputés reçus (clause 10
+-- des conditions), et la facturation affiche la mention au lieu de
+-- l'alerte « bon non signé ».
+alter table bons_travail add column if not exists client_absent boolean not null default false;
+
+-- ============================================================
+-- SNIPPET « 38 » — connexion QuickBooks (jetons OAuth, Sandbox).
+-- ============================================================
+-- Les jetons d'accès QuickBooks ne doivent JAMAIS être lisibles depuis
+-- le navigateur : RLS activée SANS AUCUNE politique = seule la clé
+-- service (serveur Vercel) peut lire/écrire cette table. Une ligne par
+-- environnement ('sandbox' puis 'production' en bascule finale).
+create table if not exists quickbooks_connexion (
+  environnement text primary key check (environnement in ('sandbox','production')),
+  realm_id text not null,
+  access_token text not null,
+  refresh_token text not null,
+  access_expire_a timestamptz not null,
+  refresh_expire_a timestamptz not null,
+  connecte_par text,
+  updated_at timestamptz default now()
+);
+alter table quickbooks_connexion enable row level security;
