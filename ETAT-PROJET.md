@@ -55,49 +55,44 @@
 - Technicien : aucun montant d'argent visible sauf taux vendants d'appels ; jamais les coûtants.
 - QuickBooks : DERNIÈRE phase, Sandbox d'abord. Factures de dépôt annulées par VOID, jamais Delete.
 
-## Où en est-on (2026-08-07)
+## Où en est-on (2026-08-10 — TOUT EST PUBLIÉ, tests terrain avec les employés en cours)
 
-- **Fait et en ligne** : auth + rôles/permissions (Admin principal voit tout, toujours) ·
-  agenda ↔ technicien temps réel · heures/paies · dépôts par zone · catalogue 289 items
-  (retrait/réactivation) · devis (versions, acceptation publique avec T&C) · facturation
-  (révision prix, temps supplémentaire auto, déductions auto) · pièces à commander (circuit
-  complet, BC auto-numéroté, demandes de paiement) · inspections véhicules + passager ·
-  pièces jointes de tâches (photos/plans → téléphone) · analyse de rentabilité · recherche
-  globale · **COURRIELS RÉELS ACTIFS depuis le 2026-08-07** : domaine vérifié chez Resend,
-  RESEND_API_KEY dans Vercel, DKIM Resend + DKIM Google activés, DMARC en surveillance
-  (p=none). Envoi testé et reçu en production. Le poste de travail officiel est
-  `C:\Dev\Ventilation-dgl` (clone git ; l'ancien dossier OneDrive est mort). Node LTS +
-  Vercel CLI installés et connectés (projet lié).
-- **Fait en LOCAL, PAS ENCORE PUBLIÉ (commit du 2026-08-07)** :
-  1. Pièces : bouton « Commander la pièce » (ex-« Marquer commandée ») · date « Livraison
-     demandée » avec choix SOUPLE/FIXE (fixe = quelqu'un se déplace à l'entrepôt pour
-     recevoir) · historique des reports de date { de, a, le, par } affiché sur la carte ·
-     courriel BC enrichi (date, adresse d'entrepôt des Paramètres, invitation à répondre) ·
-     copie CC à l'expéditeur + réponses dirigées vers lui (route courriel, opt-in
-     `copieExpediteur` — l'adresse vient du jeton de session, jamais du corps).
-  2. Clause 10 des T&C (client absent à la fin des travaux / instructions verbales /
-     retour facturable min. 3 h) — VERSION_CONDITIONS passée à « 2026-08-06 ».
-  3. Technicien : case « Le client n'était pas sur place à la fin des travaux » —
-     débloque l'envoi sans signature ; mention claire (clause 10) en facturation admin
-     à la place de l'alerte « NON SIGNÉ ».
-  4. Demande de paiement : plus de silence — messages explicites quand la fiche client
-     n'a pas de courriel / aucun destinataire / montant à zéro.
-  5. Devis : l'ENVOI RÉEL part À LA CRÉATION (fenêtre de choix des destinataires =
-     vrai envoi avec lien d'acceptation). Le journal ne dit « envoyé » que si c'est vrai.
-  6. QuickBooks Sandbox COMPLET : `lib/quickbooksServeur.js` + routes
-     `/api/quickbooks/{connexion,callback,etat,transactions}` + `lib/quickbooksClient.js`
-     + carte Paramètres → Connexions + sync réelle (Invoice/Purchase/Bill 12 mois) avec
-     repli simulé. PAS ENCORE BRANCHÉ — il reste : Redirect URI
-     `http://localhost:3000/api/quickbooks/callback` (+ URL Vercel) dans le portail
-     développeur Intuit, et QB_CLIENT_ID / QB_CLIENT_SECRET / SUPABASE_SERVICE_ROLE_KEY
-     dans `.env.local` (local) et Vercel (prod). Compte développeur Intuit créé.
-- **Snippets SQL passés jusqu'au nº 38** (36 : livraison_fixe + reports_date ;
-  37 : client_absent ; 38 : table quickbooks_connexion — RLS sans politique, clé service
-  seulement).
-- **Phase suivante** : brancher QuickBooks Sandbox (voir 6) · facture de dépôt QuickBooks
-  avec envoi automatique (le dépôt d'appel de service N'ENVOIE PAS de courriel pour
-  l'instant — c'est voulu) · durcissement RLS (politiques `using (true)` — OBLIGATOIRE
-  avant une 2e entreprise) · textos « en route » (idée notée, propriétaire pas convaincu).
+- **Fait, EN LIGNE et testé** : auth + rôles/permissions · agenda ↔ technicien temps réel ·
+  heures/paies · dépôts par zone · catalogue 289 items · devis (versions, acceptation
+  publique avec T&C v2026-08-06 incluant la clause 10 « client absent ») · facturation ·
+  pièces à commander (bouton « Commander la pièce », livraison SOUPLE/FIXE, historique des
+  reports de date, courriel BC enrichi + CC à l'expéditeur) · case « client absent » côté
+  technicien · devis envoyés RÉELLEMENT à la création (lien d'acceptation) · annulation de
+  tâches dans l'agenda (double vérification, raison obligatoire ; admins toujours,
+  répartiteur seulement sans dépôt/pièce, refusée si travail exécuté) · **COURRIELS RÉELS**
+  (Resend vérifié, DKIM Resend + Google, DMARC) · **COMPTES EMPLOYÉS EN UN CLIC** : fiche →
+  compte Auth avec rôle → courriel d'invitation (Resend) → page /choisir-mot-de-passe ;
+  testé de bout en bout ; en local le lien va au presse-papier (pas de clé Resend, voulu).
+- **QuickBooks Sandbox CONNECTÉE** (realm 9341457669242533, « Sandbox Company US c42b ») —
+  jetons dans quickbooks_connexion, sync Invoice/Purchase/Bill fonctionnelle. DÉCISION du
+  propriétaire : rester en Sandbox pendant tous les tests employés ; bascule production
+  seulement après validation de la facturation.
+- **Retours de tests des employés — batch 1 LIVRÉ (2026-08-10)** : Nº de devis existant
+  QuickBooks à la création de tâche (transition) · multi-techniciens d'un coup (même tâche
+  partagée) · heures de début au QUART D'HEURE (« 09:15 » — la grille reste en cases d'une
+  heure, helper `indexCaseHeure`) · filtres de recherche AU-DESSUS des listes client et
+  adresses (la liste reste) · adresses identifiées par client · champ App./unité · choix
+  « Nom affiché » du client (nom/entreprise/les deux) · bouton camion qui explique pourquoi
+  il est gris · menu « Recherche » retiré (doublon) · salaires avec point ET virgule
+  (44,50) — InputNombreDecimal partout, plus de champs « number » du navigateur.
+- **Données** : base RÉINITIALISÉE le 2026-08-10 avant les tests (clients/devis/tâches/
+  heures de test effacés ; catalogue, utilisateurs et paramètres conservés). Un fournisseur
+  « TEST — Fournisseur » (courriel du propriétaire) existe pour tester les BC. RÈGLE
+  ABSOLUE depuis : ne JAMAIS effacer de données sans demande explicite du propriétaire.
+- **Snippets SQL passés jusqu'au nº 39** (36 livraison/reports · 37 client_absent ·
+  38 quickbooks_connexion · 39 clients_app.nom_affichage).
+- **Vercel** : RESEND_API_KEY + SUPABASE_SERVICE_ROLE_KEY posées (prod+preview). Supabase
+  Auth URL Configuration faite (Site URL prod + redirect prod/localhost).
+- **PROCHAIN GRAND CHANTIER (point 9 des retours)** : facture de DÉPÔT dans QuickBooks
+  Sandbox à la création d'un appel de service — créer/lier le client QBO, créer la facture
+  de dépôt, l'envoyer par courriel au destinataire choisi, journaliser. Règle gelée :
+  annulation par VOID, jamais Delete. Ensuite : durcissement RLS (OBLIGATOIRE avant une
+  2e entreprise) · textos « en route » (idée notée, propriétaire pas convaincu).
 
 ## Pièges connus (payés cher — ne pas répéter)
 
