@@ -502,6 +502,32 @@ const EMPLOYES = [
 // mais l'admin peut toujours se déplacer librement vers la gauche
 // (heures plus tôt) ou la droite (heures plus tard) au besoin.
 const HEURES = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, "0")}:00`);
+// QUARTS D'HEURE (retour de tests 2026-08-10) : l'heure de début se
+// choisit à 15 minutes près (09:15, 09:30…). La GRILLE, elle, reste en
+// cases d'une heure : une tâche à 09:15 occupe la case de 9 h, et les
+// minutes réelles restent affichées partout où l'heure apparaît.
+const HEURES_QUART = HEURES.flatMap((h) => ["00", "15", "30", "45"].map((m) => `${h.slice(0, 2)}:${m}`));
+// Case horaire d'une heure de début — tolère les quarts d'heure.
+const indexCaseHeure = (h) => HEURES.indexOf(`${String(h || "").slice(0, 2)}:00`);
+
+// NOM AFFICHÉ d'un client (retour de tests 2026-08-10) : quand une fiche
+// porte un nom ET une entreprise, l'admin choisit ce que les listes
+// montrent — le nom, l'entreprise, ou les deux.
+function nomAffichageClient(c) {
+  if (!c) return "";
+  const nom = (c.nom || "").trim();
+  const entreprise = (c.entreprise || "").trim();
+  const mode = c.nomAffichage || "nom";
+  if (mode === "entreprise") return entreprise || nom;
+  if (mode === "nom-entreprise") return [nom, entreprise].filter(Boolean).join(" — ") || nom;
+  return nom || entreprise;
+}
+
+// Étiquette d'une adresse de chantier — avec l'appartement s'il existe.
+function libelleAdresse(a) {
+  if (!a) return "";
+  return `${a.ligne1}${a.appartement ? `, app. ${a.appartement}` : ""}`;
+}
 
 // Génère une tâche de transport SYSTÈME (Début/Fin de journée). Ces
 // tâches sont recalculées automatiquement (voir recalculerTransports) et
@@ -986,7 +1012,9 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
   const groupes = [
     { titre: "Vue d'ensemble", items: [
       { id: "tableau-de-bord", label: "Tableau de bord", icone: LayoutGrid },
-      { id: "recherche", label: "Recherche", icone: Search },
+      // « Recherche » retirée du menu (retour de tests 2026-08-10) :
+      // doublon exact de la recherche globale de l'en-tête, même moteur.
+      // La page existe toujours si un vieux lien y mène.
     ]},
     { titre: "Clients & ventes", items: [
       { id: "clients", label: "Clients", icone: Users },
@@ -2422,6 +2450,12 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
                     <Plus size={12} /> Ajouter le camion
                   </Button>
                 </div>
+                {/* POURQUOI le bouton est gris — toujours le dire. */}
+                {!nouveauCamionNom.trim() && (
+                  <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">
+                    ✋ Inscris au moins le « Nom / numéro » du camion (ex. : C-08) — le bouton s&apos;activera.
+                  </p>
+                )}
 
                 {/* ANCIENS VÉHICULES — dossiers conservés : coordonnées du
                     camion, motif du retrait, remplaçant, et tout son
@@ -8033,6 +8067,8 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
 function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, bons, inspections }) {
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   const [entreprise, setEntreprise] = useState("");
+  // Nom affiché dans les listes quand nom ET entreprise existent.
+  const [nomAffichageChoix, setNomAffichageChoix] = useState("nom");
   const [prenom, setPrenom] = useState("");
   const [nomFamille, setNomFamille] = useState("");
   const [courriel, setCourriel] = useState("");
@@ -8243,6 +8279,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     setTelephone("");
     setTermeFacturation(TERMES_FACTURATION[0]);
     setAdresseFacturation(null);
+    setNomAffichageChoix("nom");
   };
 
   const peutCreer = prenom.trim() && nomFamille.trim() && courriel.trim();
@@ -8263,6 +8300,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     const nouveauClient = {
       id,
       entreprise: entreprise.trim(),
+      nomAffichage: entreprise.trim() ? nomAffichageChoix : "nom",
       nom: `${prenom.trim()} ${nomFamille.trim()}`,
       courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: courriel.trim(), defaut: true }],
       telephone: telephone.trim(),
@@ -8359,6 +8397,26 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                 placeholder="Ex: Toitures Lavallée inc."
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
+              {/* NOM AFFICHÉ (retour de tests) : avec une entreprise, on
+                  choisit ce que les listes montrent. */}
+              {entreprise.trim() && (
+                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Nom affiché dans les listes</p>
+                  <div className="flex flex-wrap gap-3">
+                    {[["nom", "Nom de la personne"], ["entreprise", "Entreprise"], ["nom-entreprise", "Nom — Entreprise"]].map(([val, lib]) => (
+                      <label key={val} className="flex items-center gap-1.5 text-[11px] text-slate-700">
+                        <input
+                          type="radio"
+                          name="nom-affichage-client"
+                          checked={nomAffichageChoix === val}
+                          onChange={() => setNomAffichageChoix(val)}
+                        />
+                        {lib}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -11076,7 +11134,7 @@ function reconstruirePlanning(rows, employesRef) {
     const nbJours = Math.max(0, tache.jours);
     const blocJourComplet = nbJours >= 1;
     const joursCibles = calculerJoursCibles(new Date(`${r.date_debut}T00:00:00`), nbJours, !!tache.sauterWeekend);
-    const indexDepart = r.heure_debut ? Math.max(0, HEURES.indexOf(r.heure_debut)) : 0;
+    const indexDepart = r.heure_debut ? Math.max(0, indexCaseHeure(r.heure_debut)) : 0;
     const nbHeures = Math.max(0, Math.min(tache.heures ?? 1, HEURES.length - indexDepart));
     const heuresCibles = blocJourComplet ? HEURES : HEURES.slice(indexDepart, indexDepart + nbHeures);
     joursCibles.forEach((d) => {
@@ -11307,8 +11365,10 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
             </div>
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Heure de début</label>
+              {/* Quarts d'heure permis — la tâche occupe la case de
+                  l'heure dans la grille, les minutes restent affichées. */}
               <select value={heureDebut} onChange={(e) => setHeureDebut(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm">
-                {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+                {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
               </select>
             </div>
           </div>
@@ -11446,7 +11506,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Heure début</label>
                   <select value={ajoutHeure} onChange={(e) => setAjoutHeure(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
-                    {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+                    {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
                   </select>
                 </div>
                 <div>
@@ -11466,8 +11526,15 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
                   Dupliquer (copie)
                 </Button>
               </div>
-              <p className="mt-1.5 text-[10px] text-slate-400">
-                « Ajouter » = même tâche partagée, avec son propre horaire. « Dupliquer » = copie indépendante. Les transports Début/Fin se créent automatiquement.
+              <p className="mt-1.5 text-[10px] leading-relaxed text-slate-400">
+                <span className="font-bold text-slate-500">Ajouter</span> = le technicien rejoint LA MÊME job : un seul
+                bon de travail, les heures s&apos;additionnent, UNE seule facturation (signature par le dernier qui ferme).
+                <br />
+                <span className="font-bold text-slate-500">Dupliquer</span> = une job jumelle mais INDÉPENDANTE : son
+                propre bon, sa propre facturation — pour deux interventions distinctes qui se ressemblent.
+                <br />
+                En résumé : même job à plusieurs bras = Ajouter · deux jobs séparées = Dupliquer. Les transports
+                Début/Fin se créent automatiquement dans les deux cas.
               </p>
             </div>
           )}
@@ -11784,6 +11851,21 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [nouvelleDate, setNouvelleDate] = useState("");
   const [nouvelleHeureDebut, setNouvelleHeureDebut] = useState(HEURE_PAR_DEFAUT);
   const [nouveauEmployeId, setNouveauEmployeId] = useState("");
+  // MULTI-TECHNICIENS à la création (retour de tests 2026-08-10) : les
+  // techniciens cochés EN PLUS reçoivent la MÊME tâche partagée (heures
+  // additionnées, une seule facturation) — fini le détour « créer puis
+  // ajouter dans l'agenda ».
+  const [nouveauxEmployesEnPlus, setNouveauxEmployesEnPlus] = useState([]);
+  // TRANSITION QUICKBOOKS : numéro d'un devis EXISTANT (hors application)
+  // à attacher à la tâche — il suit jusqu'au bon de travail et à la
+  // facturation.
+  const [numeroDevisExistant, setNumeroDevisExistant] = useState("");
+  // Filtres de recherche des listes déroulantes (la liste RESTE — le
+  // filtre la raccourcit seulement).
+  const [filtreClientTache, setFiltreClientTache] = useState("");
+  const [filtreAdresseTache, setFiltreAdresseTache] = useState("");
+  // Appartement / unité d'une nouvelle adresse de travaux.
+  const [nouvelleAdresseApp, setNouvelleAdresseApp] = useState("");
   const [nouvelleDureeHeures, setNouvelleDureeHeures] = useState(1);
   const [nouvelleDureeJours, setNouvelleDureeJours] = useState(0);
   const [nouveauSauterWeekend, setNouveauSauterWeekend] = useState(false);
@@ -11867,10 +11949,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 
     if (adresseTravauxDifferente) {
       if (nouvelleAdresseTravaux) {
-        nouvelle.adresseTravaux = nouvelleAdresseTravaux.label;
+        // Appartement/unité ajouté à l'adresse choisie (retour de tests).
+        nouvelle.adresseTravaux = `${nouvelleAdresseTravaux.label}${nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}`;
       } else if (adresseTravauxId) {
         const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
-        if (a) nouvelle.adresseTravaux = `${a.nom} — ${a.ligne1}`;
+        if (a) nouvelle.adresseTravaux = `${a.nom} — ${libelleAdresse(a)}`;
       }
     }
 
@@ -11901,6 +11984,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       if (nouveauType === "entretien_contrat") {
         nouvelle.frequenceFacturationAnnuelle = nouvelleFrequence;
       }
+    }
+
+    // TRANSITION QUICKBOOKS : un numéro de devis EXISTANT (hors app)
+    // s'attache à n'importe quel type de tâche — il suivra jusqu'au bon
+    // de travail et à la facturation. Le devis choisi dans l'app garde
+    // priorité s'il y en a un.
+    if (!nouvelle.devisNumero && numeroDevisExistant.trim()) {
+      nouvelle.devisNumero = numeroDevisExistant.trim();
     }
 
     const projetLie = projetsDisponibles.find((p) => p.id === nouveauProjetId);
@@ -11946,7 +12037,17 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       // tous les deux renseignés dès la création — sinon, comme avant,
       // la tâche atterrit dans "Tâches en attente".
       assigner(nouvelle, nouveauEmployeId, new Date(`${nouvelleDate}T00:00:00`), nouvelleHeureDebut);
-      ajouterJournal(`📋 Tâche créée et placée directement dans l'horaire — ${libelleType} (${client?.nom})${suffixeProjet}`);
+      // MULTI-TECHNICIENS : chaque coché EN PLUS reçoit la MÊME tâche
+      // partagée (id identique = heures additionnées, une facturation).
+      const enPlus = nouveauxEmployesEnPlus.filter((id) => id && id !== nouveauEmployeId);
+      enPlus.forEach((id) => assigner(nouvelle, id, new Date(`${nouvelleDate}T00:00:00`), nouvelleHeureDebut));
+      const nomsEquipe = [nouveauEmployeId, ...enPlus]
+        .map((id) => employes.find((e) => e.id === id)?.nom)
+        .filter(Boolean)
+        .join(", ");
+      ajouterJournal(
+        `📋 Tâche créée et placée directement dans l'horaire — ${libelleType} (${client?.nom})${suffixeProjet}${enPlus.length > 0 ? ` — équipe : ${nomsEquipe}` : ""}`
+      );
     } else {
       setTachesAttente((prev) => [nouvelle, ...prev]);
       ajouterJournal(`📋 Tâche créée — ${libelleType} (${client?.nom})${suffixeProjet}`);
@@ -11966,6 +12067,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setNouvelleDate("");
     setNouvelleHeureDebut(HEURE_PAR_DEFAUT);
     setNouveauEmployeId("");
+    setNouveauxEmployesEnPlus([]);
+    setNumeroDevisExistant("");
+    setFiltreClientTache("");
+    setFiltreAdresseTache("");
+    setNouvelleAdresseApp("");
     setNouvelleDureeHeures(1);
     setNouvelleDureeJours(0);
     setNouveauSauterWeekend(false);
@@ -12010,7 +12116,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     // est explicitement mis à 0.
     const blocageJourComplet = nbJoursSpecifie >= 1;
     const joursCibles = calculerJoursCibles(dateDepart, nbJoursSpecifie, tache.sauterWeekend);
-    const indexDepart = heureDepart ? Math.max(0, HEURES.indexOf(heureDepart)) : 0;
+    const indexDepart = heureDepart ? Math.max(0, indexCaseHeure(heureDepart)) : 0;
     // tache.heures peut valoir 0 (saisi explicitement) — on ne le
     // remplace plus par 1 via `|| 1`. Math.max(0, ...) plutôt que
     // Math.max(1, ...) : 0 case horaire bloquée est un résultat valide
@@ -12081,7 +12187,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // ailleurs (contrats/multi-jours).
   const redimensionnerTache = (tache, employeId, jourCible, heureDebut, nouvellesHeures) => {
     if (lectureSeule) return;
-    const indexDepart = Math.max(0, HEURES.indexOf(heureDebut));
+    const indexDepart = Math.max(0, indexCaseHeure(heureDebut));
     const nbHeures = Math.max(1, Math.min(nouvellesHeures, HEURES.length - indexDepart));
     const heuresCibles = HEURES.slice(indexDepart, indexDepart + nbHeures);
     setPlanning((prev) => {
@@ -12466,6 +12572,16 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               </div>
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Client</label>
+                {/* FILTRE AU-DESSUS DE LA LISTE (retour de tests) : taper
+                    3 lettres raccourcit la liste ; ne rien taper = liste
+                    complète, défilable comme avant. La liste reste — le
+                    filtre l'aide, il ne la remplace pas. */}
+                <input
+                  value={filtreClientTache}
+                  onChange={(e) => setFiltreClientTache(e.target.value)}
+                  placeholder="🔍 Filtrer les clients (nom, entreprise, téléphone)…"
+                  className="mb-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+                />
                 <select
                   value={nouveauClientId}
                   onChange={(e) => {
@@ -12478,14 +12594,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     setNouveauClientId(e.target.value);
                     setAdresseTravauxId("");
                     setNouvelleAdresseTravaux(null);
+                    setFiltreAdresseTache("");
                     setNouveauProjetId("");
                   }}
                   className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                 >
                   <option value="__nouveau__">➕ Nouveau client…</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.nom}</option>
-                  ))}
+                  {clients
+                    .filter((c) => {
+                      const f = filtreClientTache.trim().toLowerCase();
+                      if (!f) return true;
+                      // Le client sélectionné reste toujours visible.
+                      if (c.id === nouveauClientId) return true;
+                      return `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(f);
+                    })
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>{nomAffichageClient(c)}</option>
+                    ))}
                 </select>
               </div>
 
@@ -12529,26 +12654,53 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   <div className="space-y-2 rounded-lg bg-slate-50 p-2">
                     {(() => {
                       const client = clients.find((c) => c.id === nouveauClientId);
-                      return (client?.adresses || []).length > 0 ? (
-                        <select
-                          value={adresseTravauxId}
-                          onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
-                          className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                        >
-                          <option value="">— Choisir une adresse enregistrée —</option>
-                          {client.adresses.map((a) => (
-                            <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
-                          ))}
-                        </select>
-                      ) : null;
+                      if ((client?.adresses || []).length === 0) return null;
+                      // La liste montre UNIQUEMENT les adresses de CE
+                      // client — son nom est affiché pour qu'aucun doute
+                      // ne subsiste (retour de tests : « adresses
+                      // mélangées »). Filtre au-dessus, liste conservée.
+                      const f = filtreAdresseTache.trim().toLowerCase();
+                      const adressesFiltrees = client.adresses.filter(
+                        (a) => !f || a.id === adresseTravauxId || `${a.nom} ${a.ligne1} ${a.appartement || ""}`.toLowerCase().includes(f)
+                      );
+                      return (
+                        <div>
+                          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            Adresses enregistrées de {nomAffichageClient(client)}
+                          </p>
+                          <input
+                            value={filtreAdresseTache}
+                            onChange={(e) => setFiltreAdresseTache(e.target.value)}
+                            placeholder="🔍 Filtrer les adresses…"
+                            className="mb-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                          />
+                          <select
+                            value={adresseTravauxId}
+                            onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
+                            className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                          >
+                            <option value="">— Choisir une adresse enregistrée —</option>
+                            {adressesFiltrees.map((a) => (
+                              <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
                     })()}
                     <p className="text-[10px] text-slate-400">Ou saisir une nouvelle adresse :</p>
                     <AutocompleteAdresse
                       onSelection={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
                     />
+                    <input
+                      value={nouvelleAdresseApp}
+                      onChange={(e) => setNouvelleAdresseApp(e.target.value)}
+                      placeholder="App. / unité (optionnel) — ex. : 4B"
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
+                    />
                     {nouvelleAdresseTravaux && (
                       <p className="flex items-center gap-1 text-[11px] text-emerald-600">
                         <Check size={12} /> {nouvelleAdresseTravaux.label}
+                        {nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}
                       </p>
                     )}
                   </div>
@@ -12649,6 +12801,25 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 </div>
               )}
 
+              {/* Nº DE DEVIS EXISTANT (transition QuickBooks) — pour les
+                  jobs vendues avec un devis d'AVANT l'application. */}
+              {nouveauType !== "devis" && nouveauType !== "entretien_contrat" && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                    Nº de devis existant (QuickBooks) <span className="font-normal normal-case text-slate-400">— optionnel</span>
+                  </label>
+                  <input
+                    value={numeroDevisExistant}
+                    onChange={(e) => setNumeroDevisExistant(e.target.value)}
+                    placeholder="Ex. : 1057 ou DEV-2024-312"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-64"
+                  />
+                  <p className="mt-0.5 text-[9px] text-slate-400">
+                    Pour la transition : le numéro suivra la tâche jusqu&apos;au bon de travail et à la facturation.
+                  </p>
+                </div>
+              )}
+
               <div className="border-t border-slate-100 pt-2">
                 <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">Planification (optionnel)</p>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -12668,7 +12839,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       onChange={(e) => setNouvelleHeureDebut(e.target.value)}
                       className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                     >
-                      {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+                      {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
                     </select>
                   </div>
                 </div>
@@ -12712,6 +12883,38 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
                   </select>
                 </div>
+                {/* MULTI-TECHNICIENS (retour de tests) : les cochés
+                    rejoignent la MÊME tâche, planifiés d'un seul coup. */}
+                {nouveauEmployeId && nouvelleDate && employes.filter((e) => e.id !== nouveauEmployeId).length > 0 && (
+                  <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      Ajouter d&apos;autres techniciens sur la même tâche
+                    </p>
+                    <div className="space-y-1">
+                      {employes
+                        .filter((e) => e.id !== nouveauEmployeId)
+                        .map((e) => (
+                          <label key={e.id} className="flex items-center gap-2 text-[11px] text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={nouveauxEmployesEnPlus.includes(e.id)}
+                              onChange={() =>
+                                setNouveauxEmployesEnPlus((prev) =>
+                                  prev.includes(e.id) ? prev.filter((x) => x !== e.id) : [...prev, e.id]
+                                )
+                              }
+                              className="h-3.5 w-3.5 accent-[#131B2E]"
+                            />
+                            {e.nom}
+                          </label>
+                        ))}
+                    </div>
+                    <p className="mt-1 text-[9px] text-slate-400">
+                      Même job à plusieurs bras : heures additionnées, UNE facturation. Chacun reste ajustable
+                      individuellement ensuite dans l&apos;agenda.
+                    </p>
+                  </div>
+                )}
                 <p className="mt-1 text-[10px] text-slate-400">
                   {depotRequis
                     ? nouveauEmployeId
@@ -13130,7 +13333,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         onChange={(e) => setAssignationMobile({ ...assignationMobile, heure: e.target.value })}
                         className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                       >
-                        {HEURES.map((h) => <option key={h} value={h}>{h}</option>)}
+                        {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
                       </select>
                     ) : (
                       <input

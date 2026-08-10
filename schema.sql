@@ -1634,3 +1634,11 @@ create table if not exists quickbooks_connexion (
   updated_at timestamptz default now()
 );
 alter table quickbooks_connexion enable row level security;
+
+-- ============================================================
+-- SNIPPET « 39 » — nom affiché du client (retours de tests).
+-- ============================================================
+-- Quand une fiche porte un NOM et une ENTREPRISE, l'admin choisit ce
+-- que les listes montrent : 'nom' (défaut), 'entreprise', ou
+-- 'nom-entreprise' (les deux).
+alter table clients_app add column if not exists nom_affichage text;
