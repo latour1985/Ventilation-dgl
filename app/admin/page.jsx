@@ -181,11 +181,12 @@ function InputNombreDecimal({ valeur, onChange, className, onBlur, ...props }) {
       onChange={(e) => {
         const brut = e.target.value;
         // N'accepte que ce qui ressemble à un nombre décimal en cours
-        // de frappe (chiffres, un seul point, signe optionnel) —
-        // bloque les autres caractères sans casser la saisie normale.
-        if (!/^-?\d*\.?\d*$/.test(brut)) return;
+        // de frappe : chiffres, signe optionnel, et UN séparateur —
+        // point OU virgule (au Québec on tape « 44,50 » ; la virgule
+        // était rejetée en silence et 44,50 devenait 4450).
+        if (!/^-?\d*[.,]?\d*$/.test(brut)) return;
         setTexte(brut);
-        const nombre = parseFloat(brut);
+        const nombre = parseFloat(brut.replace(",", "."));
         onChange(Number.isNaN(nombre) ? 0 : nombre);
       }}
       className={`${className || ""} focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100`}
@@ -5599,14 +5600,16 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, onSauvegarderTaux, prixDepo
                 <div key={niv}>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{niv}</label>
                   <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={tauxMetiers[m]?.[niv] ?? 0}
+                    {/* InputNombreDecimal (et non un champ « number » du
+                        navigateur) : les champs number refusent le point
+                        ou la virgule selon la langue du navigateur — la
+                        saisie des centimes devenait impossible. Ici,
+                        44.50 ET 44,50 passent. */}
+                    <InputNombreDecimal
+                      valeur={Number(tauxMetiers[m]?.[niv]) || 0}
                       disabled={!estAdminPrincipal}
-                      onChange={(e) => setTauxMetiers((prev) => ({ ...prev, [m]: { ...prev[m], [niv]: e.target.value } }))}
-                      className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+                      onChange={(v) => setTauxMetiers((prev) => ({ ...prev, [m]: { ...prev[m], [niv]: v } }))}
+                      className="w-full border-0 bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
                     />
                     <span className="text-[10px] text-slate-400">$/h</span>
                   </div>
