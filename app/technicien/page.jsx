@@ -4010,6 +4010,12 @@ function AppTechnicien() {
   const inspectionFaitePour = (date) => !!inspectionsParDate[date];
   const [vue, setVue] = useState("accueil");
   const [tacheActiveId, setTacheActiveId] = useState(null);
+  // OUVERTURE D'UNE TÂCHE : toujours repartir du HAUT de l'écran. La
+  // liste de l'horaire peut être défilée loin — sans ce retour en haut,
+  // le panneau « Démarrer la tâche » s'ouvrait à moitié hors écran.
+  useEffect(() => {
+    if (tacheActiveId) window.scrollTo(0, 0);
+  }, [tacheActiveId]);
   // Question « As-tu dîné ? » posée au démarrage du Transport — Fin de
   // journée (id de la tâche concernée, ou null).
   const [modalLunchPour, setModalLunchPour] = useState(null);

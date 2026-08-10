@@ -38,6 +38,7 @@ import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
 import { etatQuickbooks, listerTransactionsQuickbooks } from "@/lib/quickbooksClient";
+import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
 import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
@@ -6844,7 +6845,33 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
 
   const peutCreer = nom.trim() && courriel.trim() && nomUtilisateur.trim();
 
-  const creerUtilisateur = () => {
+  // RÉSULTAT D'UNE INVITATION — un seul interprète pour les trois
+  // gestes (créer, renvoyer, réinitialiser). Le journal ne dit
+  // « envoyé » que si c'est VRAI ; en mode simulé (local) ou si le
+  // courriel rate, le lien est copié dans le presse-papier de l'admin
+  // pour transmission manuelle — jamais de trou noir.
+  const journaliserInvitation = async (r, cible, contexte) => {
+    if (r?.envoye) {
+      ajouterJournal(
+        `📧 ${contexte} — ${r.nouveau ? `compte créé et invitation envoyée à ${cible.courriel} (il choisit son mot de passe via le lien)` : `lien de réinitialisation envoyé à ${cible.courriel}`}`
+      );
+    } else if (r?.lien) {
+      let copie = false;
+      try {
+        await navigator.clipboard?.writeText(r.lien);
+        copie = true;
+      } catch {
+        window.prompt("Copie ce lien et transmets-le à l'employé :", r.lien);
+      }
+      ajouterJournal(
+        `🔗 ${contexte} — ${r.simule ? "service de courriels non configuré ici (normal en local)" : `courriel NON parti (${r.erreur || "erreur"})`} ; le lien « choisir mot de passe » de ${cible.courriel} ${copie ? "est COPIÉ dans ton presse-papier" : "t'a été montré"} — transmets-le-lui.`
+      );
+    } else {
+      ajouterJournal(`⚠️ ${contexte} — compte de connexion NON créé pour ${cible.courriel} : ${r?.erreur || "erreur inconnue"}.`);
+    }
+  };
+
+  const creerUtilisateur = async () => {
     if (!peutCreer) return;
     const nouvel = {
       id: `u-${Date.now()}`,
@@ -6864,22 +6891,40 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
     // Persistance Supabase : l'employé survit aux rechargements et
     // apparaît durablement dans l'agenda (et la synchro des tâches).
     persisterUtilisateur?.(nouvel);
-    ajouterJournal(`👤 Utilisateur "${nouvel.nom}" créé (${typeAcces}) — lien de connexion envoyé`);
+    ajouterJournal(`👤 Fiche "${nouvel.nom}" créée (${typeAcces})`);
     setFormulaireOuvert(false);
     reinitialiserFormulaire();
-    setCourrielAperçu(nouvel);
+    // Le VRAI compte de connexion + l'invitation — la route serveur
+    // fait tout (Auth + rôle en métadonnées + courriel Resend).
+    if (nouvel.courriel) {
+      const r = await inviterEmploye({
+        courriel: nouvel.courriel,
+        nom: nouvel.nom,
+        role: nouvel.typeAcces,
+        sousCategorie: nouvel.typeAcces === "Administration bureau" ? nouvel.metier : null,
+      });
+      await journaliserInvitation(r, nouvel, "Invitation");
+    } else {
+      ajouterJournal(`⚠️ "${nouvel.nom}" n'a pas de courriel — aucun compte de connexion créé. Ajoute son courriel puis « Renvoyer le lien ».`);
+    }
   };
 
-  const envoyerLienConnexion = (u) => {
-    ajouterJournal(`📧 Lien de connexion renvoyé à ${u.nom} (${u.courriel})`);
-    setCourrielAperçu(u);
+  const envoyerLienConnexion = async (u) => {
+    const r = await inviterEmploye({
+      courriel: u.courriel,
+      nom: u.nom,
+      role: u.typeAcces,
+      sousCategorie: u.typeAcces === "Administration bureau" ? u.metier : null,
+    });
+    await journaliserInvitation(r, u, `Lien de connexion pour ${u.nom}`);
   };
 
-  const reinitialiserMotDePasse = (id) => {
+  const reinitialiserMotDePasse = async (id) => {
     setUtilisateurs((prev) => prev.map((u) => (u.id === id ? { ...u, motDePasseCree: false } : u)));
     const u = utilisateurs.find((x) => x.id === id);
-    ajouterJournal(`🔑 Mot de passe réinitialisé pour ${u.nom} — un nouveau lien de connexion lui a été envoyé`);
-    setCourrielAperçu(u);
+    if (!u) return;
+    const r = await inviterEmploye({ courriel: u.courriel, nom: u.nom, role: u.typeAcces });
+    await journaliserInvitation(r, u, `Réinitialisation du mot de passe de ${u.nom}`);
   };
 
   return (
@@ -11068,7 +11113,14 @@ function techniciensPourTache(planning, tacheId, employes) {
   });
 }
 
-function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait }) {
+function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation }) {
+  // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
+  // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
+  // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
+  // seulement sans dépôt ni pièce (règle du propriétaire) ; app
+  // technicien : jamais — ces props n'y existent pas.
+  const [etapeAnnulation, setEtapeAnnulation] = useState(null); // null | "raison" | "confirmation"
+  const [raisonAnnulation, setRaisonAnnulation] = useState("");
   const [date, setDate] = useState(dateInitiale || todayISO());
   const [heureDebut, setHeureDebut] = useState(heureInitiale || HEURE_PAR_DEFAUT);
   const [heures, setHeures] = useState(tache.heures ?? 1);
@@ -11420,13 +11472,102 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
           <Button onClick={enregistrer} className="w-full">
             {dejaPlanifiee ? "Enregistrer les modifications" : employeId ? "Enregistrer et assigner" : "Enregistrer"}
           </Button>
+
+          {/* RETRAIT DE L'HORAIRE — le même geste que « Laisser en
+              attente » du menu déroulant, mais VISIBLE : personne ne
+              devine qu'une option de menu sert de bouton Retirer. */}
+          {dejaPlanifiee && onRetirerHoraire && (
+            <Button
+              variant="outline"
+              onClick={() => onRetirerHoraire({ heures: Math.max(0, heures), jours: Math.max(0, jours), sauterWeekend, description })}
+              className="min-h-0 w-full py-2 text-xs"
+            >
+              ↩️ Retirer de l&apos;horaire — la tâche retourne dans « Tâches en attente »
+            </Button>
+          )}
+
+          {/* ANNULATION DÉFINITIVE — lien discret (pas un gros bouton
+              rouge à côté d'Enregistrer), mais parcours en 2 étapes. */}
+          {onAnnulerTache && travailFait && (
+            <p className="rounded-lg bg-slate-100 px-3 py-2 text-[11px] text-slate-500">
+              🔒 Un technicien a déjà exécuté du travail sur cette tâche — elle ne peut plus être annulée :
+              elle doit se facturer (ou se créditer) via l&apos;onglet Facturation.
+            </p>
+          )}
+          {onAnnulerTache && !travailFait && annulation?.permise && (
+            <button
+              onClick={() => setEtapeAnnulation("raison")}
+              className="w-full text-center text-[11px] font-semibold text-slate-400 underline underline-offset-2 hover:text-red-600"
+            >
+              🗑️ Annuler cette tâche définitivement…
+            </button>
+          )}
+          {onAnnulerTache && !travailFait && !annulation?.permise && annulation?.bloqueeRaison && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">{annulation.bloqueeRaison}</p>
+          )}
         </div>
       </div>
+
+      {/* ÉTAPE 1 — raison obligatoire + avertissements dépôt/pièce. */}
+      {etapeAnnulation === "raison" && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <p className="text-base font-extrabold text-slate-900">🗑️ Annuler la tâche</p>
+            <p className="mt-1 text-[13px] font-bold text-slate-700">« {tache.titre || tache.clientNom} »</p>
+            {(annulation?.avertissements || []).map((a, i) => (
+              <p key={i} className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold leading-snug text-amber-800">{a}</p>
+            ))}
+            <label className="mt-3 mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Raison de l&apos;annulation *</label>
+            <textarea
+              value={raisonAnnulation}
+              onChange={(e) => setRaisonAnnulation(e.target.value)}
+              rows={2}
+              placeholder="Ex. : le client a annulé son rendez-vous"
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+            />
+            <div className="mt-3 flex gap-2">
+              <Button variant="outline" onClick={() => { setEtapeAnnulation(null); setRaisonAnnulation(""); }} className="min-h-0 flex-1 py-2 text-xs">
+                Retour
+              </Button>
+              <Button onClick={() => setEtapeAnnulation("confirmation")} disabled={raisonAnnulation.trim().length < 3} className="min-h-0 flex-1 py-2 text-xs">
+                Continuer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ÉTAPE 2 — dernière vérification, en rouge, irréversible. */}
+      {etapeAnnulation === "confirmation" && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <p className="text-base font-extrabold text-red-600">⚠️ Dernière vérification</p>
+            <p className="mt-1.5 text-[13px] leading-snug text-slate-600">
+              La tâche <span className="font-bold text-slate-800">« {tache.titre || tache.clientNom} »</span> sera
+              annulée <span className="font-bold">définitivement</span> : retirée de l&apos;horaire de tous les
+              techniciens et de la liste d&apos;attente. Cette action est <span className="font-bold">irréversible</span>.
+            </p>
+            <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs italic text-slate-500">Raison : {raisonAnnulation.trim()}</p>
+            <div className="mt-4 space-y-2">
+              <Button
+                variant="danger"
+                onClick={() => onAnnulerTache(raisonAnnulation.trim())}
+                className="min-h-[48px] w-full text-sm font-extrabold"
+              >
+                Oui, annuler définitivement
+              </Button>
+              <Button variant="outline" onClick={() => setEtapeAnnulation("raison")} className="min-h-[48px] w-full text-sm font-bold">
+                Non, retour
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece }) {
+function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role }) {
   // Taux de taxes des Paramètres — dépôts affichés taxes incluses.
   const configEnt = useEntreprise();
   // Statut du dépôt d'une tâche : bloque la planification tant que le
@@ -11963,6 +12104,82 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     });
     const employe = employes.find((e) => e.id === employeId);
     ajouterJournal(`↔️ "${tache.titre || tache.clientNom}" redimensionnée à ${nbHeures} h (${employe?.nom}, ${jourCible}) — mise à jour envoyée à son app mobile`);
+  };
+
+  // ------------------------------------------------------------
+  // ANNULATION DÉFINITIVE D'UNE TÂCHE (règles validées avec le
+  // propriétaire, 2026-08-07) :
+  //   • Admins : toujours, avec avertissements si dépôt/pièce en jeu.
+  //   • Répartiteur : SEULEMENT si aucun dépôt ni pièce en commande
+  //     n'est lié — sinon réservé aux administrateurs.
+  //   • Chargé de projet / lecture seule : aucun bouton.
+  //   • App technicien : la fonction n'y existe pas, point.
+  //   • Travail déjà exécuté (bon envoyé) : annulation refusée — ça se
+  //     facture ou se crédite, ça ne disparaît pas.
+  // Double vérification à l'écran (raison obligatoire + confirmation
+  // rouge) — voir ModalEditionTache. Trace complète au journal.
+  // ------------------------------------------------------------
+  const estAdminAgenda = role === "Admin principal" || role === "Admin régulier";
+  const estRepartiteurAgenda = role === "Répartiteur";
+  // Pièce encore en jeu pour cette tâche (retour bloqué ou pose à
+  // venir) — une pièce annulée ne compte plus.
+  const pieceLieeATache = (tacheId) =>
+    (pieces || []).find((p) => (p.tacheRetourId === tacheId || p.tacheOrigineId === tacheId) && p.statut !== "annulee");
+  const contexteAnnulation = (tache) => {
+    if (!tache) return { permise: false, bloqueeRaison: null, avertissements: [] };
+    const depot = depotDe(tache.id);
+    const piece = pieceLieeATache(tache.id);
+    const avertissements = [];
+    if (depot) {
+      const paye = depot.statut === "paye" || depot.statut === "paye_manuel";
+      avertissements.push(
+        `💰 Un dépôt ${paye ? "PAYÉ" : "non payé"} est rattaché à cette tâche — décide de son sort (remboursement ou conservé, selon ta politique) en annulant.`
+      );
+    }
+    if (piece) {
+      avertissements.push(`🔧 La pièce « ${piece.pieceRequise} » est liée à cette tâche — pense à l'annuler ou la réaffecter dans l'onglet Pièces.`);
+    }
+    const sensible = !!depot || !!piece;
+    const permise = estAdminAgenda || (estRepartiteurAgenda && !sensible);
+    const bloqueeRaison =
+      !permise && estRepartiteurAgenda
+        ? "🔒 Un dépôt ou une pièce en commande est lié à cette tâche — son annulation est réservée aux administrateurs."
+        : null;
+    return { permise, bloqueeRaison, avertissements };
+  };
+  const peutOuvrirAnnulation = !lectureSeule && (estAdminAgenda || estRepartiteurAgenda);
+  const annulerTacheDefinitivement = (tache, raison) => {
+    if (!peutOuvrirAnnulation || !contexteAnnulation(tache).permise) {
+      ajouterJournal("⛔ Tentative d'annulation de tâche refusée — rôle non autorisé");
+      return;
+    }
+    // 1. Prévenir l'app mobile de chaque technicien concerné.
+    techniciensPourTache(planning, tache.id, employes).forEach((t) => {
+      const emp = employes.find((e) => e.id === t.employeId);
+      retirerTacheSupabase(tache.id, emp?.courriel).catch(() => {});
+    });
+    // 2. Retirer TOUTES ses cases de l'horaire (tous techniciens, tous
+    //    jours) et recalculer les transports.
+    setPlanning((prev) => {
+      const copie = { ...prev };
+      Object.keys(copie).forEach((cle) => {
+        const restants = listeCellule(copie[cle]).filter((x) => x.id !== tache.id);
+        if (restants.length) copie[cle] = restants;
+        else delete copie[cle];
+      });
+      return recalculerTransports(copie);
+    });
+    // 3. Retirer de la file d'attente — la persistance Supabase supprime
+    //    la ligne automatiquement (voir l'effet de synchronisation).
+    setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
+    // 4. La trace : qui (rôle), quoi, pourquoi — et les suites à donner.
+    const depot = depotDe(tache.id);
+    const piece = pieceLieeATache(tache.id);
+    ajouterJournal(
+      `🗑️ Tâche "${tache.titre || tache.clientNom}" ANNULÉE définitivement (${role}) — raison : ${raison}` +
+        (depot ? " · ⚠️ un dépôt y était rattaché : à traiter" : "") +
+        (piece ? ` · ⚠️ pièce liée « ${piece.pieceRequise} » : voir l'onglet Pièces` : "")
+    );
   };
 
   // Modifie une tâche DÉJÀ planifiée, cliquée directement dans le
@@ -13368,6 +13585,28 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
             });
             setTacheDetailOuverte(null);
           }}
+          onRetirerHoraire={
+            lectureSeule
+              ? undefined
+              : (champs) => {
+                  modifierTachePlanifiee(tacheDetailOuverte.tache, tacheDetailOuverte.employe.id, {
+                    ...champs,
+                    employeId: null,
+                    date: tacheDetailOuverte.date,
+                    heureDebut: tacheDetailOuverte.heure,
+                  });
+                  setTacheDetailOuverte(null);
+                }
+          }
+          annulation={contexteAnnulation(tacheDetailOuverte.tache)}
+          onAnnulerTache={
+            peutOuvrirAnnulation
+              ? (raison) => {
+                  annulerTacheDefinitivement(tacheDetailOuverte.tache, raison);
+                  setTacheDetailOuverte(null);
+                }
+              : undefined
+          }
         />
       )}
       {tacheEnEditionId && (
@@ -13377,6 +13616,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           clients={clients}
           onFermer={() => setTacheEnEditionId(null)}
           onEnregistrer={(champs) => enregistrerEditionRapide(tacheEnEditionId, champs)}
+          annulation={contexteAnnulation(tachesAttente.find((t) => t.id === tacheEnEditionId))}
+          onAnnulerTache={
+            peutOuvrirAnnulation
+              ? (raison) => {
+                  annulerTacheDefinitivement(tachesAttente.find((t) => t.id === tacheEnEditionId), raison);
+                  setTacheEnEditionId(null);
+                }
+              : undefined
+          }
         />
       )}
       {/* FENÊTRE — NOUVEAU CLIENT depuis la création de tâche (composant
@@ -15748,6 +15996,10 @@ export default function App() {
             ajouterJournal(`✔️ Tâche « ${tache.titre} » conservée sans pièce — elle est de nouveau planifiable.`);
           }}
           lectureSeule={sousCategorie === "Chargé de projet"}
+          /* Rôle effectif pour les règles d'annulation : les admins
+             portent `role`, répartiteur/chargé de projet vivent dans
+             `sousCategorie` — on donne à l'agenda la valeur qui compte. */
+          role={role === "Admin principal" || role === "Admin régulier" ? role : sousCategorie}
           employes={(() => {
             // Rangées de l'agenda : le répertoire des employés + le compte
             // CONNECTÉ (ajouté d'office s'il n'a pas encore de fiche —
