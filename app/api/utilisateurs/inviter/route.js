@@ -27,21 +27,28 @@ function courrielValide(adresse) {
   return typeof adresse === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adresse.trim());
 }
 
-// Le rôle de l'appelant, résolu comme l'application le fait : la table
-// permissions_utilisateurs d'abord, sinon les métadonnées du compte,
-// sinon « Admin principal » (le propriétaire n'a pas toujours de fiche).
+// Le rôle de l'appelant, résolu EXACTEMENT comme l'application le fait
+// (lib/permissions.js) : un rôle CONNU est respecté, tout le reste —
+// absent, vide, ou une vieille étiquette abîmée (« ChargÃ© de projet »
+// avec espace parasite, vécu le 2026-08-10) — retombe sur « Admin
+// principal », la règle du propriétaire. Être PLUS sévère que
+// l'application ici avait bloqué le propriétaire lui-même.
+const ROLES_CONNUS = ["Admin principal", "Admin régulier", "Administration bureau", "Technicien", "Chargé de projet", "Répartiteur"];
 async function roleAppelant(admin, utilisateur) {
+  let brut = null;
   try {
     const { data } = await admin
       .from("permissions_utilisateurs")
       .select("role")
       .eq("email", (utilisateur.email || "").toLowerCase())
       .maybeSingle();
-    if (data?.role) return data.role;
+    brut = data?.role || null;
   } catch {
-    // table absente — on retombe sur les métadonnées
+    // table injoignable — on retombe sur les métadonnées
   }
-  return utilisateur.user_metadata?.role || "Admin principal";
+  if (!brut) brut = utilisateur.user_metadata?.role || null;
+  const propre = String(brut || "").trim();
+  return ROLES_CONNUS.includes(propre) ? propre : "Admin principal";
 }
 
 function gabaritInvitation({ nom, lien, nouveau }) {
@@ -63,9 +70,14 @@ function gabaritInvitation({ nom, lien, nouveau }) {
             Choisir mon mot de passe
           </a>
         </p>
+        <p style="margin:0 0 12px;color:#334155;font-size:13px;line-height:1.6;">
+          Ensuite, connecte-toi en tout temps avec ton courriel et ce mot de passe, à cette adresse :<br/>
+          📱 <a href="https://ventilation-dgl.vercel.app/technicien" style="color:#131B2E;font-weight:bold;">ventilation-dgl.vercel.app/technicien</a><br/>
+          <span style="color:#64748b;font-size:12px;">Astuce : ouvre cette adresse sur ton téléphone et ajoute-la à ton écran d'accueil — elle se comportera comme une application.</span>
+        </p>
         <p style="margin:0;color:#64748b;font-size:12px;line-height:1.5;">
-          Ensuite, connecte-toi avec ton courriel et ce mot de passe. Ce lien est personnel et expire —
-          s'il ne fonctionne plus, demande une nouvelle invitation à l'administration.
+          Le lien du bouton est personnel et expire — s'il ne fonctionne plus, demande une nouvelle
+          invitation à l'administration.
         </p>
       </td></tr>
     </table>
