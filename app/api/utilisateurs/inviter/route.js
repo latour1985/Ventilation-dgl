@@ -126,40 +126,50 @@ export async function POST(request) {
   // 3. Fabriquer le lien : invitation (nouveau compte, créé du même
   //    coup avec son rôle en métadonnées) — ou réinitialisation si le
   //    compte existe déjà (réinvitation / mot de passe oublié).
+  //
+  // ANTI-CONSOMMATION AUTOMATIQUE (2026-08-10) : on n'envoie PAS le lien
+  // « action_link » de Supabase (qui grille le jeton à usage unique dès
+  // qu'un robot d'aperçu — RCS, Gmail, antivirus — le visite, avant même
+  // le clic humain → « lien plus valide » à la 1re ouverture). On envoie
+  // plutôt un lien vers NOTRE page, portant le jeton HACHÉ ; le jeton
+  // n'est vérifié qu'au clic volontaire sur le bouton (verifyOtp). Les
+  // robots d'aperçu chargent la page sans rien consommer.
   const origine = new URL(request.url).origin;
-  const redirection = `${origine}/choisir-mot-de-passe`;
-  let lien = null;
+  let jetonHache = null;
+  let typeLien = "invite";
   let nouveau = true;
   try {
     const { data, error } = await admin.auth.admin.generateLink({
       type: "invite",
       email: courriel,
       options: {
-        redirectTo: redirection,
+        redirectTo: `${origine}/choisir-mot-de-passe`,
         data: { nom, role: roleNouveau, ...(sousCategorie ? { sous_categorie: sousCategorie } : {}) },
       },
     });
     if (error) throw error;
-    lien = data?.properties?.action_link || null;
+    jetonHache = data?.properties?.hashed_token || null;
   } catch (e) {
     const deja = /already|exist|registered/i.test(String(e?.message || ""));
     if (!deja) {
       return Response.json({ erreur: `Création du compte refusée : ${e?.message || "erreur inconnue"}` }, { status: 502 });
     }
     nouveau = false;
+    typeLien = "recovery";
     const { data, error } = await admin.auth.admin.generateLink({
       type: "recovery",
       email: courriel,
-      options: { redirectTo: redirection },
+      options: { redirectTo: `${origine}/choisir-mot-de-passe` },
     });
     if (error) {
       return Response.json({ erreur: `Lien de réinitialisation refusé : ${error.message}` }, { status: 502 });
     }
-    lien = data?.properties?.action_link || null;
+    jetonHache = data?.properties?.hashed_token || null;
   }
-  if (!lien) {
+  if (!jetonHache) {
     return Response.json({ erreur: "Le lien n'a pas pu être fabriqué — réessaie." }, { status: 502 });
   }
+  const lien = `${origine}/choisir-mot-de-passe?jeton=${encodeURIComponent(jetonHache)}&type=${typeLien}`;
 
   // 4. Envoyer l'invitation — Resend en prod, lien remis à l'admin en
   //    mode simulé (local).

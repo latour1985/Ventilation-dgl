@@ -3,30 +3,48 @@
 // PAGE « CHOISIR MON MOT DE PASSE » — l'atterrissage des liens
 // d'invitation ET de réinitialisation.
 //
-// L'employé clique le lien reçu par courriel : Supabase le reconnaît
-// (le jeton voyage dans l'adresse, la librairie le traite toute seule)
-// et cette page lui demande simplement son nouveau mot de passe.
-// Personne — ni l'admin, ni nous — ne voit jamais ce mot de passe.
+// ANTI-CONSOMMATION AUTOMATIQUE (2026-08-10) : le lien porte un jeton
+// HACHÉ dans l'adresse (?jeton=...&type=invite|recovery). On ne le
+// vérifie (verifyOtp) QU'AU CLIC de l'employé sur le bouton — jamais au
+// chargement. Ainsi, les robots d'aperçu (RCS, Gmail, antivirus) qui
+// visitent le lien pour générer une vignette ne grillent pas le jeton à
+// usage unique : c'est ce qui causait « lien plus valide » à la 1re
+// ouverture.
 //
-// Lien expiré ou déjà utilisé : message clair, pas d'écran cassé.
+// Compatibilité : si on arrive plutôt avec une session déjà ouverte
+// (ancien lien, ou l'utilisateur revient), on montre directement le
+// formulaire.
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 export default function ChoisirMotDePasse() {
-  const [etat, setEtat] = useState("verification"); // verification | pret | sans_session | enregistrement | reussi
+  const [etat, setEtat] = useState("verification"); // verification | a_confirmer | pret | verification_en_cours | enregistrement | reussi | sans_session
   const [motDePasse, setMotDePasse] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [erreur, setErreur] = useState("");
+  const [jeton, setJeton] = useState(null);
+  const [typeJeton, setTypeJeton] = useState("invite");
 
   useEffect(() => {
     let actif = true;
-    // La librairie Supabase lit le jeton du lien et ouvre la session —
-    // on lui laisse un instant, puis on tranche.
+    // 1) Un jeton dans l'adresse ? On attend le clic (anti-robot).
+    const params = new URLSearchParams(window.location.search);
+    const j = params.get("jeton");
+    const t = params.get("type") || "invite";
+    if (j) {
+      setJeton(j);
+      setTypeJeton(t);
+      setEtat("a_confirmer");
+      return () => {
+        actif = false;
+      };
+    }
+    // 2) Sinon : peut-être une session déjà ouverte (ancien lien à hash,
+    //    ou retour de l'utilisateur). On laisse un instant puis on tranche.
     const verifier = async () => {
       const { data } = await supabase.auth.getSession();
-      if (!actif) return;
-      if (data?.session) setEtat("pret");
+      if (actif && data?.session) setEtat("pret");
     };
     verifier();
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
@@ -41,6 +59,18 @@ export default function ChoisirMotDePasse() {
       clearTimeout(delai);
     };
   }, []);
+
+  // Vérifie le jeton (verifyOtp) — appelé au CLIC, jamais au chargement.
+  const confirmerAcces = async () => {
+    setErreur("");
+    setEtat("verification_en_cours");
+    const { error } = await supabase.auth.verifyOtp({ token_hash: jeton, type: typeJeton });
+    if (error) {
+      setEtat("sans_session");
+      return;
+    }
+    setEtat("pret");
+  };
 
   const enregistrer = async () => {
     setErreur("");
@@ -67,14 +97,30 @@ export default function ChoisirMotDePasse() {
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-sm">
         <p className="text-lg font-extrabold text-slate-900">Ventilation DGL inc.</p>
 
-        {etat === "verification" && <p className="mt-3 text-sm text-slate-500">Vérification de ton lien…</p>}
+        {etat === "verification" && <p className="mt-3 text-sm text-slate-500">Un instant…</p>}
+
+        {etat === "a_confirmer" && (
+          <div className="mt-3">
+            <p className="text-sm text-slate-600">
+              Bienvenue ! Clique ci-dessous pour activer ton accès et choisir ton mot de passe.
+            </p>
+            <button
+              onClick={confirmerAcces}
+              className="mt-4 min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
+            >
+              Activer mon accès
+            </button>
+          </div>
+        )}
+
+        {etat === "verification_en_cours" && <p className="mt-3 text-sm text-slate-500">Activation en cours…</p>}
 
         {etat === "sans_session" && (
           <div className="mt-3">
             <p className="text-sm font-bold text-red-600">Ce lien n&apos;est plus valide.</p>
             <p className="mt-1 text-sm text-slate-600">
               Il a peut-être expiré ou déjà servi. Demande une nouvelle invitation à l&apos;administration,
-              un nouveau lien te sera envoyé par courriel.
+              un nouveau lien te sera envoyé.
             </p>
           </div>
         )}
