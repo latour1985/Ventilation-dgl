@@ -30,14 +30,14 @@ import { listerProjets, sauvegarderProjet, sAbonnerProjets } from "@/lib/supabas
 import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbonnerTachesAttente } from "@/lib/supabase/taches";
 import { listerJournal, ajouterEntreeJournal } from "@/lib/supabase/journal";
 import { listerTaux, sauvegarderTaux } from "@/lib/supabase/tauxMetiers";
-import { listerDepots, creerDepot, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot } from "@/lib/supabase/depots";
+import { listerDepots, creerDepot, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
 import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots } from "@/lib/supabase/prixDepots";
 import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
-import { etatQuickbooks, listerTransactionsQuickbooks } from "@/lib/quickbooksClient";
+import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot } from "@/lib/quickbooksClient";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
 import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
@@ -11835,6 +11835,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [depotRequis, setDepotRequis] = useState(true);
   const [depotMontant, setDepotMontant] = useState("");
   const [depotChoixPrix, setDepotChoixPrix] = useState(""); // "", montant de la liste, ou "hors_liste"
+  // Destinataires de la DEMANDE DE DÉPÔT (courriel avec facture QBO) —
+  // les adresses par défaut du client sont précochées au choix du client.
+  const [depotEmails, setDepotEmails] = useState([]);
+  const [depotExtra, setDepotExtra] = useState("");
   // Le défaut suit le type : appel de service = dépôt suggéré d'office.
   useEffect(() => {
     setDepotRequis(nouveauType === "appel_service");
@@ -12026,6 +12030,13 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         montantHT: montantDepot,
         isProspect: false,
         prospect: null,
+        // Facture de dépôt QuickBooks + courriel au client (point 9
+        // des retours de tests) — traités par creerDepotPourTache.
+        clientId: nouvelle.clientId || null,
+        clientNom: client?.nom || nouvelle.clientNom || "",
+        zone: nouvelle.zoneAppel === "hors_zone" ? "hors zone" : nouvelle.zoneAppel,
+        joursLimite: 1,
+        courriels: [...new Set([...depotEmails, ...(depotExtra.trim() ? [depotExtra.trim()] : [])])],
       });
       setTachesAttente((prev) => [nouvelle, ...prev]);
       const nomPrevu = nouveauEmployeId ? employes.find((e) => e.id === nouveauEmployeId)?.nom : "";
@@ -12055,6 +12066,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 
     setDepotMontant("");
     setDepotChoixPrix("");
+    setDepotEmails([]);
+    setDepotExtra("");
     setNouveauTitre("");
     setNouvellesPiecesJointes([]);
     setNouvelleDescription("");
@@ -12596,6 +12609,13 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     setNouvelleAdresseTravaux(null);
                     setFiltreAdresseTache("");
                     setNouveauProjetId("");
+                    // Destinataires du dépôt : précoche les adresses par
+                    // défaut de la fiche du client choisi.
+                    const fiche = clients.find((c) => c.id === e.target.value);
+                    const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
+                    const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
+                    setDepotEmails(defauts.length > 0 ? defauts : tous.slice(0, 1));
+                    setDepotExtra("");
                   }}
                   className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                 >
@@ -12983,11 +13003,56 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         );
                       })()}
                     </div>
+                    {/* DESTINATAIRES DE LA DEMANDE DE DÉPÔT — le courriel
+                        (avec le Nº de la facture QuickBooks) part à la
+                        création de la tâche. Adresses par défaut du
+                        client précochées ; « autre adresse » en secours. */}
+                    {(() => {
+                      const fiche = clients.find((c) => c.id === nouveauClientId);
+                      const contacts = (fiche?.courriels || [])
+                        .map((c) => (typeof c === "string" ? { email: c } : c))
+                        .filter((c) => c?.email);
+                      return (
+                        <div className="rounded-lg border border-amber-200 bg-white p-2">
+                          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                            ✉️ Envoyer la demande de dépôt à :
+                          </p>
+                          {contacts.length === 0 && (
+                            <p className="mb-1 text-[10px] font-semibold text-amber-700">
+                              Ce client n&apos;a aucun courriel dans sa fiche — inscris une adresse ci-dessous, ou aucune (tu l&apos;appelleras).
+                            </p>
+                          )}
+                          {contacts.map((c) => (
+                            <label key={c.email} className="mb-0.5 flex items-center gap-1.5 text-[11px] text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={depotEmails.includes(c.email)}
+                                onChange={() =>
+                                  setDepotEmails((prev) =>
+                                    prev.includes(c.email) ? prev.filter((x) => x !== c.email) : [...prev, c.email]
+                                  )
+                                }
+                              />
+                              {c.email}
+                              {c.label ? <span className="text-[10px] text-slate-400">({c.label})</span> : null}
+                            </label>
+                          ))}
+                          <input
+                            value={depotExtra}
+                            onChange={(e) => setDepotExtra(e.target.value)}
+                            placeholder="Autre adresse (optionnel)"
+                            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                          />
+                        </div>
+                      );
+                    })()}
                     <p className="text-[10px] font-semibold text-amber-800">
                       💡 Client pas encore enregistré ? Choisis <span className="font-bold">« ➕ Nouveau client… »</span> en haut de la liste Client — sa fiche complète sera créée et validée du même coup.
                     </p>
                     <p className="text-[9px] leading-snug text-amber-700">
-                      La tâche restera bloquée hors agenda tant que le dépôt n'est pas payé (ou confirmé manuellement). La facture de dépôt QuickBooks et son envoi automatique arrivent à la phase QuickBooks.
+                      La tâche restera bloquée hors agenda tant que le dépôt n&apos;est pas payé (ou confirmé manuellement).
+                      À la création : la facture de dépôt est créée dans QuickBooks (Sandbox pendant les tests) et la
+                      demande part aux adresses cochées.
                     </p>
                   </div>
                 )}
@@ -13283,18 +13348,36 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     </p>
                   )}
                 {/* RELANCE APRÈS ANNULATION — le client a rappelé : nouveau
-                    dépôt, nouveau délai de 24 h (nouvelle facture QBO en Phase 4). */}
+                    dépôt, nouveau délai de 24 h. L'ancienne facture QBO est
+                    annulée par VOID (jamais Delete — règle gelée), une
+                    NOUVELLE facture et un nouveau courriel partent. */}
                 {!lectureSeule && depotDe(t.id)?.statut === "annule_delai" && (
                   <Button
                     variant="outline"
-                    onClick={() => {
+                    onClick={async () => {
                       const d = depotDe(t.id);
+                      if (d?.qboInvoiceId) {
+                        const rv = await annulerFactureDepot(d.qboInvoiceId);
+                        ajouterJournal(
+                          rv?.annulee
+                            ? `🧾 Ancienne facture de dépôt${d.qboDocNumber ? ` Nº ${d.qboDocNumber}` : ""} annulée par VOID`
+                            : `⚠️ VOID de l'ancienne facture refusé (${rv?.erreur || "?"}) — vérifie dans QuickBooks`
+                        );
+                      }
+                      const fiche = clients.find((c) => c.id === t.clientId);
+                      const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
+                      const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
                       onCreerDepot?.(t.id, {
                         montantHT: d.montantHT,
                         isProspect: d.isProspect,
                         prospect: d.isProspect
                           ? { nom: d.prospectNom, courriel: d.prospectCourriel, telephone: d.prospectTelephone, adresse: d.prospectAdresse }
                           : null,
+                        clientId: t.clientId || null,
+                        clientNom: t.clientNom || fiche?.nom || "",
+                        zone: t.zoneAppel === "hors_zone" ? "hors zone" : t.zoneAppel,
+                        joursLimite: 1,
+                        courriels: defauts.length > 0 ? defauts : tous.slice(0, 1),
                       });
                       ajouterJournal(`🔄 Dépôt relancé pour « ${t.titre || t.clientNom} » — nouveau délai de 24 h`);
                     }}
@@ -15262,7 +15345,20 @@ export default function App() {
         if (d.statut === "en_attente_paiement" && d.dateLimite && new Date(d.dateLimite).getTime() < maintenant) {
           annulerDepotDelai(d.tacheId).catch(() => {});
           setDepots((prev) => ({ ...prev, [d.tacheId]: { ...prev[d.tacheId], statut: "annule_delai" } }));
-          ajouterJournal(`⏰ Délai de 24 h dépassé — dépôt annulé, tâche non planifiable (annulation de la facture QuickBooks : Phase 4)`);
+          ajouterJournal(`⏰ Délai de 24 h dépassé — dépôt annulé, tâche non planifiable`);
+          // Facture de dépôt QuickBooks : annulation par VOID (jamais
+          // Delete — règle gelée). La séquence comptable reste pleine.
+          if (d.qboInvoiceId) {
+            annulerFactureDepot(d.qboInvoiceId)
+              .then((rv) =>
+                ajouterJournal(
+                  rv?.annulee
+                    ? `🧾 Facture de dépôt${d.qboDocNumber ? ` Nº ${d.qboDocNumber}` : ""} annulée par VOID dans QuickBooks`
+                    : `⚠️ VOID de la facture de dépôt refusé (${rv?.erreur || "?"}) — annule-la à la main dans QuickBooks`
+                )
+              )
+              .catch(() => {});
+          }
         }
       });
     };
@@ -15399,7 +15495,7 @@ export default function App() {
     ajouterJournal(`🚚 Coût du camion mis à ${valeur.toFixed(2)} $/h — appliqué aux journées à venir (les passées gardent leur taux figé).`);
   };
 
-  const creerDepotPourTache = (tacheId, infos) => {
+  const creerDepotPourTache = async (tacheId, infos) => {
     const repli = {
       tacheId,
       statut: "en_attente_paiement",
@@ -15417,8 +15513,71 @@ export default function App() {
     });
     const t = taxesDepot(infos.montantHT, configEntreprise);
     ajouterJournal(
-      `💰 Dépôt requis : ${t.ht.toFixed(2)} $ + taxes = ${t.total.toFixed(2)} $ — payable sous ${(Number(infos.joursLimite) || 1) === 1 ? "24 h" : `${infos.joursLimite} jours`} (facture et envoi QuickBooks : Phase 4)`
+      `💰 Dépôt requis : ${t.ht.toFixed(2)} $ + taxes = ${t.total.toFixed(2)} $ — payable sous ${(Number(infos.joursLimite) || 1) === 1 ? "24 h" : `${infos.joursLimite} jours`}`
     );
+
+    // ------------------------------------------------------------
+    // FACTURE DE DÉPÔT QUICKBOOKS + COURRIEL AU CLIENT (2026-08-10,
+    // point 9 des retours de tests). Seulement quand la fiche client
+    // est connue (appels de service) — les dépôts de déplacement des
+    // pièces gardent leur propre courriel dans l'onglet Pièces.
+    // Chaque étape journalise honnêtement ; un échec QuickBooks ne
+    // bloque JAMAIS le dépôt lui-même (le verrou de planification est
+    // déjà en place).
+    // ------------------------------------------------------------
+    if (!infos.clientNom) return;
+    let facture = null;
+    const r = await creerFactureDepot({
+      tacheId,
+      clientId: infos.clientId || null,
+      clientNom: infos.clientNom,
+      montantHT: Number(infos.montantHT) || 0,
+      zone: infos.zone || null,
+      joursLimite: Number(infos.joursLimite) || 1,
+      description: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""} — ${infos.clientNom}`,
+    });
+    if (r?.creee) {
+      facture = r;
+      setDepots((prev) => ({ ...prev, [tacheId]: { ...prev[tacheId], qboInvoiceId: r.factureId, qboDocNumber: r.docNumber } }));
+      majDepotFactureQbo(tacheId, { factureId: r.factureId, docNumber: r.docNumber }).catch(() => {});
+      ajouterJournal(`🧾 Facture de dépôt QuickBooks Nº ${r.docNumber || r.factureId} créée (Sandbox) — annulation par VOID seulement`);
+    } else if (r?.nonConnecte) {
+      ajouterJournal("🔌 QuickBooks non connecté — le dépôt est actif, mais aucune facture n'a été créée (Paramètres → Connexions)");
+    } else if (r?.simule) {
+      ajouterJournal("🧪 QuickBooks non configuré ici — dépôt actif, facture non créée (normal en local)");
+    } else if (r?.erreur) {
+      ajouterJournal(`⚠️ Facture de dépôt QuickBooks NON créée : ${r.erreur} — le dépôt reste actif quand même`);
+    }
+    // Le courriel de demande de dépôt — aux destinataires choisis.
+    const adresses = [...new Set(infos.courriels || [])].filter(Boolean);
+    if (adresses.length === 0) {
+      ajouterJournal(`📞 Aucun courriel choisi pour le dépôt de ${infos.clientNom} — appelle le client pour le paiement`);
+      return;
+    }
+    const rc = await envoyerCourriel({
+      a: adresses,
+      sujet: `Dépôt requis — réservation de votre appel de service (${configEntreprise.nomCommercial || configEntreprise.nomLegal})`,
+      html: gabaritDemandePaiement({
+        config: configEntreprise,
+        clientNom: infos.clientNom,
+        description:
+          `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ` +
+          `${(Number(infos.joursLimite) || 1) === 1 ? "24 heures" : `${infos.joursLimite} jours`}. ` +
+          `${facture?.docNumber ? `Référence : facture Nº ${facture.docNumber}. ` : ""}` +
+          `Dès sa réception, votre rendez-vous est confirmé.`,
+        lignes: [{ etiquette: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}`, montant: t.ht }],
+        tps: t.tps,
+        tvq: t.tvq,
+        total: t.total,
+      }),
+    });
+    if (rc.envoye) {
+      ajouterJournal(`✉️ Demande de dépôt de ${t.total.toFixed(2)} $ (taxes incl.) ENVOYÉE à ${adresses.join(", ")}`);
+    } else if (rc.simule) {
+      ajouterJournal("🔧 Demande de dépôt SIMULÉE (pas de service de courriels ici) — appelle le client");
+    } else {
+      ajouterJournal(`⚠️ Courriel de dépôt NON parti (${rc.erreur || "erreur"}) — appelle le client, le dépôt reste actif`);
+    }
   };
   const depotPayeManuel = (tacheId, mode) => {
     setDepots((prev) => ({ ...prev, [tacheId]: { ...(prev[tacheId] || { tacheId }), statut: "paye_manuellement", modePaiement: mode } }));

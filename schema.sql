@@ -1642,3 +1642,10 @@ alter table quickbooks_connexion enable row level security;
 -- que les listes montrent : 'nom' (défaut), 'entreprise', ou
 -- 'nom-entreprise' (les deux).
 alter table clients_app add column if not exists nom_affichage text;
+
+-- ============================================================
+-- SNIPPET « 40 » — numéro de la facture de dépôt QuickBooks.
+-- ============================================================
+-- L'id QBO existait déjà (qbo_depot_invoice_id) ; on y ajoute le numéro
+-- HUMAIN (DocNumber) affiché au bureau et dans le courriel au client.
+alter table depots add column if not exists qbo_depot_doc_number text;
