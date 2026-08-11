@@ -11,7 +11,7 @@ import ConnexionTechnicien from "@/components/ConnexionTechnicien";
 import { supabase } from "@/lib/supabase/client";
 import { permissionsEffectives } from "@/lib/permissions";
 import { enregistrerInspection } from "@/lib/supabase/inspections";
-import { listerEmployes } from "@/lib/supabase/repertoireEmployes";
+import { listerAnnuaireEmployes } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { televerserPhotoTravail } from "@/lib/supabase/photosTravaux";
 import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
@@ -781,7 +781,8 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
   const [collegues, setCollegues] = useState([]);
   useEffect(() => {
     if (etape !== "passager") return;
-    listerEmployes()
+    // Annuaire noms + courriels seulement — jamais les salaires (RLS).
+    listerAnnuaireEmployes()
       .then((liste) =>
         setCollegues(
           (liste || []).filter((e) => (e.courriel || "").toLowerCase() !== (monCourriel || "").toLowerCase())
@@ -3980,13 +3981,14 @@ function AppTechnicien() {
       return;
     }
     setNomTechnicien(courriel.split("@")[0]); // affichage immédiat, raffiné ensuite
-    listerEmployes()
+    // Annuaire noms + courriels seulement (jamais les salaires).
+    listerAnnuaireEmployes()
       .then((liste) => {
         const fiche = (liste || []).find((e) => (e.courriel || "").toLowerCase() === courriel);
         if (fiche?.nom) setNomTechnicien(fiche.nom);
       })
       .catch(() => {
-        // répertoire inaccessible — le début du courriel reste affiché
+        // annuaire inaccessible — le début du courriel reste affiché
       });
   }, [session]);
 

@@ -1652,3 +1652,33 @@ alter table clients_app add column if not exists nom_affichage text;
 -- L'id QBO existait déjà (qbo_depot_invoice_id) ; on y ajoute le numéro
 -- HUMAIN (DocNumber) affiché au bureau et dans le courriel au client.
 alter table depots add column if not exists qbo_depot_doc_number text;
+
+-- ============================================================
+-- SNIPPET « 44 » — ANNUAIRE EMPLOYÉS (noms + courriels, SANS salaires)
+-- ============================================================
+-- Ferme proprement la fuite laissée ouverte par le snippet 42 : au lieu
+-- de rouvrir toute la table repertoire_employes (qui contient les taux
+-- et primes) à l'app technicien, on expose une VUE limitée à 4 colonnes.
+-- La vue s'exécute avec les droits de son propriétaire (security_invoker
+-- OFF) : elle traverse la RLS de repertoire_employes, mais ne révèle
+-- JAMAIS taux_horaire, prime_horaire, notes_rh ou adresse.
+-- À exécuter MAINTENANT (ne casse rien — la table reste lisible aussi).
+create or replace view public.annuaire_employes as
+  select id, nom, courriel, nom_utilisateur
+    from public.repertoire_employes;
+alter view public.annuaire_employes set (security_invoker = false);
+revoke all on public.annuaire_employes from public, anon;
+grant select on public.annuaire_employes to authenticated;
+
+-- ============================================================
+-- SNIPPET « 45 » — RE-VERROUILLAGE DU RÉPERTOIRE COMPLET
+-- ============================================================
+-- À exécuter APRÈS la publication du code technicien (qui lit désormais
+-- la vue annuaire_employes). Referme repertoire_employes au bureau
+-- seulement — les salaires ne sont plus lisibles par un technicien.
+-- (L'écriture, elle, est déjà réservée aux admins par le snippet 40.)
+drop policy if exists "repertoire_lecture_temporaire" on repertoire_employes;
+drop policy if exists "repertoire_lecture_test" on repertoire_employes;
+drop policy if exists "repertoire_lecture_bureau" on repertoire_employes;
+create policy "repertoire_lecture_bureau" on repertoire_employes
+  for select to authenticated using (public.fn_est_bureau());
