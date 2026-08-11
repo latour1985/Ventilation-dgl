@@ -1644,7 +1644,10 @@ alter table quickbooks_connexion enable row level security;
 alter table clients_app add column if not exists nom_affichage text;
 
 -- ============================================================
--- SNIPPET « 40 » — numéro de la facture de dépôt QuickBooks.
+-- SNIPPET « 43 » — numéro de la facture de dépôt QuickBooks.
+-- (43 et non 40 : les numéros 40-41-42 sont occupés dans l'éditeur du
+-- propriétaire par des snippets RLS préparés lors d'une validation
+-- externe — durcissement / retour arrière / ajustements.)
 -- ============================================================
 -- L'id QBO existait déjà (qbo_depot_invoice_id) ; on y ajoute le numéro
 -- HUMAIN (DocNumber) affiché au bureau et dans le courriel au client.
