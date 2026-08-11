@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase/client";
 import { permissionsEffectives } from "@/lib/permissions";
 import { enregistrerInspection } from "@/lib/supabase/inspections";
 import { listerAnnuaireEmployes } from "@/lib/supabase/repertoireEmployes";
+import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { televerserPhotoTravail } from "@/lib/supabase/photosTravaux";
 import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
@@ -1957,14 +1958,10 @@ function LigneProduit({ ligne, onChange, onSupprimer, lectureSeule }) {
           {ligne.prixNonListe || ligne.horsCatalogue ? (
             <>
               <span className="text-sm text-slate-500">$</span>
-              <input
-                type="number"
-                step="0.01"
-                value={ligne.prix_vendant}
+              <InputNombreDecimal
+                valeur={Number(ligne.prix_vendant) || 0}
                 disabled={lectureSeule}
-                onChange={(e) =>
-                  onChange({ ...ligne, prix_vendant: parseFloat(e.target.value) || 0 })
-                }
+                onChange={(v) => onChange({ ...ligne, prix_vendant: v })}
                 className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm font-bold tabular-nums disabled:bg-slate-100"
               />
             </>

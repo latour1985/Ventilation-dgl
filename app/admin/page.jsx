@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionAdmin from "@/components/ConnexionAdmin";
+import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { supabase } from "@/lib/supabase/client";
 import { permissionsEffectives, permissionsPour, ORDRE_SECTIONS, LIBELLES_SECTIONS, aAutorisation } from "@/lib/permissions";
 import GestionAcces from "@/components/GestionAcces";
@@ -38,6 +39,7 @@ import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot } from "@/lib/quickbooksClient";
+import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
 import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
@@ -146,54 +148,8 @@ function Button({ variant = "primary", loading = false, loadingText = "Chargemen
   );
 }
 
-// ============================================================
-// SAISIE D'UN NOMBRE DÉCIMAL — préserve le texte exact tapé (ex:
-// "12." ou "12,5" en cours de frappe) au lieu de le faire
-// immédiatement passer par parseFloat() puis réafficher la version
-// arrondie, ce qui effaçait le point décimal dès qu'il était tapé et
-// rendait la saisie des centimes impossible au clavier. La valeur
-// NUMÉRIQUE remontée au parent via onChange reste toujours à jour ;
-// seul l'AFFICHAGE local garde le texte brut le temps de la frappe.
-// ============================================================
-// `onBlur` est extrait des props et ENCHAÎNÉ au comportement interne :
-// laissé dans {...props}, il écraserait la resynchronisation de
-// l'affichage et un « 12. » en cours de frappe resterait à l'écran.
-function InputNombreDecimal({ valeur, onChange, className, onBlur, ...props }) {
-  const [texte, setTexte] = useState(String(valeur));
-  const enFocus = useRef(false);
-
-  // Resynchronise l'affichage si la valeur change depuis l'EXTÉRIEUR
-  // du champ (ex: réinitialisation du formulaire) — MAIS jamais pendant
-  // que l'utilisateur tape (focus), sinon un champ vidé ou un "12." en
-  // cours de frappe serait immédiatement réécrit (« 0 ») et la saisie
-  // des décimales deviendrait impossible.
-  useEffect(() => {
-    if (!enFocus.current) setTexte(String(valeur));
-  }, [valeur]);
-
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={texte}
-      onFocus={() => { enFocus.current = true; }}
-      onBlur={(e) => { enFocus.current = false; setTexte(String(valeur)); onBlur?.(e); }}
-      onChange={(e) => {
-        const brut = e.target.value;
-        // N'accepte que ce qui ressemble à un nombre décimal en cours
-        // de frappe : chiffres, signe optionnel, et UN séparateur —
-        // point OU virgule (au Québec on tape « 44,50 » ; la virgule
-        // était rejetée en silence et 44,50 devenait 4450).
-        if (!/^-?\d*[.,]?\d*$/.test(brut)) return;
-        setTexte(brut);
-        const nombre = parseFloat(brut.replace(",", "."));
-        onChange(Number.isNaN(nombre) ? 0 : nombre);
-      }}
-      className={`${className || ""} focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100`}
-      {...props}
-    />
-  );
-}
+// InputNombreDecimal vit maintenant dans components/ (partagé avec l'app
+// technicien) — importé en haut de ce fichier.
 
 
 // ============================================================
@@ -1863,12 +1819,13 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                     {(p.paiementAvantCommande || p.paiementRequis) && (
                       <span className="flex items-center gap-1">
                         <input
-                          type="number"
-                          min={0}
-                          step="0.01"
+                          type="text"
+                          inputMode="decimal"
                           defaultValue={p.montantPiece ?? ""}
                           onBlur={(e) => {
-                            const v = e.target.value === "" ? null : parseFloat(e.target.value) || 0;
+                            // Accepte le point ET la virgule (44,50).
+                            const brut = String(e.target.value).replace(",", ".");
+                            const v = brut === "" ? null : parseFloat(brut) || 0;
                             if (v !== p.montantPiece) onMaj(p.id, { montant_piece: v });
                           }}
                           placeholder="Montant"
@@ -1971,12 +1928,12 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
             {pieceEncoreAPayer(demandePour) && (
               <>
                 <label className="mt-2 mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Pièce ($ HT)</label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={demandeMontant}
-                  onChange={(e) => setDemandeMontant(e.target.value)}
+                {/* InputNombreDecimal : accepte le point ET la virgule
+                    (44,50) — un champ « number » du navigateur les refuse
+                    selon sa langue. */}
+                <InputNombreDecimal
+                  valeur={Number(demandeMontant) || 0}
+                  onChange={(v) => setDemandeMontant(v)}
                   className="w-40 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
                 />
               </>
@@ -2012,13 +1969,9 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                       <option value="Hors zone">🗺️ Hors zone — montant manuel</option>
                     </select>
                     <span className="flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={demandeMontantDeplacement}
-                        onChange={(e) => setDemandeMontantDeplacement(e.target.value)}
-                        placeholder="Montant"
+                      <InputNombreDecimal
+                        valeur={Number(demandeMontantDeplacement) || 0}
+                        onChange={(v) => setDemandeMontantDeplacement(v)}
                         className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
                       />
                       <span className="text-[10px] text-slate-400">$ HT</span>
@@ -2165,7 +2118,7 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
       camion: travauxSaisie.camion,
       type: travauxSaisie.type,
       description: travDescription.trim(),
-      cout: travCout === "" ? null : parseFloat(travCout) || 0,
+      cout: travCout === "" ? null : parseFloat(String(travCout).replace(",", ".")) || 0,
       garage: travGarage.trim(),
       km: travauxSaisie.km ?? null,
       inspectionId: travauxSaisie.inspectionId || null,
@@ -2851,7 +2804,7 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
                               className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                             />
                             <div className="grid grid-cols-2 gap-1.5">
-                              <input type="number" min={0} step="0.01" value={travCout} onChange={(ev) => setTravCout(ev.target.value)} placeholder="Coût $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                              <input type="text" inputMode="decimal" value={travCout} onChange={(ev) => setTravCout(ev.target.value)} placeholder="Coût $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
                               <input value={travGarage} onChange={(ev) => setTravGarage(ev.target.value)} placeholder="Garage / fournisseur" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
                             </div>
                             <p className="text-[10px] text-slate-400">Enregistré au carnet le {todayISO()}{ent.kmActuel > 0 ? ` · ${ent.kmActuel.toLocaleString("fr-CA")} km` : ""}.</p>
@@ -2892,7 +2845,7 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
                             className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                           />
                           <div className="grid grid-cols-2 gap-1.5">
-                            <input type="number" min={0} step="0.01" value={travCout} onChange={(ev) => setTravCout(ev.target.value)} placeholder="Coût $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                            <input type="text" inputMode="decimal" value={travCout} onChange={(ev) => setTravCout(ev.target.value)} placeholder="Coût $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
                             <input value={travGarage} onChange={(ev) => setTravGarage(ev.target.value)} placeholder="Garage / fournisseur" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
                           </div>
                           <p className="text-[10px] text-slate-400">Enregistré au carnet le {todayISO()}{ent.kmActuel > 0 ? ` · ${ent.kmActuel.toLocaleString("fr-CA")} km` : ""}.</p>
@@ -5739,14 +5692,11 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, onSauvegarderTaux, prixDepo
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <div className={`flex w-40 items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
-            <input
-              type="number"
-              min={0}
-              step="0.01"
-              value={camionValeur}
+            <InputNombreDecimal
+              valeur={Number(camionValeur) || 0}
               disabled={!estAdminPrincipal}
-              onChange={(e) => setCamionValeur(e.target.value)}
-              className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+              onChange={(v) => setCamionValeur(v)}
+              className="w-full border-0 bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
             />
             <span className="text-[10px] text-slate-400">$/h</span>
           </div>
@@ -5777,14 +5727,11 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, onSauvegarderTaux, prixDepo
             <div key={zone}>
               <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{zone}</label>
               <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={prixDepots?.[zone] ?? 0}
+                <InputNombreDecimal
+                  valeur={Number(prixDepots?.[zone]) || 0}
                   disabled={!estAdminPrincipal}
-                  onChange={(e) => setPrixDepots((prev) => ({ ...prev, [zone]: e.target.value }))}
-                  className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+                  onChange={(v) => setPrixDepots((prev) => ({ ...prev, [zone]: v }))}
+                  className="w-full border-0 bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
                 />
                 <span className="text-[10px] text-slate-400">$ HT</span>
               </div>
@@ -5830,14 +5777,11 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, onSauvegarderTaux, prixDepo
           <div>
             <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Taux horaire VENDANT technicien</label>
             <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={prixDepots?.taux_horaire_vendant ?? 0}
+              <InputNombreDecimal
+                valeur={Number(prixDepots?.taux_horaire_vendant) || 0}
                 disabled={!estAdminPrincipal}
-                onChange={(e) => setPrixDepots((prev) => ({ ...prev, taux_horaire_vendant: e.target.value }))}
-                className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+                onChange={(v) => setPrixDepots((prev) => ({ ...prev, taux_horaire_vendant: v }))}
+                className="w-full border-0 bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
               />
               <span className="text-[10px] text-slate-400">$/h</span>
             </div>
@@ -5997,8 +5941,8 @@ function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }) {
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Prix coûtant</label>
                 <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2">
-                  <input type="number" step="0.01" min="0" value={f.prix_coutant}
-                    onChange={(e) => maj("prix_coutant", e.target.value)} placeholder="inconnu"
+                  <input type="text" inputMode="decimal" value={f.prix_coutant}
+                    onChange={(e) => maj("prix_coutant", e.target.value.replace(",", "."))} placeholder="inconnu"
                     className="w-full bg-transparent py-1.5 text-xs outline-none" />
                   <span className="text-[10px] text-slate-400">$</span>
                 </div>
@@ -6006,8 +5950,8 @@ function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }) {
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Prix de vente</label>
                 <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2">
-                  <input type="number" step="0.01" min="0" value={f.prix_vendant}
-                    onChange={(e) => maj("prix_vendant", e.target.value)}
+                  <input type="text" inputMode="decimal" value={f.prix_vendant}
+                    onChange={(e) => maj("prix_vendant", e.target.value.replace(",", "."))}
                     className="w-full bg-transparent py-1.5 text-xs outline-none" />
                   <span className="text-[10px] text-slate-400">$</span>
                 </div>
@@ -15937,6 +15881,20 @@ export default function App() {
   // ------------------------------------------------------------
   const [transactionsQb, setTransactionsQb] = useState([]);
   const [syncQbEnCours, setSyncQbEnCours] = useState(false);
+  // Attributions manuelles QuickBooks PERSISTÉES { quickbooksId: projetId }
+  // — chargées de Supabase, ré-appliquées à chaque synchro pour survivre
+  // au rafraîchissement.
+  const [attributionsQb, setAttributionsQb] = useState({});
+  const attributionsQbRef = useRef(attributionsQb);
+  attributionsQbRef.current = attributionsQb;
+  useEffect(() => {
+    if (!session) return;
+    listerAttributionsQb()
+      .then((a) => setAttributionsQb(a))
+      .catch(() => {
+        // table absente — les attributions restent locales à la session
+      });
+  }, [session]);
 
   const synchroniserQuickBooksProjets = async () => {
     // Conformité : la synchronisation QuickBooks est réservée aux rôles
@@ -15968,9 +15926,13 @@ export default function App() {
       ajouterJournal(`⚠️ Synchronisation QuickBooks impossible : ${reponse.erreur || "erreur inconnue"}`);
       return;
     }
+    // Attribution AUTOMATIQUE (Règle 1/2), PUIS on ré-applique par-dessus
+    // les attributions MANUELLES enregistrées (la décision humaine prime
+    // et survit au rafraîchissement).
+    const manuelles = attributionsQbRef.current || {};
     const enrichies = brutes.map((t) => ({
       ...t,
-      projectId: attribuerTransactionQuickBooks(t, projets, clients),
+      projectId: manuelles[t.quickbooksId] || attribuerTransactionQuickBooks(t, projets, clients),
       syncedAt: new Date().toISOString(),
     }));
     setTransactionsQb(enrichies);
@@ -15984,6 +15946,16 @@ export default function App() {
 
   const assignerTransactionManuellement = (quickbooksId, projetId) => {
     setTransactionsQb((prev) => prev.map((t) => (t.quickbooksId === quickbooksId ? { ...t, projectId: projetId } : t)));
+    setAttributionsQb((prev) => {
+      const suivant = { ...prev };
+      if (projetId) suivant[quickbooksId] = projetId;
+      else delete suivant[quickbooksId];
+      return suivant;
+    });
+    // PERSISTANCE : la décision survit au rafraîchissement (table Supabase).
+    enregistrerAttributionQb(quickbooksId, projetId, session?.user?.email).catch(() =>
+      ajouterJournal("⚠️ Attribution affichée mais NON enregistrée — vérifie la connexion (elle sera perdue au rafraîchissement).")
+    );
     const p = projets.find((x) => x.id === projetId);
     ajouterJournal(`✋ Transaction QuickBooks ${quickbooksId} assignée manuellement au projet "${p?.nom}"`);
   };

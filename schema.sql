@@ -1682,3 +1682,22 @@ drop policy if exists "repertoire_lecture_test" on repertoire_employes;
 drop policy if exists "repertoire_lecture_bureau" on repertoire_employes;
 create policy "repertoire_lecture_bureau" on repertoire_employes
   for select to authenticated using (public.fn_est_bureau());
+
+-- ============================================================
+-- SNIPPET « 46 » — attributions manuelles QuickBooks (persistance).
+-- ============================================================
+-- Mémorise la décision « cette transaction QuickBooks appartient à ce
+-- projet » pour qu'elle survive au rafraîchissement. Réservée au bureau
+-- (même règle que la facturation). RLS activée AVEC politique bureau —
+-- indispensable : une table sans RLS est ouverte à tout le monde.
+create table if not exists qb_attributions_manuelles (
+  quickbooks_id text primary key,
+  projet_id uuid references projets_app(id) on delete cascade,
+  assignee_par text,
+  updated_at timestamptz default now()
+);
+alter table qb_attributions_manuelles enable row level security;
+drop policy if exists "qb_attributions_bureau" on qb_attributions_manuelles;
+create policy "qb_attributions_bureau" on qb_attributions_manuelles
+  for all to authenticated
+  using (public.fn_est_bureau()) with check (public.fn_est_bureau());
