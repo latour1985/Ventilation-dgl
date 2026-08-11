@@ -15272,7 +15272,7 @@ export default function App() {
   }, [session]);
   // Liste de prix des dépôts (par zone) — chargée depuis Supabase,
   // modifiable par l'Admin principal dans l'onglet Utilisateurs.
-  const [prixDepots, setPrixDepots] = useState({ "Zone 1": 0, "Zone 2": 0, "Zone 3": 0, taux_horaire_vendant: 0, minutes_incluses: 90, minutes_incluses_hors_zone: 180 });
+  const [prixDepots, setPrixDepots] = useState({ "Zone 1": 0, "Zone 2": 0, "Zone 3": 0, "Zone 4 (Montréal)": 0, taux_horaire_vendant: 0, minutes_incluses: 90, minutes_incluses_hors_zone: 180 });
   useEffect(() => {
     if (!session) return;
     listerPrixDepots()
