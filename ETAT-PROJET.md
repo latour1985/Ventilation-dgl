@@ -55,7 +55,7 @@
 - Technicien : aucun montant d'argent visible sauf taux vendants d'appels ; jamais les coûtants.
 - QuickBooks : DERNIÈRE phase, Sandbox d'abord. Factures de dépôt annulées par VOID, jamais Delete.
 
-## Où en est-on (2026-08-10 — TOUT EST PUBLIÉ, tests terrain avec les employés en cours)
+## Où en est-on (2026-08-10 soir — TOUT PUBLIÉ ; chantiers 1-3 faits ; tests employés en cours)
 
 - **Fait, EN LIGNE et testé** : auth + rôles/permissions · agenda ↔ technicien temps réel ·
   heures/paies · dépôts par zone · catalogue 289 items · devis (versions, acceptation
@@ -86,13 +86,43 @@
   ABSOLUE depuis : ne JAMAIS effacer de données sans demande explicite du propriétaire.
 - **Snippets SQL passés jusqu'au nº 39** (36 livraison/reports · 37 client_absent ·
   38 quickbooks_connexion · 39 clients_app.nom_affichage).
-- **Vercel** : RESEND_API_KEY + SUPABASE_SERVICE_ROLE_KEY posées (prod+preview). Supabase
-  Auth URL Configuration faite (Site URL prod + redirect prod/localhost).
-- **PROCHAIN GRAND CHANTIER (point 9 des retours)** : facture de DÉPÔT dans QuickBooks
-  Sandbox à la création d'un appel de service — créer/lier le client QBO, créer la facture
-  de dépôt, l'envoyer par courriel au destinataire choisi, journaliser. Règle gelée :
-  annulation par VOID, jamais Delete. Ensuite : durcissement RLS (OBLIGATOIRE avant une
-  2e entreprise) · textos « en route » (idée notée, propriétaire pas convaincu).
+- **Vercel** : RESEND_API_KEY + SUPABASE_SERVICE_ROLE_KEY + QB_CLIENT_ID/SECRET (Sandbox)
+  posées (prod+preview). Supabase Auth URL Configuration faite ; Email OTP Expiration = 24 h.
+
+### Travaux du 2026-08-10 (soirée) — TOUS PUBLIÉS
+- **Zone 4 (Montréal)** ajoutée aux dépôts d'appels de service (315 $, mêmes règles que 1-2-3).
+- **Facture de DÉPÔT QuickBooks** (route `/api/quickbooks/facture-depot`) : à la création d'un
+  appel de service avec dépôt, crée/lie le client QBO, crée la facture de dépôt, envoie le
+  courriel de demande au client (taxes QC, Nº de facture), journalise. Annulation = VOID
+  (jamais Delete). Relance et délai 24 h gèrent le VOID + nouvelle facture.
+- **SÉCURITÉ RLS DURCIE et vérifiée** : voir le fichier mémoire `securite-rls`. Les snippets
+  40 (durcissement)/41 (retour arrière)/42 (ajustements) avaient été exécutés DANS LE DÉSORDRE,
+  laissant l'auto-promotion admin OUVERTE ; corrigé en réexécutant 40 PUIS 42. Fuite salaires
+  fermée par une VUE `annuaire_employes` (noms+courriels seulement, snippet 44) + reverrouillage
+  (snippet 45) ; l'app technicien lit `listerAnnuaireEmployes()`. Vérifié par « test-sonde »
+  (compte technicien jetable via clé service). Rôle du compte propriétaire réparé
+  (« ChargÃ© de projet » corrompu → « Admin principal »).
+- **Invitations — bug « lien plus valide » à la 1re ouverture CORRIGÉ** : les robots d'aperçu
+  (RCS, Gmail, antivirus) consommaient le jeton à usage unique avant le clic humain. Désormais
+  le lien porte le jeton HACHÉ vers `/choisir-mot-de-passe?jeton=...&type=` et n'est vérifié
+  (verifyOtp) qu'au CLIC sur « Activer mon accès ».
+- **Chantier 3 : attributions QuickBooks persistées** (table `qb_attributions_manuelles`,
+  snippet 46 — projet_id en TEXT) : l'assignation manuelle d'une transaction à un projet
+  survit au rafraîchissement (rechargée + réappliquée par-dessus l'auto-attribution).
+- **Virgule décimale (44,50) acceptée PARTOUT** dans les champs d'argent ; `InputNombreDecimal`
+  déplacé dans `components/` (partagé admin + technicien).
+- **Snippets SQL passés jusqu'au nº 46** (40-42 RLS · 43 qbo_depot_doc_number · 44 vue annuaire ·
+  45 reverrouillage répertoire · 46 attributions QB).
+
+### Ordre de bataille (améliorations proposées par Claude, validées avec le propriétaire)
+1. ✅ Facture de dépôt QuickBooks. 2. ✅ Durcissement RLS. 3. ✅ Attributions QB + virgule.
+4. ⏸️ EN PAUSE (pendant les tests employés) : découpage de `app/admin/page.jsx` (~16 500 lignes,
+   un onglet = un fichier, zéro changement visible). 5. À venir : tests automatiques des calculs
+   critiques (marges, tranches 15 min, taux figés).
+- **Sécurité phase 2 (non urgent)** : migrer le rôle vers app_metadata (voir `securite-rls`) ;
+  durcir les tables héritées encore en `using(true)` ; politiques du Storage.
+- **Autres** : bascule QuickBooks PRODUCTION (après validation Sandbox par les tests) ·
+  textos « en route » (idée notée, propriétaire pas convaincu).
 
 ## Pièges connus (payés cher — ne pas répéter)
 
