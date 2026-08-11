@@ -1690,9 +1690,13 @@ create policy "repertoire_lecture_bureau" on repertoire_employes
 -- projet » pour qu'elle survive au rafraîchissement. Réservée au bureau
 -- (même règle que la facturation). RLS activée AVEC politique bureau —
 -- indispensable : une table sans RLS est ouverte à tout le monde.
+-- projet_id est en TEXT (et non uuid) : les identifiants de projets_app
+-- sont des chaînes de caractères, pas des uuid — pas de clé étrangère
+-- typée possible. L'app garde de toute façon la cohérence (elle n'écrit
+-- que des id de projets existants).
 create table if not exists qb_attributions_manuelles (
   quickbooks_id text primary key,
-  projet_id uuid references projets_app(id) on delete cascade,
+  projet_id text,
   assignee_par text,
   updated_at timestamptz default now()
 );
