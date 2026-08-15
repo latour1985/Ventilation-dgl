@@ -3,7 +3,7 @@
 > Ce fichier est le **briefing d'embarquement** pour une session de travail
 > sur un nouvel ordinateur (ou après une longue pause). Il résume ce qui ne
 > se devine pas en lisant le code. Mis à jour aux grandes étapes.
-> Dernière mise à jour : 2026-08-07.
+> Dernière mise à jour : 2026-08-15.
 
 ## Qui / quoi
 
@@ -123,6 +123,20 @@
   durcir les tables héritées encore en `using(true)` ; politiques du Storage.
 - **Autres** : bascule QuickBooks PRODUCTION (après validation Sandbox par les tests) ·
   textos « en route » (idée notée, propriétaire pas convaincu).
+
+### Travaux du 2026-08-15 — TOUS PUBLIÉS
+- Retours employés batch 2 : SIGNATURE sans défilement (blocage tactile natif non-passif sur
+  le canevas + gel du défilement de page pendant le trait) ; RETOUR AU MENU après envoi du bon
+  (chemins équipe/non-facturable réparés + retour auto 5 s depuis l'écran de confirmation).
+- PAIEMENTS EN LIGNE (QuickBooks Payments, Sandbox) — RÈGLE VALIDÉE avec le propriétaire :
+  APPELS DE SERVICE = automatique (Paramètres → « Paiements en ligne » : carte OFF/ON ≈2,9 %,
+  virement OFF/ON ≈1 %, seuil carte défaut 2 000 $ HT qui COUPE la carte au-dessus) ;
+  TOUTES LES AUTRES FACTURES = choix À L'ENVOI, cases DÉCOCHÉES par défaut, frais affichés en
+  DOLLARS pour le propriétaire seul (à implémenter avec la facturation QBO régulière).
+  JAMAIS de frais ajoutés à la facture client (LPC Québec) — coût interne du marchand.
+  Route facture-depot : AllowOnlineCreditCardPayment/AllowOnlineACHPayment + include=invoiceLink ;
+  le lien « 💳 Payer en ligne » entre dans le courriel de demande de dépôt quand QuickBooks le
+  fournit (QuickBooks Payments actif sur le compte). Snippet SQL 47 (3 colonnes entreprises).
 
 ## Pièges connus (payés cher — ne pas répéter)
 

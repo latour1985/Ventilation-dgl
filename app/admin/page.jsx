@@ -6572,6 +6572,53 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
               />
             </div>
           </div>
+
+          {/* 💳 PAIEMENTS EN LIGNE (QuickBooks Payments)
+              ------------------------------------------------------------
+              APPELS DE SERVICE seulement — le chemin automatique. Les
+              autres factures demanderont un choix À L'ENVOI (règle du
+              propriétaire, chantier QuickBooks). Défaut : tout éteint.
+              Les frais (≈2,9 % carte / ≈1 % virement) sont un coût du
+              MARCHAND — au Québec (LPC), jamais ajoutés au client. */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">💳 Paiements en ligne — appels de service</p>
+            <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+              Boutons « Payer en ligne » sur les factures de dépôt QuickBooks. Les frais par transaction sont à ta charge
+              (jamais ajoutés au client — loi québécoise) : c'est pour ça que la carte se coupe toute seule au-dessus du seuil.
+              Les autres types de factures demanderont ton choix à chaque envoi.
+            </p>
+            <div className="space-y-2">
+              <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${brouillon.paiementCarteAppels ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}>
+                <input
+                  type="checkbox"
+                  checked={!!brouillon.paiementCarteAppels}
+                  disabled={!estAdminPrincipal}
+                  onChange={(e) => champ("paiementCarteAppels", e.target.checked)}
+                  className="h-4 w-4 accent-[#131B2E]"
+                />
+                Carte de crédit (frais ≈ 2,9 % + 0,25 $ — à ta charge)
+              </label>
+              <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${brouillon.paiementVirementAppels ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}>
+                <input
+                  type="checkbox"
+                  checked={!!brouillon.paiementVirementAppels}
+                  disabled={!estAdminPrincipal}
+                  onChange={(e) => champ("paiementVirementAppels", e.target.checked)}
+                  className="h-4 w-4 accent-[#131B2E]"
+                />
+                Virement bancaire (frais ≈ 1 % — à ta charge)
+              </label>
+              <ChampParametre
+                {...propsChamp}
+                cle="seuilCarteAppels"
+                libelle="Carte désactivée au-dessus de"
+                type="number"
+                pas="100"
+                unite="$ HT"
+                aide="Garde-fou du chemin automatique : au-dessus de ce montant, la carte s'éteint toute seule même si elle est activée — 2,9 % sur un gros dépôt, ça ne vaut pas la rapidité. Le virement (1 %) n'a pas de seuil."
+              />
+            </div>
+          </div>
         </div>
       )}
 
@@ -15485,6 +15532,11 @@ export default function App() {
       setDepots((prev) => ({ ...prev, [tacheId]: { ...prev[tacheId], qboInvoiceId: r.factureId, qboDocNumber: r.docNumber } }));
       majDepotFactureQbo(tacheId, { factureId: r.factureId, docNumber: r.docNumber }).catch(() => {});
       ajouterJournal(`🧾 Facture de dépôt QuickBooks Nº ${r.docNumber || r.factureId} créée (Sandbox) — annulation par VOID seulement`);
+      if (r.carteOfferte || r.virementOffert) {
+        ajouterJournal(
+          `💳 Paiement en ligne OFFERT sur cette facture : ${[r.carteOfferte ? "carte" : null, r.virementOffert ? "virement" : null].filter(Boolean).join(" + ")}${r.lienPaiement ? "" : " (lien à venir — QuickBooks Payments pas encore actif sur le compte)"}`
+        );
+      }
     } else if (r?.nonConnecte) {
       ajouterJournal("🔌 QuickBooks non connecté — le dépôt est actif, mais aucune facture n'a été créée (Paramètres → Connexions)");
     } else if (r?.simule) {
@@ -15513,6 +15565,7 @@ export default function App() {
         tps: t.tps,
         tvq: t.tvq,
         total: t.total,
+        lienPaiement: facture?.lienPaiement || null,
       }),
     });
     if (rc.envoye) {

@@ -134,19 +134,36 @@ export async function POST(request) {
   const joursLimite = Math.max(1, Number(corps?.joursLimite) || 1);
 
   try {
-    const [customerId, itemId] = await Promise.all([
-      clientQbo(acces, clientSupabaseService(), { clientId: corps?.clientId || null, clientNom }),
+    const admin = clientSupabaseService();
+    const [customerId, itemId, entreprise] = await Promise.all([
+      clientQbo(acces, admin, { clientId: corps?.clientId || null, clientNom }),
       articleServiceQbo(acces),
+      admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels").limit(1).maybeSingle(),
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
 
+    // ---------- PAIEMENT EN LIGNE (chemin AUTOMATIQUE des appels) ----------
+    // Les interrupteurs vivent dans Paramètres (Admin principal). La
+    // carte s'éteint TOUTE SEULE au-dessus du seuil : 2,9 % sur un gros
+    // montant, c'est un coût de marchand déraisonnable — et au Québec il
+    // ne se refile JAMAIS au client (LPC), donc on le gère à la source.
+    const reglages = entreprise?.data || {};
+    const seuilCarte = reglages.seuil_carte_appels != null ? Number(reglages.seuil_carte_appels) : 2000;
+    const carteOfferte = reglages.paiement_carte_appels === true && montantHT <= seuilCarte;
+    const virementOffert = reglages.paiement_virement_appels === true;
+
     const echeance = new Date(Date.now() + joursLimite * 24 * 60 * 60 * 1000);
     const dateLocale = `${echeance.getFullYear()}-${String(echeance.getMonth() + 1).padStart(2, "0")}-${String(echeance.getDate()).padStart(2, "0")}`;
-    const cree = await ecrireQbo(acces, "invoice", {
+    // `include=invoiceLink` : QuickBooks retourne le lien « voir et
+    // payer » quand QuickBooks Payments est actif sur le compte — c'est
+    // ce lien que notre courriel offre au client comme bouton.
+    const cree = await ecrireQbo(acces, "invoice?include=invoiceLink", {
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
       PrivateNote: `Dépôt d'appel de service — tâche ${corps?.tacheId || "?"} — créé par l'application Ventilation DGL`,
+      AllowOnlineCreditCardPayment: carteOfferte,
+      AllowOnlineACHPayment: virementOffert,
       Line: [
         {
           DetailType: "SalesItemLineDetail",
@@ -157,7 +174,14 @@ export async function POST(request) {
       ],
     });
     const facture = cree?.Invoice;
-    return Response.json({ creee: true, factureId: facture?.Id || null, docNumber: facture?.DocNumber || null });
+    return Response.json({
+      creee: true,
+      factureId: facture?.Id || null,
+      docNumber: facture?.DocNumber || null,
+      lienPaiement: facture?.InvoiceLink || null,
+      carteOfferte,
+      virementOffert,
+    });
   } catch (e) {
     return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });
   }

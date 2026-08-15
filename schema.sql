@@ -1705,3 +1705,14 @@ drop policy if exists "qb_attributions_bureau" on qb_attributions_manuelles;
 create policy "qb_attributions_bureau" on qb_attributions_manuelles
   for all to authenticated
   using (public.fn_est_bureau()) with check (public.fn_est_bureau());
+
+-- ============================================================
+-- SNIPPET « 47 » — paiements en ligne (QuickBooks Payments)
+-- ------------------------------------------------------------
+-- Chemin AUTOMATIQUE des appels de service seulement. Défaut : éteint.
+-- Le seuil coupe la carte au-dessus du montant (frais de 2,9 % — coût
+-- INTERNE du marchand : au Québec, jamais ajouté à la facture client).
+-- ============================================================
+alter table entreprises add column if not exists paiement_carte_appels boolean not null default false;
+alter table entreprises add column if not exists paiement_virement_appels boolean not null default false;
+alter table entreprises add column if not exists seuil_carte_appels numeric;
