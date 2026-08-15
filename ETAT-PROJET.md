@@ -185,6 +185,29 @@
   d'application (ou domaine par client) avant de vrais clients ; DEPOT_ADRESSE (hors-zone)
   encore codée en dur ; compagnie séparée + Loi 25 + assurance à régler côté affaires.
 
+## POLYVALENCE COMPTABLE (décidé 2026-08-15 — « le plus polyvalent possible »)
+
+Le propriétaire veut accueillir les clients PEU IMPORTE leur logiciel comptable.
+Architecture cible : un « adaptateur comptable » par entreprise (le choix vit dans
+ses Connexions), QuickBooks étant le premier adaptateur (fait, Sandbox).
+
+- **À l'embarquement de CHAQUE entreprise cliente** : demander « quel logiciel
+  comptable utilises-tu ? » et le noter sur sa fiche plateforme. C'est cette
+  réponse qui déclenche (ou non) les chantiers ci-dessous — on construit pour un
+  vrai client, jamais par anticipation.
+- **Sage Business Cloud** : API REST + OAuth comme QuickBooks → généraliser les
+  routes /api/quickbooks/* derrière une interface commune (client, facture, devis,
+  paiements). Travail balisé, mêmes patrons.
+- **Sage 50 (bureau — ex-Simple Comptable, très répandu au QC)** : PAS d'API web
+  (logiciel local). Chemin réaliste : EXPORT de fichiers au format d'import Sage 50
+  (clients + factures), le comptable importe. Quelques jours de travail.
+- **Acomba (autre classique QC)** : même approche export de fichiers, à valider
+  avec le format d'import Acomba le jour venu.
+- **Sans connecteur** : l'application fonctionne complète (les factures se saisissent
+  manuellement dans n'importe quel logiciel) — argument de vente honnête : « peu
+  importe ton logiciel comptable, on s'adapte ».
+- ORDRE : rien de tout ça avant la validation QuickBooks + le grand soir.
+
 ## Pièges connus (payés cher — ne pas répéter)
 
 - `String.replace` avec du texte contenant `$` corrompt le fichier (séquences `$&`, `` $` ``) —
