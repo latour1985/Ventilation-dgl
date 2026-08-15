@@ -1739,3 +1739,70 @@ alter table taux_metiers add column if not exists taux_residentiel numeric;
 alter table travaux_effectues add column if not exists secteur text;
 alter table projets_app add column if not exists secteur text;
 alter table bons_travail add column if not exists secteur text;
+
+-- ============================================================
+-- SNIPPET « 50 » — MULTI-ENTREPRISES, PHASE A (additive, SANS DANGER)
+-- ------------------------------------------------------------
+-- Décision du propriétaire (2026-08-15) : base PARTAGÉE avec isolation
+-- RLS — croissance rapide visée (3 partenaires fondateurs, 1 an
+-- gratuit, puis prix fondateur).
+--
+-- Cette phase ne change AUCUN comportement : chaque table reçoit une
+-- étiquette d'entreprise avec « dgl » par défaut — l'application
+-- actuelle continue d'écrire sans le savoir, et toutes ses lignes
+-- (passées et futures) appartiennent à Ventilation DGL. La bascule des
+-- règles de sécurité (phase B, « le grand soir ») viendra APRÈS la
+-- validation QuickBooks — avec test-sonde d'isolation obligatoire.
+--
+-- NOTES PHASE B (à ne PAS faire maintenant) :
+--   • clés à rendre composites : prix_depots (zone), compteurs (cle),
+--     taux_metiers (metier+niveau), quickbooks_connexion (ligne unique)
+--     → chaque entreprise aura SES zones, SES numéros, SES taux, SA
+--     connexion QuickBooks ;
+--   • app_metadata.entreprise_id scellé côté serveur sur chaque compte ;
+--   • politiques RLS « entreprise_id = jwt » sur les 22 tables + storage.
+-- ============================================================
+alter table bons_travail add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_bons_travail_entreprise on bons_travail (entreprise_id);
+alter table camions add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_camions_entreprise on camions (entreprise_id);
+alter table carnet_vehicules add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_carnet_vehicules_entreprise on carnet_vehicules (entreprise_id);
+alter table clients_app add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_clients_app_entreprise on clients_app (entreprise_id);
+alter table compteurs add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_compteurs_entreprise on compteurs (entreprise_id);
+alter table depots add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_depots_entreprise on depots (entreprise_id);
+alter table devis_app add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_devis_app_entreprise on devis_app (entreprise_id);
+alter table entretiens_vehicules add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_entretiens_vehicules_entreprise on entretiens_vehicules (entreprise_id);
+alter table fournisseurs add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_fournisseurs_entreprise on fournisseurs (entreprise_id);
+alter table inspections_vehicules add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_inspections_vehicules_entreprise on inspections_vehicules (entreprise_id);
+alter table journal_activite add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_journal_activite_entreprise on journal_activite (entreprise_id);
+alter table permissions_utilisateurs add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_permissions_utilisateurs_entreprise on permissions_utilisateurs (entreprise_id);
+alter table pieces_commandees add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_pieces_commandees_entreprise on pieces_commandees (entreprise_id);
+alter table prix_depots add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_prix_depots_entreprise on prix_depots (entreprise_id);
+alter table projets_app add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_projets_app_entreprise on projets_app (entreprise_id);
+alter table qb_attributions_manuelles add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_qb_attributions_manuelles_entreprise on qb_attributions_manuelles (entreprise_id);
+alter table quickbooks_connexion add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_quickbooks_connexion_entreprise on quickbooks_connexion (entreprise_id);
+alter table repertoire_employes add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_repertoire_employes_entreprise on repertoire_employes (entreprise_id);
+alter table taches_assignees add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_taches_assignees_entreprise on taches_assignees (entreprise_id);
+alter table taches_attente add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_taches_attente_entreprise on taches_attente (entreprise_id);
+alter table taux_metiers add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_taux_metiers_entreprise on taux_metiers (entreprise_id);
+alter table travaux_effectues add column if not exists entreprise_id text not null default 'dgl';
+create index if not exists idx_travaux_effectues_entreprise on travaux_effectues (entreprise_id);

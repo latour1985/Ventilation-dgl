@@ -167,6 +167,24 @@
   « dont Résidentiel » dans l'export TSV (chantier + transports, jamais admin/divers/dîner).
 - Snippet SQL 49 (taux_residentiel + secteur sur travaux_effectues/projets_app/bons_travail).
 
+## COMMERCIALISATION — LE PLAN (décidé 2026-08-15 avec le propriétaire)
+
+- **Architecture choisie : base PARTAGÉE + isolation RLS** (pas une base par client) —
+  croissance rapide visée. Le moment est idéal : UNE seule vraie entreprise dans la base.
+- **3 partenaires fondateurs** (contacts de confiance du propriétaire) : 1 AN GRATUIT contre
+  usage réel + un retour par mois, puis PRIX FONDATEUR fixé D'AVANCE (à vie). Entente d'une
+  page à rédiger (données leur appartiennent, version en rodage, confidentialité, Loi 25).
+- **Ordre strict** : (0) valider QuickBooks ✓en cours → (A) phase ADDITIVE ✓faite (snippet 50 :
+  entreprise_id default 'dgl' sur 22 tables + index — zéro changement de comportement) →
+  (B) LE GRAND SOIR : clés composites (prix_depots/compteurs/taux_metiers/quickbooks_connexion),
+  app_metadata.entreprise_id scellé serveur, RLS « entreprise_id = jwt » sur 22 tables +
+  storage, TEST-SONDE d'isolation obligatoire → (C) propriétaire seul en multi-tenant 1-2
+  semaines → (D) outil d'embarquement (créer une entreprise clé en main) → (E) les 3
+  fondateurs, un à la fois. GEL des nouvelles fonctionnalités pendant B.
+- **Drapeaux connus** : courriels partent de ventilationdgl.com — il faudra un domaine neutre
+  d'application (ou domaine par client) avant de vrais clients ; DEPOT_ADRESSE (hors-zone)
+  encore codée en dur ; compagnie séparée + Loi 25 + assurance à régler côté affaires.
+
 ## Pièges connus (payés cher — ne pas répéter)
 
 - `String.replace` avec du texte contenant `$` corrompt le fichier (séquences `$&`, `` $` ``) —
