@@ -4045,6 +4045,9 @@ export default function App() {
 }
 
 function AppTechnicien() {
+  // Config entreprise (contexte) — lue EN TÊTE : les hooks doivent
+  // précéder tout retour conditionnel (règle des hooks React).
+  const configTech = useEntreprise();
   // Durée de la pause dîner non payée (Paramètres de l'entreprise).
   const minutesDiner = Number(useEntreprise().minutesDiner) || 30;
   const [connecte, setConnecte] = useState(false);
@@ -4814,8 +4817,11 @@ function AppTechnicien() {
     );
   }
   // Blocage d'accès : seuls les rôles/accès ayant "technicien" entrent ici.
+  // 🧩 MODULES À LA CARTE : si le forfait de l'entreprise (plateforme)
+  // n'inclut pas le module « technicien », l'app mobile se ferme aussi.
   const { role: roleTech, sections: sectionsTech } = permissionsEffectives(accesPerso, session);
-  if (!sectionsTech.includes("technicien")) {
+  const moduleTechnicienActif = !Array.isArray(configTech?.modules) || configTech.modules.includes("technicien");
+  if (!sectionsTech.includes("technicien") || !moduleTechnicienActif) {
     return (
       <div className="flex min-h-screen w-full flex-col sm:mx-auto items-center justify-center gap-3 sm:h-[844px] sm:min-h-0 sm:max-w-sm sm:overflow-hidden sm:rounded-[2.5rem] sm:border-8 sm:border-slate-900 bg-white p-6 text-center shadow-2xl">
         <p className="text-lg font-extrabold text-slate-800">Accès refusé</p>

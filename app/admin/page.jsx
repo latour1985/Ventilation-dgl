@@ -207,7 +207,10 @@ const TYPES_ACCES = ["Admin principal", "Admin régulier", "Administration burea
 // MÉTIERS DE TERRAIN (taux = grille CCQ selon niveau + prime horaire
 // individuelle éventuelle) et MÉTIERS DE BUREAU (taux horaire individuel
 // complet, saisi sur la fiche de chaque employé).
-const METIERS_TERRAIN = ["Frigoriste", "Ferblantier"];
+// Périodes d'apprentissage CCQ vérifiées (ccq.org, 2026-08) :
+// Électricien 4 · Plombier (tuyauteur) 4 · Peintre 3 · Plâtrier 3 —
+// périodes de 2 000 h chacune, puis Compagnon.
+const METIERS_TERRAIN = ["Frigoriste", "Ferblantier", "Électricien", "Plombier", "Peintre", "Plâtrier"];
 const METIERS_BUREAU = ["Adjointe administrative", "Chargé de projet", "Estimateur", "Répartiteur", "Directeur"];
 const METIERS = [...METIERS_TERRAIN, ...METIERS_BUREAU];
 const estMetierBureau = (m) => METIERS_BUREAU.includes(m);
@@ -259,6 +262,10 @@ function GrilleAcces({ sections, onBasculer, desactive }) {
 const NIVEAUX_PAR_METIER = {
   Frigoriste: ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"],
   Ferblantier: ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Compagnon"],
+  "Électricien": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"],
+  "Plombier": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"],
+  "Peintre": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Compagnon"],
+  "Plâtrier": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Compagnon"],
   // Métiers de bureau : pas de niveaux CCQ — un seul « niveau » neutre.
   "Adjointe administrative": ["—"],
   "Chargé de projet": ["—"],
@@ -283,6 +290,10 @@ const metiersTerrainDe = (tauxMetiers) =>
 const TAUX_METIERS_INIT = {
   Frigoriste: { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
   Ferblantier: { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
+  "Électricien": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
+  "Plombier": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
+  "Peintre": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
+  "Plâtrier": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
 };
 
 const COULEUR_TYPE_ACCES = {
@@ -16941,8 +16952,15 @@ export default function App() {
   // Gestion des accès, ou par une vieille ligne en base), elle reste
   // hors de portée. L'écran des Paramètres touche les coordonnées
   // envoyées aux clients, les taux de taxes et les règles de paie.
-  const permissions =
+  const permissionsSelonRole =
     role === "Admin principal" ? permissionsBrutes : permissionsBrutes.filter((s) => s !== "parametres");
+  // 🧩 MODULES À LA CARTE — la plateforme décide ce que CETTE entreprise
+  // a dans son forfait ; personne (Admin principal compris) ne voit un
+  // module absent. `null` = tous les modules (DGL, historique).
+  const modulesEntreprise = Array.isArray(configEntreprise?.modules) ? configEntreprise.modules : null;
+  const permissions = modulesEntreprise
+    ? permissionsSelonRole.filter((s) => modulesEntreprise.includes(s))
+    : permissionsSelonRole;
   // AUTORISATION « modifier la liste de prix ». Verrou posé ici, et pas
   // seulement dans l'écran des accès : même si la case se retrouvait
   // cochée pour un autre rôle, elle reste sans effet. Les prix du

@@ -30,6 +30,27 @@ import {
   exporterEntreprise,
 } from "@/lib/supabase/plateforme";
 
+// 🧩 MODULES À LA CARTE — ce qu'une entreprise reçoit dans son forfait.
+// Décision du propriétaire (2026-08-15) : les besoins diffèrent selon le
+// domaine (un peintre n'a pas besoin des inspections de camions). Cocher
+// = inclus. « Tous » (défaut) = l'entreprise voit tout.
+const MODULES_CATALOGUE = [
+  ["tableau-de-bord", "Tableau de bord"],
+  ["recherche", "Recherche"],
+  ["clients", "Clients"],
+  ["projets", "Projets"],
+  ["devis", "Devis"],
+  ["agenda", "Agenda"],
+  ["facturation", "Facturation"],
+  ["inspections", "Véhicules / Inspections"],
+  ["pieces", "Pièces en commande"],
+  ["paies", "Heures de la semaine"],
+  ["tarifs", "Tarifs"],
+  ["parametres", "Paramètres"],
+  ["utilisateurs", "Utilisateurs"],
+  ["technicien", "App technicien (mobile)"],
+];
+
 const STATUTS = {
   proprietaire: { label: "Propriétaire", cls: "bg-slate-900 text-white" },
   fondateur: { label: "Fondateur", cls: "bg-amber-100 text-amber-800" },
@@ -215,6 +236,7 @@ function TableauPlateforme({ session }) {
               const bd = {};
               if (champs.statut) bd.statut_plateforme = champs.statut;
               if ("gratuitJusqua" in champs) bd.gratuit_jusqua = champs.gratuitJusqua || null;
+              if ("modules" in champs) bd.modules = champs.modules;
               await majEntreprisePlateforme(id, bd).catch(() => charger());
             }}
           />
@@ -293,10 +315,50 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                     </span>
                   )}
                   <Bouton variant="outline" onClick={() => setEditionId(null)} className="min-h-0 px-3 py-1.5 text-xs">Fermer</Bouton>
+                  {/* 🧩 MODULES — cocher ce que ce client reçoit. */}
+                  <div className="w-full rounded-xl bg-slate-50 p-2.5">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <p className="text-[10px] font-extrabold uppercase text-slate-400">🧩 Modules du forfait</p>
+                      {Array.isArray(e.modules) && (
+                        <button
+                          onClick={() => onMaj(e.id, { modules: null })}
+                          className="text-[10px] font-bold text-blue-600 underline underline-offset-2"
+                        >
+                          Tout redonner
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      {MODULES_CATALOGUE.map(([id, label]) => {
+                        const inclus = !Array.isArray(e.modules) || e.modules.includes(id);
+                        return (
+                          <label key={id} className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold ${inclus ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-400"}`}>
+                            <input
+                              type="checkbox"
+                              checked={inclus}
+                              onChange={() => {
+                                const base = Array.isArray(e.modules) ? e.modules : MODULES_CATALOGUE.map(([m]) => m);
+                                const suivant = inclus ? base.filter((m) => m !== id) : [...base, id];
+                                onMaj(e.id, { modules: suivant });
+                              }}
+                              className="h-3.5 w-3.5 accent-[#131B2E]"
+                            />
+                            {label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-1 text-[9px] leading-snug text-slate-400">
+                      Un module décoché disparaît pour TOUTE l'entreprise, son admin principal compris. L'entreprise
+                      voit le changement à sa prochaine connexion.
+                    </p>
+                  </div>
                 </>
               ) : (
                 <>
-                  <Bouton variant="outline" onClick={() => setEditionId(e.id)} className="min-h-0 px-3 py-1.5 text-xs">Statut…</Bouton>
+                  <Bouton variant="outline" onClick={() => setEditionId(e.id)} className="min-h-0 px-3 py-1.5 text-xs">
+                    Statut & modules… {Array.isArray(e.modules) ? `(🧩 ${e.modules.length}/${MODULES_CATALOGUE.length})` : ""}
+                  </Bouton>
                   <Bouton variant="outline" onClick={() => onExporter(e)} className="min-h-0 px-3 py-1.5 text-xs">
                     <Download size={13} /> Exporter ses données
                   </Bouton>

@@ -1915,3 +1915,8 @@ create index if not exists idx_achats_libres_entreprise on achats_libres (entrep
 --    — rangé SUR le projet comme ses bons de commande : entre dans les
 --    coûts matériaux sans nouveau circuit.
 alter table projets_app add column if not exists materiel_stock jsonb not null default '[]'::jsonb;
+
+-- SNIPPET « 54 » — MODULES À LA CARTE par entreprise (plateforme).
+-- null = tous les modules (DGL et historique) ; sinon la liste cochée
+-- dans /plateforme. Appliqué dans les DEUX applications à la connexion.
+alter table entreprises add column if not exists modules jsonb;
