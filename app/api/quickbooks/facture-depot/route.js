@@ -26,60 +26,14 @@ import {
   configQuickbooksPresente,
   jetonAccesValide,
   requeteQbo,
-  urlBaseApiQb,
   utilisateurDepuisJeton,
+  ecrireQbo,
+  echapperQbo,
+  clientQboPour,
+  articleServiceQboPour,
 } from "@/lib/quickbooksServeur";
-
-// Appel d'écriture à l'API QuickBooks (POST JSON).
-async function ecrireQbo(acces, chemin, corps) {
-  const url = `${urlBaseApiQb()}/v3/company/${acces.realmId}/${chemin}${chemin.includes("?") ? "&" : "?"}minorversion=75`;
-  const reponse = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${acces.accessToken}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(corps),
-  });
-  const resultat = await reponse.json().catch(() => ({}));
-  if (!reponse.ok) {
-    const detail = resultat?.Fault?.Error?.[0]?.Message || `QuickBooks a refusé (code ${reponse.status}).`;
-    throw new Error(detail);
-  }
-  return resultat;
-}
-
-// Guillemets échappés pour le langage de requête QBO.
-const echapper = (s) => String(s || "").replace(/'/g, "\\'");
-
-// Retrouve ou crée le client QuickBooks. Retourne son id.
-async function clientQbo(acces, admin, { clientId, clientNom }) {
-  // 1. L'id mémorisé sur la fiche de l'app, s'il existe encore chez QBO.
-  if (clientId) {
-    const { data } = await admin.from("clients_app").select("quickbooks_customer_id").eq("id", clientId).maybeSingle();
-    if (data?.quickbooks_customer_id) return data.quickbooks_customer_id;
-  }
-  // 2. Par nom exact chez QuickBooks.
-  const trouve = await requeteQbo(acces, `select Id from Customer where DisplayName = '${echapper(clientNom)}' maxresults 1`);
-  let id = trouve?.Customer?.[0]?.Id || null;
-  // 3. Sinon : création.
-  if (!id) {
-    const cree = await ecrireQbo(acces, "customer", { DisplayName: clientNom.slice(0, 100) });
-    id = cree?.Customer?.Id || null;
-  }
-  // Mémorise pour les fois suivantes (et pour la Règle 1 d'attribution).
-  if (id && clientId) {
-    await admin.from("clients_app").update({ quickbooks_customer_id: id, sync_qb: "synchronise" }).eq("id", clientId);
-  }
-  return id;
-}
-
-// Un article « Service » pour porter la ligne de la facture (QBO exige
-// un article). On prend « Services » s'il existe, sinon le premier
-// article de type Service du fichier.
-async function articleServiceQbo(acces) {
-  const nomme = await requeteQbo(acces, `select Id, Name from Item where Name = 'Services' maxresults 1`);
-  if (nomme?.Item?.[0]?.Id) return nomme.Item[0].Id;
-  const premier = await requeteQbo(acces, `select Id, Name from Item where Type = 'Service' maxresults 1`);
-  return premier?.Item?.[0]?.Id || null;
-}
+// (Les helpers d'écriture vivent dans quickbooksServeur.js — partagés
+// avec les routes facture, estimate et clients-sync.)
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -114,7 +68,7 @@ export async function POST(request) {
     const factureId = String(corps?.factureId || "").trim();
     if (!factureId) return Response.json({ erreur: "factureId requis." }, { status: 400 });
     try {
-      const lu = await requeteQbo(acces, `select Id, SyncToken from Invoice where Id = '${echapper(factureId)}' maxresults 1`);
+      const lu = await requeteQbo(acces, `select Id, SyncToken from Invoice where Id = '${echapperQbo(factureId)}' maxresults 1`);
       const facture = lu?.Invoice?.[0];
       if (!facture) return Response.json({ annulee: true, note: "Facture introuvable — probablement déjà annulée." });
       await ecrireQbo(acces, "invoice?operation=void", { Id: facture.Id, SyncToken: facture.SyncToken });
@@ -136,8 +90,8 @@ export async function POST(request) {
   try {
     const admin = clientSupabaseService();
     const [customerId, itemId, entreprise] = await Promise.all([
-      clientQbo(acces, admin, { clientId: corps?.clientId || null, clientNom }),
-      articleServiceQbo(acces),
+      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
+      articleServiceQboPour(acces),
       admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels").limit(1).maybeSingle(),
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });

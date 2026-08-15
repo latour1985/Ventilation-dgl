@@ -1,0 +1,105 @@
+// app/api/quickbooks/estimate/route.js
+//
+// DEVIS QUICKBOOKS (« Estimate ») — le propriétaire faisait ses devis
+// DANS QuickBooks avant l'application ; ce pont préserve sa pratique :
+// chaque devis de l'application existe aussi dans QuickBooks, et son
+// comptable retrouve la même structure qu'avant (devis → facture).
+//
+// UN devis d'application = UN estimate QuickBooks, mis à JOUR quand le
+// devis est révisé (nouvelle version) — pas un nouvel estimate par
+// révision, sinon le grand livre se remplit de brouillons. QBO exige le
+// SyncToken courant pour une mise à jour : on le relit à chaque fois.
+//
+// SANDBOX (compagnie US) : montants HT, pas de TPS/TVQ — le fichier
+// canadien réel appliquera ses taxes à la bascule.
+
+import {
+  clientSupabaseService,
+  configQuickbooksPresente,
+  jetonAccesValide,
+  utilisateurDepuisJeton,
+  requeteQbo,
+  ecrireQbo,
+  echapperQbo,
+  clientQboPour,
+  articleServiceQboPour,
+} from "@/lib/quickbooksServeur";
+
+export async function POST(request) {
+  const enTete = request.headers.get("authorization") || "";
+  const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
+  const utilisateur = await utilisateurDepuisJeton(jeton);
+  if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
+  if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
+    return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
+  }
+  if (!configQuickbooksPresente()) return Response.json({ simule: true });
+
+  let corps;
+  try {
+    corps = await request.json();
+  } catch {
+    return Response.json({ erreur: "Demande illisible." }, { status: 400 });
+  }
+
+  const clientNom = String(corps?.clientNom || "").trim();
+  const numero = String(corps?.numero || "").trim();
+  const lignes = (Array.isArray(corps?.lignes) ? corps.lignes : [])
+    .map((l) => ({
+      description: String(l?.description || "").slice(0, 300),
+      quantite: Number(l?.quantite) || 1,
+      prixUnitaire: Number(l?.prixUnitaire) || 0,
+    }))
+    .filter((l) => l.description && l.prixUnitaire !== 0);
+  if (!clientNom || !numero || lignes.length === 0) {
+    return Response.json({ erreur: "Client, numéro et lignes requis." }, { status: 400 });
+  }
+
+  let acces;
+  try {
+    acces = await jetonAccesValide();
+  } catch (e) {
+    return Response.json({ erreur: `Jeton QuickBooks : ${e?.message || "erreur"}` }, { status: 502 });
+  }
+  if (!acces) return Response.json({ nonConnecte: true });
+
+  try {
+    const admin = clientSupabaseService();
+    const [customerId, itemId] = await Promise.all([
+      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
+      articleServiceQboPour(acces),
+    ]);
+    if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
+    if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
+
+    const corpsEstimate = {
+      CustomerRef: { value: customerId },
+      DocNumber: numero.slice(0, 21), // limite QBO
+      PrivateNote: `Devis ${numero} — créé par l'application Ventilation DGL`,
+      Line: lignes.map((l) => ({
+        DetailType: "SalesItemLineDetail",
+        Amount: Math.round(l.quantite * l.prixUnitaire * 100) / 100,
+        Description: l.description,
+        SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: l.quantite, UnitPrice: l.prixUnitaire },
+      })),
+    };
+
+    // MISE À JOUR si l'estimate existe déjà (id fourni et retrouvable),
+    // sinon CRÉATION. La mise à jour QBO est un remplacement complet
+    // avec le SyncToken courant.
+    const estimateId = String(corps?.estimateId || "").trim();
+    if (estimateId) {
+      const lu = await requeteQbo(acces, `select Id, SyncToken from Estimate where Id = '${echapperQbo(estimateId)}' maxresults 1`);
+      const existant = lu?.Estimate?.[0];
+      if (existant) {
+        const maj = await ecrireQbo(acces, "estimate", { ...corpsEstimate, Id: existant.Id, SyncToken: existant.SyncToken });
+        return Response.json({ creee: true, misAJour: true, estimateId: maj?.Estimate?.Id || existant.Id, docNumber: maj?.Estimate?.DocNumber || numero });
+      }
+      // Introuvable (supprimé côté QBO ?) — on retombe sur la création.
+    }
+    const cree = await ecrireQbo(acces, "estimate", corpsEstimate);
+    return Response.json({ creee: true, misAJour: false, estimateId: cree?.Estimate?.Id || null, docNumber: cree?.Estimate?.DocNumber || numero });
+  } catch (e) {
+    return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });
+  }
+}

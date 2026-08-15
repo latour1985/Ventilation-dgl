@@ -1716,3 +1716,14 @@ create policy "qb_attributions_bureau" on qb_attributions_manuelles
 alter table entreprises add column if not exists paiement_carte_appels boolean not null default false;
 alter table entreprises add column if not exists paiement_virement_appels boolean not null default false;
 alter table entreprises add column if not exists seuil_carte_appels numeric;
+
+-- ============================================================
+-- SNIPPET « 48 » — facturation QuickBooks complète
+-- ------------------------------------------------------------
+-- 1. Les factures émises d'un bon sont enfin PERSISTÉES (avant :
+--    perdues au rechargement de la page — inacceptable avec de vrais
+--    numéros QuickBooks dessus).
+-- 2. Chaque devis mémorise son « estimate » QuickBooks (le devis vit
+--    dans l'application ET dans QuickBooks — pratique du propriétaire).
+alter table bons_travail add column if not exists factures_emises jsonb not null default '[]'::jsonb;
+alter table devis add column if not exists qbo_estimate_id text;
