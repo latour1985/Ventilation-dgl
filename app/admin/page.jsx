@@ -957,6 +957,32 @@ function ajouterJours(d, n) {
   return copie;
 }
 
+// ------------------------------------------------------------
+// ADRESSE DE FACTURATION D'UN CLIENT — la règle du propriétaire :
+// « l'adresse de facturation est l'adresse PRINCIPALE du client ».
+// Ordre : le champ explicite (grand formulaire) → sinon la PREMIÈRE
+// adresse de la fiche (la principale) → sinon rien (vrai manquant).
+// Un client créé par un chemin rapide puis complété après coup n'affiche
+// plus jamais « adresse manquante » alors que sa fiche en a une.
+// ------------------------------------------------------------
+function adresseFacturationClient(client) {
+  if (client?.adresseFacturation) return client.adresseFacturation;
+  const principale = client?.adresses?.[0];
+  if (!principale) return "";
+  return [principale.ligne1, principale.codePostal].filter(Boolean).join(", ");
+}
+
+// Nom normalisé pour la détection de DOUBLONS : minuscules, accents
+// retirés, espaces réduits — « Raphaël  Gélinas » = « raphael gelinas ».
+function nomClientNormalise(nom) {
+  return String(nom || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/s+/g, " ")
+    .trim();
+}
+
 // ============================================================
 // NAVIGATION
 // ============================================================
@@ -4775,6 +4801,97 @@ function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }) {
   );
 }
 
+
+// ============================================================
+// ✏️ MODIFIER LA FICHE CLIENT — après la création
+// ------------------------------------------------------------
+// Demande du propriétaire (2026-08-15) : tout se corrige après coup —
+// le nom du contact, l'entreprise, LE NOM AFFICHÉ (personne vs
+// entreprise — ex. afficher « Toitures Lavallée inc. » plutôt que le
+// contact), le téléphone et l'ADRESSE DE FACTURATION. La sauvegarde
+// passe par l'effet de persistance existant (clients modifiés =
+// réécrits automatiquement en base).
+// ============================================================
+function ModalEditionClient({ client, onFermer, onEnregistrer }) {
+  const [nom, setNom] = useState(client.nom || "");
+  const [entreprise, setEntreprise] = useState(client.entreprise || "");
+  const [nomAffichage, setNomAffichage] = useState(client.nomAffichage || "nom");
+  const [telephone, setTelephone] = useState(client.telephone || "");
+  // Adresse de facturation : l'actuelle (règle complète) affichée, une
+  // nouvelle choisie via Google la remplace.
+  const [nouvelleAdresse, setNouvelleAdresse] = useState(null);
+  const actuelle = adresseFacturationClient(client);
+
+  const enregistrer = () => {
+    if (!nom.trim()) return;
+    onEnregistrer({
+      nom: nom.trim(),
+      entreprise: entreprise.trim(),
+      // Sans entreprise, afficher l'entreprise n'a pas de sens.
+      nomAffichage: entreprise.trim() ? nomAffichage : "nom",
+      telephone: telephone.trim(),
+      ...(nouvelleAdresse ? { adresseFacturation: nouvelleAdresse.label } : {}),
+    });
+    onFermer();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-900">✏️ Modifier la fiche — {nomAffichageClient(client)}</h3>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Nom du contact</label>
+            <input value={nom} onChange={(e) => setNom(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Entreprise (optionnel)</label>
+            <input value={entreprise} onChange={(e) => setEntreprise(e.target.value)} placeholder="Ex : Toitures Lavallée inc." className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          </div>
+          {entreprise.trim() && (
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Nom affiché (listes, devis, factures)</label>
+              <div className="flex flex-wrap gap-3">
+                {[["nom", "Nom de la personne"], ["entreprise", "Entreprise"], ["nom-entreprise", "Nom — Entreprise"]].map(([val, lib]) => (
+                  <label key={val} className="flex items-center gap-1.5 text-[11px] text-slate-700">
+                    <input type="radio" name="edition-nom-affichage" checked={nomAffichage === val} onChange={() => setNomAffichage(val)} />
+                    {lib}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Téléphone</label>
+            <input value={telephone} onChange={(e) => setTelephone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          </div>
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Adresse de facturation</label>
+            {nouvelleAdresse ? (
+              <p className="mb-1 flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1.5 text-[11px] font-semibold text-emerald-700">
+                <Check size={11} /> {nouvelleAdresse.label}
+                <button onClick={() => setNouvelleAdresse(null)} className="ml-auto text-emerald-600 underline">annuler</button>
+              </p>
+            ) : (
+              <p className="mb-1 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+                {actuelle || <span className="italic text-amber-600">aucune — choisis-en une ci-dessous</span>}
+              </p>
+            )}
+            <AutocompleteAdresse onSelection={setNouvelleAdresse} />
+            <p className="mt-0.5 text-[9px] text-slate-400">
+              Cette adresse s'imprime sous « Facturé à » sur les devis, bons de travail et factures.
+            </p>
+          </div>
+          <Button onClick={enregistrer} disabled={!nom.trim()} className="w-full">Enregistrer les modifications</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }) {
   const q = terme.trim().toLowerCase();
   const resultats = terme.trim() ? clients.filter((c) => correspond(c, terme)) : [];
@@ -4872,7 +4989,7 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }
           <div key={c.id} className="rounded-xl border border-slate-200 bg-white p-3.5">
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-sm font-bold text-slate-900">{c.nom}</p>
+                <p className="text-sm font-bold text-slate-900">{nomAffichageClient(c)}</p>
                 {c.entreprise && <p className="text-xs font-semibold text-[#131B2E]">{c.entreprise}</p>}
               </div>
               {c.quickbooksCustomerId && (
@@ -4889,8 +5006,15 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }
                 </div>
               ))}
               {c.telephone && <div className="flex items-center gap-1.5"><Phone size={11} /> {c.telephone}</div>}
-              {(c.adresses || []).map((a) => (
-                <div key={a.id} className="flex items-center gap-1.5"><MapPin size={11} /> {a.nom} — {a.ligne1}</div>
+              {(c.adresses || []).map((a, idx) => (
+                <div key={a.id} className="flex items-center gap-1.5">
+                  <MapPin size={11} /> {a.nom} — {a.ligne1}
+                  {idx === 0 && (
+                    <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold text-slate-500" title="La première adresse de la fiche sert d'adresse de facturation">
+                      Principale (facturation)
+                    </span>
+                  )}
+                </div>
               ))}
             </div>
           </div>
@@ -4928,7 +5052,7 @@ function ApercuBonTravailClient({ travail, clients, onFermer }) {
           <p className="text-xs text-slate-500">Date : {travail.date}</p>
           <AdressesDocument
             clientNom={client?.nom || travail.clientNom}
-            adresseFacturation={client?.adresseFacturation}
+            adresseFacturation={adresseFacturationClient(client)}
             adresseTravaux={adresse}
           />
 
@@ -8137,6 +8261,8 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
   const [dejaSyncQb, setDejaSyncQb] = useState(false);
   const [syncEnCours, setSyncEnCours] = useState(false);
   const [clientOuvertId, setClientOuvertId] = useState(null);
+  // ✏️ Fiche client en cours de MODIFICATION (fenêtre d'édition).
+  const [clientEnEditionId, setClientEnEditionId] = useState(null);
   // Arrivée depuis la RECHERCHE RAPIDE : le dossier du client visé
   // s'ouvre tout seul (et son devis est mis en évidence par DevisDuClient).
   useEffect(() => {
@@ -8556,6 +8682,17 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
               </div>
             </div>
 
+            {(() => {
+              const nomSaisi = nomClientNormalise(`${prenom} ${nomFamille}`);
+              const doublon =
+                nomSaisi.length > 3 && (clients || []).find((c) => nomClientNormalise(c.nom) === nomSaisi);
+              return doublon ? (
+                <p className="mb-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                  ⚠️ Un client nommé <span className="font-extrabold">{doublon.nom}</span> existe déjà — vérifie sa
+                  fiche avant de créer un doublon (les devis et tâches se rattachent par client).
+                </p>
+              ) : null;
+            })()}
             {erreursCreation.length > 0 && (
               <div className="rounded-xl border border-red-200 bg-red-50 p-3">
                 <p className="mb-1 flex items-center gap-1.5 text-xs font-bold text-red-700">
@@ -8602,6 +8739,20 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
             Aucun client ne correspond à « {rechercheClients.trim()} ».
           </p>
         )}
+        {clientEnEditionId && (() => {
+          const cible = clients.find((x) => x.id === clientEnEditionId);
+          if (!cible) return null;
+          return (
+            <ModalEditionClient
+              client={cible}
+              onFermer={() => setClientEnEditionId(null)}
+              onEnregistrer={(champs) => {
+                setClients((prev) => prev.map((x) => (x.id === cible.id ? { ...x, ...champs } : x)));
+                ajouterJournal(`✏️ Fiche client modifiée : ${champs.entreprise && champs.nomAffichage !== "nom" ? champs.entreprise : champs.nom}`);
+              }}
+            />
+          );
+        })()}
         {clientsFiltres.map((c) => {
           const ouvert = clientOuvertId === c.id;
           return (
@@ -8624,7 +8775,21 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
 
               {ouvert && (
                 <div className="space-y-1.5 border-t border-slate-100 px-3.5 pb-3.5 pt-2 text-xs text-slate-500">
-                  <p className="text-sm font-extrabold text-[#131B2E]">{c.entreprise || "Particulier (aucune entreprise)"}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-extrabold text-[#131B2E]">{c.entreprise || "Particulier (aucune entreprise)"}</p>
+                    <button
+                      onClick={() => setClientEnEditionId(c.id)}
+                      className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                    >
+                      ✏️ Modifier la fiche
+                    </button>
+                  </div>
+                  {/* ADRESSE DE FACTURATION — la règle : champ explicite,
+                      sinon l'adresse PRINCIPALE (première de la fiche). */}
+                  <p className="flex items-center gap-1.5">
+                    🧾 <span className="font-bold text-slate-600">Facturation :</span>
+                    {adresseFacturationClient(c) || <span className="italic text-amber-600">aucune adresse — à compléter via ✏️</span>}
+                  </p>
 
                   <div className="space-y-1 rounded-lg bg-slate-50 p-2">
                     <p className="text-[10px] font-bold uppercase text-slate-400">Courriels ({(c.courriels || []).length})</p>
@@ -9381,9 +9546,11 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
   // Doublon probable : même courriel, ou nom identique à un client existant.
   const doublonPossible = (clients || []).find((c) => {
     const courrielSaisi = ncCourriel.trim().toLowerCase();
-    const nomSaisi = `${ncPrenom.trim()} ${ncNomFamille.trim()}`.trim().toLowerCase();
+    // Insensible aux ACCENTS et aux espaces : « Raphaël  Gélinas » =
+    // « raphael gelinas » — c'est comme ça que le doublon est passé.
+    const nomSaisi = nomClientNormalise(`${ncPrenom} ${ncNomFamille}`);
     if (courrielSaisi && (c.courriels || []).some((cc) => cc.email.toLowerCase() === courrielSaisi)) return true;
-    return nomSaisi.length > 3 && c.nom.toLowerCase() === nomSaisi;
+    return nomSaisi.length > 3 && nomClientNormalise(c.nom) === nomSaisi;
   });
   const creer = () => {
     if (!(ncPrenom.trim() && ncNomFamille.trim() && ncCourriel.trim())) return;
@@ -10917,7 +11084,7 @@ function ApercuDevisClient({ devis, onFermer }) {
               rien afficher que le PDF n'aurait pas. */}
           <AdressesDocument
             clientNom={devis.clientNom}
-            adresseFacturation={fiche?.adresseFacturation}
+            adresseFacturation={adresseFacturationClient(fiche)}
             adresseTravaux={devis.adresseTravaux}
           />
 
@@ -10971,7 +11138,7 @@ function ApercuDevisClient({ devis, onFermer }) {
           <PiedDocument />
         </div>
 
-        <BoutonPDF type="devis" devis={devis} />
+        <BoutonPDF type="devis" devis={{ ...devis, adresseFacturation: devis?.adresseFacturation || adresseFacturationClient(fiche) }} />
 
         <p className="mt-2 text-[11px] text-slate-400">
           Aperçu de démonstration — le PDF réel envoyé par courriel au client se génère et s'expédie via une fonction backend, avec ce même contenu.
@@ -11921,15 +12088,6 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   };
   const [nouveauClientId, setNouveauClientId] = useState(clients[0]?.id || "");
   const [nouveauType, setNouveauType] = useState("appel_service");
-  // SECTEUR CCQ — décide du taux coûtant de chaque heure. Hérité du
-  // PROJET choisi (option validée par le propriétaire), Commercial par
-  // défaut, changeable au cas par cas.
-  const [nouveauSecteur, setNouveauSecteur] = useState("commercial");
-  useEffect(() => {
-    const projetChoisi = (projets || []).find((pr) => pr.id === nouveauProjetId);
-    if (projetChoisi?.secteur) setNouveauSecteur(projetChoisi.secteur);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nouveauProjetId]);
   // TEMPS SUR LE PROJET, OU FRAIS ADMINISTRATIFS ?
   //
   // La même visite n'a pas le même sens selon le moment : préparer une
@@ -11956,6 +12114,18 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [nouveauDevisId, setNouveauDevisId] = useState("");
   const [nouvelleFrequence, setNouvelleFrequence] = useState(4);
   const [nouveauProjetId, setNouveauProjetId] = useState(""); // "" = Aucun / Projet général
+  // SECTEUR CCQ — décide du taux coûtant de chaque heure. Hérité du
+  // (DOIT vivre APRÈS nouveauProjetId : l'avoir déclaré AVANT plantait
+  // tout l'onglet Agenda — « cannot access before initialization ».
+  // Trouvé par le propriétaire en production, 2026-08-15.)
+  // PROJET choisi (option validée par le propriétaire), Commercial par
+  // défaut, changeable au cas par cas.
+  const [nouveauSecteur, setNouveauSecteur] = useState("commercial");
+  useEffect(() => {
+    const projetChoisi = (projets || []).find((pr) => pr.id === nouveauProjetId);
+    if (projetChoisi?.secteur) setNouveauSecteur(projetChoisi.secteur);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nouveauProjetId]);
   const [adresseTravauxDifferente, setAdresseTravauxDifferente] = useState(false);
   const [adresseTravauxId, setAdresseTravauxId] = useState("");
   const [nouvelleAdresseTravaux, setNouvelleAdresseTravaux] = useState(null); // résultat de l'autocomplétion
@@ -14576,7 +14746,7 @@ function ApercuFactureClient({ bon, onFermer }) {
           <p className="text-xs text-slate-500">Date : {date}</p>
           <AdressesDocument
             clientNom={bon.client}
-            adresseFacturation={fiche?.adresseFacturation}
+            adresseFacturation={adresseFacturationClient(fiche)}
             adresseTravaux={bon.adresseTravaux}
           />
 
@@ -14641,7 +14811,7 @@ function ApercuFactureClient({ bon, onFermer }) {
           <PiedDocument />
         </div>
 
-        <BoutonPDF type="facture" bon={bon} />
+        <BoutonPDF type="facture" bon={{ ...bon, adresseFacturation: bon?.adresseFacturation || adresseFacturationClient(fiche) }} />
 
         <p className="mt-2 text-[11px] text-slate-400">
           Aperçu de démonstration — la facture réelle est générée et envoyée via QuickBooks, avec ce même contenu.

@@ -39,6 +39,14 @@ export default [
       // La règle qui compte. Une variable utilisée mais jamais définie
       // dans la portée = ReferenceError garanti à l'écran.
       "no-undef": "error",
+      // Variable utilisée AVANT sa déclaration (même portée) : plantage
+      // « cannot access before initialization » garanti à l'exécution —
+      // c'est le bogue qui a tué l'onglet Agenda le 2026-08-15.
+      // En AVERTISSEMENT : 33 cas légitimes existent (fonctions appelées
+      // après coup dans des gestionnaires). MAIS toute nouvelle occurrence
+      // dans un chemin de RENDU (tableau de dépendances, corps de rendu)
+      // doit être traitée comme fatale — vérifier avec npm run verifier:tout.
+      "no-use-before-define": ["warn", { functions: false, classes: false, variables: true, allowNamedExports: true }],
       // Deux fois la même clé dans un objet : la seconde écrase la
       // première en silence.
       "no-dupe-keys": "error",
