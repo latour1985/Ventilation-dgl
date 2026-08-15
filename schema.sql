@@ -1727,3 +1727,15 @@ alter table entreprises add column if not exists seuil_carte_appels numeric;
 --    dans l'application ET dans QuickBooks — pratique du propriétaire).
 alter table bons_travail add column if not exists factures_emises jsonb not null default '[]'::jsonb;
 alter table devis add column if not exists qbo_estimate_id text;
+
+-- ============================================================
+-- SNIPPET « 49 » — secteurs COMMERCIAL / RÉSIDENTIEL (CCQ)
+-- ------------------------------------------------------------
+-- Le même compagnon ne coûte pas le même prix selon le secteur.
+-- Chaque tâche porte son secteur (hérité du projet, Commercial par
+-- défaut) ; l'heure enregistrée FIGE le taux du bon secteur ; la
+-- feuille de temps sépare les heures pour payer correctement.
+alter table taux_metiers add column if not exists taux_residentiel numeric;
+alter table travaux_effectues add column if not exists secteur text;
+alter table projets_app add column if not exists secteur text;
+alter table bons_travail add column if not exists secteur text;

@@ -3097,7 +3097,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
   const parEmploye = {};
   lignesSemaine.forEach((t) => {
     const cle = t.employeEmail.toLowerCase();
-    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, details: [] });
+    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, details: [] });
     const h = Number(t.heures) || 0;
     e.parJour[t.date] = (e.parJour[t.date] || 0) + h;
     // ADMINISTRATIF et DIVERS passent AVANT le classement habituel :
@@ -3111,6 +3111,10 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
     else if (estCcq(t)) e.transportCcq += h;
     else if (t.estTransport) e.transport += h;
     else e.chantier += h;
+    // SECTEUR RÉSIDENTIEL — cumul séparé (chantier + transports) : la
+    // paie doit savoir combien d'heures payer au taux résidentiel.
+    // Les heures administratives/divers ne sont d'aucun secteur.
+    if (t.secteur === "residentiel" && cat === "projet" && !estLunch(t)) e.residentiel += h;
     e.total += h;
     e.details.push(t);
   });
@@ -3120,7 +3124,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
   (utilisateurs || []).forEach((u) => {
     const cle = (u.courriel || "").toLowerCase();
     if (!cle || parEmploye[cle]) return;
-    parEmploye[cle] = { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, details: [] };
+    parEmploye[cle] = { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, details: [] };
   });
   // REPORT ± : corrections TARDIVES validées PENDANT la semaine affichée
   // mais portant sur des lignes de semaines ANTÉRIEURES — la différence
@@ -3200,13 +3204,14 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
       setAvertissementPaieOuvert(true);
       return;
     }
-    const enTete = ["Technicien", ...jours.map((j) => j.toLocaleDateString("fr-CA", { weekday: "short", day: "numeric" })), "Chantier", "Transport", "Transport journalier", "Administratif", "Divers", "Dîner", "Nuit", "Sam/Dim", "Report ±", "Régulières", `Supplémentaires (>${seuilSupp} h)`, "TOTAL À PAYER"].join("\t");
+    const enTete = ["Technicien", ...jours.map((j) => j.toLocaleDateString("fr-CA", { weekday: "short", day: "numeric" })), "Chantier", "dont Résidentiel", "Transport", "Transport journalier", "Administratif", "Divers", "Dîner", "Nuit", "Sam/Dim", "Report ±", "Régulières", `Supplémentaires (>${seuilSupp} h)`, "TOTAL À PAYER"].join("\t");
     const corps = employesSemaine
       .map((e) =>
         [
           e.nom,
           ...isoJours.map((iso) => (e.parJour[iso] ? e.parJour[iso].toFixed(2) : "")),
           e.chantier.toFixed(2),
+          (e.residentiel || 0).toFixed(2),
           e.transport.toFixed(2),
           e.transportCcq.toFixed(2),
           e.administratif.toFixed(2),
@@ -3225,6 +3230,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
       "TOTAL ÉQUIPE",
       ...isoJours.map((iso) => (totauxEquipe.parJour[iso] ? totauxEquipe.parJour[iso].toFixed(2) : "")),
       totauxEquipe.chantier.toFixed(2),
+      (totauxEquipe.residentiel || 0).toFixed(2),
       totauxEquipe.transport.toFixed(2),
       totauxEquipe.transportCcq.toFixed(2),
       totauxEquipe.administratif.toFixed(2),
@@ -3535,7 +3541,14 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                           </td>
                         );
                       })}
-                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.chantier.toFixed(2)} h</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
+                        {e.chantier.toFixed(2)} h
+                        {(e.residentiel || 0) > 0.001 && (
+                          <span className="block text-[9px] font-bold text-emerald-600" title="Heures au taux RÉSIDENTIEL (chantier + transports)">
+                            🏠 rés. {e.residentiel.toFixed(2)} h
+                          </span>
+                        )}
+                      </td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transport.toFixed(2)} h</td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transportCcq.toFixed(2)} h</td>
                       {/* ADMINISTRATIF cliquable : ouvre le detail des
@@ -5472,7 +5485,7 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
 // ONGLET TARIFS — grille des taux horaires + liste de prix des dépôts
 // (modification réservée à l'Admin principal, consultation sinon)
 // ============================================================
-function OngletTarifs({ tauxMetiers, setTauxMetiers, onSauvegarderTaux, prixDepots, setPrixDepots, onSauvegarderPrixDepots, estAdminPrincipal, ajouterJournal, catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, onSauvegarderCoutCamion }) {
+function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMetiersRes, onSauvegarderTaux, prixDepots, setPrixDepots, onSauvegarderPrixDepots, estAdminPrincipal, ajouterJournal, catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, onSauvegarderCoutCamion }) {
   // Taux de taxes des Paramètres — pour afficher les prix taxes incluses.
   const configEnt = useEntreprise();
   // État du bouton « Sauvegarder la liste de prix » (dépôts par zone).
@@ -5598,7 +5611,19 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, onSauvegarderTaux, prixDepo
                       onChange={(v) => setTauxMetiers((prev) => ({ ...prev, [m]: { ...prev[m], [niv]: v } }))}
                       className="w-full border-0 bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
                     />
-                    <span className="text-[10px] text-slate-400">$/h</span>
+                    <span className="shrink-0 text-[9px] font-bold text-slate-400" title="Commercial / institutionnel">COM</span>
+                    <span className="mx-1 text-slate-200">|</span>
+                    {/* SECTEUR RÉSIDENTIEL — le même compagnon, l'autre
+                        taux CCQ. Laissé à 0 = retombe sur le commercial
+                        (jamais une paie à zéro sur une grille à moitié
+                        remplie). */}
+                    <InputNombreDecimal
+                      valeur={Number(tauxMetiersRes?.[m]?.[niv]) || 0}
+                      disabled={!estAdminPrincipal}
+                      onChange={(v) => setTauxMetiersRes((prev) => ({ ...prev, [m]: { ...(prev?.[m] || {}), [niv]: v } }))}
+                      className="w-full border-0 bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+                    />
+                    <span className="shrink-0 text-[9px] font-bold text-emerald-600" title="Résidentiel (0 = même taux que commercial)">RÉS</span>
                   </div>
                 </div>
               ))}
@@ -8234,6 +8259,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
   const margeProjet = totalFactureProjet - totalCoutantProjet;
   const margePctProjet = totalFactureProjet > 0 ? (margeProjet / totalFactureProjet) * 100 : 0;
 
+  const [nouveauProjetSecteur, setNouveauProjetSecteur] = useState("commercial");
   const creerProjet = (clientId) => {
     if (!nouveauProjetNom.trim() || totalFactureProjet <= 0) return;
     const client = clients.find((c) => c.id === clientId);
@@ -8253,6 +8279,9 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
       adresseTravaux,
       dateDebut: nouveauProjetDebut,
       dateFin: nouveauProjetFin,
+      // Secteur CCQ du chantier — chaque tâche du projet en HÉRITE
+      // (changeable tâche par tâche à la création).
+      secteur: nouveauProjetSecteur === "residentiel" ? "residentiel" : "commercial",
       statut: "À planifier",
       // budgetTotal et tauxHoraireCoutant sont dérivés de la ventilation
       // ci-dessous (le calcul de rentabilité existant s'en sert toujours).
@@ -8790,6 +8819,21 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
 
                         <div className="grid grid-cols-2 gap-1.5">
                           <div>
+                            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Secteur CCQ du chantier</label>
+                            <div className="mb-2 flex gap-1.5">
+                              {[["commercial", "🏢 Commercial"], ["residentiel", "🏠 Résidentiel"]].map(([val, lib]) => (
+                                <button
+                                  key={val}
+                                  type="button"
+                                  onClick={() => setNouveauProjetSecteur(val)}
+                                  className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-bold ${
+                                    nouveauProjetSecteur === val ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-600"
+                                  }`}
+                                >
+                                  {lib}
+                                </button>
+                              ))}
+                            </div>
                             <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Date de début</label>
                             <input type="date" value={nouveauProjetDebut} onChange={(e) => setNouveauProjetDebut(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
                           </div>
@@ -11877,6 +11921,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   };
   const [nouveauClientId, setNouveauClientId] = useState(clients[0]?.id || "");
   const [nouveauType, setNouveauType] = useState("appel_service");
+  // SECTEUR CCQ — décide du taux coûtant de chaque heure. Hérité du
+  // PROJET choisi (option validée par le propriétaire), Commercial par
+  // défaut, changeable au cas par cas.
+  const [nouveauSecteur, setNouveauSecteur] = useState("commercial");
+  useEffect(() => {
+    const projetChoisi = (projets || []).find((pr) => pr.id === nouveauProjetId);
+    if (projetChoisi?.secteur) setNouveauSecteur(projetChoisi.secteur);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nouveauProjetId]);
   // TEMPS SUR LE PROJET, OU FRAIS ADMINISTRATIFS ?
   //
   // La même visite n'a pas le même sens selon le moment : préparer une
@@ -11966,6 +12019,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       id: `tache-manuelle-${Date.now()}`,
       clientId: nouveauClientId || null,
       clientNom: client?.nom || "",
+      // SECTEUR CCQ — hérité du projet choisi (Commercial par défaut).
+      // C'est lui qui décidera du taux coûtant FIGÉ de chaque heure.
+      secteur: nouveauSecteur === "residentiel" ? "residentiel" : "commercial",
       // Courriels du client transmis AVEC la tâche : le technicien peut
       // ainsi choisir à quelles adresses envoyer le bon de travail signé
       // (choix multiple) sans avoir accès au dossier client complet.
@@ -12691,6 +12747,25 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 </select>
               </div>
 
+              {/* SECTEUR CCQ — commercial/résidentiel : décide du taux
+                  coûtant. Hérité du projet choisi, changeable ici. */}
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Secteur (taux CCQ)</label>
+                <div className="flex gap-1.5">
+                  {[["commercial", "🏢 Commercial"], ["residentiel", "🏠 Résidentiel"]].map(([val, lib]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setNouveauSecteur(val)}
+                      className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-bold ${
+                        nouveauSecteur === val ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-600"
+                      }`}
+                    >
+                      {lib}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Projet lié (optionnel)</label>
                 <select
@@ -15670,6 +15745,9 @@ export default function App() {
           depotRequis: false,
           // Trace : d'où vient cette tâche.
           issueDePieceTacheId: b.tacheId,
+          // Même secteur que la visite d'origine — la pose de la pièce
+          // se paie au même taux CCQ que le diagnostic.
+          secteur: b.secteur === "residentiel" ? "residentiel" : "commercial",
         };
         setTachesAttente((prev) => [tacheRetour, ...prev]);
 
@@ -16037,20 +16115,24 @@ export default function App() {
     };
   }, [session]);
 
+  // Grille RÉSIDENTIELLE (CCQ) — le même métier×niveau, l'autre secteur.
+  const [tauxMetiersRes, setTauxMetiersRes] = useState({});
   // Grille des taux — chargée depuis Supabase à la connexion. La
   // sauvegarde est EXPLICITE (bouton « Sauvegarder les taux », réservé à
   // l'Admin principal, dans l'onglet Utilisateurs).
   useEffect(() => {
     if (!session) return;
     listerTaux()
-      .then((grille) => {
+      .then(({ com, res }) => {
         setTauxMetiers((prev) => {
           const fusion = { ...prev };
-          Object.entries(grille).forEach(([m, niveaux]) => {
+          Object.entries(com).forEach(([m, niveaux]) => {
             fusion[m] = { ...(fusion[m] || {}), ...niveaux };
           });
           return fusion;
         });
+        // Grille RÉSIDENTIELLE — parallèle à la commerciale, mêmes clés.
+        setTauxMetiersRes(res || {});
       })
       .catch(() => {
         // table absente — la grille locale continue seule
@@ -16859,7 +16941,9 @@ export default function App() {
           onSauvegarderCoutCamion={sauvegarderCoutCamion}
           tauxMetiers={tauxMetiers}
           setTauxMetiers={setTauxMetiers}
-          onSauvegarderTaux={() => sauvegarderTaux(tauxMetiers)}
+          onSauvegarderTaux={() => sauvegarderTaux(tauxMetiers, tauxMetiersRes)}
+          tauxMetiersRes={tauxMetiersRes}
+          setTauxMetiersRes={setTauxMetiersRes}
           prixDepots={prixDepots}
           setPrixDepots={setPrixDepots}
           onSauvegarderPrixDepots={() => sauvegarderPrixDepots(prixDepots)}

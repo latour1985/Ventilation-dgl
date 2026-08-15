@@ -244,12 +244,18 @@ function completerTransportsJournee(tachesEntree) {
   // 2) CRÉE les transports manquants pour chaque journée travaillée.
   Object.entries(parDate).forEach(([date, liste]) => {
     const heures = liste.map((t) => t.heure || "08:00").sort();
+    // SECTEUR des transports (règle validée) : ils héritent de la tâche
+    // à laquelle ils se rattachent — début = 1re tâche du jour, fin =
+    // dernière, CCQ = sa tâche de destination (réglé plus bas).
+    const trieesPourSecteur = liste.slice().sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
+    const secteurPremiere = trieesPourSecteur[0]?.secteur || "commercial";
+    const secteurDerniere = trieesPourSecteur[trieesPourSecteur.length - 1]?.secteur || "commercial";
     const gabarit = { type: "transport", date, etat: "a_faire", tempsAccumuleSec: 0, tempsDebutSegment: null, kilometres: 0 };
     if (!resultat.some((t) => t.type === "transport" && t.momentTransport === "debut" && t.date === date)) {
-      resultat.push({ ...gabarit, id: `transport-debut-${date}`, momentTransport: "debut", heure: decalerHeure(heures[0], -30), titre: "Transport — Début de journée" });
+      resultat.push({ ...gabarit, secteur: secteurPremiere, id: `transport-debut-${date}`, momentTransport: "debut", heure: decalerHeure(heures[0], -30), titre: "Transport — Début de journée" });
     }
     if (!resultat.some((t) => t.type === "transport" && t.momentTransport === "fin" && t.date === date)) {
-      resultat.push({ ...gabarit, id: `transport-fin-${date}`, momentTransport: "fin", heure: decalerHeure(heures[heures.length - 1], 150), titre: "Transport — Fin de journée" });
+      resultat.push({ ...gabarit, secteur: secteurDerniere, id: `transport-fin-${date}`, momentTransport: "fin", heure: decalerHeure(heures[heures.length - 1], 150), titre: "Transport — Fin de journée" });
     }
     // 3) TRANSPORT CCQ entre chaque paire de tâches consécutives (2 tâches
     // et plus dans la journée) : le déplacement entre deux clients est
@@ -267,6 +273,9 @@ function completerTransportsJournee(tachesEntree) {
         const avantSuivante = decalerHeure(suivante.heure || "08:00", -15);
         resultat.push({
           ...gabarit,
+          // CCQ : le secteur de sa tâche de DESTINATION (même règle que
+          // l'imputation du projet).
+          secteur: suivante.secteur || "commercial",
           id: `transport-ccq-${date}-${suivante.id}`,
           momentTransport: "ccq",
           tacheSuivanteId: suivante.id,
@@ -2957,6 +2966,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         date: tache.date || isoLocal(new Date()),
         heures,
         typeTache: tache.typeTache || null,
+        secteur: tache.secteur || "commercial",
         devisNumero: tache.devisNumero || null,
         adresseTravaux: tache.adresseTravaux || null,
         projetId: tache.projetId || null,
@@ -4279,6 +4289,7 @@ function AppTechnicien() {
           // Pour les tâches assignées par l'admin : l'identifiant D'ORIGINE
           // (côté agenda), pour que le bloc passe au vert dans l'agenda.
           tacheId: t.cleHeures || t.tacheOrigineId || t.id,
+        secteur: t.secteur || "commercial",
           titre: t.titre || (t.type === "transport" ? "Transport" : undefined),
           clientNom: t.clientNom || clientDemo?.nom || null,
           date: t.date || isoLocal(new Date()),
@@ -4357,6 +4368,7 @@ function AppTechnicien() {
     enregistrerTravailEffectue(
       {
         tacheId: t.cleHeures || t.tacheOrigineId || t.id,
+        secteur: t.secteur || "commercial",
         titre: `🔒 JOURNÉE BLOQUÉE — ${titreOriginal}`,
         clientNom: t.clientNom || null,
         date: dateTache,
@@ -4418,6 +4430,7 @@ function AppTechnicien() {
       enregistrerTravailEffectue(
         {
           tacheId: tache.cleHeures || tache.tacheOrigineId || tache.id,
+        secteur: tache.secteur || "commercial",
           titre: tache.titre || (tache.type === "transport" ? "Transport" : undefined),
           clientNom: tache.clientNom || null,
           date: tache.date || isoLocal(new Date()),

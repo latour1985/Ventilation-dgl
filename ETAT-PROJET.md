@@ -154,6 +154,19 @@
   rechargement). majFacturesEmises(rowId sans le préfixe sbb-).
 - Snippet SQL 48 (factures_emises + devis.qbo_estimate_id). 47 = paiements appels.
 
+### Travaux du 2026-08-15 (suite 2) — SECTEURS COMMERCIAL / RÉSIDENTIEL (CCQ)
+- Grille des taux : DEUX colonnes par métier×niveau (COM | RÉS). Résidentiel à 0 = retombe
+  sur le commercial (jamais une paie à zéro). listerTaux() retourne {com, res} ;
+  sauvegarderTaux(com, res) ; tauxPourCourriel(courriel, secteur).
+- Chaque TÂCHE porte son secteur : hérité du PROJET (champ au formulaire projet), Commercial
+  par défaut, changeable à la création (boutons 🏢/🏠). Voyage par donnees → technicien.
+- Transports : héritent de leur tâche (début = 1re du jour, fin = dernière, CCQ = destination).
+- Le taux FIGÉ à l'enregistrement choisit la colonne du bon secteur ; travaux_effectues.secteur
+  étiquette chaque heure. Tâche de retour pièce = secteur du diagnostic (bons_travail.secteur).
+- Heures de la semaine : sous-total « 🏠 rés. X h » sous la colonne Chantier + colonne
+  « dont Résidentiel » dans l'export TSV (chantier + transports, jamais admin/divers/dîner).
+- Snippet SQL 49 (taux_residentiel + secteur sur travaux_effectues/projets_app/bons_travail).
+
 ## Pièges connus (payés cher — ne pas répéter)
 
 - `String.replace` avec du texte contenant `$` corrompt le fichier (séquences `$&`, `` $` ``) —
