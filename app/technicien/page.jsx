@@ -2272,6 +2272,25 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
 function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommencee, onSignatureEffacee, lectureSeule, libelle }) {
   const dessine = useRef(false);
 
+  // L'ÉCRAN NE DOIT PAS BOUGER PENDANT LA SIGNATURE (constat des
+  // employés). `touch-none` ne suffit pas sur tous les téléphones :
+  // on bloque AUSSI les événements tactiles natifs du canevas (en mode
+  // non passif — seul mode où preventDefault fonctionne), sinon la page
+  // défile, la barre d'adresse se replie et le canevas glisse sous le
+  // doigt en plein trait.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const bloquer = (e) => e.preventDefault();
+    canvas.addEventListener("touchstart", bloquer, { passive: false });
+    canvas.addEventListener("touchmove", bloquer, { passive: false });
+    return () => {
+      canvas.removeEventListener("touchstart", bloquer);
+      canvas.removeEventListener("touchmove", bloquer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const pos = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -2289,6 +2308,8 @@ function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommen
   const debut = (e) => {
     if (lectureSeule) return;
     dessine.current = true;
+    // Gèle le défilement de la PAGE le temps du trait — remis à la fin.
+    document.body.style.overflow = "hidden";
     e.target.setPointerCapture(e.pointerId);
     const ctx = canvasRef.current.getContext("2d");
     const { x, y } = pos(e);
@@ -2313,6 +2334,7 @@ function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommen
 
   const fin = () => {
     dessine.current = false;
+    document.body.style.overflow = "";
   };
 
   const effacer = () => {
@@ -2909,6 +2931,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     if (tache.nonFacturable) {
       setEnvoiEnCours(false);
       onTerminer();
+      // Retour au menu des tâches — l'écran restait planté ici (constat
+      // des employés) : la tâche était finie mais rien ne bougeait.
+      onRetour();
       return;
     }
     // UN SEUL BON DE TRAVAIL PAR TÂCHE : seul le dernier à fermer le
@@ -2920,6 +2945,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     if (!jeSuisLeDernier) {
       setEnvoiEnCours(false);
       onTerminer();
+      onRetour();
       return;
     }
     enregistrerBonTravail(
@@ -2975,6 +3001,17 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     }, 600);
   };
 
+  // RETOUR AUTOMATIQUE (constat des employés : « la tâche reste
+  // ouverte ») : l'écran de confirmation ramène à l'horaire tout seul
+  // après 5 secondes. Toucher « Ajouter une note ou une photo »
+  // l'annule — le nettoyage de l'effet coupe le minuteur.
+  useEffect(() => {
+    if (!montrerConfirmation) return;
+    const minuteur = setTimeout(() => onRetour(), 5000);
+    return () => clearTimeout(minuteur);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [montrerConfirmation]);
+
   if (montrerConfirmation) {
     return (
       <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-slate-100 px-6 text-center">
@@ -2990,6 +3027,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         <Button onClick={onRetour} className="px-6">
           Retour à l'horaire
         </Button>
+        <p className="text-[11px] text-slate-400">Retour automatique dans quelques secondes…</p>
         <PiedCopyright />
       </div>
     );
