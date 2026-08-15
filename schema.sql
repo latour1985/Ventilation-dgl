@@ -1806,3 +1806,54 @@ alter table taux_metiers add column if not exists entreprise_id text not null de
 create index if not exists idx_taux_metiers_entreprise on taux_metiers (entreprise_id);
 alter table travaux_effectues add column if not exists entreprise_id text not null default 'dgl';
 create index if not exists idx_travaux_effectues_entreprise on travaux_effectues (entreprise_id);
+
+-- ============================================================
+-- SNIPPET « 51 » — PLATEFORME (3e interface) + LOI 25
+-- ------------------------------------------------------------
+-- 1. La table `entreprises` devient le REGISTRE DES LOCATAIRES de la
+--    plateforme : statut commercial (propriétaire / fondateur / essai /
+--    payant / suspendu) + fin du gratuit (entente fondateurs : 1 an).
+alter table entreprises add column if not exists statut_plateforme text not null default 'proprietaire';
+alter table entreprises add column if not exists gratuit_jusqua date;
+alter table entreprises add column if not exists suspendue boolean not null default false;
+
+-- 2. VERROU D'ISOLATION — la création d'entreprises reste verrouillée
+--    tant que le grand soir (RLS multi-locataires + test-sonde) n'est
+--    pas passé. C'est la plateforme qui lit ce drapeau ; on ne le mettra
+--    à vrai qu'après la preuve d'étanchéité.
+create table if not exists plateforme_config (
+  cle        text primary key,
+  valeur     text,
+  updated_at timestamptz not null default now()
+);
+insert into plateforme_config (cle, valeur) values ('isolation_activee', 'non')
+  on conflict (cle) do nothing;
+
+-- 3. REGISTRE DES INCIDENTS DE CONFIDENTIALITÉ — obligation Loi 25
+--    (tenir un registre même sans incident ; notifier la Commission
+--    d'accès à l'information et les personnes si préjudice sérieux).
+create table if not exists incidents_confidentialite (
+  id                 uuid primary key default gen_random_uuid(),
+  date_incident      date not null,
+  description        text not null,
+  gravite            text not null default 'faible', -- faible | moyen | serieux
+  mesures            text,
+  personnes_touchees text,
+  notifie_cai        boolean not null default false,
+  notifie_personnes  boolean not null default false,
+  cree_par           text,
+  created_at         timestamptz not null default now()
+);
+alter table incidents_confidentialite enable row level security;
+-- Réservé aux comptes PLATEFORME (sceau app_metadata, scellé serveur).
+drop policy if exists "incidents_plateforme" on incidents_confidentialite;
+create policy "incidents_plateforme" on incidents_confidentialite
+  for all to authenticated
+  using (coalesce((auth.jwt() -> 'app_metadata' ->> 'plateforme')::boolean, false))
+  with check (coalesce((auth.jwt() -> 'app_metadata' ->> 'plateforme')::boolean, false));
+
+-- 4. LE SCEAU DU PROPRIÉTAIRE DE PLATEFORME — app_metadata est la zone
+--    que SEUL le serveur écrit : impossible à s'auto-attribuer.
+update auth.users
+  set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"plateforme": true}'::jsonb
+  where email = 'jeanfrancois@ventilationdgl.com';
