@@ -3123,7 +3123,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
   const parEmploye = {};
   lignesSemaine.forEach((t) => {
     const cle = t.employeEmail.toLowerCase();
-    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, details: [] });
+    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, residentielChantier: 0, residentielTransport: 0, details: [] });
     const h = Number(t.heures) || 0;
     e.parJour[t.date] = (e.parJour[t.date] || 0) + h;
     // ADMINISTRATIF et DIVERS passent AVANT le classement habituel :
@@ -3140,7 +3140,13 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
     // SECTEUR RÉSIDENTIEL — cumul séparé (chantier + transports) : la
     // paie doit savoir combien d'heures payer au taux résidentiel.
     // Les heures administratives/divers ne sont d'aucun secteur.
-    if (t.secteur === "residentiel" && cat === "projet" && !estLunch(t)) e.residentiel += h;
+    if (t.secteur === "residentiel" && cat === "projet" && !estLunch(t)) {
+      e.residentiel += h;
+      // Détail chantier vs transport — les deux cellules du tableau
+      // affichent chacune leur part résidentielle.
+      if (t.estTransport) e.residentielTransport += h;
+      else e.residentielChantier += h;
+    }
     e.total += h;
     e.details.push(t);
   });
@@ -3150,7 +3156,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
   (utilisateurs || []).forEach((u) => {
     const cle = (u.courriel || "").toLowerCase();
     if (!cle || parEmploye[cle]) return;
-    parEmploye[cle] = { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, details: [] };
+    parEmploye[cle] = { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, residentielChantier: 0, residentielTransport: 0, details: [] };
   });
   // REPORT ± : corrections TARDIVES validées PENDANT la semaine affichée
   // mais portant sur des lignes de semaines ANTÉRIEURES — la différence
@@ -3484,7 +3490,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
         </p>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+          <DefilementHorizontal>
             <table className="w-full min-w-[1100px] text-xs">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left">
@@ -3568,14 +3574,25 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                         );
                       })}
                       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
-                        {e.chantier.toFixed(2)} h
-                        {(e.residentiel || 0) > 0.001 && (
-                          <span className="block text-[9px] font-bold text-emerald-600" title="Heures au taux RÉSIDENTIEL (chantier + transports)">
-                            🏠 rés. {e.residentiel.toFixed(2)} h
-                          </span>
+                        {(e.residentielChantier || 0) > 0.001 ? (
+                          <>
+                            <span className="block font-bold">🏢 {(e.chantier - e.residentielChantier).toFixed(2)} h</span>
+                            <span className="block font-bold text-emerald-700" title="Heures de chantier payées au taux RÉSIDENTIEL">🏠 {e.residentielChantier.toFixed(2)} h</span>
+                          </>
+                        ) : (
+                          `${e.chantier.toFixed(2)} h`
                         )}
                       </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transport.toFixed(2)} h</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
+                        {(e.residentielTransport || 0) > 0.001 ? (
+                          <>
+                            <span className="block font-bold">🏢 {(e.transport - e.residentielTransport).toFixed(2)} h</span>
+                            <span className="block font-bold text-emerald-700" title="Transports payés au taux RÉSIDENTIEL">🏠 {e.residentielTransport.toFixed(2)} h</span>
+                          </>
+                        ) : (
+                          `${e.transport.toFixed(2)} h`
+                        )}
+                      </td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transportCcq.toFixed(2)} h</td>
                       {/* ADMINISTRATIF cliquable : ouvre le detail des
                           visites (quel client, quel projet on est alle
@@ -3686,7 +3703,9 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                           : estCcq(t)
                           ? { label: "TRANSP. JOURNALIER", cls: "bg-amber-100 text-amber-700" }
                           : t.estTransport
-                          ? { label: "TRANSPORT", cls: "bg-slate-200 text-slate-600" }
+                          ? { label: t.secteur === "residentiel" ? "TRANSPORT 🏠" : "TRANSPORT", cls: "bg-slate-200 text-slate-600" }
+                          : t.secteur === "residentiel"
+                          ? { label: "CHANTIER 🏠 RÉS.", cls: "bg-emerald-200 text-emerald-800" }
                           : { label: "CHANTIER", cls: "bg-emerald-100 text-emerald-700" };
                       const tj = lignesJour.reduce(
                         (acc, t) => {
@@ -3828,6 +3847,9 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                             )}
                             <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-bold text-slate-700">
                               <span>🟢 Chantier : <span className="tabular-nums">{tj.chantier.toFixed(2)} h</span></span>
+                              {lignesJour.some((t) => t.secteur === "residentiel") && (
+                                <span className="text-emerald-700">🏠 Résidentiel : <span className="tabular-nums">{lignesJour.filter((t) => t.secteur === "residentiel" && !estLunch(t)).reduce((s, t) => s + (Number(t.heures) || 0), 0).toFixed(2)} h</span></span>
+                              )}
                               <span>⚪ Transport : <span className="tabular-nums">{tj.transport.toFixed(2)} h</span></span>
                               <span>🟡 Transport journalier : <span className="tabular-nums">{tj.ccq.toFixed(2)} h</span></span>
                               {tj.diner < 0 && (
@@ -3895,7 +3917,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                 </tr>
               </tfoot>
             </table>
-          </div>
+          </DefilementHorizontal>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[11px] text-slate-400">
@@ -4892,6 +4914,50 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   );
 }
 
+
+// ============================================================
+// DÉFILEMENT HORIZONTAL À DOUBLE BARRE — pour les tableaux plus larges
+// que l'écran (Heures de la semaine). Demande du propriétaire : un
+// « curseur gauche-droite » VISIBLE — la barre du bas seule vit au pied
+// d'un tableau haut, hors de vue. Une barre jumelle vit donc AU-DESSUS,
+// synchronisée dans les deux sens, et les deux sont toujours affichées.
+// ============================================================
+function DefilementHorizontal({ children }) {
+  const hautRef = useRef(null);
+  const basRef = useRef(null);
+  const fantomeRef = useRef(null);
+  useEffect(() => {
+    const haut = hautRef.current;
+    const bas = basRef.current;
+    const fantome = fantomeRef.current;
+    if (!haut || !bas || !fantome) return;
+    // Le fantôme donne à la barre du haut la largeur RÉELLE du tableau.
+    const majLargeur = () => { fantome.style.width = `${bas.scrollWidth}px`; };
+    majLargeur();
+    const observateur = new ResizeObserver(majLargeur);
+    observateur.observe(bas);
+    if (bas.firstElementChild) observateur.observe(bas.firstElementChild);
+    let verrou = false;
+    const suitHaut = () => { if (verrou) return; verrou = true; bas.scrollLeft = haut.scrollLeft; verrou = false; };
+    const suitBas = () => { if (verrou) return; verrou = true; haut.scrollLeft = bas.scrollLeft; verrou = false; };
+    haut.addEventListener("scroll", suitHaut);
+    bas.addEventListener("scroll", suitBas);
+    return () => {
+      observateur.disconnect();
+      haut.removeEventListener("scroll", suitHaut);
+      bas.removeEventListener("scroll", suitBas);
+    };
+  }, []);
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white">
+      <div ref={hautRef} className="barre-defilement overflow-x-scroll border-b border-slate-100" aria-hidden="true">
+        <div ref={fantomeRef} style={{ height: 1 }} />
+      </div>
+      <div ref={basRef} className="barre-defilement overflow-x-auto">{children}</div>
+    </div>
+  );
+}
+
 function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }) {
   const q = terme.trim().toLowerCase();
   const resultats = terme.trim() ? clients.filter((c) => correspond(c, terme)) : [];
@@ -5367,6 +5433,8 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
   // individuelle (métiers de terrain — s'ajoute à la grille CCQ).
   const [tauxHoraire, setTauxHoraire] = useState(utilisateur.tauxHoraire ?? 0);
   const [primeHoraire, setPrimeHoraire] = useState(utilisateur.primeHoraire ?? 0);
+  // 💼 Droit acquis : payé au taux COMMERCIAL peu importe le secteur.
+  const [toujoursCommercial, setToujoursCommercial] = useState(!!utilisateur.toujoursCommercial);
   const [poste, setPoste] = useState(utilisateur.poste || "");
   const [dateEmbauche, setDateEmbauche] = useState(utilisateur.dateEmbauche || "");
   const [adresse, setAdresse] = useState(utilisateur.adresse || "");
@@ -5494,6 +5562,15 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
               <p className="mt-1 text-[10px] text-slate-400">
                 S'ajoute à la grille CCQ (Tarifs). Taux coûtant réel = grille {metier} · {niveau} + prime. 0 = aucune entente.
               </p>
+              <label className="mt-2 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] font-semibold text-slate-700">
+                <input type="checkbox" checked={toujoursCommercial} onChange={(e) => setToujoursCommercial(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#131B2E]" />
+                <span>
+                  💼 Payé au taux <span className="font-extrabold">COMMERCIAL en tout temps</span> (droit acquis)
+                  <span className="block text-[10px] font-normal text-slate-400">
+                    Même sur une tâche résidentielle, ses heures se figent au taux commercial — la feuille de temps suit sa paie réelle.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
 
@@ -5556,6 +5633,7 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
                 // métier de terrain : prime au-dessus de la grille CCQ.
                 tauxHoraire: estMetierBureau(metier) ? Number(tauxHoraire) || 0 : null,
                 primeHoraire: !estMetierBureau(metier) ? Number(primeHoraire) || 0 : null,
+                toujoursCommercial: !estMetierBureau(metier) && toujoursCommercial,
                 sectionsAcces,
                 poste,
                 dateEmbauche,
@@ -7023,6 +7101,7 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
   // CCQ (métiers de terrain) — saisis dès la création de la fiche.
   const [tauxHoraire, setTauxHoraire] = useState(0);
   const [primeHoraire, setPrimeHoraire] = useState(0);
+  const [toujoursCommercial, setToujoursCommercial] = useState(false);
   const [courrielAperçu, setCourrielAperçu] = useState(null);
   const [utilisateurOuvertId, setUtilisateurOuvertId] = useState(null);
 
@@ -7104,6 +7183,7 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
       niveau,
       tauxHoraire: estMetierBureau(metier) ? Number(tauxHoraire) || 0 : null,
       primeHoraire: !estMetierBureau(metier) ? Number(primeHoraire) || 0 : null,
+      toujoursCommercial: !estMetierBureau(metier) && toujoursCommercial,
       sectionsAcces,
       motDePasseCree: false,
     };
@@ -7236,6 +7316,15 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums"
                 />
                 <p className="mt-1 text-[10px] text-slate-400">S'ajoute à la grille CCQ (onglet Tarifs) pour cet employé seulement.</p>
+                <label className="mt-2 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] font-semibold text-slate-700">
+                  <input type="checkbox" checked={toujoursCommercial} onChange={(e) => setToujoursCommercial(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#131B2E]" />
+                  <span>
+                    💼 Payé au taux <span className="font-extrabold">COMMERCIAL en tout temps</span> (droit acquis)
+                    <span className="block text-[10px] font-normal text-slate-400">
+                      Même sur une tâche résidentielle, ses heures se figent au taux commercial — la feuille de temps suit sa paie réelle.
+                    </span>
+                  </span>
+                </label>
               </div>
             )}
 

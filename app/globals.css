@@ -24,3 +24,26 @@ textarea,
 select {
   color: var(--foreground);
 }
+
+/* Barres de défilement TOUJOURS VISIBLES et saisissables (tableaux
+   larges — Heures de la semaine). Sans ça, la barre n'apparaît qu'au
+   survol et personne ne trouve les colonnes de totaux. */
+.barre-defilement {
+  scrollbar-width: auto;
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+.barre-defilement::-webkit-scrollbar {
+  height: 12px;
+}
+.barre-defilement::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 8px;
+}
+.barre-defilement::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 8px;
+  border: 2px solid #f1f5f9;
+}
+.barre-defilement::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}

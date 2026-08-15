@@ -1857,3 +1857,9 @@ create policy "incidents_plateforme" on incidents_confidentialite
 update auth.users
   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"plateforme": true}'::jsonb
   where email = 'jeanfrancois@ventilationdgl.com';
+
+-- SNIPPET « 52 » — droit acquis : payé au taux COMMERCIAL en tout temps.
+-- Certains employés ont ce droit peu importe le secteur de la tâche ;
+-- l'option se coche sur la fiche employé et FORCE le taux commercial au
+-- moment où l'heure se fige (la feuille de temps suit la PAIE réelle).
+alter table repertoire_employes add column if not exists toujours_commercial boolean not null default false;
