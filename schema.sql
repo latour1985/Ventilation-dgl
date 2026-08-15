@@ -1863,3 +1863,55 @@ update auth.users
 -- l'option se coche sur la fiche employé et FORCE le taux commercial au
 -- moment où l'heure se fige (la feuille de temps suit la PAIE réelle).
 alter table repertoire_employes add column if not exists toujours_commercial boolean not null default false;
+
+-- ============================================================
+-- SNIPPET « 53 » — MATÉRIEL (3 flux, décidés 2026-08-15)
+-- ------------------------------------------------------------
+-- 1. Commandes de matériel CAMION (technicien → bureau). Boucle courte :
+--    envoyée → « ✓ Commande passée » (+ note facultative visible au
+--    technicien). Pas d'étape « reçue » : le stock arrive dans son
+--    camion, pas besoin de cérémonie. Frais général — aucun projet.
+create table if not exists commandes_camion (
+  id               uuid primary key default gen_random_uuid(),
+  technicien_email text not null,
+  technicien_nom   text,
+  lignes           jsonb not null default '[]'::jsonb, -- [{article, quantite}]
+  note_technicien  text,
+  statut           text not null default 'envoyee', -- envoyee | commandee
+  note_bureau      text,
+  commandee_par    text,
+  commandee_le     timestamptz,
+  created_at       timestamptz not null default now(),
+  entreprise_id    text not null default 'dgl'
+);
+alter table commandes_camion enable row level security;
+drop policy if exists "commandes_camion_test" on commandes_camion;
+create policy "commandes_camion_test" on commandes_camion
+  for all to authenticated using (true) with check (true);
+create index if not exists idx_commandes_camion_entreprise on commandes_camion (entreprise_id);
+
+-- 2. ACHATS LIBRES : un bon de commande SANS tâche ni projet (ex. 4
+--    rouleaux de tape). S'il vise un projet, il va plutôt dans
+--    projets_app.bons_commande (le mécanisme de coûts existant).
+create table if not exists achats_libres (
+  id              uuid primary key default gen_random_uuid(),
+  numero_bc       text,
+  fournisseur_nom text,
+  description     text,
+  montant_ht      numeric not null default 0,
+  statut          text not null default 'commande', -- commande | recu | annule
+  cree_par        text,
+  date_achat      date,
+  created_at      timestamptz not null default now(),
+  entreprise_id   text not null default 'dgl'
+);
+alter table achats_libres enable row level security;
+drop policy if exists "achats_libres_test" on achats_libres;
+create policy "achats_libres_test" on achats_libres
+  for all to authenticated using (true) with check (true);
+create index if not exists idx_achats_libres_entreprise on achats_libres (entreprise_id);
+
+-- 3. MATÉRIEL DU STOCK attribué à un projet (déjà payé, sur la tablette)
+--    — rangé SUR le projet comme ses bons de commande : entre dans les
+--    coûts matériaux sans nouveau circuit.
+alter table projets_app add column if not exists materiel_stock jsonb not null default '[]'::jsonb;

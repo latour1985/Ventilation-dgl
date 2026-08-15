@@ -36,6 +36,7 @@ import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots } from "@/lib/sup
 import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
+import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres } from "@/lib/supabase/materiel";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo } from "@/lib/quickbooksClient";
@@ -747,7 +748,11 @@ function calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs
   const coutMateriauxQb = depensesQb
     .filter((d) => !bcApparies.has(d.quickbooksId))
     .reduce((s, t) => s + (Number(t.amountHT) || 0), 0);
-  const coutMateriaux = coutMateriauxBC + coutMateriauxQb;
+  // MATÉRIEL DU STOCK — déjà payé, pris sur la tablette du bureau et
+  // attribué à ce projet (« 4 paquets de tuyaux ») : un vrai coût du
+  // projet même sans bon de commande ni dépense QuickBooks.
+  const coutMaterielStock = (projet.materielStock || []).reduce((s, m) => s + (Number(m.coutTotal) || 0), 0);
+  const coutMateriaux = coutMateriauxBC + coutMateriauxQb + coutMaterielStock;
   const totalFactureReel = facturesQb.reduce((s, t) => s + t.amountHT, 0);
   // Coût de main-d'œuvre : idéalement calculé par employé (taux du métier
   // + niveau de celui qui a pointé les heures, lu dans la table centrale).
@@ -804,6 +809,7 @@ function calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs
     totalHeures,
     coutMateriauxBC,
     coutMateriauxQb,
+    coutMaterielStock,
     coutMateriaux,
     transactionsDuProjet,
     totalFactureReel,
@@ -1270,7 +1276,15 @@ const STATUTS_PIECE = {
   annulee: { label: "Annulée", cls: "bg-slate-100 text-slate-500 border-slate-300" },
 };
 
-function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot }) {
+function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, projets }) {
+  // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
+  const [notePassee, setNotePassee] = useState(null); // { id, note }
+  // ➕ BC libre.
+  const [bcLibreOuvert, setBcLibreOuvert] = useState(false);
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "" });
+  const [bcLibreEnCours, setBcLibreEnCours] = useState(false);
+  const [bcLibreMsg, setBcLibreMsg] = useState("");
+  const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
   const [filtre, setFiltre] = useState("ouvertes");
   const [annulationPour, setAnnulationPour] = useState(null);
@@ -1477,6 +1491,148 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
           </span>
         )}
       </div>
+
+      {/* 🧰 COMMANDES DE MATÉRIEL CAMION — le technicien demande, la
+          personne des achats commande et clique « Commande passée »
+          (+ note facultative, visible sur son téléphone). Boucle courte
+          voulue : pas d'étape « reçue ». */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+          🧰 Matériel camion (techniciens)
+          {camionEnAttente.length > 0 && (
+            <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{camionEnAttente.length} à commander</span>
+          )}
+        </p>
+        {(commandesCamion || []).length === 0 ? (
+          <p className="mt-1 text-xs text-slate-400">Aucune demande — les techniciens commandent depuis leur téléphone (🧰 Matériel de camion).</p>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            {(commandesCamion || []).slice(0, 12).map((c) => (
+              <div key={c.id} className={"rounded-xl p-2.5 text-xs " + (c.statut === "envoyee" ? "bg-amber-50" : "bg-slate-50")}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-slate-800">
+                    {c.technicienNom}
+                    <span className="ml-1 font-normal text-slate-400">{c.creeLe ? new Date(c.creeLe).toLocaleDateString("fr-CA") : ""}</span>
+                  </span>
+                  {c.statut === "commandee" ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">✓ Commande passée</span>
+                  ) : peutCommander ? (
+                    notePassee?.id === c.id ? null : (
+                      <Button onClick={() => setNotePassee({ id: c.id, note: "" })} className="min-h-0 px-2.5 py-1 text-[11px]">
+                        ✓ Commande passée…
+                      </Button>
+                    )
+                  ) : (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-700">⏳ À commander</span>
+                  )}
+                </div>
+                <p className="mt-1 text-slate-600">{(c.lignes || []).map((l) => l.article + " ×" + l.quantite).join(" · ")}</p>
+                {c.noteTechnicien && <p className="mt-0.5 text-[11px] italic text-slate-500">📝 {c.noteTechnicien}</p>}
+                {c.statut === "commandee" && c.noteBureau && (
+                  <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">💬 {c.noteBureau}</p>
+                )}
+                {notePassee?.id === c.id && (
+                  <div className="mt-1.5 flex gap-1.5">
+                    <input
+                      value={notePassee.note}
+                      onChange={(e) => setNotePassee({ id: c.id, note: e.target.value })}
+                      placeholder="Note pour le technicien (optionnel) — ex : arrive jeudi"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <Button onClick={() => { onCommandePassee?.(c.id, notePassee.note.trim()); setNotePassee(null); }} className="min-h-0 px-3 py-1.5 text-xs">
+                      Confirmer
+                    </Button>
+                    <Button variant="outline" onClick={() => setNotePassee(null)} className="min-h-0 px-2 py-1.5 text-xs">✕</Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ➕ BON DE COMMANDE LIBRE — « 4 rouleaux de tape » : pas de tâche,
+          pas de pièce client. Attribué à un PROJET = entre dans ses coûts
+          matériaux (mécanisme existant) ; sinon achat général. */}
+      {peutCommander && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">🧾 Bon de commande libre</p>
+            {!bcLibreOuvert && (
+              <Button variant="outline" onClick={() => { setBcLibreOuvert(true); setBcLibreMsg(""); }} className="min-h-0 px-3 py-1.5 text-xs">
+                ➕ Nouveau BC (sans tâche)
+              </Button>
+            )}
+          </div>
+          {bcLibreMsg && <p className="mt-1 text-[11px] font-semibold text-emerald-700">{bcLibreMsg}</p>}
+          {bcLibreOuvert && (
+            <div className="mt-2 space-y-1.5 rounded-xl bg-slate-50 p-2.5">
+              <input
+                list="bc-libre-fournisseurs"
+                value={bcLibre.fournisseurNom}
+                onChange={(e) => setBcLibre((f) => ({ ...f, fournisseurNom: e.target.value }))}
+                placeholder="Fournisseur"
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+              />
+              <datalist id="bc-libre-fournisseurs">
+                {(fournisseurs || []).map((f) => <option key={f.id || f.nom} value={f.nom} />)}
+              </datalist>
+              <input
+                value={bcLibre.description}
+                onChange={(e) => setBcLibre((f) => ({ ...f, description: e.target.value }))}
+                placeholder="Description — ex : 4 rouleaux de tape aluminium"
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+              />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  Montant HT
+                  <InputNombreDecimal valeur={Number(bcLibre.montantHT) || 0} onChange={(v) => setBcLibre((f) => ({ ...f, montantHT: v }))} className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                  $
+                </span>
+                <select
+                  value={bcLibre.projetId}
+                  onChange={(e) => setBcLibre((f) => ({ ...f, projetId: e.target.value }))}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  <option value="">Achat général (aucun projet)</option>
+                  {(projets || []).map((pr) => <option key={pr.id} value={pr.id}>Projet : {pr.nom}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-1.5">
+                <Button
+                  loading={bcLibreEnCours}
+                  disabled={!(bcLibre.description || "").trim() || !(Number(bcLibre.montantHT) > 0)}
+                  onClick={async () => {
+                    setBcLibreEnCours(true);
+                    const numero = await onCreerBcLibre?.(bcLibre);
+                    setBcLibreEnCours(false);
+                    setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "" });
+                    setBcLibreOuvert(false);
+                  }}
+                  className="min-h-0 flex-1 py-1.5 text-xs"
+                >
+                  Créer le bon de commande
+                </Button>
+                <Button variant="outline" onClick={() => setBcLibreOuvert(false)} className="min-h-0 py-1.5 text-xs">Annuler</Button>
+              </div>
+            </div>
+          )}
+          {(achatsLibres || []).length > 0 && (
+            <div className="mt-2 space-y-1">
+              {(achatsLibres || []).slice(0, 6).map((a2) => (
+                <div key={a2.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                  <span className="min-w-0 truncate">
+                    <span className="font-bold text-slate-700">{a2.numeroBc}</span> · {a2.description}
+                    {a2.fournisseurNom ? " — " + a2.fournisseurNom : ""}
+                  </span>
+                  <span className="shrink-0 tabular-nums">{a2.montantHT.toFixed(2)} $</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-1.5">
         {[["ouvertes", "En attente"], ["a_commander", "À commander"], ["commandee", "Commandées"], ["recue", "Reçues"], ["toutes", "Toutes"]].map(
@@ -7594,7 +7750,31 @@ function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQuickBook
   );
 }
 
-function OngletBonsCommandeProjet({ projet, onAjouterBC, transactionsQb, fournisseurs, setFournisseurs, ajouterJournal, clients }) {
+function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, transactionsQb, fournisseurs, setFournisseurs, ajouterJournal, clients }) {
+  // 🧱 MATÉRIEL DU STOCK — pris sur la tablette du bureau, attribué à ce
+  // projet (décision du propriétaire : bureau seulement, catalogue OU
+  // coût manuel au choix — la liste de produits est grande).
+  const catalogueStock = useCatalogue();
+  const [stockForm, setStockForm] = useState(null); // {description, quantite, coutUnitaire, tacheTitre}
+  const ajouterStock = () => {
+    const f = stockForm;
+    if (!f || !(f.description || "").trim() || !(Number(f.coutUnitaire) >= 0) || !(Number(f.quantite) > 0)) return;
+    const quantite = Number(f.quantite) || 1;
+    const coutUnitaire = Number(f.coutUnitaire) || 0;
+    const entree = {
+      id: "mat-" + Date.now(),
+      description: f.description.trim(),
+      quantite,
+      coutUnitaire,
+      coutTotal: Math.round(quantite * coutUnitaire * 100) / 100,
+      tacheTitre: (f.tacheTitre || "").trim() || null,
+      date: todayISO(),
+    };
+    onMajMateriel?.([...(projet.materielStock || []), entree]);
+    ajouterJournal("🧱 Matériel du stock ajouté au projet « " + projet.nom + " » : " + entree.description + " ×" + quantite + " = " + entree.coutTotal.toFixed(2) + " $");
+    setStockForm(null);
+  };
+  const tachesDuProjet = [...new Set((r?.travauxDuProjet || []).map((t) => t.titre).filter(Boolean))];
   // Dépenses QuickBooks de ce projet, indexées par numéro de BC — sert à
   // montrer quels BC ont déjà leur facture fournisseur réelle (le montant
   // de QuickBooks fait alors foi, jamais additionné au montant saisi).
@@ -7710,6 +7890,96 @@ function OngletBonsCommandeProjet({ projet, onAjouterBC, transactionsQb, fournis
         })}
         {(projet.bonsCommande || []).length === 0 && <p className="text-xs text-slate-400">Aucun bon de commande pour l'instant.</p>}
       </div>
+      {/* 🧱 MATÉRIEL DU STOCK — déjà payé, sur la tablette : un coût du
+          projet sans bon de commande. Catalogue (coûtant auto) OU saisie
+          manuelle, tâche précise facultative. */}
+      <div className="mt-3 rounded-xl border border-slate-200 bg-white p-2.5">
+        <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">🧱 Matériel du stock (sans commande)</p>
+        {(projet.materielStock || []).map((m) => (
+          <div key={m.id} className="flex items-center justify-between gap-2 border-b border-slate-100 py-1 text-xs last:border-0">
+            <span className="min-w-0 truncate text-slate-700">
+              {m.description} <span className="text-slate-400">×{m.quantite}</span>
+              {m.tacheTitre && <span className="ml-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500">{m.tacheTitre}</span>}
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="font-bold tabular-nums text-slate-700">{(Number(m.coutTotal) || 0).toFixed(2)} $</span>
+              <button
+                onClick={() => onMajMateriel?.((projet.materielStock || []).filter((x) => x.id !== m.id))}
+                className="text-slate-300 hover:text-red-500"
+                aria-label="Retirer"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          </div>
+        ))}
+        {(projet.materielStock || []).length === 0 && !stockForm && (
+          <p className="text-xs text-slate-400">Rien pour l'instant — « 4 paquets de tuyaux pris au bureau », c'est ici.</p>
+        )}
+        {stockForm ? (
+          <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 p-2">
+            <SelecteurItem
+              catalogue={catalogueStock}
+              libelle="🔎 Choisir du catalogue (coûtant automatique)"
+              onChoisir={(item) =>
+                setStockForm((f) => ({
+                  ...f,
+                  description: item.nom,
+                  coutUnitaire: item.prix_coutant != null ? item.prix_coutant : f.coutUnitaire,
+                }))
+              }
+            />
+            <input
+              value={stockForm.description}
+              onChange={(e) => setStockForm((f) => ({ ...f, description: e.target.value }))}
+              placeholder="ou description libre — ex : paquet de tuyaux 6po"
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                Qté
+                <input type="number" min={1} value={stockForm.quantite}
+                  onChange={(e) => setStockForm((f) => ({ ...f, quantite: e.target.value }))}
+                  className="w-16 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                Coût unitaire
+                <InputNombreDecimal valeur={Number(stockForm.coutUnitaire) || 0}
+                  onChange={(v) => setStockForm((f) => ({ ...f, coutUnitaire: v }))}
+                  className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                $
+              </span>
+              <span className="text-[11px] font-bold tabular-nums text-slate-600">
+                = {((Number(stockForm.quantite) || 0) * (Number(stockForm.coutUnitaire) || 0)).toFixed(2)} $
+              </span>
+            </div>
+            {tachesDuProjet.length > 0 && (
+              <select
+                value={stockForm.tacheTitre || ""}
+                onChange={(e) => setStockForm((f) => ({ ...f, tacheTitre: e.target.value }))}
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+              >
+                <option value="">Projet en général (aucune tâche précise)</option>
+                {tachesDuProjet.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            )}
+            <div className="flex gap-1.5">
+              <Button onClick={ajouterStock}
+                disabled={!(stockForm.description || "").trim() || !(Number(stockForm.quantite) > 0)}
+                className="min-h-0 flex-1 py-1.5 text-xs">
+                Ajouter au projet
+              </Button>
+              <Button variant="outline" onClick={() => setStockForm(null)} className="min-h-0 py-1.5 text-xs">Annuler</Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="outline" onClick={() => setStockForm({ description: "", quantite: 1, coutUnitaire: 0, tacheTitre: "" })}
+            className="mt-2 min-h-0 w-full py-1.5 text-xs">
+            ➕ Matériel utilisé (du stock)
+          </Button>
+        )}
+      </div>
+
       {/* NOUVEAU BON DE COMMANDE — le fournisseur vient du répertoire, la
           description part dans le courriel, et le BC peut être envoyé
           directement au fournisseur à sa création. */}
@@ -7910,7 +8180,7 @@ function OngletFacturationProjet({ r, devisDuClient }) {
   );
 }
 
-function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onChangerStatut, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
+function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onChangerStatut, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
   const [ongletActif, setOngletActif] = useState("apercu");
   const configProj = useEntreprise();
   const r = useMemo(
@@ -7957,7 +8227,7 @@ function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, client
           {ongletActif === "apercu" && (
             <OngletApercuProjet projet={projet} r={r} sante={sante} onChangerStatut={onChangerStatut} onSyncQuickBooks={onSyncQuickBooks} syncQbEnCours={syncQbEnCours} peutSyncQb={peutSyncQb} />
           )}
-          {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
+          {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} onMajMateriel={onMajMateriel} r={r} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
           {ongletActif === "temps" && <OngletTempsProjet r={r} />}
           {ongletActif === "facturation" && <OngletFacturationProjet r={r} devisDuClient={devisDuClient} />}
         </div>
@@ -8314,6 +8584,7 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
       {projetOuvert && (
         <ModalDetailProjet
           inspections={inspections}
+          onMajMateriel={(liste) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, materielStock: liste } : px)))}
           projet={projetOuvert}
           travaux={travaux}
           devisListe={devisListe}
@@ -9373,6 +9644,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
       {projetOuvert && (
         <ModalDetailProjet
           inspections={inspections}
+          onMajMateriel={(liste) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, materielStock: liste } : px)))}
           projet={projetOuvert}
           travaux={travaux}
           devisListe={devisListe}
@@ -15958,6 +16230,43 @@ export default function App() {
     return sAbonnerPieces(charger);
   }, [session]);
 
+  // 🧰 MATÉRIEL — commandes camion (technicien → bureau) et achats
+  // libres (BC sans projet). Voir lib/supabase/materiel.js.
+  const [commandesCamion, setCommandesCamion] = useState([]);
+  const [achatsLibres, setAchatsLibres] = useState([]);
+  useEffect(() => {
+    if (!session) return;
+    const charger = () => listerCommandesCamion().then(setCommandesCamion).catch(() => {});
+    charger();
+    listerAchatsLibres().then(setAchatsLibres).catch(() => {});
+    return sAbonnerCommandesCamion(charger);
+  }, [session]);
+  // « ✓ Commande passée » — le seul geste du bureau ; la note (facultative)
+  // part telle quelle sur le téléphone du technicien.
+  const commandeCamionPassee = (id, note) => {
+    const c = commandesCamion.find((x) => x.id === id);
+    setCommandesCamion((prev) => prev.map((x) => (x.id === id ? { ...x, statut: "commandee", noteBureau: note || "" } : x)));
+    marquerCommandeCamionPassee(id, note, session)
+      .then(() => ajouterJournal("🧰 Matériel camion COMMANDÉ pour " + (c?.technicienNom || "?") + (note ? " — note : " + note : "")))
+      .catch(() => ajouterJournal("⚠️ Commande camion NON marquée — réessaie."));
+  };
+  // BC LIBRE — numéro officiel ; projet choisi = coûts du projet
+  // (mécanisme existant), sinon achat général (registre à part).
+  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId }) => {
+    const numero = await numeroBonCommande().catch(() => "BC-" + Date.now());
+    if (projetId) {
+      const bc = { id: "bc-" + Date.now(), numeroBC: numero, fournisseur: fournisseurNom || "", montantHT: Number(montantHT) || 0, statut: "En attente", date: todayISO(), description: description || "" };
+      setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] } : px)));
+      const proj = projets.find((px) => px.id === projetId);
+      ajouterJournal("🧾 BC " + numero + " créé et attribué au projet « " + (proj?.nom || projetId) + " » — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
+    } else {
+      await creerAchatLibre({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO() }, session).catch(() => {});
+      listerAchatsLibres().then(setAchatsLibres).catch(() => {});
+      ajouterJournal("🧾 BC " + numero + " créé (achat général, sans projet) — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
+    }
+    return numero;
+  };
+
   // CRÉATION AUTOMATIQUE depuis les bons de travail : quand un
   // technicien coche « pièce à commander », la demande apparaît au
   // bureau sans que personne n'ait à la ressaisir. Le garde sur
@@ -17235,6 +17544,11 @@ export default function App() {
         <OngletPieces
           pieces={pieces}
           clients={clients}
+          commandesCamion={commandesCamion}
+          onCommandePassee={commandeCamionPassee}
+          achatsLibres={achatsLibres}
+          onCreerBcLibre={creerBcLibre}
+          projets={projets}
           depots={depots}
           prixDepots={prixDepots}
           onCreerDepot={creerDepotPourTache}

@@ -20,6 +20,7 @@ import { listerCamions } from "@/lib/supabase/camions";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
+import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
 
 // ============================================================
@@ -1503,7 +1504,140 @@ function MesHeures({ courriel, onRetour }) {
   );
 }
 
-function Accueil({ taches, dateSelectionnee, setDateSelectionnee, modeVue, setModeVue, onOuvrir, onDeconnexion, role, enLigne, suggestionChantier, onConfirmerChantier, onIgnorerChantier, onReinitialiser, nbEnAttente, syncEnCours, erreurSync, nomTechnicien, onOuvrirMesHeures, onCorrigerChrono }) {
+// ============================================================
+// 🧰 MATÉRIEL DE CAMION — le technicien demande, le bureau commande.
+// ------------------------------------------------------------
+// Boucle volontairement COURTE (décision du propriétaire) : le
+// technicien envoie sa liste, le bureau clique « Commande passée »
+// (+ note facultative — « arrive jeudi »), et c'est tout. Pas d'étape
+// « reçue » : le stock apparaît dans son camion. Le technicien n'a pas
+// besoin de savoir chez qui la commande est partie.
+// ============================================================
+function CarteCommandeCamion({ session }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [formOuvert, setFormOuvert] = useState(false);
+  const [lignes, setLignes] = useState([{ article: "", quantite: 1 }]);
+  const [note, setNote] = useState("");
+  const [envoi, setEnvoi] = useState(false);
+  const [mesCommandes, setMesCommandes] = useState([]);
+
+  const courriel = session?.user?.email || null;
+  useEffect(() => {
+    if (!courriel) return;
+    const charger = () => listerCommandesCamionPourEmploye(courriel).then(setMesCommandes).catch(() => {});
+    charger();
+    // En direct : quand le bureau clique « Commande passée », le badge
+    // change ici sans rien rafraîchir.
+    return sAbonnerCommandesCamion(charger);
+  }, [courriel]);
+
+  const envoyer = async () => {
+    const propres = lignes
+      .map((l) => ({ article: (l.article || "").trim(), quantite: Math.max(1, Number(l.quantite) || 1) }))
+      .filter((l) => l.article);
+    if (propres.length === 0) return;
+    setEnvoi(true);
+    try {
+      await enregistrerCommandeCamion({ lignes: propres, note: note.trim() }, session);
+      setLignes([{ article: "", quantite: 1 }]);
+      setNote("");
+      setFormOuvert(false);
+      listerCommandesCamionPourEmploye(courriel).then(setMesCommandes).catch(() => {});
+    } finally {
+      setEnvoi(false);
+    }
+  };
+
+  const enAttente = mesCommandes.filter((c) => c.statut === "envoyee").length;
+
+  return (
+    <div className="mx-4 mb-4 rounded-2xl border border-slate-200 bg-white">
+      <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between p-3.5 text-left">
+        <span className="text-sm font-extrabold text-slate-800">
+          🧰 Matériel de camion
+          {enAttente > 0 && (
+            <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{enAttente} en attente</span>
+          )}
+        </span>
+        <span className="text-slate-400">{ouvert ? "▲" : "▼"}</span>
+      </button>
+      {ouvert && (
+        <div className="border-t border-slate-100 p-3.5 pt-2.5">
+          {!formOuvert ? (
+            <Button variant="outline" onClick={() => setFormOuvert(true)} className="w-full">
+              ➕ Commander du matériel pour mon camion
+            </Button>
+          ) : (
+            <div className="space-y-2">
+              {lignes.map((l, i) => (
+                <div key={i} className="flex gap-1.5">
+                  <input
+                    value={l.article}
+                    onChange={(e) => setLignes((prev) => prev.map((x, j) => (j === i ? { ...x, article: e.target.value } : x)))}
+                    placeholder="Ex : ruban d'aluminium"
+                    className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={l.quantite}
+                    onChange={(e) => setLignes((prev) => prev.map((x, j) => (j === i ? { ...x, quantite: e.target.value } : x)))}
+                    className="w-16 rounded-xl border border-slate-300 px-2 py-2.5 text-center text-sm tabular-nums"
+                  />
+                  {lignes.length > 1 && (
+                    <button onClick={() => setLignes((prev) => prev.filter((_, j) => j !== i))} aria-label="Retirer" className="px-1 text-slate-300">
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button onClick={() => setLignes((prev) => [...prev, { article: "", quantite: 1 }])} className="text-xs font-bold text-slate-500 underline underline-offset-2">
+                + Ajouter un article
+              </button>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={2}
+                placeholder="Note pour le bureau (optionnel)"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              />
+              <div className="flex gap-2">
+                <Button onClick={envoyer} loading={envoi} disabled={!lignes.some((l) => (l.article || "").trim())} className="flex-1">
+                  Envoyer au bureau
+                </Button>
+                <Button variant="outline" onClick={() => setFormOuvert(false)}>Annuler</Button>
+              </div>
+            </div>
+          )}
+
+          {mesCommandes.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {mesCommandes.slice(0, 5).map((c) => (
+                <div key={c.id} className="rounded-xl bg-slate-50 p-2.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-slate-600">
+                      {c.lignes.map((l) => `${l.article} ×${l.quantite}`).join(" · ")}
+                    </span>
+                    {c.statut === "commandee" ? (
+                      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">✓ Commande passée</span>
+                    ) : (
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-700">⏳ Envoyée</span>
+                    )}
+                  </div>
+                  {c.statut === "commandee" && c.noteBureau && (
+                    <p className="mt-1 text-[11px] font-semibold text-emerald-700">💬 {c.noteBureau}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeVue, setModeVue, onOuvrir, onDeconnexion, role, enLigne, suggestionChantier, onConfirmerChantier, onIgnorerChantier, onReinitialiser, nbEnAttente, syncEnCours, erreurSync, nomTechnicien, onOuvrirMesHeures, onCorrigerChrono }) {
   const isoJour = isoLocal(dateSelectionnee);
   // CHRONOS OUBLIÉS — cherchés sur TOUTES les tâches, pas seulement
   // celles du jour affiché : une tâche laissée en marche vendredi doit
@@ -1807,6 +1941,7 @@ function Accueil({ taches, dateSelectionnee, setDateSelectionnee, modeVue, setMo
         </div>
       )}
 
+      <CarteCommandeCamion session={session} />
       <PiedCopyright />
     </div>
   );
@@ -4697,6 +4832,7 @@ function AppTechnicien() {
           <MesHeures courriel={session?.user?.email} onRetour={retourAccueil} />
         ) : vue === "accueil" || !tacheActive ? (
           <Accueil
+            session={session}
             taches={taches}
             dateSelectionnee={dateSelectionnee}
             setDateSelectionnee={setDateSelectionnee}
