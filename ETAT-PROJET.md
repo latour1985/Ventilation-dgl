@@ -138,6 +138,22 @@
   le lien « 💳 Payer en ligne » entre dans le courriel de demande de dépôt quand QuickBooks le
   fournit (QuickBooks Payments actif sur le compte). Snippet SQL 47 (3 colonnes entreprises).
 
+### Travaux du 2026-08-15 (suite) — FACTURATION QUICKBOOKS COMPLÈTE (Sandbox)
+- VRAIES factures QBO pour TOUT ce qui se facture (envoi direct + progressives) — routes
+  /api/quickbooks/facture (helpers d'écriture partagés déplacés dans quickbooksServeur.js).
+  Un échec QBO n'invente JAMAIS de numéro : le bon reste en attente, journal explique.
+- FENÊTRE D'AVANT-ENVOI sur chaque facture non-appel : carte/virement DÉCOCHÉS, frais du
+  marchand en dollars (2,9 %+0,25 / 1 %) pour le propriétaire seul — jamais au client (LPC).
+- DEVIS = miroir « estimate » QBO (un par dossier, mis à jour aux révisions, DocNumber =
+  numeroBase, qbo_estimate_id mémorisé) — préserve la pratique du propriétaire.
+- CLIENTS : TOUS dans QBO (décision propriétaire — c'était déjà sa réalité). Création de
+  fiche → sync auto (persist d'abord, puis liaison par nom, jamais de doublon) ; bouton
+  « Synchroniser les clients » (Connexions, lots de 100) pour le rattrapage. Les faux
+  transferts simulés (QBO-xxxx) sont MORTS.
+- FACTURES ÉMISES enfin PERSISTÉES (bons_travail.factures_emises jsonb — avant : perdues au
+  rechargement). majFacturesEmises(rowId sans le préfixe sbb-).
+- Snippet SQL 48 (factures_emises + devis.qbo_estimate_id). 47 = paiements appels.
+
 ## Pièges connus (payés cher — ne pas répéter)
 
 - `String.replace` avec du texte contenant `$` corrompt le fichier (séquences `$&`, `` $` ``) —
