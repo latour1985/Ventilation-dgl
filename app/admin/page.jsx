@@ -14208,7 +14208,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               Tâches en attente ({tachesAttente.length})
             </h3>
             {!lectureSeule && (
-              <Button onClick={() => { setFormulaireOuvert((v) => !v); setEtapeTypeTache(true); }} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
+              <Button onClick={() => { setFormulaireOuvert((v) => !v); setEtapeTypeTache(false); }} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
                 <Plus size={12} /> Nouvelle tâche
               </Button>
             )}
@@ -14282,43 +14282,58 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3">
                   <h3 className="text-sm font-extrabold text-slate-900">
                     ➕ Nouvelle tâche
-                    {!etapeTypeTache && (
-                      <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
-                        {TYPE_INFO(nouveauType)?.label}
-                      </span>
-                    )}
+                    <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{TYPE_INFO(nouveauType)?.label}</span>
                   </h3>
                   <button onClick={() => setFormulaireOuvert(false)} aria-label="Fermer">
                     <X size={18} className="text-slate-400" />
                   </button>
                 </div>
-                <div
-                  className={`flex-1 overflow-y-auto p-4 ${
-                    etapeTypeTache
-                      ? "space-y-2"
-                      : "space-y-2 md:columns-2 md:gap-x-6 md:space-y-0 md:[&>*]:mb-3 md:[&>*]:break-inside-avoid"
-                  }`}
-                >
-              {etapeTypeTache ? (
-                <div>
-                  <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Quel type de tâche ?</p>
-                  <p className="mt-0.5 text-[10px] text-slate-400">Le formulaire ne montrera que les cases utiles à ce type.</p>
-                  <div className="mt-2 grid grid-cols-2 gap-1.5">
-                    {TYPES_TACHE.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        onClick={() => { setNouveauType(t.id); setEtapeTypeTache(false); }}
-                        className="rounded-xl border border-slate-200 p-2.5 text-left active:scale-[0.99] hover:border-[#FF6A13]"
-                      >
-                        <span className="block text-xs font-extrabold text-slate-800">{t.label}</span>
-                        <span className="mt-0.5 block text-[9px] leading-snug text-slate-400">{t.description}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
+                <div className="flex-1 space-y-2 overflow-y-auto p-4 md:columns-2 md:gap-x-6 md:space-y-0 md:[&>*]:mb-3 md:[&>*]:break-inside-avoid">
               <>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Type de tâche</label>
+                <select
+                  value={nouveauType}
+                  onChange={(e) => setNouveauType(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  {TYPES_TACHE.map((t) => (
+                    <option key={t.id} value={t.id}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {TYPES_TACHE.find((t) => t.id === nouveauType)?.description}
+                </p>
+
+                {/* TEMPS SUR LE PROJET — seulement pour les visites.
+                    Une visite de soumission qu'on ne remporte pas est un
+                    coût de vente ; une visite sur un chantier en cours
+                    appartient à ce projet. Toi seul le sais. */}
+                {estTypeAdministratif(nouveauType) && (
+                  <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                    <input
+                      type="checkbox"
+                      checked={tempsSurProjet}
+                      onChange={(e) => setTempsSurProjet(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-[#131B2E]"
+                    />
+                    <span className="text-[10px] leading-snug text-slate-600">
+                      <span className="font-bold text-slate-800">Temps comptabilisé sur le projet</span>
+                      <br />
+                      {tempsSurProjet
+                        ? "Ces heures entreront dans le coût du projet choisi."
+                        : "Décoché : les heures vont aux frais ADMINISTRATIFS de l'entreprise, pas au coût d'un projet."}
+                    </span>
+                  </label>
+                )}
+
+                {nouveauType === "conge" && (
+                  <p className="mt-2 rounded-lg bg-zinc-100 px-2 py-1.5 text-[10px] leading-snug text-zinc-600">
+                    🚫 Aucun chronomètre, aucune heure. La journée est simplement bloquée à l&apos;agenda pour qu&apos;on
+                    n&apos;y place pas de travail.
+                  </p>
+                )}
+              </div>
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Titre / description courte</label>
                 <input
@@ -14590,50 +14605,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 )}
               </div>
 
-              <div>
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Type de tâche</label>
-                <select
-                  value={nouveauType}
-                  onChange={(e) => setNouveauType(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                >
-                  {TYPES_TACHE.map((t) => (
-                    <option key={t.id} value={t.id}>{t.label}</option>
-                  ))}
-                </select>
-                <p className="mt-1 text-[10px] text-slate-400">
-                  {TYPES_TACHE.find((t) => t.id === nouveauType)?.description}
-                </p>
 
-                {/* TEMPS SUR LE PROJET — seulement pour les visites.
-                    Une visite de soumission qu'on ne remporte pas est un
-                    coût de vente ; une visite sur un chantier en cours
-                    appartient à ce projet. Toi seul le sais. */}
-                {estTypeAdministratif(nouveauType) && (
-                  <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
-                    <input
-                      type="checkbox"
-                      checked={tempsSurProjet}
-                      onChange={(e) => setTempsSurProjet(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 shrink-0 accent-[#131B2E]"
-                    />
-                    <span className="text-[10px] leading-snug text-slate-600">
-                      <span className="font-bold text-slate-800">Temps comptabilisé sur le projet</span>
-                      <br />
-                      {tempsSurProjet
-                        ? "Ces heures entreront dans le coût du projet choisi."
-                        : "Décoché : les heures vont aux frais ADMINISTRATIFS de l'entreprise, pas au coût d'un projet."}
-                    </span>
-                  </label>
-                )}
-
-                {nouveauType === "conge" && (
-                  <p className="mt-2 rounded-lg bg-zinc-100 px-2 py-1.5 text-[10px] leading-snug text-zinc-600">
-                    🚫 Aucun chronomètre, aucune heure. La journée est simplement bloquée à l&apos;agenda pour qu&apos;on
-                    n&apos;y place pas de travail.
-                  </p>
-                )}
-              </div>
 
               {(nouveauType === "devis" || nouveauType === "entretien_contrat" || nouveauType === "appel_service") && (
                 <div>
@@ -14926,23 +14898,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   n'était exigé (c'est exactement le trou qui permettait de
                   planifier un appel de service non payé). */}
               </>
-              )}
                 </div>
-                {!etapeTypeTache && (
-                  <div className="shrink-0 border-t border-slate-200 px-4 py-3">
+                <div className="shrink-0 border-t border-slate-200 px-4 py-3">
                     {depotRequis && !(parseFloat(depotMontant) > 0) && (
                       <p className="mb-2 rounded-lg bg-red-50 px-2 py-1.5 text-[10px] font-bold text-red-700">
                         ⚠️ Choisis un montant de dépôt (liste de prix ou tarif sur mesure) pour pouvoir créer la tâche.
                       </p>
                     )}
                     <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setEtapeTypeTache(true)}
-                        className="shrink-0 text-[11px] font-bold text-slate-400 underline underline-offset-2"
-                      >
-                        ← Type
-                      </button>
                       <Button
                         onClick={creerTache}
                         disabled={
@@ -14956,7 +14919,6 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       </Button>
                     </div>
                   </div>
-                )}
               </div>
             </div>
           )}
