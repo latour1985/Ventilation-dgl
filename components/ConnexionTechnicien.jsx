@@ -7,24 +7,31 @@
 "use client";
 
 import { useState } from "react";
-import { supabase } from "@/lib/supabase/client";
+import { seConnecterSurveille, demanderReinitialisation } from "@/lib/connexionSurveillee";
 
 export default function ConnexionTechnicien() {
   const [courriel, setCourriel] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [erreur, setErreur] = useState("");
   const [chargement, setChargement] = useState(false);
+  const [verrouMinutes, setVerrouMinutes] = useState(null);
+  const [essaisRestants, setEssaisRestants] = useState(null);
+  const [reinitEnvoyee, setReinitEnvoyee] = useState(false);
 
   const seConnecter = async (e) => {
     e.preventDefault();
     setErreur("");
     setChargement(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: courriel.trim(),
-      password: motDePasse,
-    });
+    const r = await seConnecterSurveille(courriel.trim(), motDePasse);
     setChargement(false);
-    if (error) setErreur("Courriel ou mot de passe incorrect.");
+    if (r.ok) return; // le succès est capté par onAuthStateChange
+    if (r.verrouille) {
+      setVerrouMinutes(r.minutes || 15);
+      setErreur("");
+      return;
+    }
+    setEssaisRestants(r.essaisRestants ?? null);
+    setErreur(r.erreur || "Courriel ou mot de passe incorrect.");
   };
 
   return (
@@ -66,8 +73,36 @@ export default function ConnexionTechnicien() {
             />
           </div>
 
+          {verrouMinutes != null && (
+            <div className="rounded-lg bg-red-500/20 px-3 py-2.5 text-xs text-red-200">
+              <p className="font-extrabold">🔒 Compte verrouillé après 3 essais.</p>
+              <p className="mt-0.5">Réessaie dans {verrouMinutes} minute{verrouMinutes > 1 ? "s" : ""} — ou réinitialise ton mot de passe :</p>
+              {reinitEnvoyee ? (
+                <p className="mt-1.5 rounded bg-emerald-500/20 px-2 py-1.5 font-bold text-emerald-300">
+                  📧 Courriel envoyé — clique le lien pour choisir un nouveau mot de passe (le verrou saute aussitôt).
+                </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!courriel.trim()) return;
+                    const ok = await demanderReinitialisation(courriel);
+                    if (ok) setReinitEnvoyee(true);
+                  }}
+                  className="mt-1.5 min-h-[44px] w-full rounded-lg bg-red-600 px-3 font-extrabold text-white active:scale-[0.99]"
+                >
+                  📧 Recevoir un courriel de réinitialisation
+                </button>
+              )}
+            </div>
+          )}
           {erreur && (
-            <p className="rounded-lg bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-300">{erreur}</p>
+            <p className="rounded-lg bg-red-500/20 px-3 py-2 text-xs font-semibold text-red-300">
+              {erreur}
+              {essaisRestants != null && essaisRestants > 0 && (
+                <span className="mt-0.5 block font-bold">⚠️ {essaisRestants} essai{essaisRestants > 1 ? "s" : ""} restant{essaisRestants > 1 ? "s" : ""} avant le verrouillage (15 min).</span>
+              )}
+            </p>
           )}
 
           <button

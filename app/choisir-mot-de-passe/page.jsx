@@ -17,6 +17,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { deverrouillerApresReinitialisation } from "@/lib/connexionSurveillee";
 
 export default function ChoisirMotDePasse() {
   const [etat, setEtat] = useState("verification"); // verification | a_confirmer | pret | verification_en_cours | enregistrement | reussi | sans_session
@@ -89,6 +90,9 @@ export default function ChoisirMotDePasse() {
       setErreur(error.message || "Enregistrement refusé — réessaie.");
       return;
     }
+    // Réinitialisation réussie = le verrou de connexion (3 essais)
+    // saute immédiatement — pas besoin d'attendre les 15 minutes.
+    deverrouillerApresReinitialisation();
     setEtat("reussi");
   };
 

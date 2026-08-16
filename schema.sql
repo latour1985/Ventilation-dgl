@@ -2051,6 +2051,21 @@ alter table camions add column if not exists indispo_note text;
 --    que SES métiers) — les taux restent conservés, réaffichable.
 alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
 
+-- SNIPPET « 68 » — VERROU DE CONNEXION : 3 ÉCHECS = 15 MINUTES.
+-- Compteur d'échecs par courriel, tenu CÔTÉ SERVEUR (route
+-- /api/connexion — un compteur dans le navigateur ne vaudrait rien).
+-- 3 échecs -> verrou 15 min + réinitialisation offerte à l'écran ;
+-- réinitialisation réussie ou bonne connexion -> compteur effacé.
+-- AUCUNE policy : la table n'est accessible qu'au service role (les
+-- routes serveur) — invisible et intouchable depuis le navigateur.
+create table if not exists connexion_echecs (
+  courriel      text primary key,
+  echecs        int not null default 0,
+  dernier_echec timestamptz,
+  verrou_jusqua timestamptz
+);
+alter table connexion_echecs enable row level security;
+
 -- SNIPPET « 67 » — GRAND MÉNAGE SECURITY ADVISOR, TOUT-EN-UN (2026-08-17).
 -- Couvre : les 2 erreurs (vues), les avertissements de sécurité
 -- (search_path, fonctions appelables, clé de chiffrement, listage du

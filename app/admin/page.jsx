@@ -17199,6 +17199,25 @@ function JournalAutomatisation({ entrees }) {
 // ============================================================
 export default function App() {
   const [onglet, setOnglet] = useState("tableau-de-bord");
+  // ⬅️➡️ RECULER/AVANCER DU NAVIGATEUR (demande du propriétaire,
+  // 2026-08-17) : chaque onglet s'inscrit dans l'adresse (#agenda…).
+  // Reculer revient à l'onglet précédent au lieu de quitter l'appli ;
+  // rafraîchir garde l'onglet ; un favori « #facturation » marche.
+  // Un onglet invalide ou non permis est déjà filtré par la dérivation
+  // `vue` (repli sur la première section permise) — aucun risque.
+  useEffect(() => {
+    const versOnglet = () => {
+      const h = decodeURIComponent(window.location.hash.replace("#", ""));
+      if (h) setOnglet(h);
+    };
+    versOnglet();
+    window.addEventListener("hashchange", versOnglet);
+    return () => window.removeEventListener("hashchange", versOnglet);
+  }, []);
+  useEffect(() => {
+    const cible = `#${onglet}`;
+    if (window.location.hash !== cible) window.history.pushState(null, "", cible);
+  }, [onglet]);
   // RECHERCHE GLOBALE — tapée dans la barre d'en-tête (visible partout)
   // ou dans la page Recherche : même valeur, deux endroits.
   const [rechercheGlobale, setRechercheGlobale] = useState("");

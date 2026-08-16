@@ -21,6 +21,7 @@
 import { useEffect, useState } from "react";
 import { Building2, Lock, LogOut, Plus, ShieldAlert, Download, Pause, Play, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import { seConnecterSurveille } from "@/lib/connexionSurveillee";
 import {
   listerEntreprisesPlateforme,
   majEntreprisePlateforme,
@@ -103,9 +104,10 @@ export default function Plateforme() {
     e.preventDefault();
     setConnexionEnCours(true);
     setErreurConnexion("");
-    const { error } = await supabase.auth.signInWithPassword({ email: courriel.trim(), password: motDePasse });
+    const r = await seConnecterSurveille(courriel.trim(), motDePasse);
     setConnexionEnCours(false);
-    if (error) setErreurConnexion("Courriel ou mot de passe refusé.");
+    if (r.verrouille) setErreurConnexion(`🔒 Compte verrouillé après 3 essais — réessaie dans ${r.minutes || 15} min, ou réinitialise ton mot de passe depuis /admin.`);
+    else if (!r.ok) setErreurConnexion(r.erreur || "Courriel ou mot de passe refusé.");
   };
 
   // LE SCEAU — app_metadata, scellé côté serveur (snippet 51). Un compte

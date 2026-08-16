@@ -4466,6 +4466,18 @@ function AppTechnicien() {
   const [inspectionsParDate, setInspectionsParDate] = useState({});
   const inspectionFaitePour = (date) => !!inspectionsParDate[date];
   const [vue, setVue] = useState("accueil");
+  // ⬅️ BOUTON RETOUR (Android / navigateur) : ferme la fiche de tâche
+  // ou l'écran Mes heures au lieu de quitter l'application — le
+  // réflexe naturel du téléphone (demande du propriétaire, 2026-08-17).
+  useEffect(() => {
+    const surRetour = () => {
+      setTacheActiveId(null);
+      setVue("accueil");
+    };
+    window.addEventListener("popstate", surRetour);
+    return () => window.removeEventListener("popstate", surRetour);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [tacheActiveId, setTacheActiveId] = useState(null);
   // OUVERTURE D'UNE TÂCHE : toujours repartir du HAUT de l'écran. La
   // liste de l'horaire peut être défilée loin — sans ce retour en haut,
@@ -4924,6 +4936,7 @@ function AppTechnicien() {
 
   const ouvrirTache = (id) => {
     setTacheActiveId(id);
+    window.history.pushState({ ecran: "tache" }, "", "#tache");
     setVue("tache");
   };
   const retourAccueil = () => setVue("accueil");
@@ -5128,7 +5141,7 @@ function AppTechnicien() {
             erreurSync={erreurSync}
             syncEnCours={syncFileEnCours}
             nomTechnicien={nomTechnicien}
-            onOuvrirMesHeures={() => setVue("mesheures")}
+            onOuvrirMesHeures={() => { setVue("mesheures"); window.history.pushState({ ecran: "heures" }, "", "#heures"); }}
             onCorrigerChrono={(id) => setCorrectionPour(id)}
           />
         ) : tacheActive.type === "transport" && tacheActive.momentTransport === "debut" && !inspectionFaitePour(tacheActive.date) ? (
