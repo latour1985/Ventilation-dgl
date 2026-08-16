@@ -98,7 +98,13 @@ const CLAUSES = [
 function EnTetePDF({ config }) {
   const e = config || CONFIG_REPLI;
   // Ligne RBQ + CMMTQ : chaque morceau ne s'affiche que s'il existe.
-  const ligneRbq = [e.numeroRbq ? `RBQ# ${e.numeroRbq}` : null, e.membreCmmtq ? "Membre de la CMMTQ" : null]
+  const assoc = Array.isArray(e.associations) ? e.associations : e.membreCmmtq ? ["cmmtq"] : [];
+  const ligneRbq = [
+    e.numeroRbq ? `RBQ# ${e.numeroRbq}` : null,
+    assoc.includes("cmmtq") ? "Membre de la CMMTQ" : null,
+    assoc.includes("cetaf") ? "Membre de la CETAF" : null,
+    assoc.includes("cmeq") ? "Membre de la CMEQ" : null,
+  ]
     .filter(Boolean)
     .join(" · ");
   return (

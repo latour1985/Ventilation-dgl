@@ -32,7 +32,7 @@ import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbo
 import { listerJournal, ajouterEntreeJournal } from "@/lib/supabase/journal";
 import { listerTaux, sauvegarderTaux } from "@/lib/supabase/tauxMetiers";
 import { listerDepots, creerDepot, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
-import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots } from "@/lib/supabase/prixDepots";
+import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots, zonesDepuis, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
@@ -202,6 +202,13 @@ const TERMES_FACTURATION = ["Comptant à la livraison", "Net 15", "Net 30", "Net
 // accès par défaut. Étiquette informative sur la fiche ; les VRAIS accès
 // se gèrent dans « Gestion des accès » (couche 3).
 const TYPES_ACCES = ["Admin principal", "Admin régulier", "Administration bureau", "Technicien"];
+
+// Zones d'appels EFFECTIVES : celles des données ; à défaut (première
+// ouverture, table vide) les quatre historiques de DGL.
+const zonesEffectives = (prixDepots) => {
+  const z = zonesDepuis(prixDepots);
+  return z.length > 0 ? z : ZONES_DEPOTS;
+};
 
 // Métiers et niveaux (les frigoristes ont un Apprenti 4, pas les ferblantiers).
 // MÉTIERS DE TERRAIN (taux = grille CCQ selon niveau + prime horaire
@@ -5894,6 +5901,9 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMeti
   // ➕ AJOUTER UN MÉTIER — le nom est nettoyé et dédoublonné ; le métier
   // naît avec les niveaux CCQ standards, tous à 0 $.
   const [ajoutMetierOuvert, setAjoutMetierOuvert] = useState(false);
+  // 🗺️ Ajout d'une zone d'appels (zones dynamiques par entreprise).
+  const [nouvelleZoneNom, setNouvelleZoneNom] = useState("");
+  const CLES_CONFIG_INTERDITES = ["taux_horaire_vendant", "minutes_incluses", "minutes_incluses_hors_zone"];
   const [nouveauMetier, setNouveauMetier] = useState("");
   const ajouterMetier = () => {
     const nom = nouveauMetier.trim().replace(/\s+/g, " ");
@@ -6117,9 +6127,29 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMeti
           </p>
         )}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {ZONES_DEPOTS.map((zone) => (
+          {zonesEffectives(prixDepots).map((zone) => (
             <div key={zone}>
-              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{zone}</label>
+              <label className="mb-0.5 flex items-center justify-between text-[10px] font-bold text-slate-400">
+                {zone}
+                {estAdminPrincipal && (
+                  <button
+                    onClick={() => {
+                      if (!window.confirm(`Retirer la zone « ${zone} » ? Les tâches existantes gardent leur étiquette.`)) return;
+                      setPrixDepots((prev) => {
+                        const suivant = { ...prev };
+                        delete suivant[zone];
+                        return suivant;
+                      });
+                      supprimerZoneDepot(zone).catch(() => {});
+                      ajouterJournal(`🗺️ Zone « ${zone} » retirée de la liste de prix des appels.`);
+                    }}
+                    className="text-slate-300 hover:text-red-500"
+                    title="Retirer cette zone"
+                  >
+                    ✕
+                  </button>
+                )}
+              </label>
               <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
                 <InputNombreDecimal
                   valeur={Number(prixDepots?.[zone]) || 0}
@@ -6132,7 +6162,31 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMeti
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[10px] text-slate-400">🗺️ Hors zone : pas de prix fixe — l'option « tarif sur mesure » de la liste déroulante ouvre la saisie manuelle.</p>
+        {estAdminPrincipal && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              value={nouvelleZoneNom}
+              onChange={(e) => setNouvelleZoneNom(e.target.value)}
+              placeholder="Ex : Zone 5 (Rive-Sud)"
+              className="min-w-[170px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+            <Button
+              variant="outline"
+              onClick={() => {
+                const nom = nouvelleZoneNom.trim();
+                if (!nom || CLES_CONFIG_INTERDITES.includes(nom)) return;
+                setPrixDepots((prev) => ({ ...prev, [nom]: prev[nom] ?? 0 }));
+                setNouvelleZoneNom("");
+                ajouterJournal(`🗺️ Zone « ${nom} » ajoutée — fixe son prix puis « Sauvegarder la liste de prix ».`);
+              }}
+              disabled={!nouvelleZoneNom.trim()}
+              className="min-h-0 px-3 py-1.5 text-xs"
+            >
+              ➕ Ajouter une zone
+            </Button>
+          </div>
+        )}
+        <p className="mt-2 text-[10px] text-slate-400">🗺️ Hors zone : pas de prix fixe — l'option « tarif sur mesure » de la liste déroulante ouvre la saisie manuelle. Chaque entreprise crée SES zones — rien n'est figé.</p>
 
         {/* TEMPS INCLUS + TAUX VENDANT (dépassement facturable) */}
         <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 sm:grid-cols-3">
@@ -6943,19 +6997,33 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
               <ChampParametre {...propsChamp} cle="numeroRbq" libelle="Licence RBQ" placeholder="0000-0000-00" />
               <ChampParametre {...propsChamp} cle="numeroNeq" libelle="NEQ (registre des entreprises)" placeholder="— facultatif —" />
             </div>
-            <label className={`mt-3 flex items-start gap-2 rounded-xl border p-2.5 ${estAdminPrincipal ? "border-slate-200" : "border-slate-100 bg-slate-50"}`}>
-              <input
-                type="checkbox"
-                checked={!!brouillon.membreCmmtq}
-                disabled={!estAdminPrincipal}
-                onChange={(e) => champ("membreCmmtq", e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0"
-              />
-              <span className="text-[11px] leading-snug text-slate-600">
-                <span className="font-bold text-slate-800">Membre de la CMMTQ</span>
-                <br />Affiche le logo CMMTQ dans l'en-tête des documents.
-              </span>
-            </label>
+            {/* ASSOCIATIONS PROFESSIONNELLES — à la carte : chaque
+                entreprise coche les SIENNES (une entreprise peut être
+                membre de plusieurs). Affichées sur devis, bons, factures. */}
+            <div className="mt-3">
+              <label className="mb-1 block text-[10px] font-bold uppercase text-slate-400">Associations professionnelles (affichées sur les documents)</label>
+              <div className="grid gap-1.5 sm:grid-cols-3">
+                {[["cmmtq", "CMMTQ", "Maîtres mécaniciens en tuyauterie"], ["cetaf", "CETAF", "Traitement de l'air et du froid"], ["cmeq", "CMEQ", "Maîtres électriciens"]].map(([id, sigle, nomLong]) => {
+                  const liste = Array.isArray(brouillon.associations) ? brouillon.associations : ["cmmtq"];
+                  const coche = liste.includes(id);
+                  return (
+                    <label key={id} className={`flex items-start gap-2 rounded-xl border p-2.5 ${coche ? "border-emerald-200 bg-emerald-50" : estAdminPrincipal ? "border-slate-200" : "border-slate-100 bg-slate-50"}`}>
+                      <input
+                        type="checkbox"
+                        checked={coche}
+                        disabled={!estAdminPrincipal}
+                        onChange={() => champ("associations", coche ? liste.filter((x) => x !== id) : [...liste, id])}
+                        className="mt-0.5 h-4 w-4 shrink-0"
+                      />
+                      <span className="text-[11px] leading-snug text-slate-600">
+                        <span className="font-bold text-slate-800">{sigle}</span>
+                        <br />{nomLong}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -11373,6 +11441,8 @@ function EnTeteEntreprise({ compact, config }) {
             />
           </div>
         ) : null}
+        {(e.associations || []).includes("cetaf") ? <p>Membre de la CETAF</p> : null}
+        {(e.associations || []).includes("cmeq") ? <p>Membre de la CMEQ</p> : null}
       </div>
     </div>
   );
@@ -12481,7 +12551,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [depotExtra, setDepotExtra] = useState("");
   // Le défaut suit le type : appel de service = dépôt suggéré d'office.
   useEffect(() => {
-    setDepotRequis(nouveauType === "appel_service");
+    // Le dépôt d'appel suit la RÈGLE DE L'ENTREPRISE (Paramètres →
+    // Appels de service) — certaines n'exigent pas de dépôt.
+    setDepotRequis(nouveauType === "appel_service" && configEnt?.appelsDepotDefaut !== false);
   }, [nouveauType]);
   const [nouveauDevisId, setNouveauDevisId] = useState("");
   const [nouvelleFrequence, setNouvelleFrequence] = useState(4);
@@ -13646,7 +13718,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs font-semibold"
                       >
                         <option value="">— Choisir dans la liste de prix —</option>
-                        {ZONES_DEPOTS.filter((z) => Number(prixDepots?.[z]) > 0).map((z) => {
+                        {zonesEffectives(prixDepots).filter((z) => Number(prixDepots?.[z]) > 0).map((z) => {
                           const p = Number(prixDepots[z]);
                           return (
                             <option key={z} value={z}>
@@ -13656,7 +13728,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         })}
                         <option value="hors_liste">🗺️ Hors zone — tarif sur mesure (3 h incluses transport compris)</option>
                       </select>
-                      {ZONES_DEPOTS.every((z) => !(Number(prixDepots?.[z]) > 0)) && (
+                      {zonesEffectives(prixDepots).every((z) => !(Number(prixDepots?.[z]) > 0)) && (
                         <p className="mt-1 text-[9px] text-amber-700">
                           Aucun prix de zone configuré — l'Admin principal peut les définir dans Utilisateurs → « Liste de prix — dépôts ».
                         </p>
@@ -14450,7 +14522,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     // Dépassement facturé par TRANCHES DE 15 MIN entamées —
                     // même règle que la boîte en direct de l'app technicien.
                     const extraMinReel = Math.max(0, Math.round((totalH - inclusH) * 60 * 100) / 100);
-                    const extraFactMin = Math.ceil(extraMinReel / 15) * 15;
+                    const trancheMin = Number(configEnt?.trancheFacturationMin) || 15;
+                    const extraFactMin = Math.ceil(extraMinReel / trancheMin) * trancheMin;
                     const extraFactH = extraFactMin / 60;
                     const detail = horsZone ? ` (total ${totalH.toFixed(2)} h dont ${heuresTransport.toFixed(2)} h transport)` : "";
                     if (extraMinReel <= 0) {
@@ -14458,7 +14531,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     }
                     return (
                       <p className="mt-0.5 text-[10px] font-bold text-amber-700 tabular-nums">
-                        ⏱️ Dépassement : {Math.ceil(extraMinReel)} min → facturable {extraFactMin} min (tranches de 15)
+                        ⏱️ Dépassement : {Math.ceil(extraMinReel)} min → facturable {extraFactMin} min (tranches de {Number(configEnt?.trancheFacturationMin) || 15})
                         {tauxV > 0
                           ? ` × ${tauxV.toFixed(2)} $/h = ${(extraFactH * tauxV).toFixed(2)} $ HT (${taxesDepot(extraFactH * tauxV, configEnt).total.toFixed(2)} $ taxes incl.)`
                           : " — définis le taux vendant dans Tarifs"}
@@ -14921,6 +14994,9 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
 function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees }) {
+  // Config entreprise (contexte) — la tranche de facturation s'affiche
+  // dans le texte d'aide du temps supplémentaire.
+  const configEnt = useEntreprise();
   // Liste de prix — le sélecteur d'items en a besoin. Elle manquait :
   // ouvrir la révision de prix plantait l'écran.
   const catalogue = useCatalogue();
@@ -15021,7 +15097,7 @@ function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piece
         )}
         {(lignesSuggerees || []).length > 0 && !bon.lignesNonListees?.length && (
           <div className="mb-3 rounded-xl bg-sky-50 p-3 text-xs font-semibold text-sky-800">
-            ⏱️ Le temps au-delà du temps inclus a été calculé automatiquement (tranches de 15 min entamées,
+            ⏱️ Le temps au-delà du temps inclus a été calculé automatiquement (tranches de {Number(configEnt?.trancheFacturationMin) || 15} min entamées,
             taux réduit pour un passager du même camion). Les lignes sont modifiables ou effaçables — c'est toi qui as le dernier mot.
           </div>
         )}
@@ -15309,7 +15385,8 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       const extraH = s.heures - consomme;
       if (extraH <= 0.0001) return;
       // Tranches de 15 minutes ENTAMÉES — la règle validée.
-      const factH = Math.ceil(Math.round(extraH * 60) / 15) * 15 / 60;
+      const trancheMin = Number(configEnt?.trancheFacturationMin) || 15;
+      const factH = (Math.ceil(Math.round(extraH * 60) / trancheMin) * trancheMin) / 60;
       const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
       lignes.push({
         description:
@@ -16390,11 +16467,17 @@ export default function App() {
   };
 
   const creerDepotPourTache = async (tacheId, infos) => {
+    // DÉLAI DE PAIEMENT : celui de l'entreprise (Paramètres), sauf si un
+    // délai explicite arrive (pièces : 7 jours). Libellé humain : « 36 h »
+    // sous 2 jours, « N jours » au-delà.
+    const heuresDelai = Number(configEntreprise?.delaiDepotHeures) || 24;
+    const joursDelai = infos.joursLimite != null ? Number(infos.joursLimite) : heuresDelai / 24;
+    const libelleDelai = joursDelai >= 2 ? `${Math.round(joursDelai)} jours` : `${Math.round(joursDelai * 24)} h`;
     const repli = {
       tacheId,
       statut: "en_attente_paiement",
       montantHT: Number(infos.montantHT) || 0,
-      dateLimite: new Date(Date.now() + (Number(infos.joursLimite) || 1) * 24 * 60 * 60 * 1000).toISOString(),
+      dateLimite: new Date(Date.now() + joursDelai * 24 * 60 * 60 * 1000).toISOString(),
       isProspect: !!infos.isProspect,
       prospectNom: infos.prospect?.nom || "",
       prospectCourriel: infos.prospect?.courriel || "",
@@ -16402,12 +16485,12 @@ export default function App() {
       prospectAdresse: infos.prospect?.adresse || "",
     };
     setDepots((prev) => ({ ...prev, [tacheId]: repli }));
-    creerDepot(tacheId, infos).catch(() => {
+    creerDepot(tacheId, { ...infos, joursLimite: joursDelai }).catch(() => {
       // hors-ligne — le blocage local reste effectif pour la session
     });
     const t = taxesDepot(infos.montantHT, configEntreprise);
     ajouterJournal(
-      `💰 Dépôt requis : ${t.ht.toFixed(2)} $ + taxes = ${t.total.toFixed(2)} $ — payable sous ${(Number(infos.joursLimite) || 1) === 1 ? "24 h" : `${infos.joursLimite} jours`}`
+      `💰 Dépôt requis : ${t.ht.toFixed(2)} $ + taxes = ${t.total.toFixed(2)} $ — payable sous ${libelleDelai}`
     );
 
     // ------------------------------------------------------------
@@ -16427,7 +16510,7 @@ export default function App() {
       clientNom: infos.clientNom,
       montantHT: Number(infos.montantHT) || 0,
       zone: infos.zone || null,
-      joursLimite: Number(infos.joursLimite) || 1,
+      joursLimite: joursDelai,
       description: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""} — ${infos.clientNom}`,
     });
     if (r?.creee) {
@@ -16461,7 +16544,7 @@ export default function App() {
         clientNom: infos.clientNom,
         description:
           `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ` +
-          `${(Number(infos.joursLimite) || 1) === 1 ? "24 heures" : `${infos.joursLimite} jours`}. ` +
+          `${libelleDelai}. ` +
           `${facture?.docNumber ? `Référence : facture Nº ${facture.docNumber}. ` : ""}` +
           `Dès sa réception, votre rendez-vous est confirmé.`,
         lignes: [{ etiquette: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}`, montant: t.ht }],

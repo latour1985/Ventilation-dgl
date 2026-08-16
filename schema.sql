@@ -1920,3 +1920,11 @@ alter table projets_app add column if not exists materiel_stock jsonb not null d
 -- null = tous les modules (DGL et historique) ; sinon la liste cochée
 -- dans /plateforme. Appliqué dans les DEUX applications à la connexion.
 alter table entreprises add column if not exists modules jsonb;
+
+-- SNIPPET « 55 » — règles d'appels PAR ENTREPRISE + associations pro.
+-- Chaque entreprise a SES règles (dépôt oui/non, délai, tranches) et
+-- SES associations (CMMTQ / CETAF / CMEQ) sur les documents.
+alter table entreprises add column if not exists associations jsonb;
+alter table entreprises add column if not exists appels_depot_defaut boolean not null default true;
+alter table entreprises add column if not exists delai_depot_heures numeric;
+alter table entreprises add column if not exists tranche_facturation_min numeric;
