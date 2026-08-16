@@ -25,6 +25,7 @@ import {
   ecrireQbo,
   clientQboPour,
   articleServiceQboPour,
+  envoyerFactureParQb,
 } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
@@ -82,9 +83,17 @@ export async function POST(request) {
     const echeance = new Date(Date.now() + joursTerme * 24 * 60 * 60 * 1000);
     const dateLocale = `${echeance.getFullYear()}-${String(echeance.getMonth() + 1).padStart(2, "0")}-${String(echeance.getDate()).padStart(2, "0")}`;
 
+    // Les adresses d'envoi — QuickBooks enverra SA facture officielle
+    // à ces courriels tout de suite après la création.
+    const envoyerA = (Array.isArray(corps?.envoyerA) ? corps.envoyerA : [])
+      .map((e) => String(e || "").trim())
+      .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+      .slice(0, 5);
+
     const cree = await ecrireQbo(acces, "invoice?include=invoiceLink", {
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
+      ...(envoyerA.length > 0 ? { BillEmail: { Address: envoyerA.join(", ") } } : {}),
       PrivateNote: `Facture — ${corps?.reference || "travaux"} — créée par l'application Ventilation DGL`,
       // Choix HUMAIN fait à l'envoi (fenêtre d'avant-envoi) — jamais un
       // défaut silencieux pour ces factures.
@@ -98,11 +107,26 @@ export async function POST(request) {
       })),
     });
     const facture = cree?.Invoice;
+
+    // ENVOI PAR QUICKBOOKS + PREUVE — jamais « envoyé » sans l'avoir
+    // relu dans le registre QuickBooks. En cas d'échec, la facture
+    // existe quand même : l'application affichera l'alerte et le
+    // bouton « Renvoyer ».
+    let envoiQb = null;
+    if (envoyerA.length > 0 && facture?.Id) {
+      try {
+        envoiQb = await envoyerFactureParQb(acces, facture.Id, envoyerA);
+      } catch {
+        envoiQb = { envoyee: false, envoyeeLe: null };
+      }
+    }
+
     return Response.json({
       creee: true,
       factureId: facture?.Id || null,
       docNumber: facture?.DocNumber || null,
       lienPaiement: facture?.InvoiceLink || null,
+      envoiQb,
     });
   } catch (e) {
     return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });

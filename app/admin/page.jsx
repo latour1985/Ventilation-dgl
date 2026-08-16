@@ -42,7 +42,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
-import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo } from "@/lib/quickbooksClient";
+import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
@@ -1408,17 +1408,39 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
     if (adresses.length === 0 || totalHT <= 0) return;
     setDemandeEnCours(true);
     const t = calculerTaxes(totalHT, configEnt);
+    // FACTURE QUICKBOOKS D'ABORD — même machine que le dépôt d'appel :
+    // la demande s'appuie sur une vraie facture (numéro officiel +
+    // bouton payer selon les réglages des appels). QuickBooks
+    // indisponible ? Le courriel part quand même — le message le dit,
+    // rien n'échoue en silence.
+    let factureQb = null;
+    const carteOk =
+      configEnt.paiementCarteAppels === true &&
+      (!(Number(configEnt.seuilCarteAppels) > 0) || totalHT <= Number(configEnt.seuilCarteAppels));
+    const rQb = await creerFactureQbo({
+      clientId: p.clientId || null,
+      clientNom: p.clientNom || "",
+      lignes: lignes.map((l) => ({ description: l.etiquette, montant: l.montant })),
+      termePaiement: "Net 0",
+      reference: `pièce — ${p.pieceRequise || ""}`,
+      paiementCarte: carteOk,
+      paiementVirement: configEnt.paiementVirementAppels === true,
+    });
+    if (rQb?.creee) factureQb = rQb;
     const r = await envoyerCourriel({
       a: adresses,
       sujet: `Demande de paiement — ${montantPiece > 0 ? "pièce pour votre réparation" : "frais de déplacement"} (${configEnt.nomCommercial || configEnt.nomLegal})`,
       html: gabaritDemandePaiement({
         config: configEnt,
         clientNom: p.clientNom,
-        description: demandeDescription,
+        description:
+          demandeDescription +
+          (factureQb?.docNumber ? ` Référence : facture Nº ${factureQb.docNumber}.` : ""),
         lignes,
         tps: t.tps,
         tvq: t.tvq,
         total: t.total,
+        lienPaiement: factureQb?.lienPaiement || null,
       }),
     });
     setDemandeEnCours(false);
@@ -1443,7 +1465,19 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
     }
     setMessageDemande(
       r.envoye
-        ? { id: p.id, ok: true, texte: `Demande de ${t.total.toFixed(2)} $ (taxes incl.) envoyée à ${adresses.join(", ")}` }
+        ? {
+            id: p.id,
+            ok: true,
+            texte:
+              `Demande de ${t.total.toFixed(2)} $ (taxes incl.) envoyée à ${adresses.join(", ")}` +
+              (factureQb?.docNumber
+                ? ` — facture QuickBooks Nº ${factureQb.docNumber}${factureQb.lienPaiement ? " + bouton Payer en ligne" : ""}`
+                : rQb?.nonConnecte
+                  ? " — ⚠️ SANS facture QuickBooks (non connecté)"
+                  : rQb?.erreur
+                    ? ` — ⚠️ facture QuickBooks NON créée : ${rQb.erreur}`
+                    : ""),
+          }
         : { id: p.id, ok: false, texte: "Service d'envoi pas encore configuré (clé Resend absente) — appelle le client, les montants et verrous sont notés." }
     );
     setDemandePour(null);
@@ -10101,6 +10135,44 @@ function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
   );
 }
 
+// ============================================================
+// FACTURES ÉMISES D'UN BON — chaque ligne porte sa PREUVE d'envoi
+// (registre QuickBooks), son PDF officiel et, au besoin, son bouton
+// « Renvoyer ». Rien ne se perd : pas de preuve = alerte rouge.
+// ============================================================
+function FacturesEmisesListe({ bon, onPdf, onRenvoyer }) {
+  return (
+    <div className="mt-1.5 space-y-1">
+      {(bon.facturesEmises || []).map((f) => (
+        <div key={f.id} className="rounded-lg bg-slate-50 px-1.5 py-1 text-left text-[10px] text-slate-500">
+          <p>
+            <span className="font-semibold text-slate-600">{f.numeroFactureQb}</span> — {Number(f.montant).toFixed(2)} $ ({f.detail}) · {f.date}
+          </p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            {f.envoiQb?.statut === "envoyee" ? (
+              <span className="font-bold text-emerald-600">✉️ Envoyée par QuickBooks ✓</span>
+            ) : f.qboInvoiceId ? (
+              <>
+                <span className="font-bold text-red-600">⚠️ Envoi non confirmé</span>
+                <button onClick={() => onRenvoyer(bon, f)} className="rounded bg-red-600 px-1.5 py-0.5 font-bold text-white active:scale-95">
+                  Renvoyer
+                </button>
+              </>
+            ) : (
+              <span className="text-slate-400">facture locale (QuickBooks non connecté)</span>
+            )}
+            {f.qboInvoiceId && (
+              <button onClick={() => onPdf(f)} className="font-semibold text-slate-500 underline underline-offset-2">
+                📄 PDF
+              </button>
+            )}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
   const courriels = client?.courriels || [];
   const [selectionIds, setSelectionIds] = useState(() => {
@@ -12903,7 +12975,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     }
     setTeleversementJointe(false);
   };
-  const [nouveauClientId, setNouveauClientId] = useState(clients[0]?.id || "");
+  // AUCUN client présélectionné (demande du propriétaire, 2026-08-17) :
+  // avant, le premier en ordre alphabétique était choisi d'office — une
+  // tâche pouvait partir sur le mauvais client par simple distraction.
+  const [nouveauClientId, setNouveauClientId] = useState("");
   const [nouveauType, setNouveauType] = useState("appel_service");
   // TEMPS SUR LE PROJET, OU FRAIS ADMINISTRATIFS ?
   //
@@ -12999,6 +13074,21 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 
   const majDureeTache = (id, champs) => {
     setTachesAttente((prev) => prev.map((t) => (t.id === id ? { ...t, ...champs } : t)));
+  };
+
+  // Choisir un client depuis les SUGGESTIONS : mêmes effets que
+  // l'ancien menu (adresse, projet et destinataires du dépôt suivent).
+  const choisirClientTache = (id) => {
+    setNouveauClientId(id);
+    setAdresseTravauxId("");
+    setNouvelleAdresseTravaux(null);
+    setFiltreAdresseTache("");
+    setNouveauProjetId("");
+    const fiche = clients.find((c) => c.id === id);
+    const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
+    const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
+    setDepotEmails(defauts.length > 0 ? defauts : tous.slice(0, 1));
+    setDepotExtra("");
   };
 
   const creerTache = () => {
@@ -13687,53 +13777,60 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               </div>
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Client</label>
-                {/* FILTRE AU-DESSUS DE LA LISTE (retour de tests) : taper
-                    3 lettres raccourcit la liste ; ne rien taper = liste
-                    complète, défilable comme avant. La liste reste — le
-                    filtre l'aide, il ne la remplace pas. */}
+                {/* ➕ TOUJOURS PREMIER À L'ÉCRAN (demande du propriétaire,
+                    2026-08-17) : créer un client est l'action la plus
+                    fréquente à rater — elle ne se cache plus dans un menu. */}
+                <button
+                  type="button"
+                  onClick={() => setModalNouveauClientTache(true)}
+                  className="mb-1 flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 active:scale-[0.99]"
+                >
+                  ➕ Nouveau client…
+                </button>
+                {/* SUGGESTIONS VISIBLES : la liste rétrécit à chaque
+                    lettre, sous les yeux — plus de menu à ouvrir. Les
+                    noms qui commencent pareil se départagent à mesure. */}
                 <input
                   value={filtreClientTache}
                   onChange={(e) => setFiltreClientTache(e.target.value)}
-                  placeholder="🔍 Filtrer les clients (nom, entreprise, téléphone)…"
-                  className="mb-1 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+                  placeholder="🔍 Tape le nom — la liste rétrécit à chaque lettre…"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
                 />
-                <select
-                  value={nouveauClientId}
-                  onChange={(e) => {
-                    // « ➕ Nouveau client » ouvre la fenêtre de création
-                    // rapide sans toucher au client déjà sélectionné.
-                    if (e.target.value === "__nouveau__") {
-                      setModalNouveauClientTache(true);
-                      return;
-                    }
-                    setNouveauClientId(e.target.value);
-                    setAdresseTravauxId("");
-                    setNouvelleAdresseTravaux(null);
-                    setFiltreAdresseTache("");
-                    setNouveauProjetId("");
-                    // Destinataires du dépôt : précoche les adresses par
-                    // défaut de la fiche du client choisi.
-                    const fiche = clients.find((c) => c.id === e.target.value);
-                    const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
-                    const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
-                    setDepotEmails(defauts.length > 0 ? defauts : tous.slice(0, 1));
-                    setDepotExtra("");
-                  }}
-                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                >
-                  <option value="__nouveau__">➕ Nouveau client…</option>
-                  {clients
-                    .filter((c) => {
-                      const f = filtreClientTache.trim().toLowerCase();
-                      if (!f) return true;
-                      // Le client sélectionné reste toujours visible.
-                      if (c.id === nouveauClientId) return true;
-                      return `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(f);
-                    })
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>{nomAffichageClient(c)}</option>
-                    ))}
-                </select>
+                {filtreClientTache.trim() !== "" && (
+                  <div className="mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    {clients
+                      .filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase()))
+                      .slice(0, 8)
+                      .map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { choisirClientTache(c.id); setFiltreClientTache(""); }}
+                          className="block w-full border-b border-slate-100 px-2 py-2 text-left text-xs font-semibold text-slate-700 last:border-0 active:bg-orange-50"
+                        >
+                          {nomAffichageClient(c)}
+                        </button>
+                      ))}
+                    {clients.filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase())).length === 0 && (
+                      <p className="px-2 py-2 text-[11px] text-slate-400">
+                        Aucun client trouvé — crée-le avec « ➕ Nouveau client… » juste au-dessus.
+                      </p>
+                    )}
+                  </div>
+                )}
+                {(() => {
+                  const c = clients.find((x) => x.id === nouveauClientId);
+                  return c ? (
+                    <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-[#FF6A13] bg-orange-50 px-2 py-1.5">
+                      <span className="min-w-0 truncate text-xs font-bold text-slate-800">{nomAffichageClient(c)}</span>
+                      <button type="button" onClick={() => choisirClientTache("")} className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2">
+                        changer
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[10px] font-bold text-amber-600">— Choisis le client (tape son nom, ou crée-le avec ➕) —</p>
+                  );
+                })()}
               </div>
 
               {/* SECTEUR CCQ — commercial/résidentiel : décide du taux
@@ -15885,6 +15982,12 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     setFiltresActifs((prev) => (prev.includes(categorie) ? prev.filter((c) => c !== categorie) : [...prev, categorie]));
   };
   const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes.filter((b) => categorieBon(b) !== "retire") : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
+  // Factures dont l'envoi par QuickBooks n'est pas (encore) confirmé au
+  // registre — l'alerte passive de l'onglet.
+  const envoisAConfirmer = bonsGroupes.reduce(
+    (s, x) => s + (x.facturesEmises || []).filter((f) => f.qboInvoiceId && f.envoiQb?.statut !== "envoyee").length,
+    0
+  );
 
   const bonFacturation = bons.find((b) => b.id === bonFacturationId) || null;
   const devisFacturation = bonFacturation ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) : null;
@@ -15952,6 +16055,71 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     }
   };
 
+  // ------------------------------------------------------------
+  // GARANTIE D'ENVOI QUICKBOOKS — PDF officiel, renvoi, vérification.
+  // ------------------------------------------------------------
+  const [verifEnvoisEnCours, setVerifEnvoisEnCours] = useState(false);
+  const ouvrirPdfFacture = async (f) => {
+    if (!f?.qboInvoiceId) return;
+    const ok = await ouvrirFacturePdfQbo(f.qboInvoiceId);
+    if (!ok) ajouterJournal("⚠️ PDF indisponible — QuickBooks non connecté ou facture introuvable.");
+  };
+  const appliquerEnvoiQb = (bonId, factureLigneId, envoiQb) => {
+    setBons((prev) => prev.map((x) => {
+      if (x.id !== bonId) return x;
+      const liste = (x.facturesEmises || []).map((f) => (f.id === factureLigneId ? { ...f, envoiQb } : f));
+      if (String(x.id).startsWith("sbb-")) {
+        majFacturesEmises(String(x.id).slice(4), liste, x.statutQb === "envoye" ? "envoye" : "a_facturer").catch(() => {});
+      }
+      return { ...x, facturesEmises: liste };
+    }));
+  };
+  const renvoyerFactureQb = async (b, f) => {
+    const adresses = (f.courrielsEnvoi || []).filter(Boolean);
+    if (adresses.length === 0) {
+      ajouterJournal(`⚠️ Aucun destinataire noté sur la facture ${f.numeroFactureQb} — impossible de renvoyer.`);
+      return;
+    }
+    const r = await envoyerFactureQbo(f.qboInvoiceId, adresses);
+    if (r?.envoyee) {
+      appliquerEnvoiQb(b.id, f.id, { statut: "envoyee", date: r.envoyeeLe || new Date().toISOString() });
+      ajouterJournal(`✉️ Facture ${f.numeroFactureQb} ENVOYÉE par QuickBooks à ${adresses.join(", ")} — confirmé au registre.`);
+    } else {
+      appliquerEnvoiQb(b.id, f.id, { statut: "non_confirme", date: null });
+      ajouterJournal(`⚠️ Facture ${f.numeroFactureQb} : envoi toujours NON confirmé${r?.erreur ? ` (${r.erreur})` : r?.nonConnecte ? " (QuickBooks non connecté)" : ""}.`);
+    }
+  };
+  const verifierTousEnvois = async () => {
+    const aVerifier = [];
+    bons.forEach((x) => (x.facturesEmises || []).forEach((f) => {
+      if (f.qboInvoiceId) aVerifier.push({ bonId: x.id, factureLigneId: f.id, qbId: f.qboInvoiceId });
+    }));
+    if (aVerifier.length === 0) {
+      ajouterJournal("Aucune facture QuickBooks à vérifier — rien d'émis encore.");
+      return;
+    }
+    setVerifEnvoisEnCours(true);
+    const r = await verifierEnvoisQbo(aVerifier.map((x) => x.qbId));
+    setVerifEnvoisEnCours(false);
+    if (!r?.statuts) {
+      ajouterJournal(`⚠️ Vérification impossible — ${r?.erreur || (r?.nonConnecte ? "QuickBooks non connecté" : r?.simule ? "QuickBooks non configuré ici" : "réessaie")}.`);
+      return;
+    }
+    let ok = 0;
+    let manquantes = 0;
+    aVerifier.forEach((x) => {
+      const s = r.statuts[x.qbId];
+      if (!s) return;
+      if (s.envoyee) { ok += 1; appliquerEnvoiQb(x.bonId, x.factureLigneId, { statut: "envoyee", date: s.envoyeeLe || new Date().toISOString() }); }
+      else { manquantes += 1; appliquerEnvoiQb(x.bonId, x.factureLigneId, { statut: "non_confirme", date: null }); }
+    });
+    ajouterJournal(
+      manquantes === 0
+        ? `✅ Vérification des envois : ${ok} facture(s) confirmée(s) envoyée(s) par QuickBooks — rien ne s'est perdu.`
+        : `⚠️ Vérification des envois : ${manquantes} facture(s) JAMAIS envoyée(s) par QuickBooks — bouton Renvoyer sur leur carte.`
+    );
+  };
+
   const envoyerBonAuClient = async (b, choix) => {
     const adresses = [...new Set((choix || []).map((cc) => cc.email))].filter(Boolean);
     if (adresses.length === 0) return;
@@ -16004,6 +16172,8 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       reference: b.projet || "travaux",
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
+      // QuickBooks envoie lui-même sa facture officielle au client.
+      envoyerA: destinataires.map((c) => c.email),
     });
     if (r?.erreur) {
       ajouterJournal(`⚠️ Facture QuickBooks NON créée pour "${b.projet}" : ${r.erreur} — le bon reste en attente`);
@@ -16014,6 +16184,12 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       return;
     }
     const numeroReel = r?.docNumber || r?.factureId || `QBINV-${Math.floor(10000 + Math.random() * 90000)}`;
+    // La PREUVE d'envoi — lue du registre QuickBooks par la route.
+    const envoiQbSimple = r?.envoiQb
+      ? r.envoiQb.envoyee
+        ? { statut: "envoyee", date: r.envoiQb.envoyeeLe || new Date().toISOString() }
+        : { statut: "non_confirme", date: null }
+      : null;
     const entree = {
       id: `fact-${Date.now()}`,
       montant: Number(b.montant) || lignes.reduce((x, l) => x + l.montant, 0),
@@ -16024,6 +16200,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       qboInvoiceId: r?.factureId || null,
       courrielEnvoi: destinataires[0]?.email || null,
       courrielsEnvoi: destinataires.map((c) => c.email),
+      envoiQb: envoiQbSimple,
     };
     const nouvelles = [...(b.facturesEmises || []), entree];
     setBons((prev) =>
@@ -16041,7 +16218,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     }
     ajouterJournal(
       r?.creee
-        ? `🧾 Facture QuickBooks Nº ${numeroReel} créée (Sandbox) pour "${b.projet}"${paiements.carte || paiements.virement ? ` — paiement en ligne offert : ${[paiements.carte ? "carte" : null, paiements.virement ? "virement" : null].filter(Boolean).join(" + ")}` : ""}${destinataires.length > 0 ? ` — transmise à ${libelleDestinataires(destinataires)}` : ""}`
+        ? `🧾 Facture QuickBooks Nº ${numeroReel} créée (Sandbox) pour "${b.projet}"${paiements.carte || paiements.virement ? ` — paiement en ligne offert : ${[paiements.carte ? "carte" : null, paiements.virement ? "virement" : null].filter(Boolean).join(" + ")}` : ""}${envoiQbSimple ? (envoiQbSimple.statut === "envoyee" ? ` — ✉️ ENVOYÉE par QuickBooks à ${libelleDestinataires(destinataires)} (confirmé au registre)` : " — ⚠️ envoi par QuickBooks NON CONFIRMÉ : bouton Renvoyer sur la carte") : destinataires.length > 0 ? ` — destinataires notés : ${libelleDestinataires(destinataires)}` : ""}`
         : `🧪 QuickBooks non configuré ici — numéro local ${numeroReel} (normal en développement)`
     );
     setBonEnvoiCourrielId(null);
@@ -16082,6 +16259,12 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       return;
     }
     const numeroFactureQb = rQbo?.docNumber || rQbo?.factureId || `QBINV-${Math.floor(10000 + Math.random() * 90000)}`;
+    // La PREUVE d'envoi — lue du registre QuickBooks par la route.
+    const envoiQb = rQbo?.envoiQb
+      ? rQbo.envoiQb.envoyee
+        ? { statut: "envoyee", date: rQbo.envoiQb.envoyeeLe || new Date().toISOString() }
+        : { statut: "non_confirme", date: null }
+      : null;
     setBons((prev) =>
       prev.map((b) => {
         if (b.id !== bonId) return b;
@@ -16097,6 +16280,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
             qboInvoiceId: rQbo?.factureId || null,
             courrielEnvoi: destinataires[0]?.email || null,
             courrielsEnvoi: destinataires.map((c) => c.email),
+            envoiQb,
           },
         ];
         const cumul = nouvelles.reduce((s, f) => s + f.montant, 0);
@@ -16111,7 +16295,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     if (b && String(b.id).startsWith("sbb-")) {
       const listePersistee = [
         ...(b.facturesEmises || []),
-        { id: `fact-${Date.now()}`, montant, type, detail, date: dateISO(new Date()), numeroFactureQb, qboInvoiceId: rQbo?.factureId || null, courrielEnvoi: destinataires[0]?.email || null, courrielsEnvoi: destinataires.map((c) => c.email) },
+        { id: `fact-${Date.now()}`, montant, type, detail, date: dateISO(new Date()), numeroFactureQb, qboInvoiceId: rQbo?.factureId || null, courrielEnvoi: destinataires[0]?.email || null, courrielsEnvoi: destinataires.map((c) => c.email), envoiQb },
       ];
       const totalAttendu = devisCourant ? devisCourant.totalVendant : b.montant;
       const cumulPersiste = listePersistee.reduce((x, f) => x + f.montant, 0);
@@ -16122,7 +16306,13 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     ajouterJournal(
       `🧾 Facture${rQbo?.creee ? " QuickBooks" : " (locale)"} Nº ${numeroFactureQb} de ${montant.toFixed(2)} $ (${libelle}) créée pour "${b?.projet}" — ${b?.type === "entretien_contrat" ? "contrat" : "devis"} #${b?.devisNumero}` +
         `${paiements.carte || paiements.virement ? ` — paiement en ligne : ${[paiements.carte ? "carte" : null, paiements.virement ? "virement" : null].filter(Boolean).join(" + ")}` : ""}` +
-        (destinataires.length > 0 ? ` — transmise à ${libelleDestinataires(destinataires)}` : "")
+        (envoiQb
+          ? envoiQb.statut === "envoyee"
+            ? ` — ✉️ ENVOYÉE par QuickBooks à ${libelleDestinataires(destinataires)} (confirmé au registre)`
+            : ` — ⚠️ envoi par QuickBooks NON CONFIRMÉ : bouton Renvoyer sur la carte`
+          : destinataires.length > 0
+            ? ` — destinataires notés : ${libelleDestinataires(destinataires)}`
+            : "")
     );
     setBonFacturationId(null);
     setFactureEnAttenteCourriel(null);
@@ -16184,6 +16374,26 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
         >
           <p className="text-2xl font-extrabold text-slate-500 tabular-nums">{retires}</p>
           <p className="text-xs font-semibold text-slate-500">Retirés — garantie / maison</p>
+        </button>
+      </div>
+
+      {/* GARANTIE D'ENVOI — le filet : compare nos factures au registre
+          d'envoi de QuickBooks. Toute facture créée mais jamais partie
+          remonte ici avec son bouton Renvoyer. */}
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+        <p className="min-w-0 text-[11px] text-slate-500">
+          {envoisAConfirmer > 0 ? (
+            <span className="font-bold text-red-600">⚠️ {envoisAConfirmer} facture{envoisAConfirmer > 1 ? "s" : ""} dont l'envoi par QuickBooks n'est pas confirmé</span>
+          ) : (
+            <span>✉️ Envois par QuickBooks : aucun problème connu</span>
+          )}
+        </p>
+        <button
+          onClick={verifierTousEnvois}
+          disabled={verifEnvoisEnCours}
+          className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 active:scale-95 disabled:opacity-50"
+        >
+          {verifEnvoisEnCours ? "Vérification…" : "🔎 Vérifier les envois"}
         </button>
       </div>
 
@@ -16359,24 +16569,22 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                 ) : (
                   b.description && <p className="mt-0.5 text-[11px] text-slate-500">{b.description}</p>
                 )}
-                {(devisType || contrat) && montantCumule > 0 && (
-                  <div className="mt-1.5 w-full max-w-[220px]">
-                    <p className="text-[10px] font-semibold text-slate-500">
-                      Cumul facturé : {montantCumule.toFixed(2)} $ / {montantDevisTotal.toFixed(2)} $
-                    </p>
-                    <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                      <div
-                        className={`h-full rounded-full ${contrat ? "bg-purple-500" : "bg-blue-500"}`}
-                        style={{ width: `${Math.min(100, (montantCumule / montantDevisTotal) * 100)}%` }}
-                      />
-                    </div>
-                    <div className="mt-1.5 space-y-0.5">
-                      {(b.facturesEmises || []).map((f) => (
-                        <p key={f.id} className="text-[10px] text-slate-400">
-                          <span className="font-semibold text-slate-600">{f.numeroFactureQb}</span> — {f.montant.toFixed(2)} $ ({f.detail}) · envoyée à QuickBooks le {f.date}
+                {(b.facturesEmises || []).length > 0 && (
+                  <div className="mt-1.5 w-full max-w-[240px]">
+                    {(devisType || contrat) && montantCumule > 0 && (
+                      <>
+                        <p className="text-[10px] font-semibold text-slate-500">
+                          Cumul facturé : {montantCumule.toFixed(2)} $ / {montantDevisTotal.toFixed(2)} $
                         </p>
-                      ))}
-                    </div>
+                        <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className={`h-full rounded-full ${contrat ? "bg-purple-500" : "bg-blue-500"}`}
+                            style={{ width: `${Math.min(100, (montantCumule / montantDevisTotal) * 100)}%` }}
+                          />
+                        </div>
+                      </>
+                    )}
+                    <FacturesEmisesListe bon={b} onPdf={ouvrirPdfFacture} onRenvoyer={renvoyerFactureQb} />
                   </div>
                 )}
               </div>
