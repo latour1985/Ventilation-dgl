@@ -39,7 +39,8 @@ import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
 import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres } from "@/lib/supabase/materiel";
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
+import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail } from "@/lib/courriels";
+import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
@@ -15528,6 +15529,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   // Bon en attente d'un envoi simple à QB ("Envoyer à QB") — le
   // sélecteur de courriel s'ouvre avant l'envoi réel.
   const [bonEnvoiCourrielId, setBonEnvoiCourrielId] = useState(null);
+  const [bonEnvoiClientId, setBonEnvoiClientId] = useState(null);
   // Détails d'une facture progressive déjà configurée dans
   // ModalFacturationDevis, en attente du choix du courriel avant
   // l'émission réelle vers QuickBooks.
@@ -15632,12 +15634,51 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   const bonFacturation = bons.find((b) => b.id === bonFacturationId) || null;
   const devisFacturation = bonFacturation ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) : null;
   const bonEnvoiCourriel = bons.find((b) => b.id === bonEnvoiCourrielId) || null;
+  const bonEnvoiClient = bons.find((b) => b.id === bonEnvoiClientId) || null;
   const bonFactureEnAttente = factureEnAttenteCourriel ? bons.find((b) => b.id === factureEnAttenteCourriel.bonId) : null;
 
   // Trouve le client d'un bon par son NOM (ces bons de démo n'ont
   // qu'un nom de client, pas d'id — en prod, `bons` porterait un vrai
   // clientId et cette étape de recherche par nom disparaîtrait).
   const trouverClientDuBon = (bon) => clients.find((c) => c.nom === bon?.client);
+
+  // ------------------------------------------------------------
+  // 📸 BON DE TRAVAIL AU CLIENT — le lien public (SANS prix).
+  // ------------------------------------------------------------
+  // Le client reçoit « vos travaux sont terminés » avec le lien vers
+  // /bon/[jeton] : descriptif, photos avant/après avec légendes et
+  // signature — ni soumission ni facture (décision du propriétaire,
+  // 2026-08-15). Lien valide 90 jours (conservé s'il court toujours,
+  // régénéré s'il est expiré), PDF téléchargeable sur la page. Le
+  // journal ne dit « envoyé » que si c'est vrai.
+  const envoyerBonAuClient = async (b, choix) => {
+    const adresses = [...new Set((choix || []).map((cc) => cc.email))].filter(Boolean);
+    if (adresses.length === 0) return;
+    const rowId = String(b.id).startsWith("sbb-") ? String(b.id).slice(4) : null;
+    if (!rowId) {
+      ajouterJournal(`⚠️ Bon de « ${b.client} » pas encore synchronisé — impossible de créer le lien client.`);
+      return;
+    }
+    try {
+      const jeton = await assurerJetonBon(rowId);
+      const r = await envoyerCourriel({
+        a: adresses,
+        sujet: `Vos travaux sont terminés — bon de travail (${configEnt.nomCommercial || configEnt.nomLegal})`,
+        html: gabaritBonTravail({ config: configEnt, clientNom: b.client, lien: lienBonPublic(jeton), joursValidite: JOURS_VALIDITE_BON }),
+      });
+      if (r.envoye) {
+        marquerBonEnvoyeClient(rowId).catch(() => {});
+        setBons((prev) => prev.map((x) => (x.id === b.id ? { ...x, envoyeClientLe: new Date().toISOString() } : x)));
+        ajouterJournal(`📸 Bon de travail de ${b.client} ENVOYÉ à ${adresses.join(", ")} — descriptif avec photos, sans prix, lien valide ${JOURS_VALIDITE_BON} jours.`);
+      } else if (r.simule) {
+        ajouterJournal(`🔧 Envoi SIMULÉ du bon au client (service de courriels non configuré) — le lien existe : ${lienBonPublic(jeton)}`);
+      } else {
+        ajouterJournal(`⚠️ Bon de travail de ${b.client} NON envoyé — ${r.erreur}`);
+      }
+    } catch {
+      ajouterJournal("⚠️ Bon de travail NON envoyé — le lien n'a pas pu être créé. Réessaie.");
+    }
+  };
 
   // VRAIE FACTURE QUICKBOOKS (2026-08-15) — le numéro vient de
   // QuickBooks, plus jamais inventé. `paiements` = le choix HUMAIN fait
@@ -16003,6 +16044,22 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                 >
                   <FileText size={11} /> Voir version client
                 </button>
+                {/* 📸 LE BON AU CLIENT — le descriptif public (photos,
+                    signature, SANS prix). Indépendant de la facturation :
+                    le client peut voir ses travaux avant même la facture. */}
+                {b.supabase && (
+                  <button
+                    onClick={() => setBonEnvoiClientId(b.id)}
+                    className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-blue-600 underline underline-offset-2"
+                  >
+                    <Send size={11} /> Bon au client
+                  </button>
+                )}
+                {b.envoyeClientLe && (
+                  <p className="mt-0.5 text-[9px] font-bold text-emerald-600">
+                    📸 Envoyé le {new Date(b.envoyeClientLe).toLocaleDateString("fr-CA")}
+                  </p>
+                )}
                 {b.statutQb === "envoye" ? (
                   <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600">
                     <CheckCircle2 size={12} /> Facturé
@@ -16049,6 +16106,18 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
           onEmettre={(info) => {
             setFactureEnAttenteCourriel({ bonId: bonFacturation.id, ...info });
             setBonFacturationId(null);
+          }}
+        />
+      )}
+
+      {bonEnvoiClient && (
+        <ModalSelectionCourriel
+          client={trouverClientDuBon(bonEnvoiClient)}
+          contexte={`Bon de travail — descriptif avec photos, SANS prix (« ${bonEnvoiClient.projet} »)`}
+          onFermer={() => setBonEnvoiClientId(null)}
+          onConfirmer={(choix) => {
+            setBonEnvoiClientId(null);
+            envoyerBonAuClient(bonEnvoiClient, choix);
           }}
         />
       )}

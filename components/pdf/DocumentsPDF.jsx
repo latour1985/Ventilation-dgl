@@ -352,3 +352,78 @@ export function BonTravailPDF({ travail, clients, config }) {
     </Document>
   );
 }
+
+// ============================================================
+// BON DE TRAVAIL PUBLIC — le PDF que le CLIENT télécharge depuis la
+// page /bon/[jeton]. Un DESCRIPTIF : description, photos avant/après
+// avec leurs légendes, signature. JAMAIS de prix, d'heures ni de
+// conditions de vente — ni soumission ni facture (décision du
+// propriétaire, 2026-08-15). `bon` vient de chargerBonPublic().
+// ============================================================
+const sPhotoLegende = {
+  bloc: { width: 118, marginRight: 6, marginBottom: 6 },
+  legende: { fontSize: 6.5, color: "#64748b", marginTop: 1.5, lineHeight: 1.3 },
+};
+
+function GrillePhotosPDF({ titre, urls, legendes }) {
+  if (!urls?.length) return null;
+  return (
+    <View style={s.block}>
+      <Text style={[s.th, { marginBottom: 2 }]}>{titre}</Text>
+      <View style={sPhotos.rangee}>
+        {urls.map((u, i) => (
+          <View key={i} style={sPhotoLegende.bloc}>
+            <Image src={u} style={[sPhotos.photo, { marginRight: 0, marginBottom: 0 }]} />
+            {legendes?.[u] ? <Text style={sPhotoLegende.legende}>{legendes[u]}</Text> : null}
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+export function BonTravailPublicPDF({ bon, config }) {
+  const unites = (bon?.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim());
+  return (
+    <Document>
+      <Page size="A4" style={s.page}>
+        <EnTetePDF config={config} />
+        <Text style={s.title}>BON DE TRAVAIL — TRAVAUX RÉALISÉS</Text>
+        <Text style={s.meta}>Date des travaux : {bon?.date || "—"}</Text>
+        {bon?.adresseTravaux ? <Text style={s.meta}>Adresse des travaux : {bon.adresseTravaux}</Text> : null}
+        <Text style={[s.meta, { marginTop: 4 }]}>Client :</Text>
+        <Text style={s.clientName}>{bon?.clientNom || "—"}</Text>
+
+        <View style={s.block}>
+          <Text style={[s.th, { marginBottom: 2 }]}>DESCRIPTION DES TRAVAUX</Text>
+          <Text style={s.descBox}>{bon?.description || bon?.titre || "Voir les photos ci-dessous."}</Text>
+        </View>
+
+        {unites.length > 0 ? (
+          <View style={s.block}>
+            <Text style={[s.th, { marginBottom: 2 }]}>ÉQUIPEMENT VÉRIFIÉ</Text>
+            {unites.map((u, i) => (
+              <Text key={i} style={s.cell}>
+                {u.modele || "—"}{u.serie ? ` · Nº de série ${u.serie}` : ""}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+
+        <GrillePhotosPDF titre="PHOTOS AVANT TRAVAUX" urls={bon?.photosAvant} legendes={bon?.legendes} />
+        <GrillePhotosPDF titre="PHOTOS APRES TRAVAUX" urls={bon?.photosApres} legendes={bon?.legendes} />
+
+        {bon?.clientAbsent ? (
+          <Text style={s.signed}>Client absent à la fin des travaux — bon transmis sans signature.</Text>
+        ) : bon?.signeParNom ? (
+          <Text style={s.signed}>Signé électroniquement par : {bon.signeParNom}</Text>
+        ) : null}
+
+        <Text style={[s.footer, { marginTop: 12 }]}>
+          Document descriptif des travaux réalisés — ne constitue ni une soumission ni une facture.
+        </Text>
+        <PiedPage config={config} />
+      </Page>
+    </Document>
+  );
+}

@@ -1968,3 +1968,73 @@ create index if not exists idx_photos_legendes_entreprise on photos_legendes (en
 alter table entreprises add column if not exists entente_acceptee_le timestamptz;
 alter table entreprises add column if not exists entente_acceptee_par text;
 alter table entreprises add column if not exists entente_version text;
+
+-- SNIPPET « 60 » — BON DE TRAVAIL PUBLIC : le client reçoit un lien
+-- (valide 90 jours) vers un DESCRIPTIF de ses travaux — description,
+-- photos avant/après avec légendes, signature. JAMAIS de prix ni
+-- d'heures : ce n'est ni une soumission ni une facture (décision du
+-- propriétaire, 2026-08-15). Même mécanique éprouvée que devis_public :
+-- la table reste fermée aux anonymes, tout passe par une fonction qui
+-- ne retourne QUE les champs choisis.
+alter table bons_travail add column if not exists jeton_public text;
+alter table bons_travail add column if not exists jeton_expire_le timestamptz;
+alter table bons_travail add column if not exists envoye_client_le timestamptz;
+create unique index if not exists idx_bons_jeton
+  on bons_travail (jeton_public) where jeton_public is not null;
+
+create or replace function bon_travail_public(p_jeton text)
+returns table (
+  entreprise_nom text,
+  entreprise_adresse text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_rbq text,
+  titre text,
+  client_nom text,
+  description text,
+  date_travail date,
+  adresse_travaux text,
+  photos jsonb,
+  legendes jsonb,
+  signe_par_nom text,
+  client_absent boolean,
+  unites jsonb,
+  expire boolean
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    coalesce(e.nom_commercial, e.nom_legal, 'Ventilation DGL inc.'),
+    e.adresse,
+    e.telephone,
+    e.courriel,
+    e.numero_rbq,
+    b.titre,
+    b.client_nom,
+    b.description,
+    b.date_travail,
+    b.adresse_travaux,
+    coalesce(b.photos, '{}'::jsonb),
+    -- Les légendes des photos du bon — et seulement celles-là.
+    coalesce((
+      select jsonb_object_agg(pl.url, pl.legende)
+      from photos_legendes pl
+      where pl.legende is not null and pl.legende <> ''
+        and pl.url in (
+          select jsonb_array_elements_text(coalesce(b.photos->'avant', '[]'::jsonb))
+          union
+          select jsonb_array_elements_text(coalesce(b.photos->'apres', '[]'::jsonb))
+        )
+    ), '{}'::jsonb),
+    b.signe_par_nom,
+    b.client_absent,
+    coalesce(b.unites, '[]'::jsonb),
+    (b.jeton_expire_le is not null and b.jeton_expire_le < now())
+  from bons_travail b
+  left join entreprises e on e.id = b.entreprise_id
+  where b.jeton_public = p_jeton;
+$$;
+
+grant execute on function bon_travail_public(text) to anon, authenticated;
