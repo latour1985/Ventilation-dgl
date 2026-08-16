@@ -13466,6 +13466,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [tacheSurvolee, setTacheSurvolee] = useState(null);
   const [tacheDetailOuverte, setTacheDetailOuverte] = useState(null); // { tache, employe, date, heure }
   const [tacheEnEditionId, setTacheEnEditionId] = useState(null);
+  // 🎴 Carte d'attente dépliée (une seule à la fois) — les autres
+  // restent sur UNE ligne : pastille, titre, chips d'état.
+  const [tacheDepliee, setTacheDepliee] = useState(null);
   const [assignationMobile, setAssignationMobile] = useState(null); // {tacheId, employeId, heure, date}
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   // « ➕ Nouveau client » depuis la création de tâche (fenêtre partagée).
@@ -14263,7 +14266,39 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           )}
 
           {formulaireOuvert && !lectureSeule && (
-            <div className="mb-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+            /* FENÊTRE SPACIEUSE (2026-08-18) : le formulaire sort de la
+               colonne étroite — grande fenêtre centrée (2 colonnes sur
+               ordinateur, plein écran sur téléphone), en-tête et pied
+               COLLANTS (le bouton Créer toujours visible). Aucune
+               logique ne change : mêmes champs, mêmes règles. */
+            <div
+              className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 md:items-center md:p-6"
+              onClick={() => setFormulaireOuvert(false)}
+            >
+              <div
+                className="flex max-h-[96dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white md:max-h-[88vh] md:max-w-3xl md:rounded-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3">
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    ➕ Nouvelle tâche
+                    {!etapeTypeTache && (
+                      <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                        {TYPE_INFO(nouveauType)?.label}
+                      </span>
+                    )}
+                  </h3>
+                  <button onClick={() => setFormulaireOuvert(false)} aria-label="Fermer">
+                    <X size={18} className="text-slate-400" />
+                  </button>
+                </div>
+                <div
+                  className={`flex-1 overflow-y-auto p-4 ${
+                    etapeTypeTache
+                      ? "space-y-2"
+                      : "space-y-2 md:columns-2 md:gap-x-6 md:space-y-0 md:[&>*]:mb-3 md:[&>*]:break-inside-avoid"
+                  }`}
+                >
               {etapeTypeTache ? (
                 <div>
                   <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Quel type de tâche ?</p>
@@ -14284,13 +14319,6 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 </div>
               ) : (
               <>
-              <button
-                type="button"
-                onClick={() => setEtapeTypeTache(true)}
-                className="flex items-center gap-1 text-[10px] font-bold text-slate-400 underline underline-offset-2"
-              >
-                ← Changer de type ({TYPE_INFO(nouveauType)?.label})
-              </button>
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Titre / description courte</label>
                 <input
@@ -14897,24 +14925,39 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   Sinon la tâche filerait à l'agenda comme si aucun dépôt
                   n'était exigé (c'est exactement le trou qui permettait de
                   planifier un appel de service non payé). */}
-              {depotRequis && !(parseFloat(depotMontant) > 0) && (
-                <p className="text-[10px] font-semibold text-red-600">
-                  ⚠️ Choisis un montant de dépôt (liste de prix ou tarif sur mesure) pour pouvoir créer la tâche.
-                </p>
-              )}
-              <Button
-                onClick={creerTache}
-                disabled={
-                  !nouveauTitre.trim() ||
-                  ((nouveauType === "devis" || nouveauType === "entretien_contrat") && !nouveauDevisId) ||
-                  (depotRequis && !(parseFloat(depotMontant) > 0))
-                }
-                className="w-full min-h-0 py-2 text-xs"
-              >
-                Créer la tâche
-              </Button>
               </>
               )}
+                </div>
+                {!etapeTypeTache && (
+                  <div className="shrink-0 border-t border-slate-200 px-4 py-3">
+                    {depotRequis && !(parseFloat(depotMontant) > 0) && (
+                      <p className="mb-2 rounded-lg bg-red-50 px-2 py-1.5 text-[10px] font-bold text-red-700">
+                        ⚠️ Choisis un montant de dépôt (liste de prix ou tarif sur mesure) pour pouvoir créer la tâche.
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEtapeTypeTache(true)}
+                        className="shrink-0 text-[11px] font-bold text-slate-400 underline underline-offset-2"
+                      >
+                        ← Type
+                      </button>
+                      <Button
+                        onClick={creerTache}
+                        disabled={
+                          !nouveauTitre.trim() ||
+                          ((nouveauType === "devis" || nouveauType === "entretien_contrat") && !nouveauDevisId) ||
+                          (depotRequis && !(parseFloat(depotMontant) > 0))
+                        }
+                        className="min-h-0 flex-1 py-2.5 text-xs"
+                      >
+                        Créer la tâche
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -14939,20 +14982,50 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     : "border-slate-200"
                 } ${lectureSeule || estBloquee(t) ? "" : "cursor-grab active:cursor-grabbing"}`}
               >
-                <button
-                  onClick={() => !lectureSeule && setTacheEnEditionId(t.id)}
-                  className="-mx-1 -mt-1 w-[calc(100%+8px)] rounded-lg p-1 text-left hover:bg-slate-50"
-                  title="Cliquer pour l'édition rapide (date, heure, durée, technicien)"
-                >
-                <div className="flex items-center gap-1.5">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${(COULEUR_TYPE_TACHE[t.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
-                  <div className="flex flex-1 items-start justify-between gap-2">
-                    <p className="text-sm font-bold text-slate-900">{t.titre || t.clientNom}</p>
-                    {t.statut === "en_attente_materiel" && (
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700">MATÉRIEL</span>
+                {/* EN-TÊTE COMPACT (2026-08-18) : une ligne — pastille,
+                    titre, chips d'état, chevron. Le clic DÉPLIE ; le ✏️
+                    ouvre l'édition rapide ; le glisser-déposer reste sur
+                    toute la carte, compacte ou dépliée. */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setTacheDepliee(tacheDepliee === t.id ? null : t.id)}
+                    className="min-w-0 flex-1 rounded-lg p-1 text-left hover:bg-slate-50"
+                    title={tacheDepliee === t.id ? "Replier" : "Voir le détail"}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${(COULEUR_TYPE_TACHE[t.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
+                      <p className="min-w-0 flex-1 truncate text-sm font-bold text-slate-900">{t.titre || t.clientNom}</p>
+                      {t.statut === "en_attente_materiel" && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">MATÉRIEL</span>
+                      )}
+                      {pieceBloque(t.id) && (
+                        <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700" title="En attente d'une pièce">🔧</span>
+                      )}
+                      {depotBloque(t.id) && (
+                        <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700" title="Dépôt impayé">🔒</span>
+                      )}
+                      <ChevronDown
+                        size={14}
+                        className={`shrink-0 text-slate-300 transition-transform ${tacheDepliee === t.id ? "rotate-180" : ""}`}
+                      />
+                    </div>
+                    {tacheDepliee !== t.id && t.clientNom && t.titre && (
+                      <p className="ml-3.5 truncate text-[10px] text-slate-400">{t.clientNom}</p>
                     )}
-                  </div>
+                  </button>
+                  {!lectureSeule && (
+                    <button
+                      onClick={() => setTacheEnEditionId(t.id)}
+                      className="shrink-0 rounded-lg p-1.5 text-slate-300 hover:bg-slate-50 hover:text-slate-600"
+                      title="Édition rapide (date, heure, durée, technicien)"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  )}
                 </div>
+                {tacheDepliee === t.id && (
+                <>
+                <div className="mt-1">
                 {(t.piecesJointes || []).length > 0 && (
                   <p className="mt-0.5 text-[10px] font-semibold text-slate-400">
                     📎 {t.piecesJointes.length} document{t.piecesJointes.length > 1 ? "s" : ""} joint{t.piecesJointes.length > 1 ? "s" : ""} pour le technicien
@@ -15098,7 +15171,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   </div>
                 )}
                 <p className="mt-1 whitespace-pre-line text-xs text-slate-500">{t.description}</p>
-                </button>
+                </div>
 
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <div>
@@ -15277,6 +15350,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       Confirmer l'assignation
                     </Button>
                   </div>
+                )}
+                </>
                 )}
               </div>
             ))}
