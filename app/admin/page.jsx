@@ -18,7 +18,7 @@ import GestionAcces from "@/components/GestionAcces";
 import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
 import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
-import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations } from "@/lib/supabase/tachesAssignees";
+import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation } from "@/lib/supabase/tachesAssignees";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT } from "@/lib/supabase/bonsTravail";
@@ -10595,6 +10595,46 @@ function FacturesEmisesListe({ bon, onPdf, onRenvoyer, envoiAuto = true }) {
   );
 }
 
+// ============================================================
+// 💰/🤝 TECHNICIEN FACTURABLE OU NON — le choix OBLIGATOIRE quand un
+// 2e (3e, 4e…) technicien s'ajoute sur une tâche. Aucun bouton par
+// défaut, pas de fermeture sans répondre : envoyer un 2e technicien ne
+// décide JAMAIS tout seul s'il se facture. Le premier est toujours
+// facturable. Coûts et paie ne changent pas — seule la facturation.
+// ============================================================
+function ModalChoixFacturable({ info, onChoisir }) {
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+        <h3 className="text-sm font-extrabold text-slate-900">
+          {info.employe?.nom || "Ce technicien"} s'ajoute sur « {info.titre} »
+        </h3>
+        <p className="mt-1 text-xs text-slate-600">
+          Ses heures sont-elles <span className="font-extrabold">facturables au client</span> ?
+        </p>
+        <p className="mt-1 text-[10px] leading-snug text-slate-400">
+          Le premier technicien est toujours facturable. Ta réponse ne change ni la paie ni les coûts —
+          seulement le calcul de facturation. (Redéposer le technicien sur la tâche repose la question.)
+        </p>
+        <div className="mt-3 grid gap-2">
+          <button
+            onClick={() => onChoisir(true)}
+            className="min-h-[48px] w-full rounded-xl border-2 border-emerald-500 bg-emerald-50 text-sm font-extrabold text-emerald-800 active:scale-[0.99]"
+          >
+            💰 Facturable au client
+          </button>
+          <button
+            onClick={() => onChoisir(false)}
+            className="min-h-[48px] w-full rounded-xl border-2 border-slate-400 bg-slate-50 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
+          >
+            🤝 Non facturable (aide interne, apprenti…)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer, onAjouterFiche = null }) {
   const courriels = client?.courriels || [];
   const [selectionIds, setSelectionIds] = useState(() => {
@@ -13297,7 +13337,15 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   );
 }
 
-function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role }) {
+function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role, onMajFacturable }) {
+  // 💰/🤝 Le choix « facturable » en attente de réponse — { tacheId, titre, employe }.
+  const [choixFacturable, setChoixFacturable] = useState(null);
+  // Un AUTRE technicien tient-il déjà cette tâche dans la grille ?
+  const autreTechnicienALaTache = (tacheId, employeIdCourant) =>
+    Object.entries(planning || {}).some(
+      ([cle, cellule]) =>
+        cle.split("|")[1] !== String(employeIdCourant) && listeCellule(cellule).some((x) => x.id === tacheId)
+    );
   // Taux de taxes des Paramètres — dépôts affichés taxes incluses.
   const configEnt = useEntreprise();
   // Statut du dépôt d'une tâche : bloque la planification tant que le
@@ -13880,6 +13928,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           `⚠️ "${tache.titre || tache.clientNom}" reste dans l'agenda mais N'A PAS été envoyée à l'app technicien — ${employe?.nom || employeId} n'a pas de courriel dans le Répertoire`
         );
       } else {
+        // 2e technicien et plus : la question OBLIGATOIRE s'ouvre juste
+        // après (l'assignation part facturable en attendant la réponse —
+        // la fenêtre bloque l'écran, la réponse suit immédiatement).
+        if (autreTechnicienALaTache(tache.id, employeId)) {
+          setChoixFacturable({ tacheId: tache.id, titre: tache.titre || tache.clientNom || "cette tâche", employe });
+        }
         assignerTacheSupabase(tache, employe, {
           date: dateISO(dateDepart),
           heureDebut: heuresCibles[0] || heureDepart || null,
@@ -15702,6 +15756,24 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       )}
       {/* FENÊTRE — NOUVEAU CLIENT depuis la création de tâche (composant
           partagé avec l'onglet Devis, mêmes validations QuickBooks). */}
+      {choixFacturable && (
+        <ModalChoixFacturable
+          info={choixFacturable}
+          onChoisir={(facturable) => {
+            const c = choixFacturable;
+            setChoixFacturable(null);
+            majFacturableAssignation(c.tacheId, c.employe?.courriel, facturable).catch(() =>
+              ajouterJournal("⚠️ Choix facturable NON enregistré (snippet 71 manquant ?) — réessaie en redéposant le technicien.")
+            );
+            onMajFacturable?.(c.tacheId, c.employe?.courriel, facturable);
+            ajouterJournal(
+              facturable
+                ? `💰 ${c.employe?.nom || "Technicien"} ajouté sur « ${c.titre} » — FACTURABLE au client.`
+                : `🤝 ${c.employe?.nom || "Technicien"} ajouté sur « ${c.titre} » — NON facturable (aide interne) : ses heures ne seront pas comptées dans la facturation.`
+            );
+          }}
+        />
+      )}
       {modalNouveauClientTache && (
         <ModalNouveauClient
           clients={clients}
@@ -16367,7 +16439,7 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   );
 }
 
-function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient }) {
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {} }) {
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
   // Sans ce raccord, la révision de prix demandait le PLEIN montant
@@ -16400,7 +16472,12 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     const tauxV = Number(prixDepots?.taux_horaire_vendant) || 0;
     if (tauxV <= 0) return [];
     const camion = Number(configEnt?.coutCamionHoraire) || 0;
-    const sources = (b.lignesSource || [b]).filter((s) => (Number(s.heures) || 0) > 0);
+    // 🤝 Les techniciens déclarés NON FACTURABLES (choix du répartiteur
+    // à l'assignation) sortent du calcul — leurs heures restent payées
+    // et comptées aux coûts, mais jamais suggérées au client.
+    const estNonFacturable = (s) =>
+      facturablesAssignations[`${b.tacheId || ""}|${(s.employeEmail || "").toLowerCase()}`] === false;
+    const sources = (b.lignesSource || [b]).filter((s) => (Number(s.heures) || 0) > 0 && !estNonFacturable(s));
     if (sources.length === 0) return [];
     // Passager ce jour-là ? (déclaré le matin, pas déduit) → taux réduit.
     const estPassager = (nom, date) =>
@@ -16492,14 +16569,14 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
           ...b,
           lignesSource: [b],
           heures: Number(b.heures) || 0,
-          equipe: b.employeNom ? [{ nom: b.employeNom, heures: Number(b.heures) || 0 }] : [],
+          equipe: b.employeNom ? [{ nom: b.employeNom, heures: Number(b.heures) || 0, courriel: b.employeEmail || "" }] : [],
         });
         return;
       }
       // Heures cumulées de toute l'équipe, un seul montant.
       existant.heures += Number(b.heures) || 0;
       existant.lignesSource.push(b);
-      if (b.employeNom) existant.equipe.push({ nom: b.employeNom, heures: Number(b.heures) || 0 });
+      if (b.employeNom) existant.equipe.push({ nom: b.employeNom, heures: Number(b.heures) || 0, courriel: b.employeEmail || "" });
       // Photos et signatures : on garde tout ce qui existe.
       existant.photosAvantUrls = [...(existant.photosAvantUrls || []), ...(b.photosAvantUrls || [])];
       existant.photosApresUrls = [...(existant.photosApresUrls || []), ...(b.photosApresUrls || [])];
@@ -17100,6 +17177,9 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     {b.equipe.map((t, i) => (
                       <span key={i} className="rounded-full bg-slate-100 px-1.5 py-0.5">
                         {t.nom} <span className="tabular-nums text-slate-400">{t.heures.toFixed(2)} h</span>
+                        {facturablesAssignations[`${b.tacheId || ""}|${(t.courriel || "").toLowerCase()}`] === false && (
+                          <span className="ml-0.5 font-bold text-slate-500" title="Déclaré NON facturable à l'assignation — heures payées mais jamais suggérées au client">🤝</span>
+                        )}
                       </span>
                     ))}
                     <span className="font-bold tabular-nums text-slate-700">= {b.heures.toFixed(2)} h au total</span>
@@ -17433,6 +17513,11 @@ function JournalAutomatisation({ entrees }) {
 // ============================================================
 export default function App() {
   const [onglet, setOnglet] = useState("tableau-de-bord");
+  // 💰/🤝 Drapeaux « facturable » par (tâche, technicien) — la clé est
+  // `tacheId|courriel`. Rempli au chargement des assignations, mis à
+  // jour au choix du répartiteur. La facturation s'en sert pour exclure
+  // les heures des non-facturables du temps supplémentaire suggéré.
+  const [facturablesAssignations, setFacturablesAssignations] = useState({});
   // ⬅️➡️ RECULER/AVANCER DU NAVIGATEUR (demande du propriétaire,
   // 2026-08-17) : chaque onglet s'inscrit dans l'adresse (#agenda…).
   // Reculer revient à l'onglet précédent au lieu de quitter l'appli ;
@@ -17591,6 +17676,13 @@ export default function App() {
     listerToutesAssignations()
       .then((rows) => {
         if (annule || rows.length === 0) return;
+        setFacturablesAssignations((prev) => {
+          const maj = { ...prev };
+          rows.forEach((r) => {
+            maj[`${r.tache_id}|${(r.employe_email || "").toLowerCase()}`] = r.facturable !== false;
+          });
+          return maj;
+        });
         const courrielSession = session.user?.email?.toLowerCase();
         const employesRef = [
           ...utilisateurs.map((u) => ({ id: u.id, courriel: u.courriel })),
@@ -18829,6 +18921,9 @@ export default function App() {
       )}
       {vue === "agenda" && (
         <OngletAgenda
+          onMajFacturable={(tacheId, courriel, val) =>
+            setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }))
+          }
           tachesAttente={tachesAttente}
           setTachesAttente={setTachesAttente}
           planning={planning}
@@ -18888,6 +18983,7 @@ export default function App() {
           inspections={inspections}
           prixDepots={prixDepots}
           estAdminPrincipal={role === "Admin principal"}
+          facturablesAssignations={facturablesAssignations}
           onAjouterCourrielClient={(clientId, email) => {
             if (!clientId || !email) return;
             setClients((prev) =>

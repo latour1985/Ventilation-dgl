@@ -2051,6 +2051,15 @@ alter table camions add column if not exists indispo_note text;
 --    que SES métiers) — les taux restent conservés, réaffichable.
 alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
 
+-- SNIPPET « 71 » — TECHNICIEN FACTURABLE OU NON (2026-08-18).
+-- Le PREMIER technicien d'une tâche est toujours facturable. À partir
+-- du 2e, le bureau CHOISIT à l'assignation (obligé de choisir — jamais
+-- de défaut silencieux) : un apprenti qu'on amène n'est pas facturé,
+-- un vrai bras de plus l'est. Coûts et paie ne changent JAMAIS — seul
+-- le calcul de facturation (temps supplémentaire des appels) en tient
+-- compte.
+alter table taches_assignees add column if not exists facturable boolean not null default true;
+
 -- SNIPPET « 70 » — MÉMOIRE ARTICLE → FOURNISSEUR (2026-08-17).
 -- La commande groupée du matériel camion se souvient chez QUI chaque
 -- article a été commandé la dernière fois : la semaine suivante, tout
