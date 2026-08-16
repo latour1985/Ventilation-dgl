@@ -2051,6 +2051,35 @@ alter table camions add column if not exists indispo_note text;
 --    que SES métiers) — les taux restent conservés, réaffichable.
 alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
 
+-- SNIPPET « 66 » — MÉNAGE DU SECURITY ADVISOR (2026-08-17).
+-- 1) Les 2 ERREURS : vues SECURITY DEFINER -> mode « invoker » (elles
+--    respectent les règles d'accès de celui qui les consulte — aucun
+--    impact : les employés connectés y ont toujours accès).
+alter view annuaire_employes set (security_invoker = true);
+alter view profils_utilisateurs_public set (security_invoker = true);
+
+-- 2) Les ~35 AVERTISSEMENTS : épingle le search_path de TOUTES nos
+--    fonctions publiques d'un coup (blindage standard). « extensions »
+--    est inclus pour les fonctions de chiffrement (pgcrypto y vit).
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as signature
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.prokind = 'f'
+  loop
+    execute format('alter function %s set search_path = public, extensions', f.signature);
+  end loop;
+end $$;
+
+-- 3) Les 11 SUGGESTIONS « RLS enabled no policy » : tables héritées des
+--    premières phases (bons_commande, adresses_livraison, devis sans
+--    _app…) — RLS actif SANS règle = verrouillées à double tour,
+--    personne ne peut les lire. C'est l'état le plus sûr : rien à
+--    faire ; leur suppression définitive attendra le grand soir.
+
 -- SNIPPET « 61 » — ENVOI AUTO DU BON CLIENT + RETRAIT DE FACTURATION.
 -- 1) Interrupteur par entreprise : à la fermeture de la tâche par le
 --    technicien, le bon (descriptif public, sans prix) part TOUT SEUL
