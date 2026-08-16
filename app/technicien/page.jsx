@@ -20,6 +20,7 @@ import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
+import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
@@ -1698,6 +1699,32 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
   const [courseNote, setCourseNote] = useState("");
   const [courseEnCours, setCourseEnCours] = useState(false);
   const [courseMsg, setCourseMsg] = useState("");
+  // 📍 Autocomplétion Google sur l'adresse de la course — comme
+  // partout ailleurs. Recherche différée de 300 ms, jeton de session
+  // (une seule unité de facturation Google par saisie).
+  const [courseSuggestions, setCourseSuggestions] = useState([]);
+  const [courseAdresseChoisie, setCourseAdresseChoisie] = useState(false);
+  const courseJetonRef = useRef(null);
+  useEffect(() => {
+    if (!courseOuverte || courseAdresseChoisie || !googlePlacesDisponible() || courseAdresse.trim().length < 3) {
+      setCourseSuggestions([]);
+      return;
+    }
+    let annule = false;
+    const minuterie = setTimeout(async () => {
+      try {
+        if (!courseJetonRef.current) courseJetonRef.current = await nouveauJeton();
+        const res = await chercherAdresses(courseAdresse, courseJetonRef.current);
+        if (!annule) setCourseSuggestions(res.slice(0, 5));
+      } catch {
+        if (!annule) setCourseSuggestions([]);
+      }
+    }, 300);
+    return () => {
+      annule = true;
+      clearTimeout(minuterie);
+    };
+  }, [courseAdresse, courseOuverte, courseAdresseChoisie]);
   const creerCourse = async () => {
     if (!courseTitre.trim()) return;
     setCourseEnCours(true);
@@ -1954,10 +1981,31 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
               <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Adresse (facultatif)</label>
               <input
                 value={courseAdresse}
-                onChange={(e) => setCourseAdresse(e.target.value)}
+                onChange={(e) => {
+                  setCourseAdresse(e.target.value);
+                  setCourseAdresseChoisie(false);
+                }}
                 placeholder="Ex : 123 rue du Garage, Blainville"
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
+              {courseSuggestions.length > 0 && (
+                <div className="mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  {courseSuggestions.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => {
+                        setCourseAdresse(s.texte);
+                        setCourseAdresseChoisie(true);
+                        setCourseSuggestions([]);
+                      }}
+                      className="block w-full border-b border-slate-100 px-3 py-2.5 text-left text-sm text-slate-700 last:border-0 active:bg-orange-50"
+                    >
+                      📍 {s.texte}
+                    </button>
+                  ))}
+                </div>
+              )}
               <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Note (facultatif)</label>
               <textarea
                 rows={2}

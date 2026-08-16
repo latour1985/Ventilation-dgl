@@ -14249,12 +14249,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               {nouveauType === "course" && (
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse de la course (facultatif)</label>
-                  <input
-                    value={adresseCourseLibre}
-                    onChange={(e) => setAdresseCourseLibre(e.target.value)}
-                    placeholder="Ex : 123 rue du Garage, Blainville"
-                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                  />
+                  {/* La MÊME autocomplétion Google que partout ailleurs —
+                      une adresse proprement choisie fait un vrai lien de
+                      navigation sur le téléphone du technicien. */}
+                  {adresseCourseLibre ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-300 bg-slate-50 px-2 py-1.5">
+                      <span className="min-w-0 truncate text-xs font-semibold text-slate-700">📍 {adresseCourseLibre}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAdresseCourseLibre("")}
+                        className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2"
+                      >
+                        changer
+                      </button>
+                    </div>
+                  ) : (
+                    <AutocompleteAdresse onSelection={(place) => setAdresseCourseLibre(place.label)} />
+                  )}
                 </div>
               )}
               <div>
