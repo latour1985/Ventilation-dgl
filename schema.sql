@@ -2051,50 +2051,32 @@ alter table camions add column if not exists indispo_note text;
 --    que SES métiers) — les taux restent conservés, réaffichable.
 alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
 
--- SNIPPET « 66 » — MÉNAGE DU SECURITY ADVISOR (2026-08-17).
--- 1) Les 2 ERREURS : vues SECURITY DEFINER -> mode « invoker » (elles
---    respectent les règles d'accès de celui qui les consulte — aucun
---    impact : les employés connectés y ont toujours accès).
+-- SNIPPET « 67 » — GRAND MÉNAGE SECURITY ADVISOR, TOUT-EN-UN (2026-08-17).
+-- Couvre : les 2 erreurs (vues), les avertissements de sécurité
+-- (search_path, fonctions appelables, clé de chiffrement, listage du
+-- bucket) ET les avertissements de performance (règles RLS recalculées
+-- par ligne, règles en double). À coller UNE fois, en entier.
+
+-- ============================================================
+-- A. LES 2 ERREURS : vues SECURITY DEFINER -> mode « invoker »
+--    (elles respectent les règles de celui qui les consulte —
+--    aucun impact : les employés connectés y ont toujours accès).
+-- ============================================================
 alter view annuaire_employes set (security_invoker = true);
 alter view profils_utilisateurs_public set (security_invoker = true);
 
--- 2) Les ~35 AVERTISSEMENTS : épingle le search_path de TOUTES nos
---    fonctions publiques d'un coup (blindage standard). « extensions »
---    est inclus pour les fonctions de chiffrement (pgcrypto y vit).
-do $$
-declare f record;
-begin
-  for f in
-    select p.oid::regprocedure as signature
-    from pg_proc p
-    join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.prokind = 'f'
-  loop
-    execute format('alter function %s set search_path = public, extensions', f.signature);
-  end loop;
-end $$;
-
--- 3) Les 11 SUGGESTIONS « RLS enabled no policy » : tables héritées des
---    premières phases (bons_commande, adresses_livraison, devis sans
---    _app…) — RLS actif SANS règle = verrouillées à double tour,
---    personne ne peut les lire. C'est l'état le plus sûr : rien à
---    faire ; leur suppression définitive attendra le grand soir.
-
--- SNIPPET « 67 » — VERROUS SUR LES FONCTIONS + STOCKAGE (2026-08-17).
--- Suite du ménage Security Advisor, d'après l'export complet.
---
--- 1) LA VRAIE TROUVAILLE : la clé de chiffrement et les fonctions
---    encrypt/decrypt étaient APPELABLES depuis le navigateur (même sans
---    connexion !). Personne côté client ne doit jamais y toucher —
---    seuls les mécanismes internes de la base s'en servent.
+-- ============================================================
+-- B. LA VRAIE TROUVAILLE : la clé de chiffrement et les fonctions
+--    encrypt/decrypt étaient APPELABLES depuis le navigateur (même
+--    sans connexion). Plus jamais.
+-- ============================================================
 revoke execute on function get_encryption_key() from public, anon, authenticated;
 revoke execute on function encrypt_data(text) from public, anon, authenticated;
 revoke execute on function decrypt_data(bytea) from public, anon, authenticated;
 revoke execute on function fn_audit_trigger() from public, anon, authenticated;
 revoke execute on function fn_set_updated_at() from public, anon, authenticated;
 
--- 2) Les aides internes (compteurs, rôles pour les policies) : réservées
---    aux CONNECTÉS — plus jamais appelables anonymement.
+-- Les aides internes : réservées aux CONNECTÉS, plus d'accès anonyme.
 revoke execute on function prochain_numero(text) from public, anon;
 grant execute on function prochain_numero(text) to authenticated;
 revoke execute on function fn_mon_email() from public, anon;
@@ -2110,18 +2092,105 @@ grant execute on function fn_est_bureau() to authenticated;
 revoke execute on function fn_sur_ma_tache(text) from public, anon;
 grant execute on function fn_sur_ma_tache(text) to authenticated;
 
--- 3) STOCKAGE : le bucket public des photos n'a pas besoin d'une policy
---    de LECTURE — les adresses publiques marchent sans elle. La retirer
---    empêche un inconnu de LISTER tous les fichiers du bucket (l'appli
---    n'utilise jamais le listage — vérifié dans le code).
+-- ============================================================
+-- C. SEARCH_PATH épinglé sur TOUTES nos fonctions publiques
+--    (« extensions » inclus : pgcrypto y vit).
+-- ============================================================
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as signature
+    from pg_proc p
+    join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.prokind = 'f'
+  loop
+    execute format('alter function %s set search_path = public, extensions', f.signature);
+  end loop;
+end $$;
+
+-- ============================================================
+-- D. STOCKAGE : le bucket public des photos n'a pas besoin d'une
+--    policy de LECTURE (les adresses publiques marchent sans elle).
+--    La retirer empêche un inconnu de LISTER tous les fichiers.
+-- ============================================================
 drop policy if exists "photos_travaux_lecture" on storage.objects;
 
+-- ============================================================
+-- E. PERFORMANCE 1 : les règles RLS qui rappellent auth.role() /
+--    auth.uid() / auth.jwt() POUR CHAQUE LIGNE. Le correctif lit la
+--    règle EN PLACE dans la base et la réécrit à l'identique, en
+--    enveloppant l'appel dans (select …) — évalué UNE seule fois.
+-- ============================================================
+do $$
+declare p record; nouv_qual text; nouv_check text; cmd_sql text;
+begin
+  for p in
+    select * from pg_policies
+    where schemaname = 'public'
+      and (coalesce(qual, '') like '%auth.%' or coalesce(with_check, '') like '%auth.%')
+      and (tablename, policyname) in (
+        ('clients', 'Utilisateurs authentifies - acces complet'),
+        ('taches_planifiees', 'Authentifies - acces complet'),
+        ('travaux', 'Authentifies - acces complet'),
+        ('travaux_photos', 'Authentifies - acces complet'),
+        ('travaux_signatures', 'Authentifies - acces complet'),
+        ('bons_travail_facturation', 'Authentifies - acces complet'),
+        ('factures_progressives', 'Authentifies - acces complet'),
+        ('transactions_quickbooks', 'Authentifies - acces complet'),
+        ('profils_utilisateurs', 'profil_lecture'),
+        ('profils_utilisateurs', 'profil_modification'),
+        ('incidents_confidentialite', 'incidents_plateforme')
+      )
+  loop
+    nouv_qual := replace(replace(replace(p.qual, 'auth.uid()', '(select auth.uid())'), 'auth.role()', '(select auth.role())'), 'auth.jwt()', '(select auth.jwt())');
+    nouv_check := replace(replace(replace(p.with_check, 'auth.uid()', '(select auth.uid())'), 'auth.role()', '(select auth.role())'), 'auth.jwt()', '(select auth.jwt())');
+    execute format('drop policy %I on public.%I', p.policyname, p.tablename);
+    cmd_sql := format('create policy %I on public.%I for %s to %s', p.policyname, p.tablename, lower(p.cmd), array_to_string(p.roles, ', '));
+    if nouv_qual is not null then cmd_sql := cmd_sql || format(' using (%s)', nouv_qual); end if;
+    if nouv_check is not null then cmd_sql := cmd_sql || format(' with check (%s)', nouv_check); end if;
+    execute cmd_sql;
+  end loop;
+end $$;
+
+-- ============================================================
+-- F. PERFORMANCE 2 : les règles « écriture » déclarées FOR ALL font
+--    double emploi avec la règle de lecture sur les SELECT. Chacune
+--    est relue EN PLACE et scindée en 3 règles précises (insert /
+--    update / delete) — mêmes conditions, plus de doublon en lecture.
+-- ============================================================
+do $$
+declare p record; q text; c text;
+begin
+  for p in
+    select * from pg_policies
+    where schemaname = 'public' and cmd = 'ALL' and policyname in (
+      'bons_travail_ecriture', 'camions_ecriture_bureau', 'carnet_ecriture_bureau',
+      'entreprises_ecriture_admin_principal', 'entretiens_ecriture_bureau', 'inspections_ecriture',
+      'permissions_ecriture_admin_principal', 'prix_depots_ecriture_admin', 'repertoire_ecriture_admin',
+      'taux_ecriture_admin', 'travaux_eff_ecriture'
+    )
+  loop
+    q := coalesce(p.qual, 'true');
+    c := coalesce(p.with_check, q);
+    execute format('drop policy %I on public.%I', p.policyname, p.tablename);
+    execute format('create policy %I on public.%I for insert to authenticated with check (%s)', p.policyname || '_ins', p.tablename, c);
+    execute format('create policy %I on public.%I for update to authenticated using (%s) with check (%s)', p.policyname || '_upd', p.tablename, q, c);
+    execute format('create policy %I on public.%I for delete to authenticated using (%s)', p.policyname || '_del', p.tablename, q);
+  end loop;
+end $$;
+
+-- ============================================================
 -- RESTENT VOLONTAIREMENT (à ignorer dans l'advisor) :
 --   • devis_public / repondre_devis / bon_travail_public appelables par
 --     anon : c'est LE mécanisme des pages publiques à jeton secret.
 --   • Les policies « always true » (achats_libres, commandes_camion,
 --     journal, photos_legendes…) : mode rodage assumé — resserrées au
 --     grand soir multi-entreprises, avant la première entreprise cliente.
+--   • « RLS enabled no policy » sur les tables héritées (bons_commande,
+--     adresses_livraison, devis sans _app…) : verrouillées à double
+--     tour, l'état le plus sûr — suppression définitive au grand soir.
+-- ============================================================
 
 -- SNIPPET « 61 » — ENVOI AUTO DU BON CLIENT + RETRAIT DE FACTURATION.
 -- 1) Interrupteur par entreprise : à la fermeture de la tâche par le
