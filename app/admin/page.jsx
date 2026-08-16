@@ -1588,7 +1588,8 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                 )}
                 {notePassee?.id === c.id && (
                   <div className="mt-1.5 flex gap-1.5">
-                    <input
+                    <textarea
+                      rows={2}
                       value={notePassee.note}
                       onChange={(e) => setNotePassee({ id: c.id, note: e.target.value })}
                       placeholder="Note pour le technicien (optionnel) — ex : arrive jeudi"
@@ -1632,7 +1633,8 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
               <datalist id="bc-libre-fournisseurs">
                 {(fournisseurs || []).map((f) => <option key={f.id || f.nom} value={f.nom} />)}
               </datalist>
-              <input
+              <textarea
+                rows={2}
                 value={bcLibre.description}
                 onChange={(e) => setBcLibre((f) => ({ ...f, description: e.target.value }))}
                 placeholder="Description — ex : 4 rouleaux de tape aluminium"
@@ -1721,7 +1723,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
               <div key={p.id} className={`rounded-2xl border bg-white p-4 ${enRetard ? "border-red-300" : "border-slate-200"}`}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-extrabold text-slate-900">{p.pieceRequise}</p>
+                    <p className="whitespace-pre-line text-sm font-extrabold text-slate-900">{p.pieceRequise}</p>
                     <p className="text-xs text-slate-500">{p.clientNom}</p>
                     {(p.modele || p.numeroSerie) && (
                       <p className="mt-0.5 text-[11px] text-slate-400">
@@ -5649,7 +5651,7 @@ function ApercuBonTravailClient({ travail, clients, onFermer }) {
 
           <div className="mt-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Description des travaux</p>
-            <p className="mt-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+            <p className="mt-1 whitespace-pre-line rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
               {travail.noteTerrain || travail.titre || "Détails à venir."}
             </p>
           </div>
@@ -5780,7 +5782,7 @@ function DetailTravail({ travail, clients, onFermer, onReactiver }) {
               Visible au client
             </span>
           </p>
-          <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+          <p className="whitespace-pre-line rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
             {travail.noteTerrain || "Aucune note pour l'instant."}
           </p>
         </div>
@@ -9053,7 +9055,31 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     setFiltreTravauxStatut("tous");
   }, [clientOuvertId]);
   const [nouveauCourrielLabel, setNouveauCourrielLabel] = useState("");
+  // ✏️ Édition en place d'un courriel existant — { clientId, courrielId, email, label }.
+  const [editionCourriel, setEditionCourriel] = useState(null);
   const [nouveauCourrielEmail, setNouveauCourrielEmail] = useState("");
+
+  // ✏️ MODIFIER un courriel existant — y compris le PRINCIPAL (avant,
+  // le courriel unique ne pouvait ni s'éditer ni se supprimer : angle
+  // mort constaté par le propriétaire, 2026-08-17).
+  const modifierCourrielClient = (clientId, courrielId, email, label) => {
+    const propre = (email || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(propre)) return false;
+    setClients((prev) =>
+      prev.map((c) =>
+        c.id === clientId
+          ? {
+              ...c,
+              courriels: (c.courriels || []).map((cc) =>
+                cc.id === courrielId ? { ...cc, email: propre, label: (label || "").trim() || cc.label } : cc
+              ),
+            }
+          : c
+      )
+    );
+    ajouterJournal(`✏️ Courriel corrigé sur la fiche : ${propre}`);
+    return true;
+  };
 
   const ajouterCourrielClient = (clientId) => {
     if (!nouveauCourrielEmail.trim()) return;
@@ -9551,28 +9577,60 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
 
                   <div className="space-y-1 rounded-lg bg-slate-50 p-2">
                     <p className="text-[10px] font-bold uppercase text-slate-400">Courriels ({(c.courriels || []).length})</p>
-                    {(c.courriels || []).map((cc) => (
-                      <div key={cc.id} className="flex items-center justify-between gap-1.5 text-xs">
-                        <div className="flex items-center gap-1.5">
-                          <Mail size={11} className="shrink-0" />
-                          <span>{cc.email}</span>
-                          <span className="text-[10px] text-slate-400">({cc.label})</span>
-                          {cc.defaut && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Défaut</span>}
+                    {(c.courriels || []).map((cc) =>
+                      editionCourriel?.courrielId === cc.id && editionCourriel?.clientId === c.id ? (
+                        <div key={cc.id} className="flex items-center gap-1.5">
+                          <input
+                            value={editionCourriel.email}
+                            onChange={(e) => setEditionCourriel((prev) => ({ ...prev, email: e.target.value }))}
+                            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
+                          />
+                          <input
+                            value={editionCourriel.label}
+                            onChange={(e) => setEditionCourriel((prev) => ({ ...prev, label: e.target.value }))}
+                            placeholder="Étiquette"
+                            className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
+                          />
+                          <button
+                            onClick={() => {
+                              if (modifierCourrielClient(c.id, cc.id, editionCourriel.email, editionCourriel.label)) setEditionCourriel(null);
+                            }}
+                            className="shrink-0 rounded-lg bg-slate-900 px-2 py-1 text-[10px] font-bold text-white"
+                          >
+                            OK
+                          </button>
+                          <button onClick={() => setEditionCourriel(null)} className="shrink-0 text-slate-400"><X size={12} /></button>
                         </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {!cc.defaut && (
-                            <button onClick={() => definirCourrielDefaut(c.id, cc.id)} className="text-[10px] font-semibold text-blue-600">
-                              Définir par défaut
+                      ) : (
+                        <div key={cc.id} className="flex items-center justify-between gap-1.5 text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <Mail size={11} className="shrink-0" />
+                            <span>{cc.email}</span>
+                            <span className="text-[10px] text-slate-400">({cc.label})</span>
+                            {cc.defaut && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Défaut</span>}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              onClick={() => setEditionCourriel({ clientId: c.id, courrielId: cc.id, email: cc.email, label: cc.label || "" })}
+                              className="text-slate-300 hover:text-slate-600"
+                              title="Modifier ce courriel"
+                            >
+                              ✏️
                             </button>
-                          )}
-                          {(c.courriels || []).length > 1 && (
-                            <button onClick={() => retirerCourrielClient(c.id, cc.id)} className="text-slate-300 hover:text-red-500">
-                              <Trash2 size={12} />
-                            </button>
-                          )}
+                            {!cc.defaut && (
+                              <button onClick={() => definirCourrielDefaut(c.id, cc.id)} className="text-[10px] font-semibold text-blue-600">
+                                Définir par défaut
+                              </button>
+                            )}
+                            {(c.courriels || []).length > 1 && (
+                              <button onClick={() => retirerCourrielClient(c.id, cc.id)} className="text-slate-300 hover:text-red-500">
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    )}
                     <div className="mt-1.5 grid grid-cols-3 gap-1">
                       <input
                         value={nouveauCourrielLabel}
@@ -10173,7 +10231,7 @@ function FacturesEmisesListe({ bon, onPdf, onRenvoyer }) {
   );
 }
 
-function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
+function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer, onAjouterFiche = null }) {
   const courriels = client?.courriels || [];
   const [selectionIds, setSelectionIds] = useState(() => {
     const parDefaut = courrielDefautClient(client);
@@ -10188,6 +10246,9 @@ function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
   // Seules les adresses au format valide partent — jamais de rebond
   // silencieux à cause d'une coquille.
   const [extra, setExtra] = useState("");
+  // 💾 L'adresse tapée peut rejoindre la FICHE du client — la prochaine
+  // fois, elle sera dans la liste à cocher.
+  const [ajouterAFiche, setAjouterAFiche] = useState(false);
   const extras = extra
     .split(/[,;]/)
     .map((x) => x.trim())
@@ -10260,12 +10321,26 @@ function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
               Adresse incomplète — vérifie le format (nom@domaine.com).
             </p>
           )}
+          {extras.length > 0 && client && onAjouterFiche && (
+            <label className="mt-1 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+              <input
+                type="checkbox"
+                checked={ajouterAFiche}
+                onChange={(e) => setAjouterAFiche(e.target.checked)}
+                className="h-4 w-4 accent-[#FF6A13]"
+              />
+              💾 Ajouter cette adresse à la fiche de {client?.nom || "ce client"}
+            </label>
+          )}
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={onFermer}>Annuler</Button>
           <Button
             disabled={selection.length + extras.length === 0}
-            onClick={() => onConfirmer([...selection, ...extras])}
+            onClick={() => {
+              if (ajouterAFiche && onAjouterFiche) extras.forEach((x) => onAjouterFiche(x.email));
+              onConfirmer([...selection, ...extras]);
+            }}
           >
             Envoyer{selection.length + extras.length > 1 ? ` (${selection.length + extras.length})` : ""}
           </Button>
@@ -10868,11 +10943,26 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
     const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
     // Pré-coche l'adresse par défaut ; à défaut la première ; sinon rien
     // (le champ libre prend le relais pour un client sans courriel).
-    setEnvoiDevis({ devisId: devis.id, choisis: defauts.length > 0 ? defauts : tous.slice(0, 1), extra: "" });
+    setEnvoiDevis({ devisId: devis.id, choisis: defauts.length > 0 ? defauts : tous.slice(0, 1), extra: "", extraFiche: false });
   };
   const envoyerDevisParCourriel = async (devis) => {
     const extra = (envoiDevis?.extra || "").trim();
     const adresses = [...new Set([...(envoiDevis?.choisis || []), ...(extra ? [extra] : [])])];
+    // 💾 L'adresse tapée rejoint la FICHE si demandé — la prochaine
+    // fois, elle sera dans la liste à cocher.
+    if (envoiDevis?.extraFiche && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extra)) {
+      const fiche = ficheClientDe(devis);
+      if (fiche) {
+        setClients((prev) =>
+          prev.map((c) => {
+            if (c.id !== fiche.id) return c;
+            if ((c.courriels || []).some((cc) => (cc.email || "").toLowerCase() === extra.toLowerCase())) return c;
+            return { ...c, courriels: [...(c.courriels || []), { id: `cc-${Date.now()}`, label: "Ajouté à l'envoi", email: extra, defaut: (c.courriels || []).length === 0 }] };
+          })
+        );
+        ajouterJournal(`💾 ${extra} ajouté à la fiche de ${fiche.nom}.`);
+      }
+    }
     if (adresses.length === 0) return;
     setEnvoiDevisEnCours(true);
     // Jeton valide — régénéré s'il est expiré, comme pour la copie.
@@ -11702,6 +11792,17 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                       placeholder="Autre adresse (optionnel)"
                       className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                     />
+                    {envoiDevis.extra.trim() !== "" && (
+                      <label className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!envoiDevis.extraFiche}
+                          onChange={(e) => setEnvoiDevis((prev) => ({ ...prev, extraFiche: e.target.checked }))}
+                          className="h-4 w-4 accent-[#FF6A13]"
+                        />
+                        💾 Ajouter cette adresse à la fiche du client
+                      </label>
+                    )}
                     <div className="flex gap-1.5">
                       <Button
                         onClick={() => envoyerDevisParCourriel(affichee)}
@@ -15802,7 +15903,7 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   );
 }
 
-function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal }) {
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient }) {
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
   // Sans ce raccord, la révision de prix demandait le PLEIN montant
@@ -16497,7 +16598,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     La réparation n'est pas finie : une 2e visite sera
                     facturée séparément, elle attend la pièce. */}
                 {b.pieceACommander && (
-                  <p className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900">
+                  <p className="mt-1 whitespace-pre-line rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-900">
                     🔧 <span className="font-extrabold">Pièce à commander :</span> {b.pieceRequise}
                     {(b.modeleUnite || b.serieUnite) && (
                       <span className="block text-[10px] text-amber-700">
@@ -16567,7 +16668,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     ))}
                   </div>
                 ) : (
-                  b.description && <p className="mt-0.5 text-[11px] text-slate-500">{b.description}</p>
+                  b.description && <p className="mt-0.5 whitespace-pre-line text-[11px] text-slate-500">{b.description}</p>
                 )}
                 {(b.facturesEmises || []).length > 0 && (
                   <div className="mt-1.5 w-full max-w-[240px]">
@@ -16701,6 +16802,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       {bonEnvoiClient && (
         <ModalSelectionCourriel
           client={trouverClientDuBon(bonEnvoiClient)}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(bonEnvoiClient)?.id, email)}
           contexte={`Bon de travail — descriptif avec photos, SANS prix (« ${bonEnvoiClient.projet} »)`}
           onFermer={() => setBonEnvoiClientId(null)}
           onConfirmer={(choix) => {
@@ -16713,6 +16815,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       {bonEnvoiCourriel && (
         <ModalSelectionCourriel
           client={trouverClientDuBon(bonEnvoiCourriel)}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(bonEnvoiCourriel)?.id, email)}
           contexte={`Facture — "${bonEnvoiCourriel.projet}" (${bonEnvoiCourriel.montant.toFixed(2)} $)`}
           onFermer={() => setBonEnvoiCourrielId(null)}
           onConfirmer={(choix) => {
@@ -16731,6 +16834,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       {bonFactureEnAttente && (
         <ModalSelectionCourriel
           client={trouverClientDuBon(bonFactureEnAttente)}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(bonFactureEnAttente)?.id, email)}
           contexte={`Facture progressive — "${bonFactureEnAttente.projet}" (${factureEnAttenteCourriel.montant.toFixed(2)} $)`}
           onFermer={() => setFactureEnAttenteCourriel(null)}
           onConfirmer={(courrielChoisi) => {
@@ -18244,6 +18348,17 @@ export default function App() {
           inspections={inspections}
           prixDepots={prixDepots}
           estAdminPrincipal={role === "Admin principal"}
+          onAjouterCourrielClient={(clientId, email) => {
+            if (!clientId || !email) return;
+            setClients((prev) =>
+              prev.map((c) => {
+                if (c.id !== clientId) return c;
+                if ((c.courriels || []).some((cc) => (cc.email || "").toLowerCase() === email.toLowerCase())) return c;
+                return { ...c, courriels: [...(c.courriels || []), { id: `cc-${Date.now()}`, label: "Ajouté à l'envoi", email, defaut: (c.courriels || []).length === 0 }] };
+              })
+            );
+            ajouterJournal(`💾 ${email} ajouté à la fiche du client.`);
+          }}
         />
       )}
       {vue === "paies" && (

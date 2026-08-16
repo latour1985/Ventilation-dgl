@@ -20,7 +20,7 @@ import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions } from "@/lib/supabase/camions";
-import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache } from "@/lib/supabase/tachesAssignees";
+import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
@@ -1654,6 +1654,36 @@ function CarteCommandeCamion({ session }) {
 }
 
 function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeVue, setModeVue, onOuvrir, onDeconnexion, role, enLigne, suggestionChantier, onConfirmerChantier, onIgnorerChantier, onReinitialiser, nbEnAttente, syncEnCours, erreurSync, nomTechnicien, onOuvrirMesHeures, onCorrigerChrono }) {
+  // 🚗 COURSE — le technicien crée LUI-MÊME une petite tâche sans
+  // client (porter un camion au garage, chercher une pièce en fin de
+  // journée) : le répartiteur ne peut pas toujours le prévoir. Pour
+  // lui-même, aujourd'hui seulement — la planification reste au bureau.
+  // Heures payées (catégorie « divers »), jamais de facturation.
+  const [courseOuverte, setCourseOuverte] = useState(false);
+  const [courseTitre, setCourseTitre] = useState("");
+  const [courseAdresse, setCourseAdresse] = useState("");
+  const [courseNote, setCourseNote] = useState("");
+  const [courseEnCours, setCourseEnCours] = useState(false);
+  const [courseMsg, setCourseMsg] = useState("");
+  const creerCourse = async () => {
+    if (!courseTitre.trim()) return;
+    setCourseEnCours(true);
+    setCourseMsg("");
+    try {
+      await creerCourseTechnicien({ titre: courseTitre.trim(), adresse: courseAdresse.trim(), note: courseNote.trim() }, session);
+      setCourseMsg("ok");
+      setCourseTitre("");
+      setCourseAdresse("");
+      setCourseNote("");
+      setTimeout(() => {
+        setCourseOuverte(false);
+        setCourseMsg("");
+      }, 1200);
+    } catch {
+      setCourseMsg("erreur");
+    }
+    setCourseEnCours(false);
+  };
   const isoJour = isoLocal(dateSelectionnee);
   // CHRONOS OUBLIÉS — cherchés sur TOUTES les tâches, pas seulement
   // celles du jour affiché : une tâche laissée en marche vendredi doit
@@ -1868,6 +1898,58 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         >
           🕐 Mes heures de la semaine
         </button>
+        <button
+          onClick={() => setCourseOuverte(true)}
+          className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:bg-slate-100"
+        >
+          🚗 Course / déplacement (sans client)
+        </button>
+        {courseOuverte && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onClick={() => !courseEnCours && setCourseOuverte(false)}>
+            <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-extrabold text-slate-900">🚗 Nouvelle course</h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Pour toi, aujourd&apos;hui. Aucun client, rien à facturer — tes heures sont payées et le bureau la voit dans l&apos;agenda.
+              </p>
+              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">Quoi ?</label>
+              <input
+                value={courseTitre}
+                onChange={(e) => setCourseTitre(e.target.value)}
+                placeholder="Ex : porter le camion 4 au garage"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              />
+              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Adresse (facultatif)</label>
+              <input
+                value={courseAdresse}
+                onChange={(e) => setCourseAdresse(e.target.value)}
+                placeholder="Ex : 123 rue du Garage, Blainville"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              />
+              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Note (facultatif)</label>
+              <textarea
+                rows={2}
+                value={courseNote}
+                onChange={(e) => setCourseNote(e.target.value)}
+                placeholder="Détails utiles…"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              />
+              {courseMsg === "ok" && (
+                <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">✅ Course créée — elle apparaît dans ton horaire.</p>
+              )}
+              {courseMsg === "erreur" && (
+                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold text-red-700">Impossible de créer la course — vérifie ta connexion et réessaie.</p>
+              )}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setCourseOuverte(false)} disabled={courseEnCours} className="w-full">
+                  Annuler
+                </Button>
+                <Button onClick={creerCourse} disabled={courseEnCours || !courseTitre.trim()} className="w-full">
+                  {courseEnCours ? "Création…" : "Créer la course"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button onClick={reculer} aria-label="Précédent" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
             <ChevronLeft size={18} />
