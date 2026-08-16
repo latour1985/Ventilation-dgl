@@ -310,7 +310,19 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                 <>
                   <select
                     value={e.statut}
-                    onChange={(ev) => onMaj(e.id, { statut: ev.target.value })}
+                    onChange={(ev) => {
+                      // EXCLUSIVITÉ FONDATEUR — la clause « 1 an gratuit +
+                      // 25 % à vie » est réservée aux 3 PREMIERS : la
+                      // plateforme refuse un 4e statut fondateur.
+                      if (ev.target.value === "fondateur") {
+                        const dejaFondateurs = entreprises.filter((x) => x.statut === "fondateur" && x.id !== e.id).length;
+                        if (dejaFondateurs >= 3) {
+                          window.alert("Les 3 places de partenaire fondateur sont prises — cette clause était exclusive aux 3 premiers et est maintenant révoquée. Utilise Essai ou Payant (avec promo au besoin).");
+                          return;
+                        }
+                      }
+                      onMaj(e.id, { statut: ev.target.value });
+                    }}
                     className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                   >
                     {Object.entries(STATUTS).map(([val, s]) => <option key={val} value={val}>{s.label}</option>)}

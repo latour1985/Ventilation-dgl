@@ -1960,3 +1960,11 @@ drop policy if exists "photos_legendes_test" on photos_legendes;
 create policy "photos_legendes_test" on photos_legendes
   for all to authenticated using (true) with check (true);
 create index if not exists idx_photos_legendes_entreprise on photos_legendes (entreprise_id);
+
+-- SNIPPET « 59 » — ACCEPTATION DE L'ENTENTE à la première connexion.
+-- L'admin principal d'une entreprise cliente coche « j'ai lu et
+-- j'accepte » à sa première entrée — qui, quand et quelle version sont
+-- consignés sur la fiche de l'entreprise (preuve d'acceptation).
+alter table entreprises add column if not exists entente_acceptee_le timestamptz;
+alter table entreprises add column if not exists entente_acceptee_par text;
+alter table entreprises add column if not exists entente_version text;

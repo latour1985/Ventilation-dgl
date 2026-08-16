@@ -40,11 +40,12 @@ import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCa
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
+import { ententePourStatut } from "@/lib/ententeTexte";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
-import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
+import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes , accepterEntente } from "@/lib/supabase/entreprise";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
 import dynamic from "next/dynamic";
 
@@ -5241,6 +5242,64 @@ function GalerieAvantApres({ travail, enMarge = false }) {
           nomFichier={(p, i) => `${nomBase}-${p.section}-${String(i + 1).padStart(2, "0")}.jpg`}
         />
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// 📜 ACCEPTATION DE L'ENTENTE — première connexion d'une entreprise
+// cliente. L'admin principal coche « j'ai lu et j'accepte » au nom de
+// son entreprise ; qui, quand et quelle version sont consignés. Le
+// texte suit le STATUT : fondateur (1 an gratuit + 25 % à vie — les 3
+// premiers seulement) ou régulier (la clause n'y apparaît JAMAIS).
+// Le Propriétaire (DGL) est exempt. Les employés ne la voient pas —
+// l'admin accepte pour l'entreprise, comme une signature de contrat.
+// ============================================================
+function EcranEntente({ config, session, onAcceptee }) {
+  const [coche, setCoche] = useState(false);
+  const [envoi, setEnvoi] = useState(false);
+  const entente = ententePourStatut(config.statutPlateforme);
+  const accepter = async () => {
+    setEnvoi(true);
+    try {
+      await accepterEntente(config.id, entente.version, session);
+      onAcceptee(new Date().toISOString());
+    } finally {
+      setEnvoi(false);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-[#131B2E] p-4">
+      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col rounded-2xl bg-white">
+        <div className="border-b border-slate-200 p-5">
+          <h1 className="text-lg font-extrabold text-slate-900">📜 {entente.titre}</h1>
+          <p className="mt-0.5 text-xs text-slate-400">
+            À lire et accepter avant la première utilisation — version {entente.version}
+          </p>
+        </div>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 text-sm leading-relaxed text-slate-700">
+          {entente.sections.map((sec) => (
+            <section key={sec.titre}>
+              <h2 className="mb-1 font-extrabold text-slate-900">{sec.titre}</h2>
+              {sec.points.map((p, i) => (
+                <p key={i} className="mb-1.5">{p}</p>
+              ))}
+            </section>
+          ))}
+        </div>
+        <div className="border-t border-slate-200 p-5">
+          <label className="flex items-start gap-2.5 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-slate-800">
+            <input type="checkbox" checked={coche} onChange={(e) => setCoche(e.target.checked)} className="mt-0.5 h-5 w-5 accent-[#131B2E]" />
+            <span>
+              Au nom de <span className="font-extrabold">{config.nomCommercial || config.nomLegal}</span>, j'ai lu la
+              présente entente (incluant l'Annexe A — Protection des données) et je l'accepte.
+            </span>
+          </label>
+          <Button onClick={accepter} disabled={!coche} loading={envoi} className="mt-3 w-full">
+            Accepter et entrer dans l'application
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -17162,6 +17221,19 @@ export default function App() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
+      {/* 📜 PORTE D'ENTENTE — première connexion d'une entreprise
+          cliente (jamais pour le Propriétaire ni les employés). */}
+      {configEntreprise?.statutPlateforme && configEntreprise.statutPlateforme !== "proprietaire" &&
+        !configEntreprise.ententeAccepteeLe && role === "Admin principal" && session && (
+        <EcranEntente
+          config={configEntreprise}
+          session={session}
+          onAcceptee={(quand) => {
+            setConfigEntreprise((prev) => ({ ...prev, ententeAccepteeLe: quand }));
+            ajouterJournal("📜 Entente acceptée au nom de l'entreprise — bienvenue !");
+          }}
+        />
+      )}
       <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6">
         {/* ☰ mobile : ouvre le tiroir. Sur bureau, la bascule du menu se
             fait via la flèche ‹/› dans le menu lui-même. */}
