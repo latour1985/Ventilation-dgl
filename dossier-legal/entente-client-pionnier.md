@@ -52,7 +52,13 @@ Pendant la durée de l'entente, le Logiciel est fourni « **tel quel** » : des 
 - Chaque partie peut y mettre fin en tout temps sur **préavis écrit de trente (30) jours**.
 - À la fin de l'entente : l'export complet des données est remis au Client pionnier sans frais, puis les données sont supprimées sur demande écrite, sous réserve des délais de conservation légaux. Les clauses 4 (propriété intellectuelle) et 5 (confidentialité) survivent.
 
-## 9. Dispositions générales
+## 9. Frais juridiques
+
+- En cas de recours judiciaire, d'arbitrage ou de médiation relié à la présente entente, au Logiciel ou à leur exécution : si le Client pionnier succombe (jugement, sentence ou règlement défavorable, en tout ou pour l'essentiel), il rembourse à l'Exploitant la totalité des frais juridiques et extrajudiciaires raisonnablement engagés par celui-ci — honoraires d'avocats, frais d'experts, frais de médiation ou d'arbitrage et débours.
+- À l'inverse, si l'Exploitant succombe, chaque partie assume ses propres frais : le Client pionnier renonce à réclamer à l'Exploitant ses frais juridiques et extrajudiciaires, quelle que soit l'issue.
+- La présente clause survit à la fin de l'entente, quelle qu'en soit la cause.
+
+## 10. Dispositions générales
 
 - La présente entente et son Annexe A constituent l'entente complète entre les parties.
 - Elle est régie par les lois du **Québec** ; tout litige relève des tribunaux du district judiciaire de l'Exploitant.
