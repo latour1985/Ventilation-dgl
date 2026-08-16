@@ -2051,6 +2051,21 @@ alter table camions add column if not exists indispo_note text;
 --    que SES métiers) — les taux restent conservés, réaffichable.
 alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
 
+-- SNIPPET « 70 » — MÉMOIRE ARTICLE → FOURNISSEUR (2026-08-17).
+-- La commande groupée du matériel camion se souvient chez QUI chaque
+-- article a été commandé la dernière fois : la semaine suivante, tout
+-- arrive pré-assigné — on vérifie d'un coup d'œil et on envoie.
+create table if not exists articles_fournisseurs (
+  article         text primary key,
+  fournisseur_nom text not null,
+  entreprise_id   text not null default 'dgl',
+  updated_at      timestamptz not null default now()
+);
+alter table articles_fournisseurs enable row level security;
+drop policy if exists "articles_fournisseurs_test" on articles_fournisseurs;
+create policy "articles_fournisseurs_test" on articles_fournisseurs
+  for all to authenticated using (true) with check (true);
+
 -- SNIPPET « 69 » — ENVOI AUTOMATIQUE DES FACTURES : OPTION PAR
 -- ENTREPRISE (2026-08-17). Activé : chaque facture créée (appels,
 -- devis, contrats, dépôts, pièces) est ENVOYÉE immédiatement par

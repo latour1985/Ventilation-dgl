@@ -36,10 +36,10 @@ import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots, zonesDepuis, sup
 import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
-import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres } from "@/lib/supabase/materiel";
+import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres, listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail } from "@/lib/courriels";
+import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo } from "@/lib/quickbooksClient";
@@ -1302,6 +1302,97 @@ const STATUTS_PIECE = {
 function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, projets }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const [notePassee, setNotePassee] = useState(null); // { id, note }
+  // 🛒 COMMANDE GROUPÉE multi-fournisseurs (2026-08-17) : les demandes
+  // de TOUS les techniciens agrégées par article, un fournisseur par
+  // article (avec MÉMOIRE de la dernière fois), un P/O par fournisseur,
+  // un clic = un courriel par fournisseur + tout marqué commandé.
+  const [assignFournisseurs, setAssignFournisseurs] = useState({});
+  const [envoiGroupeEnCours, setEnvoiGroupeEnCours] = useState(false);
+  const [messageGroupe, setMessageGroupe] = useState(null);
+  const [noteGroupee, setNoteGroupee] = useState("");
+  // ✅ Confirmation avant « Pièce reçue » — le geste qui débloque la
+  // planification mérite une double vérification.
+  const [confirmRecue, setConfirmRecue] = useState(null);
+  useEffect(() => {
+    listerMemoireFournisseurs()
+      .then((m) => setAssignFournisseurs((prev) => ({ ...m, ...prev })))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const articlesGroupes = useMemo(() => {
+    const m = new Map();
+    camionEnAttente.forEach((c) =>
+      (c.lignes || []).forEach((l) => {
+        const cle = String(l.article || "").trim().toLowerCase();
+        if (!cle) return;
+        const e = m.get(cle) || { cle, article: l.article, total: 0, demandeurs: [] };
+        e.total += Number(l.quantite) || 1;
+        e.demandeurs.push(`${c.technicienNom} ×${Number(l.quantite) || 1}`);
+        m.set(cle, e);
+      })
+    );
+    return [...m.values()].sort((a, b) => a.article.localeCompare(b.article));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commandesCamion]);
+  const articlesSansFournisseur = articlesGroupes.filter((a) => !assignFournisseurs[a.cle]);
+  const fournisseursDeLaCommande = [...new Set(articlesGroupes.map((a) => assignFournisseurs[a.cle]).filter(Boolean))];
+  const copierListeGroupee = async () => {
+    try {
+      await navigator.clipboard?.writeText(articlesGroupes.map((a) => `${a.article} × ${a.total}`).join("\n"));
+      setMessageGroupe({ ok: true, texte: "Liste copiée — colle-la où tu veux." });
+    } catch {
+      setMessageGroupe({ ok: false, texte: "Copie refusée par le navigateur." });
+    }
+  };
+  const envoyerCommandesGroupees = async () => {
+    if (articlesSansFournisseur.length > 0 || camionEnAttente.length === 0) return;
+    setEnvoiGroupeEnCours(true);
+    setMessageGroupe(null);
+    const groupes = {};
+    articlesGroupes.forEach((a) => {
+      const f = assignFournisseurs[a.cle];
+      if (f) (groupes[f] = groupes[f] || []).push(a);
+    });
+    const resume = [];
+    const sansCourriel = [];
+    for (const [fNom, arts] of Object.entries(groupes)) {
+      let po;
+      try {
+        po = await numeroBonCommande();
+      } catch {
+        po = genererNumeroSecours("BC");
+      }
+      const fiche = (fournisseurs || []).find((x) => (x.nom || "").trim().toLowerCase() === fNom.trim().toLowerCase());
+      const adressesF = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email || "")).filter(Boolean);
+      let envoye = false;
+      if (adressesF.length > 0) {
+        const r = await envoyerCourriel({
+          a: adressesF,
+          sujet: `Bon de commande ${po} — matériel (${configEnt.nomCommercial || configEnt.nomLegal})`,
+          html: gabaritCommandeGroupee({ config: configEnt, numeroPo: po, fournisseurNom: fNom, lignes: arts.map((a) => ({ article: a.article, quantite: a.total })) }),
+          copieExpediteur: true,
+        });
+        envoye = !!r.envoye;
+      } else {
+        sansCourriel.push(fNom);
+      }
+      resume.push(`P/O ${po} (${fNom}${envoye ? "" : adressesF.length > 0 ? " — courriel NON parti" : " — aucun courriel au dossier"})`);
+    }
+    const noteFinale = `${resume.join(" + ")}${noteGroupee.trim() ? ` — ${noteGroupee.trim()}` : ""}`;
+    for (const c of camionEnAttente) {
+      // eslint-disable-next-line no-await-in-loop
+      await onCommandePassee?.(c.id, noteFinale);
+    }
+    memoriserFournisseursArticles(
+      articlesGroupes.filter((a) => assignFournisseurs[a.cle]).map((a) => ({ article: a.cle, fournisseurNom: assignFournisseurs[a.cle] }))
+    ).catch(() => {});
+    setMessageGroupe({
+      ok: true,
+      texte: `✅ ${noteFinale}${sansCourriel.length > 0 ? ` · ⚠️ ${sansCourriel.join(", ")} : aucun courriel au dossier — passe la commande par téléphone (le P/O est réservé)` : ""}`,
+    });
+    setNoteGroupee("");
+    setEnvoiGroupeEnCours(false);
+  };
   // ➕ BC libre.
   const [bcLibreOuvert, setBcLibreOuvert] = useState(false);
   const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "" });
@@ -1567,6 +1658,67 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
             <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{camionEnAttente.length} à commander</span>
           )}
         </p>
+        {camionEnAttente.length > 0 && peutCommander && articlesGroupes.length > 0 && (
+          <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
+            <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+              🛒 Commande groupée — {articlesGroupes.length} article{articlesGroupes.length > 1 ? "s" : ""}, {camionEnAttente.length} demande{camionEnAttente.length > 1 ? "s" : ""}
+            </p>
+            <div className="mt-1.5 space-y-1">
+              {articlesGroupes.map((a) => (
+                <div key={a.cle} className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-2 py-1.5 text-xs">
+                  <span className="min-w-0 flex-1">
+                    <span className="font-bold text-slate-800">{a.article}</span>
+                    <span className="ml-1 font-extrabold tabular-nums text-slate-900">× {a.total}</span>
+                    <span className="block text-[10px] text-slate-400">{a.demandeurs.join(" · ")}</span>
+                  </span>
+                  <select
+                    value={assignFournisseurs[a.cle] || ""}
+                    onChange={(e) => setAssignFournisseurs((prev) => ({ ...prev, [a.cle]: e.target.value }))}
+                    className={`rounded-lg border px-2 py-1 text-[11px] font-semibold ${assignFournisseurs[a.cle] ? "border-slate-300" : "border-amber-400 bg-amber-50"}`}
+                  >
+                    <option value="">— Fournisseur ? —</option>
+                    {(fournisseurs || []).map((f) => (
+                      <option key={f.id || f.nom} value={f.nom}>{f.nom}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            {fournisseursDeLaCommande.length > 0 && (
+              <p className="mt-1.5 text-[10px] font-bold text-slate-600">
+                📦 {fournisseursDeLaCommande.join(" · ")} — un P/O officiel par fournisseur à l'envoi.
+              </p>
+            )}
+            {articlesSansFournisseur.length > 0 && (
+              <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800">
+                ⚠️ {articlesSansFournisseur.length} article{articlesSansFournisseur.length > 1 ? "s" : ""} sans fournisseur — assigne-{articlesSansFournisseur.length > 1 ? "les" : "le"} pour pouvoir envoyer.
+              </p>
+            )}
+            <input
+              value={noteGroupee}
+              onChange={(e) => setNoteGroupee(e.target.value)}
+              placeholder="Note pour les techniciens (facultatif) — ex : arrive jeudi"
+              className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[11px]"
+            />
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <Button
+                onClick={envoyerCommandesGroupees}
+                disabled={envoiGroupeEnCours || articlesSansFournisseur.length > 0}
+                className="min-h-0 flex-1 px-3 py-1.5 text-[11px]"
+              >
+                {envoiGroupeEnCours ? "Envoi…" : `📧 Envoyer les commandes${fournisseursDeLaCommande.length > 1 ? ` (${fournisseursDeLaCommande.length} fournisseurs)` : ""}`}
+              </Button>
+              <Button variant="outline" onClick={copierListeGroupee} className="min-h-0 px-2.5 py-1.5 text-[11px]">
+                📋 Copier la liste
+              </Button>
+            </div>
+            {messageGroupe && (
+              <p className={`mt-1.5 rounded-lg px-2 py-1.5 text-[11px] font-semibold ${messageGroupe.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"}`}>
+                {messageGroupe.texte}
+              </p>
+            )}
+          </div>
+        )}
         {(commandesCamion || []).length === 0 ? (
           <p className="mt-1 text-xs text-slate-400">Aucune demande — les techniciens commandent depuis leur téléphone (🧰 Matériel de camion).</p>
         ) : (
@@ -2025,12 +2177,36 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                             planification. Toujours humain : une facture
                             fournisseur ne prouve pas que la pièce est
                             arrivée sur la tablette. */}
-                        <Button
-                          onClick={() => onRecue(p.id, nomUtilisateur)}
-                          className="min-h-0 px-3 py-1.5 text-xs"
-                        >
-                          <Check size={13} /> Pièce reçue
-                        </Button>
+                        {confirmRecue === p.id ? (
+                          <div className="w-full rounded-lg border border-emerald-300 bg-emerald-50 p-2 text-[11px]">
+                            <p className="font-bold text-emerald-900">
+                              ✅ Confirmer la réception de « {p.pieceRequise} » pour {p.clientNom} ? La tâche de retour deviendra planifiable à l'agenda.
+                            </p>
+                            {p.statut !== "commandee" && (
+                              <p className="mt-1 rounded bg-amber-100 px-1.5 py-1 font-bold text-amber-800">
+                                ⚠️ Cette pièce n'a JAMAIS été marquée commandée. Reçue quand même ? (ex. : prise directement au comptoir)
+                              </p>
+                            )}
+                            <div className="mt-1.5 flex gap-1.5">
+                              <Button
+                                onClick={() => {
+                                  setConfirmRecue(null);
+                                  onRecue(p.id, nomUtilisateur, p.statut !== "commandee");
+                                }}
+                                className="min-h-0 px-3 py-1.5 text-xs"
+                              >
+                                Oui, reçue
+                              </Button>
+                              <Button variant="outline" onClick={() => setConfirmRecue(null)} className="min-h-0 px-2.5 py-1.5 text-xs">
+                                Annuler
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <Button onClick={() => setConfirmRecue(p.id)} className="min-h-0 px-3 py-1.5 text-xs">
+                            <Check size={13} /> Pièce reçue
+                          </Button>
+                        )}
                         <button
                           onClick={() => { setAnnulationPour(p.id); setRaisonAnnulation(""); }}
                           className="text-[11px] font-semibold text-slate-400 underline underline-offset-2 hover:text-red-600"
@@ -18980,13 +19156,13 @@ export default function App() {
               })
               .catch(() => ajouterJournal("⚠️ Mise à jour de la pièce non enregistrée — réessaie."));
           }}
-          onRecue={(id, parNom) => {
+          onRecue={(id, parNom, sansCommande = false) => {
             const p = pieces.find((x) => x.id === id);
             setPieces((prev) => prev.map((x) => (x.id === id ? { ...x, statut: "recue", recuParNom: parNom, recuVia: "manuel", recuLe: new Date().toISOString() } : x)));
             marquerRecue(id, parNom, "manuel")
               .then(() =>
                 ajouterJournal(
-                  `📦 Pièce REÇUE : ${p?.pieceRequise} pour ${p?.clientNom} — la tâche de retour peut être planifiée.`
+                  `📦 Pièce REÇUE${sansCommande ? " ⚠️ SANS commande préalable (prise au comptoir ?)" : ""} : ${p?.pieceRequise} pour ${p?.clientNom} — la tâche de retour peut être planifiée.`
                 )
               )
               .catch(() => ajouterJournal("⚠️ Réception non enregistrée — réessaie."));
