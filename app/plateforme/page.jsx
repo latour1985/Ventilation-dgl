@@ -28,6 +28,7 @@ import {
   listerIncidents,
   creerIncident,
   exporterEntreprise,
+  listerSiegesPlateforme,
 } from "@/lib/supabase/plateforme";
 
 // 🧩 MODULES À LA CARTE — ce qu'une entreprise reçoit dans son forfait.
@@ -215,7 +216,7 @@ function TableauPlateforme({ session }) {
 
       <div className="mx-auto max-w-3xl p-4 md:p-6">
         <div className="mb-4 flex gap-1.5 rounded-xl border border-slate-200 bg-white p-1">
-          {[["entreprises", "🏢 Entreprises"], ["incidents", "🔐 Incidents (Loi 25)"]].map(([id, label]) => (
+          {[["entreprises", "🏢 Entreprises"], ["facturation", "💰 Facturation"], ["incidents", "🔐 Incidents (Loi 25)"]].map(([id, label]) => (
             <button key={id} onClick={() => setOnglet(id)}
               className={`flex-1 rounded-lg px-3 py-2 text-xs font-extrabold ${onglet === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}>
               {label}
@@ -237,10 +238,15 @@ function TableauPlateforme({ session }) {
               if (champs.statut) bd.statut_plateforme = champs.statut;
               if ("gratuitJusqua" in champs) bd.gratuit_jusqua = champs.gratuitJusqua || null;
               if ("modules" in champs) bd.modules = champs.modules;
+              if ("prixBase" in champs) bd.prix_base = champs.prixBase === "" ? null : Number(champs.prixBase);
+              if ("siegesInclus" in champs) bd.sieges_inclus = Number(champs.siegesInclus) || 4;
+              if ("prixParSiege" in champs) bd.prix_par_siege = champs.prixParSiege === "" ? null : Number(champs.prixParSiege);
+              if ("rabaisPourcent" in champs) bd.rabais_pourcent = Number(champs.rabaisPourcent) || 0;
               await majEntreprisePlateforme(id, bd).catch(() => charger());
             }}
           />
         )}
+        {onglet === "facturation" && <SectionFacturation entreprises={entreprises} />}
         {onglet === "incidents" && (
           <SectionIncidents incidents={incidents} session={session} onCree={charger} />
         )}
@@ -351,6 +357,44 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                     <p className="mt-1 text-[9px] leading-snug text-slate-400">
                       Un module décoché disparaît pour TOUTE l'entreprise, son admin principal compris. L'entreprise
                       voit le changement à sa prochaine connexion.
+                    </p>
+                  </div>
+                  {/* 💰 PRIX — modifiables en tout temps (hausses annuelles,
+                      ententes). Les changements s'appliquent aux calculs
+                      des mois SUIVANTS — jamais rétroactifs. */}
+                  <div className="w-full rounded-xl bg-slate-50 p-2.5">
+                    <p className="mb-1.5 text-[10px] font-extrabold uppercase text-slate-400">💰 Prix de l'abonnement</p>
+                    <div className="flex flex-wrap items-end gap-2 text-[11px]">
+                      <span>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400">Base / mois ($)</label>
+                        <input type="number" min={0} step="1" value={e.prixBase ?? ""}
+                          onChange={(ev) => onMaj(e.id, { prixBase: ev.target.value })}
+                          placeholder="à définir"
+                          className="w-24 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
+                      </span>
+                      <span>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400">Sièges inclus</label>
+                        <input type="number" min={0} step="1" value={e.siegesInclus ?? 4}
+                          onChange={(ev) => onMaj(e.id, { siegesInclus: ev.target.value })}
+                          className="w-20 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
+                      </span>
+                      <span>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400">$ / siège extra</label>
+                        <input type="number" min={0} step="1" value={e.prixParSiege ?? ""}
+                          onChange={(ev) => onMaj(e.id, { prixParSiege: ev.target.value })}
+                          placeholder="à définir"
+                          className="w-24 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
+                      </span>
+                      <span>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400">Rabais % (fondateur : 25)</label>
+                        <input type="number" min={0} max={100} step="1" value={e.rabaisPourcent ?? 0}
+                          onChange={(ev) => onMaj(e.id, { rabaisPourcent: ev.target.value })}
+                          className="w-20 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[9px] leading-snug text-slate-400">
+                      Le rabais fondateur s'applique à la base ET aux sièges extras — à vie (entente). Pendant la
+                      période gratuite, rien n'est facturé et les sièges sont illimités.
                     </p>
                   </div>
                 </>
@@ -497,6 +541,119 @@ function SectionIncidents({ incidents, session, onCree }) {
           </div>
         ))
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// 💰 FACTURATION — l'outil de calcul intégré (règles du propriétaire) :
+//   • siège ACTIF = invitation acceptée (au moins une connexion) ;
+//   • les N premiers sièges (par ancienneté) sont INCLUS dans la base ;
+//   • un siège activé EN COURS DE MOIS se facture AU PRORATA des jours
+//     restants (jour d'activation inclus) ;
+//   • rabais % appliqué à la base ET aux extras (fondateurs : 25 à vie) ;
+//   • période gratuite : 0 $, sièges illimités.
+// Les montants calculés se reportent dans les factures récurrentes
+// QuickBooks (débit préautorisé) — l'humain garde la main sur l'argent.
+// ============================================================
+function SectionFacturation({ entreprises }) {
+  const [sieges, setSieges] = useState(null);
+  const [erreur, setErreur] = useState("");
+  const n = new Date();
+  const [mois, setMois] = useState(`${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`);
+
+  useEffect(() => {
+    listerSiegesPlateforme().then((r) => {
+      if (r?.sieges) setSieges(r.sieges);
+      else setErreur(r?.erreur || "Lecture des sièges impossible.");
+    });
+  }, []);
+
+  const [annee, moisNum] = mois.split("-").map(Number);
+  const joursDansMois = new Date(annee, moisNum, 0).getDate();
+  const debutMois = `${mois}-01`;
+  const finMois = `${mois}-${String(joursDansMois).padStart(2, "0")}`;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Mois à facturer</p>
+        <input type="month" value={mois} onChange={(e) => setMois(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+      </div>
+      {erreur && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">⚠️ {erreur}</p>}
+      {!sieges && !erreur && <p className="rounded-xl bg-white px-3 py-2 text-xs text-slate-400">Lecture des comptes…</p>}
+
+      {sieges && entreprises.map((e) => {
+        // Période gratuite ce mois-là ? (fondateurs an 1 : illimité, 0 $)
+        const gratuite = e.gratuitJusqua && e.gratuitJusqua >= debutMois;
+        const comptes = (sieges[e.id] || []).filter((c) => c.actif && c.activeLe);
+        // Ancienneté : les plus vieux consomment les sièges inclus.
+        const tries = [...comptes].sort((a, b) => String(a.activeLe).localeCompare(String(b.activeLe)));
+        // Seuls comptent ce mois-ci : activés AVANT la fin du mois.
+        const duMois = tries.filter((c) => String(c.activeLe).slice(0, 10) <= finMois);
+        const inclus = duMois.slice(0, Math.max(0, e.siegesInclus ?? 4));
+        const extras = duMois.slice(Math.max(0, e.siegesInclus ?? 4));
+        const prixSiege = Number(e.prixParSiege) || 0;
+        const facteurRabais = 1 - (Number(e.rabaisPourcent) || 0) / 100;
+        const lignes = extras.map((c) => {
+          const dateAct = String(c.activeLe).slice(0, 10);
+          const enCoursDeMois = dateAct >= debutMois && dateAct <= finMois;
+          const jourAct = enCoursDeMois ? Number(dateAct.slice(8, 10)) : 1;
+          const joursFactures = enCoursDeMois ? joursDansMois - jourAct + 1 : joursDansMois;
+          const montant = prixSiege * (joursFactures / joursDansMois) * facteurRabais;
+          return { email: c.email, dateAct, enCoursDeMois, joursFactures, montant };
+        });
+        const base = (Number(e.prixBase) || 0) * facteurRabais;
+        const totalExtras = lignes.reduce((s2, l) => s2 + l.montant, 0);
+        const total = gratuite ? 0 : base + totalExtras;
+        const prixManquants = !gratuite && (e.prixBase == null || (extras.length > 0 && e.prixParSiege == null));
+        return (
+          <div key={e.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-extrabold text-slate-900">{e.nom}</p>
+                <p className="text-[11px] text-slate-400">
+                  👥 {duMois.length} siège{duMois.length > 1 ? "s" : ""} actif{duMois.length > 1 ? "s" : ""} · {e.siegesInclus ?? 4} inclus
+                  {(Number(e.rabaisPourcent) || 0) > 0 && ` · rabais ${e.rabaisPourcent} %`}
+                </p>
+              </div>
+              <p className={`text-lg font-extrabold tabular-nums ${gratuite ? "text-amber-600" : "text-slate-900"}`}>
+                {gratuite ? "GRATUIT" : `${total.toFixed(2)} $`}
+              </p>
+            </div>
+            {gratuite ? (
+              <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                🎁 Période fondateur — sièges illimités, 0 $ jusqu'au {e.gratuitJusqua}.
+              </p>
+            ) : (
+              <div className="mt-2 space-y-0.5 border-t border-slate-100 pt-2 text-[11px] text-slate-600">
+                <div className="flex justify-between"><span>Base mensuelle{(Number(e.rabaisPourcent) || 0) > 0 ? ` (−${e.rabaisPourcent} %)` : ""}</span><span className="tabular-nums">{base.toFixed(2)} $</span></div>
+                {lignes.map((l) => (
+                  <div key={l.email} className="flex justify-between gap-2">
+                    <span className="min-w-0 truncate">
+                      {l.email}
+                      {l.enCoursDeMois && <span className="ml-1 text-emerald-700">· activé le {l.dateAct} → prorata {l.joursFactures}/{joursDansMois} j</span>}
+                    </span>
+                    <span className="shrink-0 tabular-nums">{l.montant.toFixed(2)} $</span>
+                  </div>
+                ))}
+                {extras.length === 0 && <p className="text-slate-400">Aucun siège au-delà des inclus.</p>}
+                {prixManquants && (
+                  <p className="mt-1 rounded-lg bg-red-50 px-2 py-1 font-bold text-red-600">⚠️ Prix non définis — ouvre « Statut & modules… » dans l'onglet Entreprises pour les fixer.</p>
+                )}
+                <p className="mt-1.5 rounded-lg bg-slate-50 px-2 py-1 font-bold text-slate-700">
+                  🧾 À reporter dans la facture récurrente QuickBooks : {total.toFixed(2)} $ + taxes
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <p className="text-[10px] leading-relaxed text-slate-400">
+        Règles : siège actif = invitation acceptée (une connexion) · les plus anciens consomment les sièges inclus ·
+        activation en cours de mois = prorata des jours restants (jour d'activation inclus) · rabais appliqué à la
+        base et aux extras · changements de prix appliqués aux mois suivants, jamais rétroactifs.
+      </p>
     </div>
   );
 }

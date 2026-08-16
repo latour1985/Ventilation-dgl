@@ -1928,3 +1928,11 @@ alter table entreprises add column if not exists associations jsonb;
 alter table entreprises add column if not exists appels_depot_defaut boolean not null default true;
 alter table entreprises add column if not exists delai_depot_heures numeric;
 alter table entreprises add column if not exists tranche_facturation_min numeric;
+
+-- SNIPPET « 56 » — facturation par siège (plateforme).
+-- Prix MODIFIABLES par entreprise (hausses annuelles, ententes) ;
+-- rabais fondateur 25 % à vie ; sièges inclus dans la base (4).
+alter table entreprises add column if not exists prix_base numeric;
+alter table entreprises add column if not exists sieges_inclus numeric not null default 4;
+alter table entreprises add column if not exists prix_par_siege numeric;
+alter table entreprises add column if not exists rabais_pourcent numeric not null default 0;
