@@ -54,7 +54,7 @@ const MODULES_CATALOGUE = [
 
 const STATUTS = {
   proprietaire: { label: "Propriétaire", cls: "bg-slate-900 text-white" },
-  fondateur: { label: "Fondateur", cls: "bg-amber-100 text-amber-800" },
+  fondateur: { label: "Pionnier", cls: "bg-amber-100 text-amber-800" },
   essai: { label: "Essai", cls: "bg-blue-100 text-blue-700" },
   payant: { label: "Payant", cls: "bg-emerald-100 text-emerald-700" },
 };
@@ -313,11 +313,11 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                     onChange={(ev) => {
                       // EXCLUSIVITÉ FONDATEUR — la clause « 1 an gratuit +
                       // 25 % à vie » est réservée aux 3 PREMIERS : la
-                      // plateforme refuse un 4e statut fondateur.
+                      // plateforme refuse un 4e statut pionnier.
                       if (ev.target.value === "fondateur") {
                         const dejaFondateurs = entreprises.filter((x) => x.statut === "fondateur" && x.id !== e.id).length;
                         if (dejaFondateurs >= 3) {
-                          window.alert("Les 3 places de partenaire fondateur sont prises — cette clause était exclusive aux 3 premiers et est maintenant révoquée. Utilise Essai ou Payant (avec promo au besoin).");
+                          window.alert("Les 3 places de client pionnier sont prises — cette clause était exclusive aux 3 premiers et est maintenant révoquée. Utilise Essai ou Payant (avec promo au besoin).");
                           return;
                         }
                       }
@@ -400,7 +400,7 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                           className="w-24 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
                       </span>
                       <span>
-                        <label className="block text-[9px] font-bold uppercase text-slate-400">Rabais % (fondateur : 25)</label>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400">Rabais % (pionnier : 25)</label>
                         <input type="number" min={0} max={100} step="1" value={e.rabaisPourcent ?? 0}
                           onChange={(ev) => onMaj(e.id, { rabaisPourcent: ev.target.value })}
                           className="w-20 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
@@ -425,7 +425,7 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                       </span>
                     </div>
                     <p className="mt-1 text-[9px] leading-snug text-slate-400">
-                      Le rabais fondateur s'applique à la base ET aux sièges extras — à vie (entente). Si une promo
+                      Le rabais pionnier s'applique à la base ET aux sièges extras — à vie (entente). Si une promo
                       est aussi active, LE MEILLEUR des deux s'applique. Pendant la période gratuite, rien n'est
                       facturé et les sièges sont illimités.
                     </p>
@@ -682,7 +682,7 @@ function SectionFacturation({ entreprises }) {
             {gratuite ? (
               <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
                 {gratuiteEntente
-                  ? `🎁 Période fondateur — sièges illimités, 0 $ jusqu'au ${e.gratuitJusqua}.`
+                  ? `🎁 Période pionnier — sièges illimités, 0 $ jusqu'au ${e.gratuitJusqua}.`
                   : `🎁 1er MOIS GRATUIT (nouveau client) — jusqu'au ${finGratuitNouveau}.`}
               </p>
             ) : (

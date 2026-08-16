@@ -1,7 +1,7 @@
 # Annexe — Protection des données
-## À joindre à l'entente des partenaires fondateurs
+## À joindre à l'entente des clients pionniers
 
-> Une page, en français clair. Chaque partenaire fondateur la signe avec
+> Une page, en français clair. Chaque client pionnier la signe avec
 > l'entente principale (1 an gratuit + prix fondateur). Brouillon du 15 août
 > 2026 — à faire relire par un avocat avant signature.
 
