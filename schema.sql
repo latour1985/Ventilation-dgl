@@ -1936,3 +1936,11 @@ alter table entreprises add column if not exists prix_base numeric;
 alter table entreprises add column if not exists sieges_inclus numeric not null default 4;
 alter table entreprises add column if not exists prix_par_siege numeric;
 alter table entreprises add column if not exists rabais_pourcent numeric not null default 0;
+
+-- SNIPPET « 57 » — PROMOTIONS par entreprise (plateforme).
+-- Rabais temporaire (X % pendant N mois) ancré sur la DATE DE CRÉATION
+-- du compte client, après le 1er mois gratuit offert à tout nouveau
+-- client ; ensuite retour au tarif régulier (les fondateurs gardent
+-- leur rabais permanent — le meilleur des deux s'applique).
+alter table entreprises add column if not exists promo_pourcent numeric not null default 0;
+alter table entreprises add column if not exists promo_mois numeric not null default 0;

@@ -242,6 +242,8 @@ function TableauPlateforme({ session }) {
               if ("siegesInclus" in champs) bd.sieges_inclus = Number(champs.siegesInclus) || 4;
               if ("prixParSiege" in champs) bd.prix_par_siege = champs.prixParSiege === "" ? null : Number(champs.prixParSiege);
               if ("rabaisPourcent" in champs) bd.rabais_pourcent = Number(champs.rabaisPourcent) || 0;
+              if ("promoPourcent" in champs) bd.promo_pourcent = Number(champs.promoPourcent) || 0;
+              if ("promoMois" in champs) bd.promo_mois = Number(champs.promoMois) || 0;
               await majEntreprisePlateforme(id, bd).catch(() => charger());
             }}
           />
@@ -392,9 +394,28 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                           className="w-20 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
                       </span>
                     </div>
+                    <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-slate-200 pt-2 text-[11px]">
+                      <span>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400">🏷️ Promo %</label>
+                        <input type="number" min={0} max={100} step="1" value={e.promoPourcent ?? 0}
+                          onChange={(ev) => onMaj(e.id, { promoPourcent: ev.target.value })}
+                          className="w-20 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
+                      </span>
+                      <span>
+                        <label className="block text-[9px] font-bold uppercase text-slate-400">Durée (mois)</label>
+                        <input type="number" min={0} step="1" value={e.promoMois ?? 0}
+                          onChange={(ev) => onMaj(e.id, { promoMois: ev.target.value })}
+                          className="w-20 rounded-lg border border-slate-300 px-2 py-1 tabular-nums" />
+                      </span>
+                      <span className="text-[9px] leading-snug text-slate-400">
+                        La promo court APRÈS le 1er mois gratuit (offert à tout nouveau client), à partir de la
+                        date de création du compte — puis retour au tarif régulier.
+                      </span>
+                    </div>
                     <p className="mt-1 text-[9px] leading-snug text-slate-400">
-                      Le rabais fondateur s'applique à la base ET aux sièges extras — à vie (entente). Pendant la
-                      période gratuite, rien n'est facturé et les sièges sont illimités.
+                      Le rabais fondateur s'applique à la base ET aux sièges extras — à vie (entente). Si une promo
+                      est aussi active, LE MEILLEUR des deux s'applique. Pendant la période gratuite, rien n'est
+                      facturé et les sièges sont illimités.
                     </p>
                   </div>
                 </>
@@ -584,8 +605,33 @@ function SectionFacturation({ entreprises }) {
       {!sieges && !erreur && <p className="rounded-xl bg-white px-3 py-2 text-xs text-slate-400">Lecture des comptes…</p>}
 
       {sieges && entreprises.map((e) => {
-        // Période gratuite ce mois-là ? (fondateurs an 1 : illimité, 0 $)
-        const gratuite = e.gratuitJusqua && e.gratuitJusqua >= debutMois;
+        // ------------------------------------------------------------
+        // LA PHASE DU MOIS AFFICHÉ (règles du propriétaire) :
+        //   1. entente gratuite explicite (fondateurs an 1) → GRATUIT ;
+        //   2. 1ER MOIS GRATUIT pour tout nouveau client — ancré sur la
+        //      date de CRÉATION du compte (un mois jour pour jour) ;
+        //   3. PROMO : X % pendant N mois APRÈS le mois gratuit ;
+        //   4. ensuite : tarif régulier (rabais permanent s'il existe —
+        //      fondateurs 25 % à vie). Promo + permanent = le MEILLEUR.
+        // ------------------------------------------------------------
+        const creation = e.creeLe ? new Date(e.creeLe) : null;
+        const ajouterMoisLocal = (d, n2) => {
+          const c2 = new Date(d);
+          c2.setMonth(c2.getMonth() + n2);
+          return c2;
+        };
+        const enISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const finGratuitNouveau = creation ? enISO(ajouterMoisLocal(creation, 1)) : null;
+        const finPromo = creation ? enISO(ajouterMoisLocal(creation, 1 + (Number(e.promoMois) || 0))) : null;
+        const gratuiteEntente = e.gratuitJusqua && e.gratuitJusqua >= debutMois;
+        const gratuiteNouveau = !gratuiteEntente && finGratuitNouveau && debutMois <= finGratuitNouveau;
+        const gratuite = gratuiteEntente || gratuiteNouveau;
+        const promoActive =
+          !gratuite && (Number(e.promoPourcent) || 0) > 0 && finPromo && debutMois <= finPromo;
+        const rabaisEffectif = Math.max(
+          Number(e.rabaisPourcent) || 0,
+          promoActive ? Number(e.promoPourcent) || 0 : 0
+        );
         const comptes = (sieges[e.id] || []).filter((c) => c.actif && c.activeLe);
         // Ancienneté : les plus vieux consomment les sièges inclus.
         const tries = [...comptes].sort((a, b) => String(a.activeLe).localeCompare(String(b.activeLe)));
@@ -594,7 +640,7 @@ function SectionFacturation({ entreprises }) {
         const inclus = duMois.slice(0, Math.max(0, e.siegesInclus ?? 4));
         const extras = duMois.slice(Math.max(0, e.siegesInclus ?? 4));
         const prixSiege = Number(e.prixParSiege) || 0;
-        const facteurRabais = 1 - (Number(e.rabaisPourcent) || 0) / 100;
+        const facteurRabais = 1 - rabaisEffectif / 100;
         const lignes = extras.map((c) => {
           const dateAct = String(c.activeLe).slice(0, 10);
           const enCoursDeMois = dateAct >= debutMois && dateAct <= finMois;
@@ -614,7 +660,7 @@ function SectionFacturation({ entreprises }) {
                 <p className="text-sm font-extrabold text-slate-900">{e.nom}</p>
                 <p className="text-[11px] text-slate-400">
                   👥 {duMois.length} siège{duMois.length > 1 ? "s" : ""} actif{duMois.length > 1 ? "s" : ""} · {e.siegesInclus ?? 4} inclus
-                  {(Number(e.rabaisPourcent) || 0) > 0 && ` · rabais ${e.rabaisPourcent} %`}
+                  {rabaisEffectif > 0 && !gratuite && ` · rabais ${rabaisEffectif} %${promoActive && rabaisEffectif === (Number(e.promoPourcent) || 0) ? " (promo)" : ""}`}
                 </p>
               </div>
               <p className={`text-lg font-extrabold tabular-nums ${gratuite ? "text-amber-600" : "text-slate-900"}`}>
@@ -623,11 +669,18 @@ function SectionFacturation({ entreprises }) {
             </div>
             {gratuite ? (
               <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
-                🎁 Période fondateur — sièges illimités, 0 $ jusqu'au {e.gratuitJusqua}.
+                {gratuiteEntente
+                  ? `🎁 Période fondateur — sièges illimités, 0 $ jusqu'au ${e.gratuitJusqua}.`
+                  : `🎁 1er MOIS GRATUIT (nouveau client) — jusqu'au ${finGratuitNouveau}.`}
               </p>
             ) : (
               <div className="mt-2 space-y-0.5 border-t border-slate-100 pt-2 text-[11px] text-slate-600">
-                <div className="flex justify-between"><span>Base mensuelle{(Number(e.rabaisPourcent) || 0) > 0 ? ` (−${e.rabaisPourcent} %)` : ""}</span><span className="tabular-nums">{base.toFixed(2)} $</span></div>
+                {promoActive && (
+                  <p className="rounded-lg bg-blue-50 px-2 py-1 font-bold text-blue-700">
+                    🏷️ PROMO {e.promoPourcent} % active — jusqu'au {finPromo}, puis tarif régulier{(Number(e.rabaisPourcent) || 0) > 0 ? ` (rabais permanent ${e.rabaisPourcent} %)` : ""}.
+                  </p>
+                )}
+                <div className="flex justify-between"><span>Base mensuelle{rabaisEffectif > 0 ? ` (−${rabaisEffectif} %)` : ""}</span><span className="tabular-nums">{base.toFixed(2)} $</span></div>
                 {lignes.map((l) => (
                   <div key={l.email} className="flex justify-between gap-2">
                     <span className="min-w-0 truncate">
@@ -650,7 +703,8 @@ function SectionFacturation({ entreprises }) {
         );
       })}
       <p className="text-[10px] leading-relaxed text-slate-400">
-        Règles : siège actif = invitation acceptée (une connexion) · les plus anciens consomment les sièges inclus ·
+        Règles : 1er mois gratuit à la création du compte · promo X % pendant N mois ensuite (le meilleur du
+        permanent et de la promo s'applique) · siège actif = invitation acceptée (une connexion) · les plus anciens consomment les sièges inclus ·
         activation en cours de mois = prorata des jours restants (jour d'activation inclus) · rabais appliqué à la
         base et aux extras · changements de prix appliqués aux mois suivants, jamais rétroactifs.
       </p>
