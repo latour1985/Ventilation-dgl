@@ -19,7 +19,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
-import { listerCamions } from "@/lib/supabase/camions";
+import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
@@ -863,13 +863,13 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
   useEffect(() => {
     listerCamions()
       .then((liste) => {
-        setCamionsParc(liste.filter((c) => c.actif).map((c) => c.nom));
+        setCamionsParc(liste.filter((c) => c.actif));
         setParcCharge(true);
       })
       .catch(() => setParcCharge(true));
   }, []);
   const camionsLocaux = chargerCamionsConnus();
-  const camionsConnus = camionsParc.length > 0 ? camionsParc : camionsLocaux;
+  const camionsConnus = camionsParc.length > 0 ? camionsParc.map((c) => c.nom) : camionsLocaux;
 
   const problemes = CONTROLES_INSPECTION_TECH.filter((c) => controles[c] === "probleme");
   const anomalie = problemes.length > 0 || remarque.trim().length > 0;
@@ -967,9 +967,16 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
                     className="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900"
                   >
                     <option value="">— Choisis ton camion —</option>
-                    {camionsConnus.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                    {(camionsParc.length > 0 ? camionsParc : camionsLocaux.map((n) => ({ nom: n }))).map((c) => {
+                      // 🔧 Camion déclaré indisponible (au garage…) :
+                      // grisé — impossible de le choisir par habitude.
+                      const indispo = camionIndisponible(c);
+                      return (
+                        <option key={c.nom} value={c.nom} disabled={indispo}>
+                          {c.nom}{indispo ? ` — 🔧 ${c.indispoRaison || "indisponible"}` : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 ) : (
                   // Parc non chargé (hors-ligne) ou vide : saisie libre en

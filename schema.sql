@@ -2039,6 +2039,18 @@ $$;
 
 grant execute on function bon_travail_public(text) to anon, authenticated;
 
+-- SNIPPET « 65 » — CAMION INDISPONIBLE + MÉTIERS MASQUÉS (2026-08-17).
+-- 1) Un camion au garage se DÉCLARE (du/au + raison) : rappel à
+--    l'agenda, tuile du tableau de bord en orange, et le camion se
+--    grise dans le choix des techniciens à l'inspection du matin.
+alter table camions add column if not exists indispo_debut date;
+alter table camions add column if not exists indispo_fin date;
+alter table camions add column if not exists indispo_raison text;
+alter table camions add column if not exists indispo_note text;
+-- 2) Métiers masqués de la grille des taux (chaque entreprise ne voit
+--    que SES métiers) — les taux restent conservés, réaffichable.
+alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
+
 -- SNIPPET « 61 » — ENVOI AUTO DU BON CLIENT + RETRAIT DE FACTURATION.
 -- 1) Interrupteur par entreprise : à la fermeture de la tâche par le
 --    technicien, le bon (descriptif public, sans prix) part TOUT SEUL

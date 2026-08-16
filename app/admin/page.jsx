@@ -23,7 +23,7 @@ import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supa
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
-import { listerCamions, sauvegarderCamion } from "@/lib/supabase/camions";
+import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis } from "@/lib/supabase/devis";
 import { listerClients, sauvegarderClient, sAbonnerClients } from "@/lib/supabase/clients";
@@ -291,8 +291,10 @@ const NIVEAUX_CCQ_DEFAUT = ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 
 const niveauxPourMetier = (m) => NIVEAUX_PAR_METIER[m] || NIVEAUX_CCQ_DEFAUT;
 // Métiers de terrain effectifs = les deux fondateurs + ceux ajoutés dans
 // la grille des taux (Tarifs). Les métiers de bureau n'y sont jamais.
-const metiersTerrainDe = (tauxMetiers) =>
-  [...new Set([...METIERS_TERRAIN, ...Object.keys(tauxMetiers || {})])].filter((m) => !estMetierBureau(m));
+const metiersTerrainDe = (tauxMetiers, masques = []) =>
+  [...new Set([...METIERS_TERRAIN, ...Object.keys(tauxMetiers || {})])].filter(
+    (m) => !estMetierBureau(m) && !(masques || []).includes(m)
+  );
 // Table centrale des taux horaires coûtants. Modifiée à un seul endroit
 // (onglet Utilisateurs) — appliquée automatiquement à chaque technicien
 // selon son métier + niveau, y compris lors des augmentations annuelles.
@@ -2392,6 +2394,39 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
   const camions = [...new Set([...camionsParc, ...camionsInspectes])];
   const camionsHorsParc = camionsInspectes.filter((n) => !camionsParc.includes(n));
 
+  // ➕ Formulaire d'ajout PLIÉ par défaut (constat du propriétaire :
+  // les champs sous la liste donnaient l'impression d'éditer le camion
+  // du dessus). Un bouton clair l'ouvre, avec son propre titre.
+  const [ajoutCamionOuvert, setAjoutCamionOuvert] = useState(false);
+  // 🔧 Indisponibilité en saisie — { camionId, debut, fin, raison, note }.
+  const [indispoCamion, setIndispoCamion] = useState(null);
+  const declarerIndispo = () => {
+    const i = indispoCamion;
+    if (!i?.camionId || !i?.debut) return;
+    const fiche = (parcCamions || []).find((c) => c.id === i.camionId);
+    setParcCamions((prev) =>
+      prev.map((c) =>
+        c.id === i.camionId
+          ? { ...c, indispoDebut: i.debut, indispoFin: i.fin || null, indispoRaison: i.raison, indispoNote: i.note }
+          : c
+      )
+    );
+    declarerIndispoCamion(i.camionId, i).catch(() =>
+      ajouterJournal("⚠️ Indisponibilité affichée mais NON enregistrée (snippet 65 manquant ?) — réessaie.")
+    );
+    ajouterJournal(
+      `🔧 ${fiche?.nom || "Camion"} déclaré INDISPONIBLE (${i.raison}) du ${i.debut}${i.fin ? ` au ${i.fin}` : " (durée indéterminée)"} — rappel à l'agenda, grisé chez les techniciens.`
+    );
+    setIndispoCamion(null);
+  };
+  const leverIndispo = (c) => {
+    setParcCamions((prev) =>
+      prev.map((x) => (x.id === c.id ? { ...x, indispoDebut: null, indispoFin: null, indispoRaison: "", indispoNote: "" } : x))
+    );
+    leverIndispoCamion(c.id).catch(() => ajouterJournal("⚠️ Remise en service affichée mais NON enregistrée — réessaie."));
+    ajouterJournal(`✅ ${c.nom} remis en service.`);
+  };
+
   const ajouterCamion = () => {
     const nom = nouveauCamionNom.trim();
     if (!nom) return;
@@ -2410,6 +2445,7 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
       ajouterJournal(`⚠️ Camion « ${nom} » ajouté localement, mais NON enregistré (table camions absente ?).`)
     );
     ajouterJournal(`🚚 Camion « ${nom} » ajouté au parc — il apparaît maintenant dans la liste des techniciens.`);
+    setAjoutCamionOuvert(false);
     setNouveauCamionNom("");
     setNouveauCamionPlaque("");
     setNouveauCamionModele("");
@@ -2574,17 +2610,80 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
                         <p className="text-xs font-bold text-slate-800">{c.nom}</p>
                         <p className="text-[10px] text-slate-400">{[c.marqueModele, c.immatriculation].filter(Boolean).join(" · ") || "—"}</p>
                       </div>
-                      <button
-                        onClick={() => {
-                          setRetraitCamion(c);
-                          setMotifRetrait("");
-                          setRemplacePar("");
-                        }}
-                        className="shrink-0 rounded-md border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-600"
-                      >
-                        Retirer du parc…
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          onClick={() =>
+                            setIndispoCamion(
+                              indispoCamion?.camionId === c.id
+                                ? null
+                                : { camionId: c.id, debut: dateISO(new Date()), fin: "", raison: "Au garage", note: "" }
+                            )
+                          }
+                          className="rounded-md border border-amber-300 px-2 py-1 text-[10px] font-bold text-amber-700"
+                        >
+                          🔧 Indisponible…
+                        </button>
+                        <button
+                          onClick={() => {
+                            setRetraitCamion(c);
+                            setMotifRetrait("");
+                            setRemplacePar("");
+                          }}
+                          className="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-600"
+                        >
+                          Retirer du parc…
+                        </button>
+                      </div>
                     </div>
+                    {camionIndisponible(c) && (
+                      <p className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800">
+                        🔧 Indisponible{c.indispoRaison ? ` — ${c.indispoRaison}` : ""} du {c.indispoDebut}
+                        {c.indispoFin ? ` au ${c.indispoFin}` : " (durée indéterminée)"}
+                        {c.indispoNote ? ` · ${c.indispoNote}` : ""}
+                        <button
+                          onClick={() => leverIndispo(c)}
+                          className="ml-2 rounded bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold text-white active:scale-95"
+                        >
+                          Remettre en service
+                        </button>
+                      </p>
+                    )}
+                    {indispoCamion?.camionId === c.id && (
+                      <div className="mt-1.5 rounded-lg border border-amber-300 bg-amber-50 p-2.5">
+                        <p className="text-[11px] font-bold text-amber-900">Déclarer « {c.nom} » indisponible</p>
+                        <div className="mt-2 grid grid-cols-2 gap-1.5">
+                          <div>
+                            <label className="mb-0.5 block text-[9px] font-bold text-amber-700">Du</label>
+                            <input type="date" value={indispoCamion.debut} onChange={(e) => setIndispoCamion((p) => ({ ...p, debut: e.target.value }))} className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs" />
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[9px] font-bold text-amber-700">Au (vide = indéterminé)</label>
+                            <input type="date" value={indispoCamion.fin} onChange={(e) => setIndispoCamion((p) => ({ ...p, fin: e.target.value }))} className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs" />
+                          </div>
+                        </div>
+                        <select
+                          value={indispoCamion.raison}
+                          onChange={(e) => setIndispoCamion((p) => ({ ...p, raison: e.target.value }))}
+                          className="mt-1.5 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs font-semibold"
+                        >
+                          {["Au garage", "Accidenté", "Prêté", "Autre"].map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                        <input
+                          value={indispoCamion.note}
+                          onChange={(e) => setIndispoCamion((p) => ({ ...p, note: e.target.value }))}
+                          placeholder="Note (ex : freins, retour prévu jeudi)"
+                          className="mt-1.5 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs"
+                        />
+                        <div className="mt-2 flex gap-1.5">
+                          <Button onClick={declarerIndispo} disabled={!indispoCamion.debut} className="min-h-0 flex-1 py-1.5 text-[11px]">
+                            Confirmer l'indisponibilité
+                          </Button>
+                          <Button variant="outline" onClick={() => setIndispoCamion(null)} className="min-h-0 py-1.5 text-[11px]">
+                            Annuler
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                     {/* SAISIE DU RETRAIT — motif + camion remplaçant. */}
                     {retraitCamion?.id === c.id && (
                       <div className="mt-1.5 rounded-lg border border-amber-300 bg-amber-50 p-2.5">
@@ -2634,19 +2733,34 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
                     ⚠️ Camions vus dans des inspections mais absents du parc : {camionsHorsParc.join(", ")} — ajoute-les pour qu'ils apparaissent dans la liste des techniciens.
                   </p>
                 )}
-                <div className="grid grid-cols-2 gap-1.5">
-                  <input value={nouveauCamionNom} onChange={(e) => setNouveauCamionNom(e.target.value)} placeholder="Nom / numéro *" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
-                  <input value={nouveauCamionPlaque} onChange={(e) => setNouveauCamionPlaque(e.target.value)} placeholder="Immatriculation" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
-                  <input value={nouveauCamionModele} onChange={(e) => setNouveauCamionModele(e.target.value)} placeholder="Marque / modèle" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
-                  <Button variant="outline" onClick={ajouterCamion} disabled={!nouveauCamionNom.trim()} className="min-h-0 py-1.5 text-xs">
-                    <Plus size={12} /> Ajouter le camion
-                  </Button>
-                </div>
-                {/* POURQUOI le bouton est gris — toujours le dire. */}
-                {!nouveauCamionNom.trim() && (
-                  <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">
-                    ✋ Inscris au moins le « Nom / numéro » du camion (ex. : C-08) — le bouton s&apos;activera.
-                  </p>
+                {!ajoutCamionOuvert ? (
+                  <button
+                    onClick={() => setAjoutCamionOuvert(true)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-slate-300 px-2 py-2 text-xs font-bold text-slate-600 active:scale-[0.99]"
+                  >
+                    ➕ Ajouter un nouveau véhicule
+                  </button>
+                ) : (
+                  <div className="rounded-xl border border-slate-300 bg-slate-50 p-2.5">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">➕ Ajout d'un nouveau véhicule</p>
+                      <button onClick={() => setAjoutCamionOuvert(false)}><X size={14} className="text-slate-400" /></button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input value={nouveauCamionNom} onChange={(e) => setNouveauCamionNom(e.target.value)} placeholder="Nom / numéro *" className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                      <input value={nouveauCamionPlaque} onChange={(e) => setNouveauCamionPlaque(e.target.value)} placeholder="Immatriculation" className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                      <input value={nouveauCamionModele} onChange={(e) => setNouveauCamionModele(e.target.value)} placeholder="Marque / modèle" className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                      <Button variant="outline" onClick={ajouterCamion} disabled={!nouveauCamionNom.trim()} className="min-h-0 py-1.5 text-xs">
+                        <Plus size={12} /> Ajouter le camion
+                      </Button>
+                    </div>
+                    {/* POURQUOI le bouton est gris — toujours le dire. */}
+                    {!nouveauCamionNom.trim() && (
+                      <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">
+                        ✋ Inscris au moins le « Nom / numéro » du camion (ex. : C-08) — le bouton s&apos;activera.
+                      </p>
+                    )}
+                  </div>
                 )}
 
                 {/* ANCIENS VÉHICULES — dossiers conservés : coordonnées du
@@ -4704,7 +4818,7 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
   );
 }
 
-function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe }) {
+function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions }) {
   const configTdb = useEntreprise();
   const analyse = projets.map((p) => {
     const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
@@ -4743,17 +4857,20 @@ function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, t
         <button
           onClick={() => setOnglet("inspections")}
           className={`rounded-2xl border p-4 text-left active:scale-[0.99] ${
-            entretiensDus.length > 0 ? "border-orange-300 bg-orange-50" : "border-slate-200 bg-white"
+            entretiensDus.length > 0 || (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) ? "border-orange-300 bg-orange-50" : "border-slate-200 bg-white"
           }`}
         >
-          <p className={`text-[10px] font-extrabold uppercase tracking-wide ${entretiensDus.length > 0 ? "text-orange-500" : "text-slate-400"}`}>
+          <p className={`text-[10px] font-extrabold uppercase tracking-wide ${entretiensDus.length > 0 || (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) ? "text-orange-500" : "text-slate-400"}`}>
             Entretiens camions
           </p>
-          <p className={`mt-1 text-3xl font-extrabold tabular-nums ${entretiensDus.length > 0 ? "text-orange-600" : "text-[#131B2E]"}`}>
-            {entretiensDus.length}
+          <p className={`mt-1 text-3xl font-extrabold tabular-nums ${entretiensDus.length > 0 || (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) ? "text-orange-600" : "text-[#131B2E]"}`}>
+            {entretiensDus.length + (parcCamions || []).filter((c) => c.actif && camionIndisponible(c)).length}
           </p>
-          <p className={`mt-1 truncate text-[11px] ${entretiensDus.length > 0 ? "text-orange-500" : "text-slate-400"}`}>
-            {entretiensDus.length > 0 ? entretiensDus.join(", ") : "aucun entretien dû"}
+          <p className={`mt-1 truncate text-[11px] ${entretiensDus.length > 0 || (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) ? "text-orange-500" : "text-slate-400"}`}>
+            {[
+              ...entretiensDus,
+              ...(parcCamions || []).filter((c) => c.actif && camionIndisponible(c)).map((c) => `🔧 ${c.nom} indisponible`),
+            ].join(", ") || "aucun entretien dû"}
           </p>
         </button>
         <button onClick={() => setOnglet("projets")} className="rounded-2xl border border-red-200 bg-red-50 p-4 text-left active:scale-[0.99]">
@@ -6164,7 +6281,7 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
 // ONGLET TARIFS — grille des taux horaires + liste de prix des dépôts
 // (modification réservée à l'Admin principal, consultation sinon)
 // ============================================================
-function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMetiersRes, onSauvegarderTaux, prixDepots, setPrixDepots, onSauvegarderPrixDepots, estAdminPrincipal, ajouterJournal, catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, onSauvegarderCoutCamion }) {
+function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMetiersRes, onSauvegarderTaux, prixDepots, setPrixDepots, onSauvegarderPrixDepots, estAdminPrincipal, ajouterJournal, catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, onSauvegarderCoutCamion, metiersMasques = [], onMasquerMetier }) {
   // Taux de taxes des Paramètres — pour afficher les prix taxes incluses.
   const configEnt = useEntreprise();
   // État du bouton « Sauvegarder la liste de prix » (dépôts par zone).
@@ -6212,6 +6329,15 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMeti
     const nom = nouveauMetier.trim().replace(/\s+/g, " ");
     if (!nom) return;
     const propre = nom.charAt(0).toUpperCase() + nom.slice(1);
+    // S'il est simplement MASQUÉ : on le réaffiche (taux conservés).
+    const masque = (metiersMasques || []).find((m) => m.toLowerCase() === propre.toLowerCase());
+    if (masque) {
+      onMasquerMetier?.(masque, false);
+      ajouterJournal(`🧰 Métier « ${masque} » réaffiché — il était masqué, ses taux sont intacts.`);
+      setAjoutMetierOuvert(false);
+      setNouveauMetier("");
+      return;
+    }
     const dejaLa = [...metiersTerrainDe(tauxMetiers), ...METIERS_BUREAU].some(
       (m) => m.toLowerCase() === propre.toLowerCase()
     );
@@ -6274,9 +6400,35 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMeti
             bureau ont leur taux individuel sur leur fiche employé.
             La liste est VIVANTE : les fondateurs + tout métier ajouté
             ci-dessous (électricien, plombier…). */}
-        {metiersTerrainDe(tauxMetiers).map((m) => (
+        {(metiersMasques || []).length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-1 rounded-lg bg-slate-50 px-2 py-1.5 text-[10px] text-slate-500">
+            <span className="font-bold">Métiers masqués :</span>
+            {(metiersMasques || []).map((m) => (
+              <button
+                key={m}
+                onClick={() => onMasquerMetier?.(m, false)}
+                className="rounded-full border border-slate-300 bg-white px-1.5 py-0.5 font-bold text-slate-600 underline-offset-2 hover:underline"
+                title="Réafficher ce métier (ses taux ont été conservés)"
+              >
+                {m} ↩︎
+              </button>
+            ))}
+          </div>
+        )}
+        {metiersTerrainDe(tauxMetiers, metiersMasques).map((m) => (
           <div key={m} className="mb-3 last:mb-0">
-            <p className="mb-1 text-[11px] font-bold text-slate-700">{m}</p>
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[11px] font-bold text-slate-700">{m}</p>
+              {estAdminPrincipal && (
+                <button
+                  onClick={() => onMasquerMetier?.(m, true)}
+                  className="text-[9px] font-semibold text-slate-300 underline underline-offset-2 hover:text-slate-500"
+                  title="Masquer ce métier de la grille — ses taux sont conservés, réaffichable en un clic"
+                >
+                  masquer
+                </button>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {niveauxPourMetier(m).map((niv) => (
                 <div key={niv}>
@@ -17431,6 +17583,21 @@ export default function App() {
 
   // Coût du camion — modifié depuis l'onglet Tarifs (rangé avec les
   // autres coûtants), mais stocké avec la configuration d'entreprise.
+  // 🧰 Masquer / réafficher un métier de la grille des taux — chaque
+  // entreprise ne garde que SES métiers à l'écran (les taux restent).
+  const masquerMetier = async (metier, masquer) => {
+    const actuels = configEntreprise?.metiersMasques || [];
+    const liste = masquer ? [...new Set([...actuels, metier])] : actuels.filter((m) => m !== metier);
+    const nouvelle = { ...configEntreprise, metiersMasques: liste };
+    setConfigEntreprise(nouvelle);
+    try {
+      await sauvegarderEntreprise(nouvelle);
+      ajouterJournal(masquer ? `🧰 Métier « ${metier} » masqué de la grille (taux conservés).` : `🧰 Métier « ${metier} » réaffiché.`);
+    } catch {
+      ajouterJournal("⚠️ Masquage affiché mais NON enregistré (snippet 65 manquant ?) — réessaie.");
+    }
+  };
+
   const sauvegarderCoutCamion = async (valeur) => {
     const nouvelle = { ...configEntreprise, coutCamionHoraire: valeur };
     await sauvegarderEntreprise(nouvelle);
@@ -18221,6 +18388,7 @@ export default function App() {
           transactionsQb={transactionsQb}
           utilisateurs={utilisateurs}
           tauxMetiers={tauxMetiers}
+          parcCamions={parcCamions}
           clients={clients}
           compteAlertes={compteAlertes}
           compteAttente={tachesAttente.length}
@@ -18375,6 +18543,19 @@ export default function App() {
             ajouterJournal(`💲 Coût de «  » mis à jour dans la liste de prix depuis un devis.`);
           }}
         />
+      )}
+      {vue === "agenda" && (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) && (
+        <div className="px-4 pt-3 md:px-6">
+          <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+            🔧 Véhicule{(parcCamions || []).filter((c) => c.actif && camionIndisponible(c)).length > 1 ? "s" : ""} indisponible
+            {(parcCamions || []).filter((c) => c.actif && camionIndisponible(c)).length > 1 ? "s" : ""} aujourd'hui :{" "}
+            {(parcCamions || [])
+              .filter((c) => c.actif && camionIndisponible(c))
+              .map((c) => `${c.nom}${c.indispoRaison ? ` (${c.indispoRaison})` : ""}${c.indispoFin ? ` — jusqu'au ${c.indispoFin}` : ""}`)
+              .join(" · ")}
+            . Prévois un autre véhicule ou un covoiturage pour les techniciens concernés.
+          </p>
+        </div>
       )}
       {vue === "agenda" && (
         <OngletAgenda
@@ -18605,6 +18786,8 @@ export default function App() {
       {vue === "tarifs" && (
         <OngletTarifs
           onSauvegarderCoutCamion={sauvegarderCoutCamion}
+          metiersMasques={configEntreprise?.metiersMasques || []}
+          onMasquerMetier={masquerMetier}
           tauxMetiers={tauxMetiers}
           setTauxMetiers={setTauxMetiers}
           onSauvegarderTaux={() => sauvegarderTaux(tauxMetiers, tauxMetiersRes)}
