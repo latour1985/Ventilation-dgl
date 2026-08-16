@@ -2129,3 +2129,102 @@ as $$
 $$;
 
 grant execute on function bon_travail_public(text) to anon, authenticated;
+
+-- SNIPPET « 64 » — LE BON PUBLIC PORTE L'ADRESSE DE FACTURATION ET LES
+-- PHOTOS DE TOUTE L'ÉQUIPE (demande du propriétaire, 2026-08-17).
+-- • Adresse de facturation : résolue À L'AFFICHAGE depuis la fiche
+--   client (jamais figée sur le bon — toujours à jour, et jamais la
+--   nôtre : celle du client ou rien, règle gelée).
+-- • Photos : le bon ne portait que celles du DERNIER technicien à
+--   fermer. La fonction fusionne maintenant les photos de TOUTES les
+--   lignes d'heures de la tâche (chaque technicien enregistre les
+--   siennes) — même celles d'un collègue qui ferme après l'envoi.
+drop function if exists bon_travail_public(text);
+
+create function bon_travail_public(p_jeton text)
+returns table (
+  entreprise_nom text,
+  entreprise_adresse text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_rbq text,
+  titre text,
+  client_nom text,
+  client_adresse_facturation text,
+  description text,
+  date_travail date,
+  adresse_travaux text,
+  photos jsonb,
+  legendes jsonb,
+  signe_par_nom text,
+  signe_par_collegue boolean,
+  client_absent boolean,
+  unites jsonb,
+  expire boolean
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    coalesce(e.nom_commercial, e.nom_legal, 'Ventilation DGL inc.'),
+    e.adresse,
+    e.telephone,
+    e.courriel,
+    e.numero_rbq,
+    b.titre,
+    b.client_nom,
+    c.adresse_facturation,
+    b.description,
+    b.date_travail,
+    b.adresse_travaux,
+    ph.photos,
+    coalesce((
+      select jsonb_object_agg(pl.url, pl.legende)
+      from photos_legendes pl
+      where pl.legende is not null and pl.legende <> ''
+        and pl.url in (
+          select jsonb_array_elements_text(coalesce(ph.photos->'avant', '[]'::jsonb))
+          union
+          select jsonb_array_elements_text(coalesce(ph.photos->'apres', '[]'::jsonb))
+        )
+    ), '{}'::jsonb),
+    b.signe_par_nom,
+    coalesce(b.signe_par_collegue, false),
+    b.client_absent,
+    coalesce(b.unites, '[]'::jsonb),
+    (b.jeton_expire_le is not null and b.jeton_expire_le < now())
+  from bons_travail b
+  left join entreprises e on e.id = b.entreprise_id
+  left join clients_app c
+    on c.nom = b.client_nom and c.entreprise_id = b.entreprise_id
+  cross join lateral (
+    select jsonb_build_object(
+      'avant', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'avant', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'avant', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb),
+      'apres', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'apres', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'apres', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb)
+    ) as photos
+  ) ph
+  where b.jeton_public = p_jeton;
+$$;
+
+grant execute on function bon_travail_public(text) to anon, authenticated;

@@ -134,13 +134,26 @@ export default function PageBonPublic({ params }) {
 
           <h1 className="mt-4 text-2xl font-extrabold text-[#131B2E]">BON DE TRAVAIL</h1>
           <p className="text-xs text-slate-500">Travaux réalisés le {bon.date}</p>
-          <p className="mt-2 text-xs text-slate-500">Pour</p>
-          <p className="text-sm font-bold text-slate-800">{bon.clientNom}</p>
-          {bon.adresseTravaux && (
-            <p className="mt-1 flex items-start gap-1 text-xs text-slate-500">
-              <MapPin size={13} className="mt-0.5 shrink-0" /> {bon.adresseTravaux}
-            </p>
-          )}
+          {/* LES DEUX ADRESSES — facturation (fiche client) et travaux.
+              La facturation ne s'affiche que si elle existe : celle du
+              client ou rien, jamais la nôtre (règle gelée). */}
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-xs text-slate-500">Facturé à</p>
+              <p className="text-sm font-bold text-slate-800">{bon.clientNom}</p>
+              {bon.adresseFacturation && (
+                <p className="text-xs text-slate-500">{bon.adresseFacturation}</p>
+              )}
+            </div>
+            {bon.adresseTravaux && (
+              <div>
+                <p className="text-xs text-slate-500">Adresse des travaux</p>
+                <p className="mt-0.5 flex items-start gap-1 text-xs font-semibold text-slate-700">
+                  <MapPin size={13} className="mt-0.5 shrink-0" /> {bon.adresseTravaux}
+                </p>
+              </div>
+            )}
+          </div>
           <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
             Ce lien est disponible pendant {JOURS_VALIDITE_BON} jours. Pour conserver le document,
             utilisez le bouton « Télécharger (PDF) » au bas de la page.

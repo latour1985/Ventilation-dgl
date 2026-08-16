@@ -390,9 +390,14 @@ export function BonTravailPublicPDF({ bon, config }) {
         <EnTetePDF config={config} />
         <Text style={s.title}>BON DE TRAVAIL — TRAVAUX RÉALISÉS</Text>
         <Text style={s.meta}>Date des travaux : {bon?.date || "—"}</Text>
-        {bon?.adresseTravaux ? <Text style={s.meta}>Adresse des travaux : {bon.adresseTravaux}</Text> : null}
-        <Text style={[s.meta, { marginTop: 4 }]}>Client :</Text>
-        <Text style={s.clientName}>{bon?.clientNom || "—"}</Text>
+        {/* Les DEUX adresses : facturation (fiche client — jamais la
+            nôtre, règle gelée) et travaux, côte à côte comme sur les
+            autres documents. */}
+        <AdressesPDF
+          clientNom={bon?.clientNom}
+          adresseFacturation={bon?.adresseFacturation}
+          adresseTravaux={bon?.adresseTravaux}
+        />
 
         <View style={s.block}>
           <Text style={[s.th, { marginBottom: 2 }]}>DESCRIPTION DES TRAVAUX</Text>
