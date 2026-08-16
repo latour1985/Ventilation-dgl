@@ -2080,6 +2080,49 @@ end $$;
 --    personne ne peut les lire. C'est l'état le plus sûr : rien à
 --    faire ; leur suppression définitive attendra le grand soir.
 
+-- SNIPPET « 67 » — VERROUS SUR LES FONCTIONS + STOCKAGE (2026-08-17).
+-- Suite du ménage Security Advisor, d'après l'export complet.
+--
+-- 1) LA VRAIE TROUVAILLE : la clé de chiffrement et les fonctions
+--    encrypt/decrypt étaient APPELABLES depuis le navigateur (même sans
+--    connexion !). Personne côté client ne doit jamais y toucher —
+--    seuls les mécanismes internes de la base s'en servent.
+revoke execute on function get_encryption_key() from public, anon, authenticated;
+revoke execute on function encrypt_data(text) from public, anon, authenticated;
+revoke execute on function decrypt_data(bytea) from public, anon, authenticated;
+revoke execute on function fn_audit_trigger() from public, anon, authenticated;
+revoke execute on function fn_set_updated_at() from public, anon, authenticated;
+
+-- 2) Les aides internes (compteurs, rôles pour les policies) : réservées
+--    aux CONNECTÉS — plus jamais appelables anonymement.
+revoke execute on function prochain_numero(text) from public, anon;
+grant execute on function prochain_numero(text) to authenticated;
+revoke execute on function fn_mon_email() from public, anon;
+grant execute on function fn_mon_email() to authenticated;
+revoke execute on function fn_mon_role() from public, anon;
+grant execute on function fn_mon_role() to authenticated;
+revoke execute on function fn_est_admin() from public, anon;
+grant execute on function fn_est_admin() to authenticated;
+revoke execute on function fn_est_admin_principal() from public, anon;
+grant execute on function fn_est_admin_principal() to authenticated;
+revoke execute on function fn_est_bureau() from public, anon;
+grant execute on function fn_est_bureau() to authenticated;
+revoke execute on function fn_sur_ma_tache(text) from public, anon;
+grant execute on function fn_sur_ma_tache(text) to authenticated;
+
+-- 3) STOCKAGE : le bucket public des photos n'a pas besoin d'une policy
+--    de LECTURE — les adresses publiques marchent sans elle. La retirer
+--    empêche un inconnu de LISTER tous les fichiers du bucket (l'appli
+--    n'utilise jamais le listage — vérifié dans le code).
+drop policy if exists "photos_travaux_lecture" on storage.objects;
+
+-- RESTENT VOLONTAIREMENT (à ignorer dans l'advisor) :
+--   • devis_public / repondre_devis / bon_travail_public appelables par
+--     anon : c'est LE mécanisme des pages publiques à jeton secret.
+--   • Les policies « always true » (achats_libres, commandes_camion,
+--     journal, photos_legendes…) : mode rodage assumé — resserrées au
+--     grand soir multi-entreprises, avant la première entreprise cliente.
+
 -- SNIPPET « 61 » — ENVOI AUTO DU BON CLIENT + RETRAIT DE FACTURATION.
 -- 1) Interrupteur par entreprise : à la fermeture de la tâche par le
 --    technicien, le bon (descriptif public, sans prix) part TOUT SEUL
