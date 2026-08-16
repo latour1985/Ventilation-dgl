@@ -10110,6 +10110,17 @@ function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
   const basculer = (id) =>
     setSelectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const selection = courriels.filter((cc) => selectionIds.includes(cc.id));
+  // COURRIEL AJOUTÉ À LA MAIN — parfois le document doit aussi partir
+  // ailleurs (assureur, gestionnaire d'immeuble, notaire…). Plusieurs
+  // adresses possibles, séparées par une virgule ou un point-virgule.
+  // Seules les adresses au format valide partent — jamais de rebond
+  // silencieux à cause d'une coquille.
+  const [extra, setExtra] = useState("");
+  const extras = extra
+    .split(/[,;]/)
+    .map((x) => x.trim())
+    .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x))
+    .map((x, i) => ({ id: `extra-${i}`, email: x, label: "Ajouté à la main" }));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -10124,7 +10135,7 @@ function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
 
         {courriels.length === 0 ? (
           <p className="rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-700">
-            {client?.nom} n'a aucun courriel enregistré — ajoute-en un dans sa fiche (onglet Clients) avant l'envoi.
+            {client?.nom} n'a aucun courriel enregistré — ajoute-en un dans sa fiche (onglet Clients), ou utilise le champ « autre adresse » ci-dessous pour cet envoi-ci.
           </p>
         ) : (
           <>
@@ -10161,10 +10172,30 @@ function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
           </>
         )}
 
+        <div className="mt-3">
+          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+            Envoyer aussi à une autre adresse (facultatif)
+          </label>
+          <input
+            type="email"
+            value={extra}
+            onChange={(e) => setExtra(e.target.value)}
+            placeholder="ex : assureur@exemple.com — virgule pour plusieurs"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#FF6A13]"
+          />
+          {extra.trim() !== "" && extras.length === 0 && (
+            <p className="mt-0.5 text-[10px] font-bold text-amber-600">
+              Adresse incomplète — vérifie le format (nom@domaine.com).
+            </p>
+          )}
+        </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={onFermer}>Annuler</Button>
-          <Button disabled={selection.length === 0} onClick={() => onConfirmer(selection)}>
-            Envoyer{selection.length > 1 ? ` (${selection.length})` : ""}
+          <Button
+            disabled={selection.length + extras.length === 0}
+            onClick={() => onConfirmer([...selection, ...extras])}
+          >
+            Envoyer{selection.length + extras.length > 1 ? ` (${selection.length + extras.length})` : ""}
           </Button>
         </div>
       </div>
