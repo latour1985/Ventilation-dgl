@@ -26,6 +26,7 @@ import {
   clientQboPour,
   articleServiceQboPour,
   envoyerFactureParQb,
+  environnementQb,
 } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
@@ -94,6 +95,12 @@ export async function POST(request) {
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
       ...(envoyerA.length > 0 ? { BillEmail: { Address: envoyerA.join(", ") } } : {}),
+      // Notre MESSAGE au client — il apparaît sur la facture et dans le
+      // courriel QuickBooks (contexte : réservation, délai, référence).
+      ...(corps?.customerMemo ? { CustomerMemo: { value: String(corps.customerMemo).slice(0, 900) } } : {}),
+      // L'ADRESSE DES TRAVAUX — elle change à chaque job, donc elle vit
+      // sur la FACTURE (champ livraison), pas sur la fiche client.
+      ...(corps?.adresseTravaux ? { ShipAddr: { Line1: String(corps.adresseTravaux).slice(0, 500) } } : {}),
       PrivateNote: `Facture — ${corps?.reference || "travaux"} — créée par l'application Ventilation DGL`,
       // Choix HUMAIN fait à l'envoi (fenêtre d'avant-envoi) — jamais un
       // défaut silencieux pour ces factures.
@@ -127,6 +134,7 @@ export async function POST(request) {
       docNumber: facture?.DocNumber || null,
       lienPaiement: facture?.InvoiceLink || null,
       envoiQb,
+      environnement: environnementQb(),
     });
   } catch (e) {
     return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });

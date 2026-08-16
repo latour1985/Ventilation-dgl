@@ -1427,9 +1427,16 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
       reference: `pièce — ${p.pieceRequise || ""}`,
       paiementCarte: carteOk,
       paiementVirement: configEnt.paiementVirementAppels === true,
+      envoyerA: configEnt?.envoiAutoFactureQb === true ? adresses : [],
+      customerMemo: demandeDescription,
     });
     if (rQb?.creee) factureQb = rQb;
-    const r = await envoyerCourriel({
+    // PRODUCTION + envoi confirmé par QuickBooks : la facture officielle
+    // (taxée, avec notre message) suffit. En Sandbox, les deux partent.
+    const r =
+      rQb?.environnement === "production" && rQb?.envoiQb?.envoyee
+        ? { envoye: true, viaQb: true }
+        : await envoyerCourriel({
       a: adresses,
       sujet: `Demande de paiement — ${montantPiece > 0 ? "pièce pour votre réparation" : "frais de déplacement"} (${configEnt.nomCommercial || configEnt.nomLegal})`,
       html: gabaritDemandePaiement({
@@ -7644,6 +7651,23 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
                 </span>
               </span>
             </label>
+            {/* 🧾 ENVOI AUTOMATIQUE DES FACTURES — le même réglage que la
+                console plateforme : chaque entreprise décide. */}
+            <label className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${brouillon.envoiAutoFactureQb === true ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}>
+              <input
+                type="checkbox"
+                checked={brouillon.envoiAutoFactureQb === true}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => champ("envoiAutoFactureQb", e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+              />
+              <span>
+                🧾 Envoi automatique des factures par QuickBooks
+                <span className="block text-[10px] font-normal text-slate-500">
+                  Activé : chaque facture créée (appels, devis, contrats, dépôts, pièces) part immédiatement par QuickBooks aux courriels choisis, avec preuve au registre. Décoché : la facture est créée dans QuickBooks SANS partir — bouton « Envoyer par QuickBooks » sur chaque ligne quand tu es prêt.
+                </span>
+              </span>
+            </label>
             {/* ANNÉE FISCALE — un jalon "mois + jour". L'analyse de
                 rentabilité offre « Année fiscale » calculée date à date
                 depuis ce jalon : les mêmes bornes que le comptable. */}
@@ -9230,6 +9254,8 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
       )
     );
     ajouterJournal(`✏️ Courriel corrigé sur la fiche : ${propre}`);
+    // La fiche QuickBooks suit — plus jamais de divergence.
+    synchroniserClientsQbo({ clientId, forcer: true }).catch(() => {});
     return true;
   };
 
@@ -9255,6 +9281,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     );
     const c = clients.find((x) => x.id === clientId);
     ajouterJournal(`📧 Courriel "${nouveauCourrielLabel.trim() || "Autre"}" ajouté pour ${c?.nom} (${nouveauCourrielEmail.trim()})`);
+    synchroniserClientsQbo({ clientId, forcer: true }).catch(() => {});
     setNouveauCourrielLabel("");
     setNouveauCourrielEmail("");
   };
@@ -9281,6 +9308,8 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
           : c
       )
     );
+    // Le courriel PAR DÉFAUT est celui que QuickBooks utilise — il suit.
+    synchroniserClientsQbo({ clientId, forcer: true }).catch(() => {});
   };
 
   const [travailOuvertId, setTravailOuvertId] = useState(null);
@@ -10350,7 +10379,7 @@ function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
 // (registre QuickBooks), son PDF officiel et, au besoin, son bouton
 // « Renvoyer ». Rien ne se perd : pas de preuve = alerte rouge.
 // ============================================================
-function FacturesEmisesListe({ bon, onPdf, onRenvoyer }) {
+function FacturesEmisesListe({ bon, onPdf, onRenvoyer, envoiAuto = true }) {
   return (
     <div className="mt-1.5 space-y-1">
       {(bon.facturesEmises || []).map((f) => (
@@ -10361,6 +10390,13 @@ function FacturesEmisesListe({ bon, onPdf, onRenvoyer }) {
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {f.envoiQb?.statut === "envoyee" ? (
               <span className="font-bold text-emerald-600">✉️ Envoyée par QuickBooks ✓</span>
+            ) : f.qboInvoiceId && !envoiAuto ? (
+              <>
+                <span className="font-bold text-slate-500">📄 Créée — envoi manuel</span>
+                <button onClick={() => onRenvoyer(bon, f)} className="rounded bg-slate-700 px-1.5 py-0.5 font-bold text-white active:scale-95">
+                  Envoyer par QuickBooks
+                </button>
+              </>
             ) : f.qboInvoiceId ? (
               <>
                 <span className="font-bold text-red-600">⚠️ Envoi non confirmé</span>
@@ -16326,10 +16362,15 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes.filter((b) => categorieBon(b) !== "retire") : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
   // Factures dont l'envoi par QuickBooks n'est pas (encore) confirmé au
   // registre — l'alerte passive de l'onglet.
-  const envoisAConfirmer = bonsGroupes.reduce(
-    (s, x) => s + (x.facturesEmises || []).filter((f) => f.qboInvoiceId && f.envoiQb?.statut !== "envoyee").length,
-    0
-  );
+  // En mode MANUEL (choix de l'entreprise), « pas envoyé » n'est pas un
+  // problème — l'alerte ne compte qu'en mode automatique.
+  const envoisAConfirmer =
+    configEnt?.envoiAutoFactureQb === true
+      ? bonsGroupes.reduce(
+          (s, x) => s + (x.facturesEmises || []).filter((f) => f.qboInvoiceId && f.envoiQb?.statut !== "envoyee").length,
+          0
+        )
+      : 0;
 
   const bonFacturation = bons.find((b) => b.id === bonFacturationId) || null;
   const devisFacturation = bonFacturation ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) : null;
@@ -16514,8 +16555,10 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       reference: b.projet || "travaux",
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
-      // QuickBooks envoie lui-même sa facture officielle au client.
-      envoyerA: destinataires.map((c) => c.email),
+      // QuickBooks envoie lui-même SA facture — seulement si
+      // l'entreprise a activé l'envoi automatique (Paramètres).
+      envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
+      adresseTravaux: b.adresseTravaux || null,
     });
     if (r?.erreur) {
       ajouterJournal(`⚠️ Facture QuickBooks NON créée pour "${b.projet}" : ${r.erreur} — le bon reste en attente`);
@@ -16591,6 +16634,10 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       reference: `${bons.find((x) => x.id === bonId)?.devisNumero || "travaux"}`,
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
+      // QuickBooks envoie SA facture — seulement si l'entreprise a
+      // activé l'envoi automatique. La route relit la preuve au registre.
+      envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
+      adresseTravaux: bons.find((x) => x.id === bonId)?.adresseTravaux || null,
     });
     if (rQbo?.erreur || rQbo?.nonConnecte) {
       ajouterJournal(
@@ -16926,7 +16973,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                         </div>
                       </>
                     )}
-                    <FacturesEmisesListe bon={b} onPdf={ouvrirPdfFacture} onRenvoyer={renvoyerFactureQb} />
+                    <FacturesEmisesListe bon={b} onPdf={ouvrirPdfFacture} onRenvoyer={renvoyerFactureQb} envoiAuto={configEnt?.envoiAutoFactureQb === true} />
                   </div>
                 )}
               </div>
@@ -17662,6 +17709,13 @@ export default function App() {
     // ------------------------------------------------------------
     if (!infos.clientNom) return;
     let facture = null;
+    // Les destinataires et NOTRE message de réservation voyagent sur la
+    // facture QuickBooks (CustomerMemo) — le client reçoit la facture
+    // officielle avec le contexte dedans, si l'envoi auto est activé.
+    const adressesDepot = [...new Set(infos.courriels || [])].filter(Boolean);
+    const messageClientDepot =
+      `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
+      `Dès sa réception, votre rendez-vous est confirmé.`;
     const r = await creerFactureDepot({
       tacheId,
       clientId: infos.clientId || null,
@@ -17670,12 +17724,15 @@ export default function App() {
       zone: infos.zone || null,
       joursLimite: joursDelai,
       description: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""} — ${infos.clientNom}`,
+      envoyerA: adressesDepot,
+      messageClient: messageClientDepot,
+      envoyerAuto: configEntreprise?.envoiAutoFactureQb === true,
     });
     if (r?.creee) {
       facture = r;
       setDepots((prev) => ({ ...prev, [tacheId]: { ...prev[tacheId], qboInvoiceId: r.factureId, qboDocNumber: r.docNumber } }));
       majDepotFactureQbo(tacheId, { factureId: r.factureId, docNumber: r.docNumber }).catch(() => {});
-      ajouterJournal(`🧾 Facture de dépôt QuickBooks Nº ${r.docNumber || r.factureId} créée (Sandbox) — annulation par VOID seulement`);
+      ajouterJournal(`🧾 Facture de dépôt QuickBooks Nº ${r.docNumber || r.factureId} créée${r.envoiQb ? (r.envoiQb.envoyee ? ` — ✉️ ENVOYÉE par QuickBooks à ${adressesDepot.join(", ")} (confirmé au registre)` : " — ⚠️ envoi par QuickBooks NON confirmé") : ""} — annulation par VOID seulement`);
       if (r.carteOfferte || r.virementOffert) {
         ajouterJournal(
           `💳 Paiement en ligne OFFERT sur cette facture : ${[r.carteOfferte ? "carte" : null, r.virementOffert ? "virement" : null].filter(Boolean).join(" + ")}${r.lienPaiement ? "" : " (lien à venir — QuickBooks Payments pas encore actif sur le compte)"}`
@@ -17689,9 +17746,16 @@ export default function App() {
       ajouterJournal(`⚠️ Facture de dépôt QuickBooks NON créée : ${r.erreur} — le dépôt reste actif quand même`);
     }
     // Le courriel de demande de dépôt — aux destinataires choisis.
-    const adresses = [...new Set(infos.courriels || [])].filter(Boolean);
+    const adresses = adressesDepot;
     if (adresses.length === 0) {
       ajouterJournal(`📞 Aucun courriel choisi pour le dépôt de ${infos.clientNom} — appelle le client pour le paiement`);
+      return;
+    }
+    // RÈGLE VALIDÉE (2026-08-17) : en PRODUCTION QuickBooks avec envoi
+    // confirmé, la facture officielle (taxée) suffit — notre courriel
+    // maison se tait. En SANDBOX (fichier américain sans TPS/TVQ), les
+    // DEUX partent : le nôtre porte les bons montants taxés.
+    if (r?.environnement === "production" && r?.envoiQb?.envoyee) {
       return;
     }
     const rc = await envoyerCourriel({

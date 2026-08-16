@@ -2051,6 +2051,17 @@ alter table camions add column if not exists indispo_note text;
 --    que SES métiers) — les taux restent conservés, réaffichable.
 alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
 
+-- SNIPPET « 69 » — ENVOI AUTOMATIQUE DES FACTURES : OPTION PAR
+-- ENTREPRISE (2026-08-17). Activé : chaque facture créée (appels,
+-- devis, contrats, dépôts, pièces) est ENVOYÉE immédiatement par
+-- QuickBooks aux courriels choisis, avec preuve au registre.
+-- Désactivé (défaut des nouvelles entreprises) : la facture est créée
+-- dans QuickBooks SANS partir — bouton « Envoyer par QuickBooks » sur
+-- chaque ligne. Réglable par l'Admin principal (Paramètres) ET par la
+-- console plateforme. DGL : activé d'office (demande du propriétaire).
+alter table entreprises add column if not exists envoi_auto_facture_qb boolean not null default false;
+update entreprises set envoi_auto_facture_qb = true where id = 'dgl';
+
 -- SNIPPET « 68 » — VERROU DE CONNEXION : 3 ÉCHECS = 15 MINUTES.
 -- Compteur d'échecs par courriel, tenu CÔTÉ SERVEUR (route
 -- /api/connexion — un compteur dans le navigateur ne vaudrait rien).

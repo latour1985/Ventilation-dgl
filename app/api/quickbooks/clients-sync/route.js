@@ -20,6 +20,7 @@ import {
   jetonAccesValide,
   utilisateurDepuisJeton,
   clientQboPour,
+  mettreAJourClientQbo,
 } from "@/lib/quickbooksServeur";
 
 const MAX_PAR_PASSE = 100;
@@ -76,6 +77,17 @@ export async function POST(request) {
   const erreurs = [];
   for (const c of aTraiter) {
     if (c.quickbooks_customer_id) {
+      // DÉJÀ RELIÉ : { forcer: true } pousse la fiche À JOUR (courriel,
+      // téléphone, adresse) — appelé quand la fiche change dans l'app.
+      if (corps?.forcer === true) {
+        try {
+          await mettreAJourClientQbo(acces, admin, c.id);
+          fait++;
+        } catch (e) {
+          erreurs.push(`${c.nom} : ${e?.message || "erreur"}`);
+        }
+        continue;
+      }
       sautes++;
       continue;
     }

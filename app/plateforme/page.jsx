@@ -246,6 +246,7 @@ function TableauPlateforme({ session }) {
               if ("rabaisPourcent" in champs) bd.rabais_pourcent = Number(champs.rabaisPourcent) || 0;
               if ("promoPourcent" in champs) bd.promo_pourcent = Number(champs.promoPourcent) || 0;
               if ("promoMois" in champs) bd.promo_mois = Number(champs.promoMois) || 0;
+              if ("envoiAutoFactureQb" in champs) bd.envoi_auto_facture_qb = champs.envoiAutoFactureQb === true;
               await majEntreprisePlateforme(id, bd).catch(() => charger());
             }}
           />
@@ -426,6 +427,23 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                         date de création du compte — puis retour au tarif régulier.
                       </span>
                     </div>
+                    {/* 🧾 TYPE DE PROGRAMME DE FACTURATION — l'entreprise
+                        peut aussi l'activer elle-même dans ses Paramètres. */}
+                    <label className="mt-2 flex items-start gap-2 text-[11px] font-semibold text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={e.envoiAutoFactureQb === true}
+                        onChange={(ev) => onMaj(e.id, { envoiAutoFactureQb: ev.target.checked })}
+                        className="mt-0.5 h-4 w-4 accent-emerald-600"
+                      />
+                      <span>
+                        🧾 Envoi automatique des factures par QuickBooks
+                        <span className="block text-[9px] font-normal leading-snug text-slate-400">
+                          Coché : les factures partent toutes seules dès leur création. Décoché : créées dans QuickBooks
+                          sans partir — l'entreprise envoie manuellement (et peut activer l'option elle-même dans ses Paramètres).
+                        </span>
+                      </span>
+                    </label>
                     <p className="mt-1 text-[9px] leading-snug text-slate-400">
                       Le rabais pionnier s'applique à la base ET aux sièges extras — à vie (entente). Si une promo
                       est aussi active, LE MEILLEUR des deux s'applique. Pendant la période gratuite, rien n'est

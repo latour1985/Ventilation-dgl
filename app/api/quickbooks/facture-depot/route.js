@@ -31,6 +31,8 @@ import {
   echapperQbo,
   clientQboPour,
   articleServiceQboPour,
+  envoyerFactureParQb,
+  environnementQb,
 } from "@/lib/quickbooksServeur";
 // (Les helpers d'écriture vivent dans quickbooksServeur.js — partagés
 // avec les routes facture, estimate et clients-sync.)
@@ -115,6 +117,13 @@ export async function POST(request) {
     const cree = await ecrireQbo(acces, "invoice?include=invoiceLink", {
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
+      // ENVOI PAR QUICKBOOKS (2026-08-17) : les courriels choisis et
+      // notre message de réservation voyagent SUR la facture — le
+      // client reçoit la facture officielle avec notre contexte dedans.
+      ...((Array.isArray(corps?.envoyerA) ? corps.envoyerA : []).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || "").trim())).length > 0
+        ? { BillEmail: { Address: corps.envoyerA.map((e) => String(e).trim()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).slice(0, 5).join(", ") } }
+        : {}),
+      ...(corps?.messageClient ? { CustomerMemo: { value: String(corps.messageClient).slice(0, 900) } } : {}),
       PrivateNote: `Dépôt d'appel de service — tâche ${corps?.tacheId || "?"} — créé par l'application Ventilation DGL`,
       AllowOnlineCreditCardPayment: carteOfferte,
       AllowOnlineACHPayment: virementOffert,
@@ -128,6 +137,22 @@ export async function POST(request) {
       ],
     });
     const facture = cree?.Invoice;
+
+    // ENVOI PAR QUICKBOOKS + PREUVE — seulement si l'entreprise a activé
+    // l'envoi automatique (interrupteur Paramètres / console plateforme).
+    let envoiQb = null;
+    const adressesEnvoi = (Array.isArray(corps?.envoyerA) ? corps.envoyerA : [])
+      .map((e) => String(e || "").trim())
+      .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+      .slice(0, 5);
+    if (corps?.envoyerAuto === true && adressesEnvoi.length > 0 && facture?.Id) {
+      try {
+        envoiQb = await envoyerFactureParQb(acces, facture.Id, adressesEnvoi);
+      } catch {
+        envoiQb = { envoyee: false, envoyeeLe: null };
+      }
+    }
+
     return Response.json({
       creee: true,
       factureId: facture?.Id || null,
@@ -135,6 +160,8 @@ export async function POST(request) {
       lienPaiement: facture?.InvoiceLink || null,
       carteOfferte,
       virementOffert,
+      envoiQb,
+      environnement: environnementQb(),
     });
   } catch (e) {
     return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });
