@@ -5311,8 +5311,13 @@ function ApercuBonTravailClient({ travail, clients, onFermer }) {
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos avant travaux</p>
                   <div className="mt-1 grid grid-cols-3 gap-2">
                     {travail.photosAvantUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
                         <img src={u} alt={`Avant ${i + 1}`} className="h-full w-full object-cover" />
+                        {u.includes("-galerie") && (
+                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
+                            📁 importée
+                          </span>
+                        )}
                       </a>
                     ))}
                   </div>
@@ -5323,8 +5328,13 @@ function ApercuBonTravailClient({ travail, clients, onFermer }) {
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos après travaux</p>
                   <div className="mt-1 grid grid-cols-3 gap-2">
                     {travail.photosApresUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
                         <img src={u} alt={`Après ${i + 1}`} className="h-full w-full object-cover" />
+                        {u.includes("-galerie") && (
+                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
+                            📁 importée
+                          </span>
+                        )}
                       </a>
                     ))}
                   </div>
@@ -5480,8 +5490,13 @@ function DetailTravail({ travail, clients, onFermer, onReactiver }) {
                   <p className="mb-1 text-[10px] font-bold text-slate-400">Avant travaux</p>
                   <div className="grid grid-cols-3 gap-2">
                     {travail.photosAvantUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
                         <img src={u} alt={`Avant ${i + 1}`} className="h-full w-full object-cover" />
+                        {u.includes("-galerie") && (
+                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
+                            📁 importée
+                          </span>
+                        )}
                       </a>
                     ))}
                   </div>
@@ -5492,8 +5507,13 @@ function DetailTravail({ travail, clients, onFermer, onReactiver }) {
                   <p className="mb-1 text-[10px] font-bold text-slate-400">Après travaux</p>
                   <div className="grid grid-cols-3 gap-2">
                     {travail.photosApresUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block aspect-square overflow-hidden rounded-lg border border-slate-200">
+                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
                         <img src={u} alt={`Après ${i + 1}`} className="h-full w-full object-cover" />
+                        {u.includes("-galerie") && (
+                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
+                            📁 importée
+                          </span>
+                        )}
                       </a>
                     ))}
                   </div>

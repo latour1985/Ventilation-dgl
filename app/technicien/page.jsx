@@ -2262,6 +2262,10 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
   const [erreur, setErreur] = useState("");
   const [cameraOuverte, setCameraOuverte] = useState(false);
   const inputRef = useRef(null);
+  // 📁 Sélecteur GALERIE — sans l'attribut capture : le système ouvre le
+  // choix de photos existantes. L'app ne voit QUE les photos choisies
+  // (sélecteur du système), jamais le reste de la galerie.
+  const inputGalerieRef = useRef(null);
 
   const ajouterPhoto = (nouvellePhoto) => {
     const nouvellesPhotos = [...photos, nouvellePhoto];
@@ -2274,7 +2278,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
     // travail client, PDF). Hors-ligne : la photo reste locale — elle
     // apparaîtra sur le téléphone mais pas au dossier.
     if (nouvellePhoto.blob) {
-      televerserPhotoTravail(nouvellePhoto.blob)
+      televerserPhotoTravail(nouvellePhoto.blob, nouvellePhoto.origine || "camera")
         .then((urlDistante) => {
           setPhotos((prev) => {
             const maj = prev.map((p) => (p.url === nouvellePhoto.url ? { ...p, urlDistante } : p));
@@ -2302,14 +2306,16 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
     if (onPhotosChange) onPhotosChange(nouvellesPhotos);
   };
 
-  const gererFichier = async (e) => {
+  const gererFichier = async (e, origine = "camera") => {
     const fichier = e.target.files[0];
     if (!fichier) return;
     setEnCours(true);
     setErreur("");
     try {
       const resultat = await compresserImage(fichier);
-      ajouterPhoto(resultat);
+      // L'ORIGINE accompagne la photo : "camera" = prise en direct
+      // (valeur de preuve), "galerie" = importée du téléphone.
+      ajouterPhoto({ ...resultat, origine });
     } catch (err) {
       // Ne jamais laisser l'interface bloquée en "chargement" si la
       // compression échoue — le technicien voit un message clair et
@@ -2348,6 +2354,9 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
         {photos.map((p, i) => (
           <div key={i} className="relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200">
             <img src={p.url} alt="" className="h-full w-full object-cover" />
+            {p.origine === "galerie" && (
+              <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[9px] text-white" title="Importée de la galerie">📁</span>
+            )}
             <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[9px] text-white">
               -{Math.round(100 - (p.tailleCompressee / p.tailleOriginale) * 100)}%
             </div>
@@ -2364,23 +2373,46 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
           </div>
         ))}
         {!lectureSeule && (
-          <button
-            type="button"
-            onClick={demarrerAjoutPhoto}
-            disabled={enCours}
-            className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 active:scale-95 disabled:opacity-60"
-          >
-            {enCours ? <Loader2 size={20} className="animate-spin" /> : <Camera size={20} />}
-            <span className="text-[10px] font-semibold">Photo</span>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={gererFichier}
-              className="hidden"
-            />
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={demarrerAjoutPhoto}
+              disabled={enCours}
+              className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 active:scale-95 disabled:opacity-60"
+            >
+              {enCours ? <Loader2 size={20} className="animate-spin" /> : <Camera size={20} />}
+              <span className="text-[10px] font-semibold">Photo</span>
+              <input
+                ref={inputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(e) => gererFichier(e, "camera")}
+                className="hidden"
+              />
+            </button>
+            {/* 📁 GALERIE — décision du propriétaire : la documentation
+                entre TOUJOURS (photos prises avec la caméra native,
+                reçues du client par texto…), mais son origine reste
+                marquée — en direct vs importée. Avec les photos AVANT
+                travaux, un bris avant/après se tranche facilement. */}
+            <button
+              type="button"
+              onClick={() => { setErreur(""); inputGalerieRef.current?.click(); }}
+              disabled={enCours}
+              className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-200 text-slate-300 active:scale-95 disabled:opacity-60"
+            >
+              <span className="text-lg leading-none">📁</span>
+              <span className="text-[10px] font-semibold">Galerie</span>
+              <input
+                ref={inputGalerieRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => gererFichier(e, "galerie")}
+                className="hidden"
+              />
+            </button>
+          </>
         )}
       </div>
       {photos.length === 0 && lectureSeule && (
