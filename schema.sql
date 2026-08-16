@@ -1944,3 +1944,19 @@ alter table entreprises add column if not exists rabais_pourcent numeric not nul
 -- leur rabais permanent — le meilleur des deux s'applique).
 alter table entreprises add column if not exists promo_pourcent numeric not null default 0;
 alter table entreprises add column if not exists promo_mois numeric not null default 0;
+
+-- SNIPPET « 58 » — LÉGENDES DE PHOTOS (titre/détail sur une photo).
+-- La légende suit la photo par son URL — écrite par le technicien sur
+-- place ou par le bureau après coup, affichée dans la visionneuse.
+create table if not exists photos_legendes (
+  url           text primary key,
+  legende       text,
+  modifie_par   text,
+  updated_at    timestamptz not null default now(),
+  entreprise_id text not null default 'dgl'
+);
+alter table photos_legendes enable row level security;
+drop policy if exists "photos_legendes_test" on photos_legendes;
+create policy "photos_legendes_test" on photos_legendes
+  for all to authenticated using (true) with check (true);
+create index if not exists idx_photos_legendes_entreprise on photos_legendes (entreprise_id);

@@ -14,7 +14,8 @@ import { enregistrerInspection } from "@/lib/supabase/inspections";
 import { listerAnnuaireEmployes } from "@/lib/supabase/repertoireEmployes";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
-import { televerserPhotoTravail } from "@/lib/supabase/photosTravaux";
+import { televerserPhotoTravail, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
+import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
 import { listerCamions } from "@/lib/supabase/camions";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache } from "@/lib/supabase/tachesAssignees";
@@ -2261,6 +2262,9 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState("");
   const [cameraOuverte, setCameraOuverte] = useState(false);
+  // 📸 Visionneuse : glissement de doigt ET flèches (gants de travail).
+  const [visionneuseIndex, setVisionneuseIndex] = useState(null);
+  const [legendes, setLegendes] = useState({});
   const inputRef = useRef(null);
   // 📁 Sélecteur GALERIE — sans l'attribut capture : le système ouvre le
   // choix de photos existantes. L'app ne voit QUE les photos choisies
@@ -2353,7 +2357,16 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
       <div className="flex flex-wrap gap-2">
         {photos.map((p, i) => (
           <div key={i} className="relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200">
-            <img src={p.url} alt="" className="h-full w-full object-cover" />
+            <img
+              src={p.url}
+              alt=""
+              className="h-full w-full object-cover"
+              onClick={() => {
+                setVisionneuseIndex(i);
+                const urls = photos.map((x) => x.urlDistante).filter(Boolean);
+                if (urls.length) listerLegendes(urls).then(setLegendes).catch(() => {});
+              }}
+            />
             {p.origine === "galerie" && (
               <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[9px] text-white" title="Importée de la galerie">📁</span>
             )}
@@ -2428,6 +2441,25 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
         <p className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-red-600">
           <AlertTriangle size={11} className="shrink-0" /> {erreur}
         </p>
+      )}
+      {visionneuseIndex != null && (
+        <VisionneusePhotos
+          photos={photos.map((p, i2) => ({ url: p.urlDistante || p.url, etiquette: `${titre} ${i2 + 1}/${photos.length}`, origineGalerie: p.origine === "galerie" }))}
+          indexDepart={visionneuseIndex}
+          legendes={legendes}
+          onFermer={() => setVisionneuseIndex(null)}
+          onLegende={(url, texte) => {
+            // La légende se rattache à la photo TÉLÉVERSÉE (URL web).
+            // Une photo encore locale (hors-ligne) attendra sa mise en
+            // ligne — le champ l'explique au lieu d'échouer en silence.
+            if (!/^https?:/.test(url)) {
+              setErreur("Photo pas encore téléversée (connexion requise) — le détail pourra s'ajouter une fois en ligne.");
+              return;
+            }
+            setLegendes((prev) => ({ ...prev, [url]: texte }));
+            sauvegarderLegende(url, texte, null).catch(() => {});
+          }}
+        />
       )}
       {cameraOuverte && (
         <ModalCaptureCamera

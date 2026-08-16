@@ -37,7 +37,8 @@ import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetire
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
 import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres } from "@/lib/supabase/materiel";
-import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
+import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
+import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement } from "@/lib/courriels";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
@@ -5132,6 +5133,118 @@ function DefilementHorizontal({ children }) {
   );
 }
 
+
+// ============================================================
+// 📸 GALERIE AVANT/APRÈS — les photos d'un travail, au bureau.
+// ------------------------------------------------------------
+// Un clic ouvre la VISIONNEUSE (flèches ← → + clavier, légendes
+// modifiables au bureau, téléchargement à la photo). « Tout (.zip) »
+// par section : sauvegarde externe ou envoi à un assureur, fichiers
+// nommés intelligiblement. Remplace les deux anciennes galeries
+// dupliquées (facturation + aperçu du bon) — un seul exemplaire.
+// ============================================================
+function GalerieAvantApres({ travail, enMarge = false }) {
+  const [indexOuvert, setIndexOuvert] = useState(null);
+  const [legendes, setLegendes] = useState({});
+  const [zipEnCours, setZipEnCours] = useState("");
+
+  const avant = travail.photosAvantUrls || [];
+  const apres = travail.photosApresUrls || [];
+  const photos = [
+    ...avant.map((u, i) => ({ url: u, etiquette: `Avant ${i + 1}/${avant.length}`, section: "avant" })),
+    ...apres.map((u, i) => ({ url: u, etiquette: `Après ${i + 1}/${apres.length}`, section: "apres" })),
+  ];
+
+  useEffect(() => {
+    const urls = photos.map((p) => p.url);
+    if (urls.length) listerLegendes(urls).then(setLegendes).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [travail.id]);
+
+  const nomBase = `${String(travail.client || "photos").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}-${travail.date || ""}`;
+
+  const telechargerZip = async (section) => {
+    setZipEnCours(section);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const liste = photos.filter((p) => p.section === section);
+      for (let i = 0; i < liste.length; i++) {
+        const reponse = await fetch(liste[i].url);
+        zip.file(`${nomBase}-${section}-${String(i + 1).padStart(2, "0")}.jpg`, await reponse.blob());
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const lien = document.createElement("a");
+      lien.href = URL.createObjectURL(blob);
+      lien.download = `${nomBase}-${section}.zip`;
+      lien.click();
+      URL.revokeObjectURL(lien.href);
+    } catch {
+      // réseau — l'utilisateur peut télécharger photo par photo
+    } finally {
+      setZipEnCours("");
+    }
+  };
+
+  const vignette = (p, indexGlobal) => (
+    <button
+      key={p.url + indexGlobal}
+      onClick={() => setIndexOuvert(indexGlobal)}
+      className="relative block aspect-square w-full overflow-hidden rounded-lg border border-slate-200"
+      title="Ouvrir la visionneuse (flèches pour naviguer)"
+    >
+      <img src={p.url} alt={p.etiquette} className="h-full w-full object-cover" />
+      {p.url.includes("-galerie") && (
+        <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white">📁 importée</span>
+      )}
+      {legendes[p.url] && (
+        <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-left text-[8px] text-white">📝 {legendes[p.url]}</span>
+      )}
+    </button>
+  );
+
+  const section = (titre, cle, decalage, liste) => (
+    liste.length > 0 && (
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{titre}</p>
+          <button
+            onClick={() => telechargerZip(cle)}
+            disabled={zipEnCours !== ""}
+            className="text-[10px] font-bold text-slate-400 underline underline-offset-2 hover:text-slate-700 disabled:opacity-50"
+          >
+            {zipEnCours === cle ? "Préparation…" : "⬇️ Tout (.zip)"}
+          </button>
+        </div>
+        <div className="mt-1 grid grid-cols-3 gap-2">
+          {liste.map((p, i) => vignette(p, decalage + i))}
+        </div>
+      </div>
+    )
+  );
+
+  return (
+    <div className={`space-y-2 ${enMarge ? "mt-3" : ""}`}>
+      {section("Photos avant travaux", "avant", 0, photos.filter((p) => p.section === "avant"))}
+      {section("Photos après travaux", "apres", avant.length, photos.filter((p) => p.section === "apres"))}
+      {indexOuvert != null && (
+        <VisionneusePhotos
+          photos={photos}
+          indexDepart={indexOuvert}
+          legendes={legendes}
+          onFermer={() => setIndexOuvert(null)}
+          onLegende={async (url, texte) => {
+            setLegendes((prev) => ({ ...prev, [url]: texte }));
+            const { data } = await supabase.auth.getSession();
+            sauvegarderLegende(url, texte, data?.session).catch(() => {});
+          }}
+          nomFichier={(p, i) => `${nomBase}-${p.section}-${String(i + 1).padStart(2, "0")}.jpg`}
+        />
+      )}
+    </div>
+  );
+}
+
 function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }) {
   const q = terme.trim().toLowerCase();
   const resultats = terme.trim() ? clients.filter((c) => correspond(c, terme)) : [];
@@ -5305,42 +5418,7 @@ function ApercuBonTravailClient({ travail, clients, onFermer }) {
 
           {/* PHOTOS RÉELLES du chantier (stockage Supabase) — avant/après. */}
           {(travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0) && (
-            <div className="mt-3 space-y-2">
-              {travail.photosAvantUrls?.length > 0 && (
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos avant travaux</p>
-                  <div className="mt-1 grid grid-cols-3 gap-2">
-                    {travail.photosAvantUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
-                        <img src={u} alt={`Avant ${i + 1}`} className="h-full w-full object-cover" />
-                        {u.includes("-galerie") && (
-                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
-                            📁 importée
-                          </span>
-                        )}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {travail.photosApresUrls?.length > 0 && (
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos après travaux</p>
-                  <div className="mt-1 grid grid-cols-3 gap-2">
-                    {travail.photosApresUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
-                        <img src={u} alt={`Après ${i + 1}`} className="h-full w-full object-cover" />
-                        {u.includes("-galerie") && (
-                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
-                            📁 importée
-                          </span>
-                        )}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <GalerieAvantApres travail={travail} enMarge />
           )}
           {/* Repli — anciennes lignes de démonstration (libellés seulement). */}
           {!(travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0) && travail.photos?.length > 0 && (
@@ -5484,42 +5562,7 @@ function DetailTravail({ travail, clients, onFermer, onReactiver }) {
         <div>
           <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Photos</p>
           {travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0 ? (
-            <div className="space-y-2">
-              {travail.photosAvantUrls?.length > 0 && (
-                <div>
-                  <p className="mb-1 text-[10px] font-bold text-slate-400">Avant travaux</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {travail.photosAvantUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
-                        <img src={u} alt={`Avant ${i + 1}`} className="h-full w-full object-cover" />
-                        {u.includes("-galerie") && (
-                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
-                            📁 importée
-                          </span>
-                        )}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {travail.photosApresUrls?.length > 0 && (
-                <div>
-                  <p className="mb-1 text-[10px] font-bold text-slate-400">Après travaux</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {travail.photosApresUrls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="relative block aspect-square overflow-hidden rounded-lg border border-slate-200">
-                        <img src={u} alt={`Après ${i + 1}`} className="h-full w-full object-cover" />
-                        {u.includes("-galerie") && (
-                          <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white" title="Importée de la galerie du téléphone (pas prise en direct dans l'application)">
-                            📁 importée
-                          </span>
-                        )}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            <GalerieAvantApres travail={travail} />
           ) : travail.photos.length === 0 ? (
             <p className="text-xs text-slate-400">Aucune photo pour l'instant.</p>
           ) : (
