@@ -603,11 +603,24 @@ function capturerPositionGps() {
 //   (pas simplement la première chronologiquement si elle est déjà
 //   complétée — la destination doit toujours pointer vers le
 //   prochain chantier réel du technicien).
-// - Trajet RETOUR (fin de journée) → l'entrepôt, toujours fixe.
-function destinationDuTrajet(tache, taches) {
-  // Fin de journée : retour à l'entrepôt.
+// - Trajet RETOUR (fin de journée) → l'adresse de L'ENTREPRISE, lue
+//   dans ses Paramètres (décision du propriétaire, 2026-08-16) : pour
+//   DGL c'est le 771 boul. Industriel, mais chaque entreprise cliente
+//   inscrit LA SIENNE — plus rien d'écrit en dur pour le multi-
+//   entreprises. Les coordonnées GPS du 771 ne servent que si c'est
+//   bien l'adresse de DGL (l'estimation de distance se passe d'elles
+//   sinon, comme pour les tâches venues de l'agenda).
+function destinationDuTrajet(tache, taches, config) {
+  // Fin de journée : retour à l'adresse de l'entreprise (Paramètres).
   if (tache.momentTransport === "fin") {
-    return { nom: DEPOT_ADRESSE.nom, ligne1: DEPOT_ADRESSE.ligne1, lat: DEPOT_ADRESSE.lat, lng: DEPOT_ADRESSE.lng };
+    const adresseEntreprise = (config?.adresse || "").trim() || DEPOT_ADRESSE.ligne1;
+    const estDepotDgl = adresseEntreprise === DEPOT_ADRESSE.ligne1 || adresseEntreprise.includes("771");
+    return {
+      nom: `Entrepôt — ${config?.nomCommercial || config?.nomLegal || "l'entreprise"}`,
+      ligne1: adresseEntreprise,
+      lat: estDepotDgl ? DEPOT_ADRESSE.lat : null,
+      lng: estDepotDgl ? DEPOT_ADRESSE.lng : null,
+    };
   }
   // Transport CCQ : destination = la tâche SUIVANTE (le prochain client).
   // Début de journée : destination = la première tâche à faire du jour.
@@ -2598,7 +2611,9 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
   const heures = duree / 3600;
   const projetImpute = projetImputeAuTransport(tache, toutesLesTaches);
   const estAller = tache.momentTransport === "debut";
-  const destination = destinationDuTrajet(tache, toutesLesTaches);
+  // La configuration de l'entreprise — l'adresse de retour y vit.
+  const configTransport = useEntreprise();
+  const destination = destinationDuTrajet(tache, toutesLesTaches, configTransport);
 
   const commettreKilometres = () => {
     onMajTache(tache.id, { kilometres: kilometresLocal });
@@ -2654,10 +2669,16 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
   const estimerRetour = async () => {
     setEstimationEnCours(true);
     const position = await capturerPositionGps();
-    if (position) {
-      const distance = Math.round(distanceKm(position.lat, position.lng, DEPOT_ADRESSE.lat, DEPOT_ADRESSE.lng) * 10) / 10;
+    // L'estimation vise la destination RÉELLE du retour (l'adresse de
+    // l'entreprise, selon ses Paramètres). Sans coordonnées connues
+    // (entreprise cliente : adresse en texte seulement), pas de calcul
+    // à vol d'oiseau possible — le guidage Google reste disponible.
+    if (position && destination?.lat != null && destination?.lng != null) {
+      const distance = Math.round(distanceKm(position.lat, position.lng, destination.lat, destination.lng) * 10) / 10;
       const dureeMin = Math.round((distance / VITESSE_MOYENNE_ESTIMATION_KMH) * 60);
       setEstimationRetour({ distanceKm: distance, dureeMin });
+    } else if (position) {
+      setMessageGps("Estimation indisponible pour cette adresse — utilise « Lancer le guidage » (Google calcule le trajet réel).");
     } else {
       setMessageGps("Position GPS indisponible pour l'estimation du retour.");
     }
@@ -2744,7 +2765,7 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
                   <Button variant="outline" onClick={() => setEstimationRetour(null)} className="min-h-0 py-2 text-xs">
                     Valider / fermer
                   </Button>
-                  <Button onClick={() => ouvrirTrajet(DEPOT_ADRESSE.ligne1, "google")} className="min-h-0 py-2 text-xs">
+                  <Button onClick={() => ouvrirTrajet(destination?.ligne1 || DEPOT_ADRESSE.ligne1, "google")} className="min-h-0 py-2 text-xs">
                     Lancer le guidage
                   </Button>
                 </div>
