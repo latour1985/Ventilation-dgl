@@ -1301,6 +1301,8 @@ const STATUTS_PIECE = {
 
 function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, projets }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
+  const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
+  const configEnt = useEntreprise();
   const [notePassee, setNotePassee] = useState(null); // { id, note }
   // 🛒 COMMANDE GROUPÉE multi-fournisseurs (2026-08-17) : les demandes
   // de TOUS les techniciens agrégées par article, un fournisseur par
@@ -1398,8 +1400,6 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
   const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "" });
   const [bcLibreEnCours, setBcLibreEnCours] = useState(false);
   const [bcLibreMsg, setBcLibreMsg] = useState("");
-  const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
-  const configEnt = useEntreprise();
   const [filtre, setFiltre] = useState("ouvertes");
   const [annulationPour, setAnnulationPour] = useState(null);
   const [raisonAnnulation, setRaisonAnnulation] = useState("");
