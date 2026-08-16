@@ -2067,7 +2067,12 @@ alter table bons_travail add column if not exists retrait_valide_le timestamptz;
 -- champ (le client voit « signature recueillie sur place »).
 alter table bons_travail add column if not exists signe_par_collegue boolean not null default false;
 
-create or replace function bon_travail_public(p_jeton text)
+-- Postgres ne peut pas CHANGER les colonnes de sortie d'une fonction
+-- existante (erreur 42P13) : on la supprime puis on la recrée — même
+-- seconde, aucun trou de service.
+drop function if exists bon_travail_public(text);
+
+create function bon_travail_public(p_jeton text)
 returns table (
   entreprise_nom text,
   entreprise_adresse text,
