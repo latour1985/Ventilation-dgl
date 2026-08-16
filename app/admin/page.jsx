@@ -16240,6 +16240,10 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     ℹ️ Client absent à la fin des travaux — travaux réputés reçus (clause 10 des conditions).
                     Bon non signé, mention au dossier.
                   </p>
+                ) : b.signeParCollegue && !b.signeParNom ? (
+                  <p className="mt-1 rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">
+                    ✍️ Signature recueillie par un collègue sur place (équipe de 2+) — un seul bon envoyé au client.
+                  </p>
                 ) : (
                   !b.signeParNom && (
                     <p className="mt-1 flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">

@@ -18,7 +18,7 @@ import { televerserPhotoTravail, listerLegendes, sauvegarderLegende } from "@/li
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
-import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
+import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions } from "@/lib/supabase/camions";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue } from "@/lib/supabase/travauxEffectues";
@@ -2895,6 +2895,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const [photosAvant, setPhotosAvant] = useState(tache.photosAvant || []);
   const [photosApres, setPhotosApres] = useState(tache.photosApres || []);
   const [nomMoule, setNomMoule] = useState(tache.nomMoule || "");
+  // ÉQUIPE DE 2+ : le dernier à fermer peut déclarer que son collègue a
+  // DÉJÀ recueilli la signature du client — la sienne n'est plus exigée
+  // et le bon part UNE seule fois (demande du propriétaire, 2026-08-16).
+  const [collegueAFaitSigner, setCollegueAFaitSigner] = useState(!!tache.collegueAFaitSigner);
   const [aSignature, setASignature] = useState(!!tache.aSignature);
   // Acceptation des termes et conditions — verrouille la signature tant
   // qu'elle n'est pas cochée. Considérée acquise si le bon est déjà signé.
@@ -2963,12 +2967,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     !descriptionManquante &&
     !photoApresManquante &&
     (jeSuisLeDernier
-      ? clientAbsent || (nomMoule.trim().length > 2 && aSignature && accepteConditions)
+      ? clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions)
       : true);
   const peutEnvoyer =
     !lectureSeule &&
     peutEnvoyerBase &&
-    (!necessiteDeuxiemeSignature || clientAbsent || (nomMoule2.trim().length > 2 && aSignature2));
+    (!necessiteDeuxiemeSignature || clientAbsent || collegueAFaitSigner || (nomMoule2.trim().length > 2 && aSignature2));
 
   // ------------------------------------------------------------
   // ACTIONS DIRECTES → synchronisées immédiatement vers l'état
@@ -3198,7 +3202,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         photosAvant: (photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
         photosApres: (photosApres || []).map((p) => p.urlDistante).filter(Boolean),
         courrielsEnvoi: destinataires,
-        signeParNom: clientAbsent ? "" : nomMoule.trim(),
+        signeParNom: clientAbsent || collegueAFaitSigner ? "" : nomMoule.trim(),
+        signeParCollegue: collegueAFaitSigner,
         // Clause 10 : client absent à la fin des travaux — la mention
         // suit le bon jusqu'à la facturation.
         clientAbsent,
@@ -3219,6 +3224,11 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       // bureau n'affichera PAS « envoyé » et le bouton manuel reste là.
       if (!bonRowId || configEnt?.envoiAutoBonClient === false || (destinataires || []).length === 0) return;
       try {
+        // Anti-doublon : si un bon de CETTE tâche a déjà été transmis
+        // au client (collègue qui a fermé avant, « je termine seul »
+        // suivi du vrai dernier…), on ne renvoie JAMAIS un deuxième
+        // courriel. Le bureau garde son bouton pour les cas spéciaux.
+        if (await bonDejaEnvoyeAuClient(tache.tacheOrigineId || tache.id)) return;
         const jetonBon = await assurerJetonBon(bonRowId);
         const r = await envoyerCourriel({
           a: destinataires,
@@ -3362,6 +3372,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             </p>
 
             {jeSuisLeDernier ? (
+              <>
               <div className="mt-2.5 rounded-xl bg-[#FF6A13] p-3">
                 <p className="text-sm font-extrabold text-white">✍️ C&apos;est toi qui fais signer</p>
                 <p className="mt-1 text-[12px] leading-snug text-white/90">
@@ -3372,6 +3383,28 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                   c&apos;est le seul document qu&apos;il recevra pour cette job.
                 </p>
               </div>
+              {!clientAbsent ? (
+                <label
+                  className={`mt-2 flex min-h-[52px] cursor-pointer items-start gap-2.5 rounded-xl border-2 p-3 ${collegueAFaitSigner ? "border-emerald-400 bg-emerald-50" : "border-slate-200 bg-white"}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={collegueAFaitSigner}
+                    onChange={(e) => {
+                      setCollegueAFaitSigner(e.target.checked);
+                      onMajTache(tache.id, { collegueAFaitSigner: e.target.checked });
+                    }}
+                    className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600"
+                  />
+                  <span className="min-w-0 text-[12px] leading-snug text-slate-700">
+                    <span className="font-extrabold">✍️ {collegues.map((c) => c.nom).join(", ") || "Mon collègue"} a déjà fait signer le client</span>
+                    <span className="mt-0.5 block text-[11px] text-slate-500">
+                      Ta signature n&apos;est plus exigée et le client ne recevra PAS un deuxième bon — un seul document part pour cette job.
+                    </span>
+                  </span>
+                </label>
+              ) : null}
+              </>
             ) : (
               <div className="mt-2.5 rounded-xl bg-slate-100 p-3">
                 <p className="text-[12px] font-bold text-slate-700">

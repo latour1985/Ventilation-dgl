@@ -2058,3 +2058,69 @@ alter table bons_travail add column if not exists retrait_demande_par text;
 alter table bons_travail add column if not exists retrait_demande_le timestamptz;
 alter table bons_travail add column if not exists retrait_valide_par text;
 alter table bons_travail add column if not exists retrait_valide_le timestamptz;
+
+-- SNIPPET « 62 » — SIGNATURE RECUEILLIE PAR UN COLLÈGUE (équipe de 2+).
+-- Le dernier à fermer peut déclarer « mon collègue a déjà fait signer
+-- le client » : sa propre signature n'est plus exigée, le bon part UNE
+-- seule fois, et le bureau voit une mention neutre au lieu de l'alerte
+-- « bon non signé ». La fonction publique est re-créée pour porter le
+-- champ (le client voit « signature recueillie sur place »).
+alter table bons_travail add column if not exists signe_par_collegue boolean not null default false;
+
+create or replace function bon_travail_public(p_jeton text)
+returns table (
+  entreprise_nom text,
+  entreprise_adresse text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_rbq text,
+  titre text,
+  client_nom text,
+  description text,
+  date_travail date,
+  adresse_travaux text,
+  photos jsonb,
+  legendes jsonb,
+  signe_par_nom text,
+  signe_par_collegue boolean,
+  client_absent boolean,
+  unites jsonb,
+  expire boolean
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    coalesce(e.nom_commercial, e.nom_legal, 'Ventilation DGL inc.'),
+    e.adresse,
+    e.telephone,
+    e.courriel,
+    e.numero_rbq,
+    b.titre,
+    b.client_nom,
+    b.description,
+    b.date_travail,
+    b.adresse_travaux,
+    coalesce(b.photos, '{}'::jsonb),
+    coalesce((
+      select jsonb_object_agg(pl.url, pl.legende)
+      from photos_legendes pl
+      where pl.legende is not null and pl.legende <> ''
+        and pl.url in (
+          select jsonb_array_elements_text(coalesce(b.photos->'avant', '[]'::jsonb))
+          union
+          select jsonb_array_elements_text(coalesce(b.photos->'apres', '[]'::jsonb))
+        )
+    ), '{}'::jsonb),
+    b.signe_par_nom,
+    coalesce(b.signe_par_collegue, false),
+    b.client_absent,
+    coalesce(b.unites, '[]'::jsonb),
+    (b.jeton_expire_le is not null and b.jeton_expire_le < now())
+  from bons_travail b
+  left join entreprises e on e.id = b.entreprise_id
+  where b.jeton_public = p_jeton;
+$$;
+
+grant execute on function bon_travail_public(text) to anon, authenticated;

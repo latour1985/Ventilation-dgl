@@ -180,6 +180,10 @@ export default function PageBonPublic({ params }) {
             <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[12px] font-semibold text-emerald-700">
               <FileCheck2 size={15} className="shrink-0" /> Signé électroniquement par : {bon.signeParNom}
             </p>
+          ) : bon.signeParCollegue ? (
+            <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[12px] font-semibold text-emerald-700">
+              <FileCheck2 size={15} className="shrink-0" /> Signature recueillie sur place auprès de notre équipe à la fin de l&apos;intervention.
+            </p>
           ) : (
             <p className="text-[12px] text-slate-500">Bon transmis par notre équipe à la fin de l&apos;intervention.</p>
           )}

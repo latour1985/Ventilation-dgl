@@ -417,6 +417,8 @@ export function BonTravailPublicPDF({ bon, config }) {
           <Text style={s.signed}>Client absent à la fin des travaux — bon transmis sans signature.</Text>
         ) : bon?.signeParNom ? (
           <Text style={s.signed}>Signé électroniquement par : {bon.signeParNom}</Text>
+        ) : bon?.signeParCollegue ? (
+          <Text style={s.signed}>Signature recueillie sur place aupres de notre equipe a la fin de l'intervention.</Text>
         ) : null}
 
         <Text style={[s.footer, { marginTop: 12 }]}>
