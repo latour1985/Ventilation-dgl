@@ -21,7 +21,7 @@ import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations } from "@/lib/supabase/tachesAssignees";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee } from "@/lib/supabase/travauxEffectues";
-import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises } from "@/lib/supabase/bonsTravail";
+import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerCamions, sauvegarderCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
@@ -4150,6 +4150,10 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
   const seuil = Number(configEnt?.seuilMargeAlerte) || 25;
   const camionDefaut = Number(configEnt?.coutCamionHoraire) || 0;
   const [periode, setPeriode] = useState("mois");
+  // Période personnalisée « du… au… » (demande du propriétaire).
+  const [persoDu, setPersoDu] = useState(() => dateISO(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const [persoAu, setPersoAu] = useState(() => dateISO(new Date()));
+  const [vueTaches, setVueTaches] = useState("taches");
 
   // Coût camion d'une ligne d'heures : l'inspection du matin fait foi
   // (camion réel + taux FIGÉ ce jour-là), passager = zéro.
@@ -4181,7 +4185,10 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
   };
 
   const debutFiscal = configEnt?.debutAnneeFiscale || "01-01";
-  const bornes = bornesPeriodeAnalyse(periode, debutFiscal);
+  const bornes =
+    periode === "perso"
+      ? { debut: persoDu || "0000-01-01", fin: persoAu || "9999-12-31" }
+      : bornesPeriodeAnalyse(periode, debutFiscal);
   const stats = calculerPeriode(bornes);
   // 🔁 COMPARATIF « à pareille date l'an passé » : les MÊMES bornes,
   // reculées d'un an. Jamais 9 mois contre 12 — ça mentirait.
@@ -4237,6 +4244,57 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
       });
     });
     return lignes.sort((a, b) => a.ecart - b.ecart);
+  })();
+
+  // ---- 📋 PAR TÂCHE — coûtant / réel / marge, période choisie ----
+  // Une ligne par TÂCHE terminée (les bons d'équipe se regroupent).
+  // Coût réel = heures réelles × taux gelé + camion (inspection) +
+  // matériel au coûtant du devis quand la tâche y est rattachée (le
+  // matériel de stock est compté au niveau du PROJET, pas ici).
+  const parTacheLignes = (() => {
+    const dedans = (d) => d && d >= bornes.debut && d <= bornes.fin;
+    const parId = new Map();
+    (bons || []).forEach((b) => {
+      if (!b.tacheId || !dedans(b.date)) return;
+      const facture = (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+      const e = parId.get(b.tacheId);
+      if (e) { e.facture += facture; return; }
+      parId.set(b.tacheId, { ...b, facture });
+    });
+    return [...parId.values()]
+      .map((b) => {
+        const lignesHeures = (travaux || []).filter(
+          (t) => String(t.tacheId || "").split("::")[0] === b.tacheId && (t.categorieHeures || "projet") === "projet"
+        );
+        const heures = lignesHeures.reduce((s, t) => s + (Number(t.heures) || 0), 0);
+        const coutMo = lignesHeures.reduce((s, t) => s + coutMoDe(t) + coutCamionDe(t), 0);
+        const devisLie = b.devisNumero ? (devisListe || []).find((d) => d.numero === b.devisNumero) : null;
+        const coutMateriel = devisLie
+          ? (devisLie.lignes || []).filter((l) => !l.estRabais).reduce((s, l) => s + (Number(l.prix_coutant) || 0) * (Number(l.quantite) || 1), 0)
+          : 0;
+        const cout = coutMo + coutMateriel;
+        const marge = b.facture > 0 ? ((b.facture - cout) / b.facture) * 100 : null;
+        const statutTexte =
+          b.statutQb === "retire"
+            ? b.retraitRaison === "client_maison" ? "🏠 Maison" : "🛡️ Garantie"
+            : b.retraitStatut === "reporte"
+              ? "🔄 Reporté"
+              : b.statutQb === "envoye" || b.facture > 0 ? "Facturé" : "À facturer";
+        return { cle: b.tacheId, nom: b.projet, clientNom: b.client, date: b.date, heures, facture: b.facture, cout, marge, statutTexte };
+      })
+      .sort((a, b2) => (a.date < b2.date ? 1 : -1));
+  })();
+  const totauxTaches = parTacheLignes.reduce((s, l) => ({ facture: s.facture + l.facture, cout: s.cout + l.cout }), { facture: 0, cout: 0 });
+  const parTacheClients = (() => {
+    const m = new Map();
+    parTacheLignes.forEach((l) => {
+      const e = m.get(l.clientNom) || { clientNom: l.clientNom, jobs: 0, facture: 0, cout: 0 };
+      e.jobs += 1; e.facture += l.facture; e.cout += l.cout;
+      m.set(l.clientNom, e);
+    });
+    return [...m.values()]
+      .map((e) => ({ ...e, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : null }))
+      .sort((a, b2) => b2.facture - a.facture);
   })();
 
   // ---- 🏆 PAR JOB (tous projets avec du facturé) ----
@@ -4315,8 +4373,15 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
               <option value="annee">Cette année (calendrier)</option>
               <option value="fiscale">Année fiscale en cours</option>
               <option value="fiscale-1">Année fiscale précédente</option>
+              <option value="perso">Du… au… (personnalisée)</option>
               <option value="tout">Tout</option>
             </select>
+            {periode === "perso" && (
+              <>
+                <input type="date" value={persoDu} onChange={(e) => setPersoDu(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                <input type="date" value={persoAu} onChange={(e) => setPersoAu(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+              </>
+            )}
             <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
           </div>
         </div>
@@ -4486,6 +4551,85 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
             </div>
           </div>
         )}
+
+        {/* 📋 PAR TÂCHE / PAR CLIENT — coûtant, réel, marge (période choisie) */}
+        <div className="mt-4 rounded-xl border border-slate-200 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">📋 Coût réel &amp; marge — {vueTaches === "taches" ? "par tâche" : "par client"}</p>
+            <div className="flex overflow-hidden rounded-lg border border-slate-300 text-[11px] font-bold">
+              <button onClick={() => setVueTaches("taches")} className={vueTaches === "taches" ? "bg-[#131B2E] px-2.5 py-1 text-white" : "px-2.5 py-1 text-slate-600"}>Par tâche</button>
+              <button onClick={() => setVueTaches("clients")} className={vueTaches === "clients" ? "bg-[#131B2E] px-2.5 py-1 text-white" : "px-2.5 py-1 text-slate-600"}>Par client</button>
+            </div>
+          </div>
+          <p className="mt-0.5 text-[10px] text-slate-400">
+            Coût réel = heures réelles × taux gelé + camion (inspection du jour){vueTaches === "taches" ? " + matériel au coûtant du devis quand la tâche y est rattachée" : ""}.
+            Les retraits (garantie, maison) et reports restent visibles : ils ont coûté même s'ils ne rapportent rien.
+          </p>
+          {parTacheLignes.length === 0 ? (
+            <p className="mt-2 text-xs text-slate-400">Aucune tâche terminée dans la période choisie.</p>
+          ) : vueTaches === "taches" ? (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b border-slate-200 text-left text-slate-400">
+                  <th className="py-1 pr-2 font-semibold">Tâche</th><th className="py-1 pr-2 font-semibold">Date</th>
+                  <th className="py-1 pr-2 font-semibold">Statut</th><th className="py-1 pr-2 text-right font-semibold">Heures</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Coût réel</th>
+                  <th className="py-1 text-right font-semibold">Marge</th>
+                </tr></thead>
+                <tbody>
+                  {parTacheLignes.map((l) => (
+                    <tr key={l.cle} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-2">
+                        <span className="font-bold text-slate-800">{l.nom}</span>
+                        <span className="block text-[10px] text-slate-400">{l.clientNom}</span>
+                      </td>
+                      <td className="py-1.5 pr-2 tabular-nums text-slate-500">{l.date}</td>
+                      <td className="py-1.5 pr-2 text-[10px] font-bold text-slate-500">{l.statutTexte}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{l.heures.toFixed(1)} h</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{l.facture > 0 ? fmt$(l.facture) : "—"}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(l.cout)}</td>
+                      <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(l.marge)}`}>
+                        {l.marge == null ? "—" : `${l.marge.toFixed(0)} %`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-slate-300 font-extrabold text-slate-800">
+                    <td className="py-1.5 pr-2" colSpan={4}>Total ({parTacheLignes.length} tâche{parTacheLignes.length > 1 ? "s" : ""})</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(totauxTaches.facture)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(totauxTaches.cout)}</td>
+                    <td className={`py-1.5 text-right tabular-nums ${classeMarge(totauxTaches.facture > 0 ? ((totauxTaches.facture - totauxTaches.cout) / totauxTaches.facture) * 100 : null)}`}>
+                      {totauxTaches.facture > 0 ? `${(((totauxTaches.facture - totauxTaches.cout) / totauxTaches.facture) * 100).toFixed(0)} %` : "—"}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          ) : (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr className="border-b border-slate-200 text-left text-slate-400">
+                  <th className="py-1 pr-2 font-semibold">Client</th><th className="py-1 pr-2 text-right font-semibold">Tâches</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Coût réel</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Profit</th><th className="py-1 text-right font-semibold">Marge</th>
+                </tr></thead>
+                <tbody>
+                  {parTacheClients.map((c) => (
+                    <tr key={c.clientNom} className="border-b border-slate-100 last:border-0">
+                      <td className="py-1.5 pr-2 font-bold text-slate-800">{c.clientNom || "—"}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{c.jobs}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{c.facture > 0 ? fmt$(c.facture) : "—"}</td>
+                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(c.cout)}</td>
+                      <td className={`py-1.5 pr-2 text-right font-bold tabular-nums ${c.facture - c.cout < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(c.facture - c.cout)}</td>
+                      <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(c.marge)}`}>{c.marge == null ? "—" : `${c.marge.toFixed(0)} %`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {/* PAR TECHNICIEN */}
         <div className="mt-4 rounded-xl border border-slate-200 p-3">
@@ -7294,6 +7438,24 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
               unite="%"
               aide="Dans l'analyse de rentabilité (tuile « Marge moyenne » du tableau de bord), toute marge SOUS ce pourcentage s'affiche en rouge — jobs, clients, devis. Mets-y ta marge minimum acceptable."
             />
+            {/* 📸 ENVOI AUTOMATIQUE DU BON AU CLIENT — quand le
+                technicien ferme la tâche, le descriptif public (photos,
+                jamais de prix) part tout seul aux courriels cochés. */}
+            <label className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${brouillon.envoiAutoBonClient !== false ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}>
+              <input
+                type="checkbox"
+                checked={brouillon.envoiAutoBonClient !== false}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => champ("envoiAutoBonClient", e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+              />
+              <span>
+                📸 Envoi automatique du bon au client à la fermeture
+                <span className="block text-[10px] font-normal text-slate-500">
+                  Le client reçoit sur-le-champ le descriptif avec photos (lien 90 jours, jamais de prix) aux courriels cochés par le technicien sur place. Décoché : seul le bouton « Bon au client » du bureau envoie.
+                </span>
+              </span>
+            </label>
             {/* ANNÉE FISCALE — un jalon "mois + jour". L'analyse de
                 rentabilité offre « Année fiscale » calculée date à date
                 depuis ce jalon : les mêmes bornes que le comptable. */}
@@ -9880,6 +10042,65 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
 // comptabilité...) et recevoir le document à plusieurs adresses d'un
 // coup. `onConfirmer` reçoit la LISTE des courriels cochés (le premier
 // sert d'affichage principal pour la compatibilité).
+
+// ============================================================
+// RETRAIT DE FACTURATION — la DEMANDE (raison prédéfinie + note).
+// ------------------------------------------------------------
+// Personne ne « perd » une facture en un clic : la demande est tracée
+// (qui, quand, pourquoi) et un Admin principal doit valider avant que
+// le bon quitte la pile. « Travaux en cours » = simple report.
+// ============================================================
+function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
+  const [raison, setRaison] = useState("travaux_en_cours");
+  const [note, setNote] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Retirer de la facturation</h3>
+            <p className="text-xs text-slate-500">{bon.client} · {bon.projet}</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+        <p className="mb-2 text-[11px] text-slate-500">
+          Choisis la raison — un <span className="font-bold">Admin principal</span> devra valider avant que le bon quitte la pile.
+        </p>
+        <div className="space-y-1.5">
+          {Object.entries(RAISONS_RETRAIT).map(([cle, libelle]) => (
+            <label
+              key={cle}
+              className={`flex cursor-pointer items-start gap-2 rounded-xl border p-2.5 ${raison === cle ? "border-[#FF6A13] bg-orange-50" : "border-slate-200"}`}
+            >
+              <input
+                type="radio"
+                name="raison-retrait"
+                checked={raison === cle}
+                onChange={() => setRaison(cle)}
+                className="mt-0.5 h-4 w-4 accent-[#FF6A13]"
+              />
+              <span className="text-xs font-semibold text-slate-700">
+                {cle === "travaux_en_cours" ? "🔄 " : cle === "garantie" ? "🛡️ " : "🏠 "}{libelle}
+              </span>
+            </label>
+          ))}
+        </div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Note facultative (ex : 2e visite prévue vendredi)"
+          rows={2}
+          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#FF6A13]"
+        />
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={onFermer}>Annuler</Button>
+          <Button onClick={() => onDemander(raison, note.trim())}>Demander le retrait</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer }) {
   const courriels = client?.courriels || [];
   const [selectionIds, setSelectionIds] = useState(() => {
@@ -15453,7 +15674,7 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   );
 }
 
-function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots }) {
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal }) {
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
   // Sans ce raccord, la révision de prix demandait le PLEIN montant
@@ -15530,6 +15751,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   // sélecteur de courriel s'ouvre avant l'envoi réel.
   const [bonEnvoiCourrielId, setBonEnvoiCourrielId] = useState(null);
   const [bonEnvoiClientId, setBonEnvoiClientId] = useState(null);
+  const [bonRetraitId, setBonRetraitId] = useState(null);
   // Détails d'une facture progressive déjà configurée dans
   // ModalFacturationDevis, en attente du choix du courriel avant
   // l'émission réelle vers QuickBooks.
@@ -15608,12 +15830,14 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   const bleus = enAttente.filter((b) => !b.prixNonListe && b.type === "devis").length;
   const violets = enAttente.filter((b) => !b.prixNonListe && b.type === "entretien_contrat").length;
   const gris = enAttente.filter((b) => !b.prixNonListe && b.type === "appel_service").length;
+  const retires = bonsGroupes.filter((b) => b.statutQb === "retire").length;
   const jaunes = enAttente.filter((b) => !b.prixNonListe && b.type !== "devis" && b.type !== "entretien_contrat" && b.type !== "appel_service").length;
 
   // Catégorie d'un bon — reprend exactement la même logique que les 5
   // encadrés ci-dessus, pour que le filtrage par clic reste toujours
   // cohérent avec les compteurs affichés.
   const categorieBon = (b) => {
+    if (b.statutQb === "retire") return "retire";
     if (b.prixNonListe) return "rouge";
     if (b.type === "entretien_contrat") return "violet";
     if (b.type === "devis") return "bleu";
@@ -15629,12 +15853,13 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   const basculerFiltre = (categorie) => {
     setFiltresActifs((prev) => (prev.includes(categorie) ? prev.filter((c) => c !== categorie) : [...prev, categorie]));
   };
-  const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
+  const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes.filter((b) => categorieBon(b) !== "retire") : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
 
   const bonFacturation = bons.find((b) => b.id === bonFacturationId) || null;
   const devisFacturation = bonFacturation ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) : null;
   const bonEnvoiCourriel = bons.find((b) => b.id === bonEnvoiCourrielId) || null;
   const bonEnvoiClient = bons.find((b) => b.id === bonEnvoiClientId) || null;
+  const bonRetrait = bonsGroupes.find((b) => b.id === bonRetraitId) || null;
   const bonFactureEnAttente = factureEnAttenteCourriel ? bons.find((b) => b.id === factureEnAttenteCourriel.bonId) : null;
 
   // Trouve le client d'un bon par son NOM (ces bons de démo n'ont
@@ -15651,6 +15876,51 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   // 2026-08-15). Lien valide 90 jours (conservé s'il court toujours,
   // régénéré s'il est expiré), PDF téléchargeable sur la page. Le
   // journal ne dit « envoyé » que si c'est vrai.
+  // ------------------------------------------------------------
+  // RETRAIT DE FACTURATION — demande, validation, remise en pile.
+  // ------------------------------------------------------------
+  // La demande est ouverte à qui voit la facturation ; la VALIDATION
+  // est réservée à l'Admin principal. Tout passe au journal — aucune
+  // facture ne disparaît sans trace.
+  const demanderRetrait = async (b, raison, note) => {
+    try {
+      await demanderRetraitFacturation(b.tacheId, raison, note);
+      setBons((prev) => prev.map((x) => (x.tacheId === b.tacheId ? { ...x, retraitStatut: "demande", retraitRaison: raison, retraitNote: note || "" } : x)));
+      ajouterJournal(`🕓 Retrait de facturation DEMANDÉ — ${b.client} : ${RAISONS_RETRAIT[raison] || raison}. Un Admin principal doit valider.`);
+    } catch {
+      ajouterJournal("⚠️ Demande de retrait NON enregistrée — réessaie.");
+    }
+  };
+  const validerRetrait = async (b, approuve) => {
+    try {
+      await validerRetraitFacturation(b.tacheId, approuve, b.retraitRaison);
+      setBons((prev) => prev.map((x) => {
+        if (x.tacheId !== b.tacheId) return x;
+        if (!approuve) return { ...x, retraitStatut: null, retraitRaison: null, retraitNote: "" };
+        if (b.retraitRaison === "travaux_en_cours") return { ...x, retraitStatut: "reporte" };
+        return { ...x, retraitStatut: "retire", statutQb: "retire" };
+      }));
+      ajouterJournal(
+        approuve
+          ? b.retraitRaison === "travaux_en_cours"
+            ? `🔄 Report APPROUVÉ — ${b.client} sera facturé à la prochaine journée de facturation.`
+            : `🗂️ Retrait APPROUVÉ — ${b.client} sort de la facturation (${RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison}). Ses coûts restent comptés dans l'analyse.`
+          : `↩️ Retrait REFUSÉ — le bon de ${b.client} reste à facturer.`
+      );
+    } catch {
+      ajouterJournal("⚠️ Validation du retrait NON enregistrée — réessaie.");
+    }
+  };
+  const remettreBonAFacturer = async (b) => {
+    try {
+      await remettreAFacturer(b.tacheId);
+      setBons((prev) => prev.map((x) => (x.tacheId === b.tacheId ? { ...x, retraitStatut: null, retraitRaison: null, retraitNote: "", statutQb: "en_attente" } : x)));
+      ajouterJournal(`↩️ ${b.client} REMIS à facturer.`);
+    } catch {
+      ajouterJournal("⚠️ Remise à facturer NON enregistrée — réessaie.");
+    }
+  };
+
   const envoyerBonAuClient = async (b, choix) => {
     const adresses = [...new Set((choix || []).map((cc) => cc.email))].filter(Boolean);
     if (adresses.length === 0) return;
@@ -15829,7 +16099,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <button
           onClick={() => basculerFiltre("rouge")}
           className={`rounded-xl border p-3 text-left transition-shadow ${
@@ -15874,6 +16144,15 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
         >
           <p className="text-2xl font-extrabold text-teal-600 tabular-nums">{gris}</p>
           <p className="text-xs font-semibold text-teal-700">Appels de service</p>
+        </button>
+        <button
+          onClick={() => basculerFiltre("retire")}
+          className={`rounded-xl border p-3 text-left transition-shadow ${
+            filtresActifs.includes("retire") ? "border-slate-400 bg-slate-100 ring-2 ring-slate-300" : "border-slate-200 bg-slate-50"
+          }`}
+        >
+          <p className="text-2xl font-extrabold text-slate-500 tabular-nums">{retires}</p>
+          <p className="text-xs font-semibold text-slate-500">Retirés — garantie / maison</p>
         </button>
       </div>
 
@@ -15921,6 +16200,41 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                 {/* CLIENT ABSENT (clause 10) : ce n'est PAS un oubli de
                     signature — les travaux sont réputés reçus. Info,
                     pas alerte : on facture normalement. */}
+                {/* RETRAIT DE FACTURATION — les trois états, toujours
+                    visibles LÀ où on facture : demande en attente
+                    (l'Admin principal tranche ici même), report approuvé,
+                    retrait approuvé (le bon vit sous l'encadré « Retirés »). */}
+                {b.retraitStatut === "demande" && (
+                  <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
+                    🕓 <span className="font-extrabold">Retrait demandé :</span> {RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison}
+                    {b.retraitNote ? <span className="block text-[10px]">Note : {b.retraitNote}</span> : null}
+                    {b.retraitDemandePar ? <span className="block text-[10px] text-amber-700">Par {b.retraitDemandePar}</span> : null}
+                    {estAdminPrincipal ? (
+                      <span className="mt-1 flex gap-2">
+                        <button onClick={() => validerRetrait(b, true)} className="rounded-lg bg-amber-600 px-2 py-1 text-[10px] font-bold text-white active:scale-95">
+                          Approuver le retrait
+                        </button>
+                        <button onClick={() => validerRetrait(b, false)} className="rounded-lg border border-amber-400 px-2 py-1 text-[10px] font-bold text-amber-700 active:scale-95">
+                          Refuser
+                        </button>
+                      </span>
+                    ) : (
+                      <span className="block text-[10px] font-bold">En attente d'un Admin principal.</span>
+                    )}
+                  </div>
+                )}
+                {b.retraitStatut === "reporte" && (
+                  <p className="mt-1 rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700">
+                    🔄 Reporté — sera facturé à la prochaine journée de facturation
+                    {b.retraitValidePar ? ` (approuvé par ${b.retraitValidePar})` : ""}.
+                  </p>
+                )}
+                {b.statutQb === "retire" && (
+                  <p className="mt-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">
+                    🗂️ Retiré de la facturation — {RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison}
+                    {b.retraitValidePar ? ` · approuvé par ${b.retraitValidePar}` : ""}. Ses coûts restent comptés dans l'analyse.
+                  </p>
+                )}
                 {b.clientAbsent ? (
                   <p className="mt-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">
                     ℹ️ Client absent à la fin des travaux — travaux réputés reçus (clause 10 des conditions).
@@ -16060,7 +16374,27 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     📸 Envoyé le {new Date(b.envoyeClientLe).toLocaleDateString("fr-CA")}
                   </p>
                 )}
-                {b.statutQb === "envoye" ? (
+                {b.statutQb === "en_attente" && !b.retraitStatut && (
+                  <button
+                    onClick={() => setBonRetraitId(b.id)}
+                    className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-slate-400 underline underline-offset-2 hover:text-slate-600"
+                  >
+                    Retirer de la facturation
+                  </button>
+                )}
+                {b.statutQb === "retire" && estAdminPrincipal && (
+                  <button
+                    onClick={() => remettreBonAFacturer(b)}
+                    className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-blue-600 underline underline-offset-2"
+                  >
+                    Remettre à facturer
+                  </button>
+                )}
+                {b.statutQb === "retire" ? (
+                  <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-slate-500">
+                    🗂️ Retiré
+                  </span>
+                ) : b.statutQb === "envoye" ? (
                   <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600">
                     <CheckCircle2 size={12} /> Facturé
                   </span>
@@ -16106,6 +16440,17 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
           onEmettre={(info) => {
             setFactureEnAttenteCourriel({ bonId: bonFacturation.id, ...info });
             setBonFacturationId(null);
+          }}
+        />
+      )}
+
+      {bonRetrait && (
+        <ModalRetraitFacturation
+          bon={bonRetrait}
+          onFermer={() => setBonRetraitId(null)}
+          onDemander={(raison, note) => {
+            setBonRetraitId(null);
+            demanderRetrait(bonRetrait, raison, note);
           }}
         />
       )}
@@ -17655,6 +18000,7 @@ export default function App() {
           pieces={pieces}
           inspections={inspections}
           prixDepots={prixDepots}
+          estAdminPrincipal={role === "Admin principal"}
         />
       )}
       {vue === "paies" && (

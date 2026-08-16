@@ -2038,3 +2038,23 @@ as $$
 $$;
 
 grant execute on function bon_travail_public(text) to anon, authenticated;
+
+-- SNIPPET « 61 » — ENVOI AUTO DU BON CLIENT + RETRAIT DE FACTURATION.
+-- 1) Interrupteur par entreprise : à la fermeture de la tâche par le
+--    technicien, le bon (descriptif public, sans prix) part TOUT SEUL
+--    aux courriels cochés sur place. Débrayable dans Paramètres.
+alter table entreprises add column if not exists envoi_auto_bon_client boolean not null default true;
+-- 2) Retrait de facturation en deux temps (demande -> validation par un
+--    Admin principal), avec raison prédéfinie et trace complète :
+--    retrait_statut : 'demande' (en attente de validation),
+--                     'reporte' (travaux en cours — reste dans la pile),
+--                     'retire'  (garantie / client maison — sort de la pile).
+--    Un bon retiré GARDE ses coûts (heures, camion) : il apparaît dans
+--    l'analyse comme travail non facturable au lieu de s'évaporer.
+alter table bons_travail add column if not exists retrait_statut text;
+alter table bons_travail add column if not exists retrait_raison text;
+alter table bons_travail add column if not exists retrait_note text;
+alter table bons_travail add column if not exists retrait_demande_par text;
+alter table bons_travail add column if not exists retrait_demande_le timestamptz;
+alter table bons_travail add column if not exists retrait_valide_par text;
+alter table bons_travail add column if not exists retrait_valide_le timestamptz;

@@ -17,6 +17,8 @@ import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { televerserPhotoTravail, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
+import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
+import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions } from "@/lib/supabase/camions";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue } from "@/lib/supabase/travauxEffectues";
@@ -2826,6 +2828,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // Celui qui ferme EN DERNIER le signe avec le client ; les autres ne
   // font qu'enregistrer leurs heures.
   const [equipe, setEquipe] = useState(null);
+  // ⚙️ Réglages de l'entreprise — l'interrupteur « envoi automatique du
+  // bon au client » y vit (Paramètres, débrayable par entreprise).
+  const configEnt = useEntreprise();
   const monCourriel = (session?.user?.email || "").toLowerCase();
   useEffect(() => {
     const id = tache.tacheOrigineId;
@@ -3185,7 +3190,30 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         pieceRequise: tache.pieceRequise || null,
       },
       session
-    ).catch(() => {
+    ).then(async (bonRowId) => {
+      // 📸 ENVOI AUTOMATIQUE DU BON AU CLIENT — sur-le-champ (demande du
+      // propriétaire, 2026-08-16). Conditions : l'interrupteur est actif
+      // (Paramètres) ET le technicien a coché au moins un courriel. En
+      // cas d'échec (réseau), rien n'est perdu : la carte du bon au
+      // bureau n'affichera PAS « envoyé » et le bouton manuel reste là.
+      if (!bonRowId || configEnt?.envoiAutoBonClient === false || (destinataires || []).length === 0) return;
+      try {
+        const jetonBon = await assurerJetonBon(bonRowId);
+        const r = await envoyerCourriel({
+          a: destinataires,
+          sujet: `Vos travaux sont terminés — bon de travail (${configEnt?.nomCommercial || configEnt?.nomLegal || ""})`,
+          html: gabaritBonTravail({
+            config: configEnt,
+            clientNom: tache.clientNom || "",
+            lien: lienBonPublic(jetonBon),
+            joursValidite: JOURS_VALIDITE_BON,
+          }),
+        });
+        if (r.envoye) marquerBonEnvoyeClient(bonRowId).catch(() => {});
+      } catch {
+        // le bureau garde son bouton « Bon au client »
+      }
+    }).catch(() => {
       // hors-ligne ou table absente — le bon reste complété localement,
       // le bureau ne le voit pas encore (le technicien peut réessayer).
     });
