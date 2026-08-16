@@ -721,7 +721,7 @@ function PiedCopyright() {
 // Partagé entre le bon de travail et les tâches de transport,
 // pour que le calcul du temps soit identique partout.
 // ============================================================
-function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, tacheBloquante, inspectionRequise, labelDebuter, labelTerminer, chargementDebuter, chargementTerminer }) {
+function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, tacheBloquante, inspectionRequise, labelDebuter, labelTerminer, chargementDebuter, chargementTerminer, fermetureGuidee = false, onAllerSigner = null }) {
   const duree = formatDuree(dureeEcoulee(tache));
 
   return (
@@ -768,11 +768,15 @@ function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, 
         {tache.etat === "en_cours" && (
           <>
             <Button variant="outline" onClick={onPause}>
-              <Pause size={15} /> Pause
+              <Pause size={15} /> Pause (non compté)
             </Button>
-            <Button onClick={onTerminer} loading={chargementTerminer}>
-              <Square size={15} /> {labelTerminer || "Terminer"}
-            </Button>
+            {fermetureGuidee ? (
+              <Button onClick={onAllerSigner}>✍️ Terminer → signer</Button>
+            ) : (
+              <Button onClick={onTerminer} loading={chargementTerminer}>
+                <Square size={15} /> {labelTerminer || "Terminer"}
+              </Button>
+            )}
           </>
         )}
         {tache.etat === "en_pause" && (
@@ -780,12 +784,34 @@ function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, 
             <Button onClick={onReprendre} disabled={!!tacheBloquante}>
               <Play size={15} /> Reprendre
             </Button>
-            <Button onClick={onTerminer} loading={chargementTerminer}>
-              <Square size={15} /> {labelTerminer || "Terminer"}
-            </Button>
+            {fermetureGuidee ? (
+              <Button onClick={onAllerSigner}>✍️ Terminer → signer</Button>
+            ) : (
+              <Button onClick={onTerminer} loading={chargementTerminer}>
+                <Square size={15} /> {labelTerminer || "Terminer"}
+              </Button>
+            )}
           </>
         )}
       </div>
+      {/* ⏸️ EN PAUSE — dire clairement ce que la pause fait (et le bon
+          réflexe matériel : la 🚗 course garde ce temps PAYÉ sans le
+          facturer au client). */}
+      {tache.etat === "en_pause" && (
+        <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-snug text-amber-800">
+          ⏸️ En pause — le chrono est arrêté : ce temps ne sera ni compté sur la tâche ni facturé.
+          Parti chercher du matériel ? Crée une <span className="font-bold">🚗 course</span> (écran d&apos;accueil) :
+          ce déplacement restera payé sans être facturé au client.
+        </p>
+      )}
+      {/* ✍️ FERMETURE GUIDÉE — la tâche client se ferme par la
+          signature, jamais par un raccourci (rien ne peut être oublié). */}
+      {fermetureGuidee && tache.etat !== "a_faire" && tache.etat !== "complete" && (
+        <p className="mt-3 rounded-xl bg-orange-50 p-3 text-[11px] leading-snug text-orange-800">
+          Cette tâche se termine par le <span className="font-bold">bon de travail en bas</span> (signature du client,
+          client absent, ou collègue qui a fait signer) — la fermeture est automatique après l&apos;envoi.
+        </p>
+      )}
     </div>
   );
 }
@@ -2934,6 +2960,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // ⚙️ Réglages de l'entreprise — l'interrupteur « envoi automatique du
   // bon au client » y vit (Paramètres, débrayable par entreprise).
   const configEnt = useEntreprise();
+  // ✍️ Cible du défilement « Terminer → signer » (fermeture guidée).
+  const refSignature = useRef(null);
   const monCourriel = (session?.user?.email || "").toLowerCase();
   useEffect(() => {
     const id = tache.tacheOrigineId;
@@ -2963,6 +2991,13 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const jeSuisLeDernier = jeSuisSeul || termineSeul || equipe.manquants.every((m) => m.email === monCourriel);
   const collegues = jeSuisSeul ? [] : equipe.equipe.filter((m) => m.email !== monCourriel);
   const colleguesRestants = jeSuisSeul ? [] : equipe.manquants.filter((m) => m.email !== monCourriel);
+  // FERMETURE GUIDÉE (demande du propriétaire, 2026-08-17) : pour une
+  // tâche client facturable, le jour où le bon doit se faire (journée
+  // unique ou dernière journée du chantier), le « Terminer » du haut ne
+  // ferme plus — il descend vers la signature. La SEULE porte de sortie
+  // devient le circuit complet → envoi → fermeture automatique.
+  // Journées intermédiaires d'un chantier : fermeture directe conservée.
+  const fermetureGuidee = !tache.nonFacturable && (Number(tache.nbJoursPrevus || 1) <= 1 || !!tache.dernierJourPrevu);
   // État initialisé depuis `tache` (la source de vérité globale) plutôt
   // que vide : si le technicien avait déjà rempli ce bon puis était
   // revenu à l'accueil (ou si la page a été rafraîchie), ses données
@@ -3430,6 +3465,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           onTerminer={onTerminer}
           tacheBloquante={tacheBloquante}
           inspectionRequise={!inspectionFaite}
+          fermetureGuidee={fermetureGuidee}
+          onAllerSigner={() => refSignature.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
         />
 
         <SelecteurClientAdresse
@@ -3947,7 +3984,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             </p>
           </div>
         )}
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <div ref={refSignature} className="rounded-2xl border border-slate-200 bg-white p-4">
           <button
             type="button"
             onClick={() => setModaleConditions(true)}

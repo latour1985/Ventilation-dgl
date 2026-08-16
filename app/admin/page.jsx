@@ -10769,7 +10769,10 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
   const catalogue = useCatalogue();
   // Taux de taxes des Paramètres — pour afficher le total client.
   const configEnt = useEntreprise();
-  const [clientId, setClientId] = useState(clients[0].id);
+  // AUCUN client présélectionné + recherche rapide (2026-08-17) —
+  // même mécanique que le formulaire de tâche.
+  const [clientId, setClientId] = useState("");
+  const [filtreClientDevis, setFiltreClientDevis] = useState("");
   // ARRIVÉE DEPUIS UNE FICHE CLIENT (bouton « + Créer un devis ») :
   // le client est déjà choisi, on ne le redemande pas. Même mécanisme
   // que la recherche rapide qui ouvre la bonne fiche.
@@ -11149,7 +11152,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
   };
 
   const demarrerCreationDevis = () => {
-    if (lignes.length === 0) return;
+    if (lignes.length === 0 || !clientId) return;
     setCourrielModalOuvert(true);
   };
 
@@ -11395,24 +11398,52 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
 
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-500">Client</label>
-            <select
-              value={clientId}
-              onChange={(e) => {
-                // « ➕ Nouveau client » ouvre la fenêtre de création rapide
-                // sans toucher au client actuellement sélectionné.
-                if (e.target.value === "__nouveau__") {
-                  setModalNouveauClient(true);
-                  return;
-                }
-                setClientId(e.target.value);
-              }}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-semibold"
+            <button
+              type="button"
+              onClick={() => setModalNouveauClient(true)}
+              className="mb-1 flex w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-slate-300 px-3 py-2 text-sm font-bold text-slate-600 active:scale-[0.99]"
             >
-              <option value="__nouveau__">➕ Nouveau client…</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.nom}</option>
-              ))}
-            </select>
+              ➕ Nouveau client…
+            </button>
+            <input
+              value={filtreClientDevis}
+              onChange={(e) => setFiltreClientDevis(e.target.value)}
+              placeholder="🔍 Tape le nom — la liste rétrécit à chaque lettre…"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"
+            />
+            {filtreClientDevis.trim() !== "" && (
+              <div className="mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                {clients
+                  .filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientDevis.trim().toLowerCase()))
+                  .slice(0, 8)
+                  .map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => { setClientId(c.id); setFiltreClientDevis(""); }}
+                      className="block w-full border-b border-slate-100 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 last:border-0 active:bg-orange-50"
+                    >
+                      {c.nom}
+                    </button>
+                  ))}
+                {clients.filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientDevis.trim().toLowerCase())).length === 0 && (
+                  <p className="px-3 py-2.5 text-xs text-slate-400">Aucun client trouvé — crée-le avec « ➕ Nouveau client… » juste au-dessus.</p>
+                )}
+              </div>
+            )}
+            {(() => {
+              const c = clients.find((x) => x.id === clientId);
+              return c ? (
+                <div className="mt-1 flex items-center justify-between gap-2 rounded-xl border border-[#FF6A13] bg-orange-50 px-3 py-2">
+                  <span className="min-w-0 truncate text-sm font-bold text-slate-800">{c.nom}</span>
+                  <button type="button" onClick={() => setClientId("")} className="shrink-0 text-[11px] font-bold text-slate-400 underline underline-offset-2">
+                    changer
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-1 text-[11px] font-bold text-amber-600">— Choisis le client (tape son nom, ou crée-le avec ➕) —</p>
+              );
+            })()}
           </div>
 
           <div className="rounded-xl bg-slate-50 p-3">
@@ -12231,6 +12262,11 @@ const TYPES_TACHE = [
   { id: "visite_chantier", label: "Visite de chantier", description: "Non facturable — heures aux frais administratifs (ou au projet, au choix)", nonFacturable: true, admin: true },
   { id: "visite_soumission", label: "Visite pour soumission", description: "Non facturable — reste en attente tant qu'aucun devis n'y est rattaché", nonFacturable: true, admin: true, suiviDevis: true },
   { id: "divers", label: "Divers", description: "Non facturable — heures payées, hors projet et hors administratif", nonFacturable: true },
+  // 🚗 COURSE / INTERNE — la même mécanique que la course créée par le
+  // technicien (2026-08-17) : AUCUN client, juste une adresse. Porter
+  // un camion au garage, aller chercher une pièce. Heures payées en
+  // « divers », jamais facturable.
+  { id: "course", label: "🚗 Course / interne (sans client)", description: "Aucun client — porter un camion au garage, chercher une pièce. Heures payées (divers), jamais facturable.", nonFacturable: true, sansClient: true },
   // CONGÉ : ce n'est pas du travail. Aucun chronomètre, aucune heure —
   // seulement un marqueur qui bloque la journée dans l'agenda pour
   // qu'on n'y place pas de travail par erreur.
@@ -12242,6 +12278,7 @@ const TYPE_INFO = (id) => TYPES_TACHE.find((t) => t.id === id) || null;
 const estTypeNonFacturable = (id) => !!TYPE_INFO(id)?.nonFacturable;
 const estTypeSansHeures = (id) => !!TYPE_INFO(id)?.sansHeures;
 const estTypeAdministratif = (id) => !!TYPE_INFO(id)?.admin;
+const estTypeSansClient = (id) => !!TYPE_INFO(id)?.sansClient || id === "conge";
 
 const FREQUENCES_CONTRAT = [1, 2, 3, 4];
 
@@ -12262,6 +12299,7 @@ const COULEUR_TYPE_TACHE = {
   visite_chantier: { fond: "bg-sky-500", pastille: "bg-sky-500", bordurePastille: "border-sky-500", texte: "text-sky-700", clair: "bg-sky-100" },
   visite_soumission: { fond: "bg-indigo-500", pastille: "bg-indigo-500", bordurePastille: "border-indigo-500", texte: "text-indigo-700", clair: "bg-indigo-100" },
   divers: { fond: "bg-stone-400", pastille: "bg-stone-400", bordurePastille: "border-stone-400", texte: "text-stone-700", clair: "bg-stone-100" },
+  course: { fond: "bg-stone-500", pastille: "bg-stone-500", bordurePastille: "border-stone-500", texte: "text-stone-700", clair: "bg-stone-100" },
   conge: { fond: "bg-zinc-300", pastille: "bg-zinc-400", bordurePastille: "border-zinc-400", texte: "text-zinc-600", clair: "bg-zinc-100" },
 };
 const COULEUR_TYPE_DEFAUT = COULEUR_TYPE_TACHE.temps_materiel;
@@ -13048,6 +13086,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // rouge pour que personne n'ait à ouvrir la pile pour le découvrir.
   const piecesEnRetard = (pieces || []).filter((p) => p.enRetard).length;
   const [nouveauTitre, setNouveauTitre] = useState("");
+  // ASSISTANT EN 2 ÉTAPES (demande du propriétaire, 2026-08-17) : le
+  // TYPE d'abord (grandes tuiles), puis un formulaire qui ne montre que
+  // les cases utiles à ce type.
+  const [etapeTypeTache, setEtapeTypeTache] = useState(true);
+  const [adresseCourseLibre, setAdresseCourseLibre] = useState("");
   // 📎 PIÈCES JOINTES (photos du site, plans PDF) — téléversées dès la
   // sélection, transmises au technicien AVEC la tâche (via donnees).
   const [nouvellesPiecesJointes, setNouvellesPiecesJointes] = useState([]);
@@ -13225,7 +13268,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       // client quand ce n'est pas la même. `null` = même adresse que la
       // facturation. Transmise à QuickBooks au moment de la facturation
       // (champ "Ship To" / adresse de livraison de la facture).
-      adresseTravaux: null,
+      // Une COURSE n'a pas de client : son adresse est tapée librement.
+      adresseTravaux: nouveauType === "course" ? adresseCourseLibre.trim() || null : null,
       // ---- COMPTABILISATION DES HEURES ----
       // `nonFacturable` : rien ne partira en facturation à la fin.
       // `sansHeures`    : congé — aucun chronomètre, aucune heure.
@@ -13237,7 +13281,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       sansHeures: estTypeSansHeures(nouveauType),
       categorieHeures: estTypeSansHeures(nouveauType)
         ? "aucune"
-        : nouveauType === "divers"
+        : nouveauType === "divers" || nouveauType === "course"
         ? "divers"
         : estTypeAdministratif(nouveauType) && !tempsSurProjet
         ? "administratif"
@@ -13743,7 +13787,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               Tâches en attente ({tachesAttente.length})
             </h3>
             {!lectureSeule && (
-              <Button onClick={() => setFormulaireOuvert((v) => !v)} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
+              <Button onClick={() => { setFormulaireOuvert((v) => !v); setEtapeTypeTache(true); }} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
                 <Plus size={12} /> Nouvelle tâche
               </Button>
             )}
@@ -13802,6 +13846,33 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 
           {formulaireOuvert && !lectureSeule && (
             <div className="mb-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+              {etapeTypeTache ? (
+                <div>
+                  <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Quel type de tâche ?</p>
+                  <p className="mt-0.5 text-[10px] text-slate-400">Le formulaire ne montrera que les cases utiles à ce type.</p>
+                  <div className="mt-2 grid grid-cols-2 gap-1.5">
+                    {TYPES_TACHE.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { setNouveauType(t.id); setEtapeTypeTache(false); }}
+                        className="rounded-xl border border-slate-200 p-2.5 text-left active:scale-[0.99] hover:border-[#FF6A13]"
+                      >
+                        <span className="block text-xs font-extrabold text-slate-800">{t.label}</span>
+                        <span className="mt-0.5 block text-[9px] leading-snug text-slate-400">{t.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+              <>
+              <button
+                type="button"
+                onClick={() => setEtapeTypeTache(true)}
+                className="flex items-center gap-1 text-[10px] font-bold text-slate-400 underline underline-offset-2"
+              >
+                ← Changer de type ({TYPE_INFO(nouveauType)?.label})
+              </button>
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Titre / description courte</label>
                 <input
@@ -13811,6 +13882,17 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                 />
               </div>
+              {nouveauType === "course" && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse de la course (facultatif)</label>
+                  <input
+                    value={adresseCourseLibre}
+                    onChange={(e) => setAdresseCourseLibre(e.target.value)}
+                    placeholder="Ex : 123 rue du Garage, Blainville"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                </div>
+              )}
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
                   Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span>
@@ -13876,6 +13958,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   </div>
                 )}
               </div>
+              {!estTypeSansClient(nouveauType) && (
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Client</label>
                 {/* ➕ TOUJOURS PREMIER À L'ÉCRAN (demande du propriétaire,
@@ -13933,9 +14016,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   );
                 })()}
               </div>
+              )}
 
               {/* SECTEUR CCQ — commercial/résidentiel : décide du taux
-                  coûtant. Hérité du projet choisi, changeable ici. */}
+                  coûtant. Hérité du projet choisi, changeable ici.
+                  Course et congé : sans objet, masqué. */}
+              {!estTypeSansClient(nouveauType) && (
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Secteur (taux CCQ)</label>
                 <div className="flex gap-1.5">
@@ -13953,6 +14039,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   ))}
                 </div>
               </div>
+              )}
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Projet lié (optionnel)</label>
                 <select
@@ -14091,10 +14178,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 )}
               </div>
 
-              {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
+              {(nouveauType === "devis" || nouveauType === "entretien_contrat" || nouveauType === "appel_service") && (
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                    {nouveauType === "entretien_contrat" ? "Devis / contrat à facturer" : "Devis à facturer"}
+                    {nouveauType === "entretien_contrat" ? "Devis / contrat à facturer" : nouveauType === "appel_service" ? "Devis à lier (optionnel — ex : devis fait après la 1re visite)" : "Devis à facturer"}
                   </label>
                   <select
                     value={nouveauDevisId}
@@ -14397,6 +14484,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               >
                 Créer la tâche
               </Button>
+              </>
+              )}
             </div>
           )}
 
