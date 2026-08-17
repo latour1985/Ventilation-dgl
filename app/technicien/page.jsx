@@ -21,8 +21,8 @@ import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
-import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien } from "@/lib/supabase/tachesAssignees";
-import { enregistrerTravailEffectue } from "@/lib/supabase/travauxEffectues";
+import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, declarerEquipeTerminee } from "@/lib/supabase/tachesAssignees";
+import { enregistrerTravailEffectue, travailDejaEnregistre } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
@@ -1300,6 +1300,158 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
             Plus tard
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// FENÊTRE — UN COÉQUIPIER A FERMÉ LA TÂCHE POUR TOUTE L'ÉQUIPE
+// ------------------------------------------------------------
+// (2026-08-17) Posée à l'ouverture de l'app quand un collègue a déclaré
+// « toute l'équipe a terminé » en fermant une tâche partagée.
+//   • « Oui, j'avais terminé » : les heures POINTÉES du technicien
+//     (arrêtées à l'heure de la fermeture du bon) partent au bureau et
+//     se cumulent automatiquement — aucune validation nécessaire.
+//   • « Non, j'ajuste » : il déclare son heure de fin réelle — la ligne
+//     part À VALIDER par un administrateur (même mécanisme que la
+//     correction de chrono oublié).
+// Le chrono d'un technicien vit sur SON téléphone : c'est pour ça que
+// c'est LUI qui confirme ses heures, jamais son collègue à sa place.
+// ============================================================
+function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
+  const fermeTs = Date.parse(tache.fermetureEquipe?.a) || Date.now();
+  // Heures pointées, arrêtées à l'instant où le bon a été fermé — pas à
+  // « maintenant » : un chrono resté ouvert toute la nuit n'invente
+  // aucune heure.
+  const segment =
+    tache.etat === "en_cours" && tache.tempsDebutSegment
+      ? Math.max(0, (fermeTs - tache.tempsDebutSegment) / 1000)
+      : 0;
+  const heuresPointees = Math.max(0, ((tache.tempsAccumuleSec || 0) + segment) / 3600);
+  const jamaisPointe = heuresPointees < 0.02;
+
+  const [ajuste, setAjuste] = useState(jamaisPointe);
+  const [heureDebut, setHeureDebut] = useState(() =>
+    tache.debutReel ? heureHHMM(tache.debutReel) : ""
+  );
+  const [heureFin, setHeureFin] = useState(() => heureHHMM(fermeTs));
+  const [erreur, setErreur] = useState("");
+
+  const validerAjustement = () => {
+    const debutTs = horodatageDepuisHeure(tache.date, heureDebut);
+    const finTs = horodatageDepuisHeure(tache.date, heureFin);
+    if (!debutTs || !finTs) {
+      setErreur("Entre ton heure de début et ton heure de fin.");
+      return;
+    }
+    if (finTs <= debutTs) {
+      setErreur("Ton heure de fin doit être après ton heure de début.");
+      return;
+    }
+    onAjuster({ debutTs, finTs });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center">
+      <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
+        <h3 className="text-base font-extrabold text-slate-900">
+          🤝 {tache.fermetureEquipe?.par || "Un coéquipier"} a fermé « {tache.titre || "la tâche"} »
+        </h3>
+        <p className="mt-1 text-[13px] leading-snug text-slate-600">
+          Il a fait signer le client et indiqué que <span className="font-bold">toute l&apos;équipe avait terminé</span>{" "}
+          à <span className="font-extrabold">{heureHHMM(fermeTs)}</span>. Le bon est déjà parti — il reste seulement à
+          confirmer <span className="font-bold">tes heures</span>.
+        </p>
+
+        {!ajuste && (
+          <>
+            <div className="mt-3 rounded-xl bg-slate-50 p-3 text-center">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tes heures pointées</p>
+              <p className="text-2xl font-extrabold tabular-nums text-slate-900">{heuresPointees.toFixed(2)} h</p>
+              {tache.debutReel && (
+                <p className="text-[11px] text-slate-500">
+                  {heureHHMM(tache.debutReel)} → {heureHHMM(fermeTs)}
+                </p>
+              )}
+            </div>
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={onConfirmer}
+                className="min-h-[52px] w-full rounded-xl bg-[#FF6A13] px-3 text-sm font-extrabold text-white active:scale-[0.99]"
+              >
+                ✅ C&apos;est exact — confirmer mes {heuresPointees.toFixed(2)} h
+              </button>
+              <p className="text-[11px] leading-snug text-slate-500">
+                Tes heures partent au bureau et se cumulent automatiquement — rien d&apos;autre à faire.
+              </p>
+              <button
+                onClick={() => setAjuste(true)}
+                className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
+              >
+                ✋ Non — ajuster mes heures
+              </button>
+            </div>
+          </>
+        )}
+
+        {ajuste && (
+          <>
+            {jamaisPointe && (
+              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-800">
+                Ton chronomètre n&apos;a pas roulé sur cette tâche — déclare tes heures réelles.
+              </p>
+            )}
+            <label className="mt-3 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">
+              À quelle heure as-tu commencé ?
+            </label>
+            <input
+              type="time"
+              value={heureDebut}
+              onChange={(e) => { setHeureDebut(e.target.value); setErreur(""); }}
+              className="mt-1 min-h-[52px] w-full rounded-xl border-2 border-slate-300 px-3 text-center text-2xl font-extrabold tabular-nums text-slate-900 outline-none focus:border-[#FF6A13]"
+            />
+            <label className="mt-3 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">
+              À quelle heure as-tu terminé ?
+            </label>
+            <input
+              type="time"
+              value={heureFin}
+              onChange={(e) => { setHeureFin(e.target.value); setErreur(""); }}
+              className="mt-1 min-h-[52px] w-full rounded-xl border-2 border-slate-300 px-3 text-center text-2xl font-extrabold tabular-nums text-slate-900 outline-none focus:border-[#FF6A13]"
+            />
+            {erreur && (
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">{erreur}</p>
+            )}
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">
+              Tes heures ajustées partent au bureau et doivent être{" "}
+              <span className="font-bold">approuvées par un administrateur</span>.
+            </p>
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={validerAjustement}
+                className="min-h-[52px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
+              >
+                Envoyer mes heures pour validation
+              </button>
+              {!jamaisPointe && (
+                <button
+                  onClick={() => { setAjuste(false); setErreur(""); }}
+                  className="min-h-[44px] w-full rounded-xl text-[13px] font-bold text-slate-500 active:scale-[0.99]"
+                >
+                  ← Revenir à mes heures pointées
+                </button>
+              )}
+            </div>
+          </>
+        )}
+
+        <button
+          onClick={onPlusTard}
+          className="mt-2 min-h-[44px] w-full rounded-xl text-[13px] font-bold text-slate-400 active:scale-[0.99]"
+        >
+          Plus tard
+        </button>
       </div>
     </div>
   );
@@ -3057,8 +3209,18 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // sur place — c'est donc à elle de le déclarer.
   const [termineSeul, setTermineSeul] = useState(!!tache.termineSeul);
 
+  // « TOUTE L'ÉQUIPE A TERMINÉ » (demande du propriétaire, 2026-08-17).
+  // À la fermeture d'une tâche partagée, on pose LA question à l'humain
+  // sur place plutôt que de deviner : s'il déclare que tous ont fini,
+  // il devient le dernier (signature + bon), et ses coéquipiers
+  // recevront la demande de confirmation de leurs heures sur leur
+  // téléphone. S'il répond non, comportement habituel.
+  const [equipeTerminee, setEquipeTerminee] = useState(!!tache.equipeTerminee);
+  const [modalEquipe, setModalEquipe] = useState(false);
+
   const jeSuisSeul = !equipe || !equipe.partage;
-  const jeSuisLeDernier = jeSuisSeul || termineSeul || equipe.manquants.every((m) => m.email === monCourriel);
+  const jeSuisLeDernier =
+    jeSuisSeul || termineSeul || equipeTerminee || equipe.manquants.every((m) => m.email === monCourriel);
   const collegues = jeSuisSeul ? [] : equipe.equipe.filter((m) => m.email !== monCourriel);
   const colleguesRestants = jeSuisSeul ? [] : equipe.manquants.filter((m) => m.email !== monCourriel);
   // FERMETURE GUIDÉE (demande du propriétaire, 2026-08-17) : pour une
@@ -3340,7 +3502,32 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       setConfirmation("tropTot");
       return;
     }
+    // Tâche partagée et des coéquipiers n'ont pas encore fermé : LA
+    // question avant tout — « est-ce que toute l'équipe a terminé ? »
+    if (!jeSuisSeul && colleguesRestants.length > 0 && !termineSeul && !equipeTerminee) {
+      setModalEquipe(true);
+      return;
+    }
     demarrerEnvoi();
+  };
+
+  // Réponse à la question d'équipe. « Oui » : je deviens le dernier —
+  // signature exigée (on y descend si elle manque), puis le bon part et
+  // mes coéquipiers reçoivent la demande de confirmation d'heures.
+  // « Non » : j'enregistre seulement ma partie, la tâche continue chez
+  // les autres — exactement comme avant.
+  const repondreEquipe = (tousTermine) => {
+    setModalEquipe(false);
+    if (!tousTermine) {
+      demarrerEnvoi();
+      return;
+    }
+    setEquipeTerminee(true);
+    onMajTache(tache.id, { equipeTerminee: true });
+    const signatureOk =
+      clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions);
+    if (signatureOk) demarrerEnvoi();
+    else refSignature.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   // Étape 2 : envoi du bon signé au(x) client(s) + création de la
@@ -3432,6 +3619,14 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       },
       session
     ).then(async (bonRowId) => {
+      // 🤝 FERMETURE D'ÉQUIPE : le bon est créé — on avertit maintenant
+      // les coéquipiers qui n'avaient pas fermé. Leur téléphone leur
+      // demandera de confirmer (ou d'ajuster) leurs heures. Si l'appel
+      // échoue (réseau), rien ne casse : ils fermeront leur tâche
+      // eux-mêmes, comme avant — aucune heure n'est inventée.
+      if (equipeTerminee && colleguesRestants.length > 0) {
+        declarerEquipeTerminee(tache.tacheOrigineId || tache.id, tache.date || null).catch(() => {});
+      }
       // 📸 ENVOI AUTOMATIQUE DU BON AU CLIENT — sur-le-champ (demande du
       // propriétaire, 2026-08-16). Conditions : l'interrupteur est actif
       // (Paramètres) ET le technicien a coché au moins un courriel. En
@@ -3596,7 +3791,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 <p className="mt-1 text-[12px] leading-snug text-white/90">
                   {termineSeul
                     ? "Tu as déclaré terminer seul."
-                    : "Tu es le dernier à fermer ce travail."}{" "}
+                    : equipeTerminee
+                      ? "Tu as déclaré que toute l'équipe avait terminé."
+                      : "Tu es le dernier à fermer ce travail."}{" "}
                   <span className="font-bold">Fais signer le bon de travail au client avant de partir</span> —
                   c&apos;est le seul document qu&apos;il recevra pour cette job.
                 </p>
@@ -4401,6 +4598,52 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         </div>
       )}
 
+      {/* FENÊTRE — « EST-CE QUE TOUTE L'ÉQUIPE A TERMINÉ ? »
+          (2026-08-17). Posée au moment de fermer une tâche partagée
+          quand des coéquipiers n'ont pas encore fermé la leur. « Oui » :
+          je fais signer, le bon part UNE fois, et chaque coéquipier
+          reçoit la demande de confirmation de ses heures sur son
+          téléphone. « Non » : j'enregistre ma partie seulement. */}
+      {modalEquipe && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <h3 className="text-base font-extrabold text-slate-900">🤝 Est-ce que toute l&apos;équipe a terminé ?</h3>
+            <div className="mt-3 space-y-1.5">
+              {colleguesRestants.map((c) => (
+                <p key={c.email} className="rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
+                  ⏱️ <span className="font-bold">{c.nom}</span> n&apos;a pas encore fermé sa tâche sur son téléphone.
+                </p>
+              ))}
+            </div>
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={() => repondreEquipe(true)}
+                className="min-h-[52px] w-full rounded-xl bg-[#FF6A13] px-3 text-sm font-extrabold text-white active:scale-[0.99]"
+              >
+                ✅ Oui, on a tous terminé
+              </button>
+              <p className="text-[11px] leading-snug text-slate-500">
+                Tu fais signer le client et le bon part une seule fois.{" "}
+                {colleguesRestants.map((c) => c.nom).join(", ")} recevra une demande de confirmation de ses heures —
+                s&apos;il les ajuste, un administrateur devra valider.
+              </p>
+              <button
+                onClick={() => repondreEquipe(false)}
+                className="min-h-[52px] w-full rounded-xl border-2 border-slate-300 px-3 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
+              >
+                Non, d&apos;autres continuent — je ferme seulement ma partie
+              </button>
+              <button
+                onClick={() => setModalEquipe(false)}
+                className="min-h-[44px] w-full rounded-xl text-[13px] font-bold text-slate-400 active:scale-[0.99]"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <PiedCopyright />
     </div>
   );
@@ -4495,6 +4738,10 @@ function AppTechnicien() {
                   clientCourriels: d.clientCourriels,
                   clientTelephone: d.clientTelephone,
                   piecesJointes: d.piecesJointes,
+                  // Fermeture d'équipe déclarée par un coéquipier — doit
+                  // atteindre un téléphone qui avait déjà la tâche en
+                  // mémoire, sinon la question ne se pose jamais.
+                  fermetureEquipe: d.fermetureEquipe,
                   date: d.date,
                   heure: d.heure,
                 }
@@ -4611,6 +4858,11 @@ function AppTechnicien() {
   // Tâche dont le technicien corrige le chrono oublié (fenêtre ouverte
   // depuis la bannière rouge de l'accueil).
   const [correctionPour, setCorrectionPour] = useState(null);
+  // 🤝 Tâche fermée « pour toute l'équipe » par un coéquipier — en
+  // attente de la confirmation d'heures du technicien (fenêtre posée à
+  // l'ouverture de l'app). « Plus tard » : mémorisé pour la session.
+  const [fermetureEquipePour, setFermetureEquipePour] = useState(null);
+  const fermeturesReporteesRef = useRef(new Set());
 
   // Transport de FIN DE JOURNÉE encore ouvert le même jour que `t` —
   // c'est lui qu'on propose de fermer du même geste quand le technicien
@@ -5039,6 +5291,148 @@ function AppTechnicien() {
     }
   };
 
+  // ------------------------------------------------------------
+  // 🤝 FERMETURE D'ÉQUIPE — réponses du coéquipier (2026-08-17).
+  // ------------------------------------------------------------
+  // Champs communs de la ligne d'heures envoyée au bureau — mêmes
+  // informations que la fermeture normale (notes, photos, catégorie).
+  const champsFermetureEquipe = (t) => ({
+    tacheId: t.cleHeures || t.tacheOrigineId || t.id,
+    secteur: t.secteur || "commercial",
+    titre: t.titre || undefined,
+    clientNom: t.clientNom || null,
+    date: t.date || isoLocal(new Date()),
+    estTransport: false,
+    categorieHeures: t.categorieHeures || "projet",
+    kilometres: null,
+    projetId: t.projetId || null,
+    noteTerrain: t.notesTerrain || "",
+    photosAvant: (t.photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
+    photosApres: (t.photosApres || []).map((p) => p.urlDistante).filter(Boolean),
+  });
+
+  // « Oui, j'avais terminé » : les heures POINTÉES (arrêtées à l'heure
+  // de la fermeture du bon, jamais à « maintenant ») partent au bureau
+  // et se cumulent automatiquement — aucune validation d'administrateur.
+  const confirmerFermetureEquipe = (id) => {
+    const t = taches.find((x) => x.id === id);
+    setFermetureEquipePour(null);
+    if (!t || !t.fermetureEquipe) return;
+    const fermeTs = Date.parse(t.fermetureEquipe.a) || Date.now();
+    const segment =
+      t.etat === "en_cours" && t.tempsDebutSegment ? Math.max(0, (fermeTs - t.tempsDebutSegment) / 1000) : 0;
+    const heures = Math.max(0, ((t.tempsAccumuleSec || 0) + segment) / 3600);
+    enregistrerTravailEffectue(
+      {
+        ...champsFermetureEquipe(t),
+        heures,
+        noteInterne:
+          `${t.notesInternes ? t.notesInternes + "\n" : ""}` +
+          `🤝 Tâche fermée pour l'équipe par ${t.fermetureEquipe.par} — heures pointées confirmées par le technicien.`,
+        debutReel: t.debutReel || null,
+        finReelle: fermeTs,
+      },
+      session
+    )
+      .then(() => setErreurSync(""))
+      .catch((e) =>
+        setErreurSync(
+          `⚠️ Tes heures n'ont PAS été transmises au bureau — ${e?.message || "connexion impossible"}. Rouvre l'app une fois connecté.`
+        )
+      );
+    setTaches((prev) =>
+      prev.map((x) =>
+        x.id === id
+          ? { ...x, etat: "complete", tempsAccumuleSec: heures * 3600, tempsDebutSegment: null, finReelle: fermeTs }
+          : x
+      )
+    );
+  };
+
+  // « Non, j'ajuste » : heures DÉCLARÉES par le technicien — partent au
+  // bureau À VALIDER par un administrateur (même mécanisme que la
+  // correction de chrono oublié : badge ⏳ dans Heures & paie).
+  const ajusterFermetureEquipe = (id, { debutTs, finTs }) => {
+    const t = taches.find((x) => x.id === id);
+    setFermetureEquipePour(null);
+    if (!t) return;
+    const heures = Math.max(0, (finTs - debutTs) / 3600000);
+    enregistrerTravailEffectue(
+      {
+        ...champsFermetureEquipe(t),
+        heures,
+        noteInterne:
+          `${t.notesInternes ? t.notesInternes + "\n" : ""}` +
+          `🤝 Fermée pour l'équipe par ${t.fermetureEquipe?.par || "un coéquipier"} — heures AJUSTÉES par le technicien (${heureHHMM(debutTs)} → ${heureHHMM(finTs)}). À VALIDER.`,
+        debutReel: debutTs,
+        finReelle: finTs,
+        heuresProposees: heures,
+        debutPropose: new Date(debutTs).toISOString(),
+        finPropose: new Date(finTs).toISOString(),
+        propositionPar: `${nomTechnicien || "Technicien"} (fermeture d'équipe — heures ajustées)`,
+      },
+      session
+    )
+      .then(() => setErreurSync(""))
+      .catch((e) =>
+        setErreurSync(
+          `⚠️ Ton ajustement n'a PAS été transmis au bureau — ${e?.message || "connexion impossible"}. Réessaie une fois connecté.`
+        )
+      );
+    setTaches((prev) =>
+      prev.map((x) =>
+        x.id === id
+          ? { ...x, etat: "complete", tempsAccumuleSec: heures * 3600, tempsDebutSegment: null, debutReel: debutTs, finReelle: finTs }
+          : x
+      )
+    );
+  };
+
+  // 🤝 FERMETURE D'ÉQUIPE — détection côté coéquipier (2026-08-17).
+  // Un collègue a fermé une tâche partagée en déclarant que toute
+  // l'équipe avait terminé : sa marque arrive par l'assignation
+  // (Realtime ou prochaine ouverture de l'app). Avant de poser la
+  // question, on vérifie au serveur que MES heures n'y sont pas déjà
+  // (téléphone réinstallé, double appareil…) — dans ce cas la tâche se
+  // ferme sans question, il n'y a rien à confirmer.
+  // (Placé APRÈS les déclarations de `taches` et `fermetureEquipePour` :
+  // le tableau de dépendances est évalué au rendu — les référencer plus
+  // haut plantait la page entière, « Cannot access before initialization ».)
+  useEffect(() => {
+    if (fermetureEquipePour) return;
+    const monEmail = (session?.user?.email || "").toLowerCase();
+    if (!monEmail) return;
+    const candidate = taches.find(
+      (t) =>
+        t.supabase &&
+        t.type === "travail" &&
+        t.etat !== "complete" &&
+        !t.envoye &&
+        t.fermetureEquipe &&
+        (t.fermetureEquipe.parEmail || "").toLowerCase() !== monEmail &&
+        (!t.fermetureEquipe.jour || t.fermetureEquipe.jour === t.date) &&
+        !fermeturesReporteesRef.current.has(t.id)
+    );
+    if (!candidate) return;
+    let annule = false;
+    (async () => {
+      const deja = await travailDejaEnregistre(
+        candidate.cleHeures || candidate.tacheOrigineId || candidate.id,
+        monEmail
+      );
+      if (annule) return;
+      if (deja) {
+        majTache(candidate.id, { etat: "complete", tempsDebutSegment: null });
+        return;
+      }
+      setFermetureEquipePour(candidate.id);
+    })();
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taches, session?.user?.email, fermetureEquipePour]);
+
   // Vérification au démarrage de l'app, puis toutes les 5 minutes.
   // Pas de processus en arrière-plan : c'est l'ouverture de l'app qui
   // déclenche le rattrapage (lundi matin pour un oubli du vendredi).
@@ -5324,6 +5718,25 @@ function AppTechnicien() {
             transportRetour={transportRetourDe(t)}
             onAnnuler={() => setCorrectionPour(null)}
             onConfirmer={appliquerCorrectionChrono}
+          />
+        );
+      })()}
+
+      {/* 🤝 FERMETURE D'ÉQUIPE — un coéquipier a fermé la tâche pour
+          tout le monde : confirmation (automatique) ou ajustement (à
+          valider par un administrateur) des heures du technicien. */}
+      {fermetureEquipePour && (() => {
+        const t = taches.find((x) => x.id === fermetureEquipePour);
+        if (!t) return null;
+        return (
+          <ModalFermetureEquipe
+            tache={t}
+            onConfirmer={() => confirmerFermetureEquipe(t.id)}
+            onAjuster={(v) => ajusterFermetureEquipe(t.id, v)}
+            onPlusTard={() => {
+              fermeturesReporteesRef.current.add(t.id);
+              setFermetureEquipePour(null);
+            }}
           />
         );
       })()}
