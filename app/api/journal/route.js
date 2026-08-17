@@ -48,7 +48,24 @@ export async function POST(request) {
   }
 
   if (corps?.action === "lister") {
-    if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
+    // ⚠️ RÔLE LU EN BASE, PAS DANS LE PROFIL (audit 2026-08-17) :
+    // user_metadata est modifiable par l'utilisateur lui-même
+    // (auth.updateUser) — un technicien pouvait s'auto-promouvoir et
+    // lire la piste d'audit. La table permissions_utilisateurs, elle,
+    // n'est modifiable que par un Admin principal (RLS) : c'est ELLE
+    // qui fait foi ; le profil ne sert que de repli si aucune fiche.
+    let roleReel = String(utilisateur.user_metadata?.role || "").trim();
+    try {
+      const { data: fiche } = await admin
+        .from("permissions_utilisateurs")
+        .select("role")
+        .eq("email", (utilisateur.email || "").toLowerCase())
+        .maybeSingle();
+      if (fiche?.role) roleReel = String(fiche.role).trim();
+    } catch {
+      // table indisponible — le repli (profil) s'applique
+    }
+    if (roleReel === "Technicien") {
       return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
     }
     const limite = Math.min(500, Math.max(1, parseInt(corps?.limite) || 300));

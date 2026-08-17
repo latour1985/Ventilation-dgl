@@ -3216,6 +3216,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // recevront la demande de confirmation de leurs heures sur leur
   // téléphone. S'il répond non, comportement habituel.
   const [equipeTerminee, setEquipeTerminee] = useState(!!tache.equipeTerminee);
+  // ⚠️ RÉF EN MIROIR de l'état (audit 2026-08-17) : « Oui, on a tous
+  // terminé » enchaîne parfois setEquipeTerminee puis envoyer() dans le
+  // MÊME rendu (client sans courriels) — envoyer() lisait alors l'état
+  // d'AVANT (fermeture périmée) et retombait dans « pas le dernier » :
+  // aucun bon créé. La réf, elle, est à jour immédiatement.
+  const equipeTermineeRef = useRef(!!tache.equipeTerminee);
   const [modalEquipe, setModalEquipe] = useState(false);
 
   const jeSuisSeul = !equipe || !equipe.partage;
@@ -3523,6 +3529,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       return;
     }
     setEquipeTerminee(true);
+    equipeTermineeRef.current = true;
     onMajTache(tache.id, { equipeTerminee: true });
     const signatureOk =
       clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions);
@@ -3554,7 +3561,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     // recevait deux bons à signer pour la même job.
     // Les heures de tout le monde, elles, partent quand même (elles
     // sont enregistrées séparément, dans travaux_effectues).
-    if (!jeSuisLeDernier) {
+    // La réf (jamais périmée) couvre le cas « Oui, on a tous terminé »
+    // suivi d'un envoi immédiat dans le même rendu — voir sa déclaration.
+    const dernierEffectif = jeSuisLeDernier || equipeTermineeRef.current;
+    if (!dernierEffectif) {
       onTerminer();
       // ------------------------------------------------------------
       // ANTI-COURSE (2026-08-17 — vécu : Dominic et Philippe ferment la
@@ -3579,6 +3589,19 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         }
       } catch {
         dernierEnRealite = false; // hors-ligne : comportement d'avant
+      }
+      // ⚠️ GARDE-SIGNATURE (audit 2026-08-17) : ce technicien se croyait
+      // « pas le dernier », donc l'app ne lui a JAMAIS exigé de faire
+      // signer. Sans signature en main, on ne crée PAS le bon officiel
+      // ici (il partirait au client non signé — règle gelée violée).
+      // On retombe sur le comportement d'avant : le bureau réactive au
+      // besoin. La fenêtre « toute l'équipe a terminé ? » reste le
+      // chemin normal, elle, avec signature exigée.
+      if (
+        dernierEnRealite &&
+        !(clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions))
+      ) {
+        dernierEnRealite = false;
       }
       if (!dernierEnRealite) {
         setEnvoiEnCours(false);
@@ -3624,7 +3647,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       // demandera de confirmer (ou d'ajuster) leurs heures. Si l'appel
       // échoue (réseau), rien ne casse : ils fermeront leur tâche
       // eux-mêmes, comme avant — aucune heure n'est inventée.
-      if (equipeTerminee && colleguesRestants.length > 0) {
+      if (equipeTermineeRef.current && colleguesRestants.length > 0) {
         declarerEquipeTerminee(tache.tacheOrigineId || tache.id, tache.date || null).catch(() => {});
       }
       // 📸 ENVOI AUTOMATIQUE DU BON AU CLIENT — sur-le-champ (demande du

@@ -11684,7 +11684,12 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
     // (sinon le client reçoit un lien mort — vécu avec DEV-3509).
     const enregistre = await persisterDevis?.(nouveauDevis);
     if (enregistre === false) {
-      ajouterJournal(`⛔ Devis ${numero} NON enregistré — AUCUN courriel envoyé (pas de lien mort). Vérifie la connexion et recrée le devis.`);
+      // ⚠️ RETRAIT DU FANTÔME (audit 2026-08-17) : le devis avait été
+      // ajouté à la liste AVANT la confirmation — le laisser affiché
+      // offrait encore « Envoyer au client »/« Copier le lien » sur un
+      // devis inexistant en base (lien mort DEV-3509 en différé).
+      setDevisListe((prev) => prev.filter((d) => d.id !== nouveauDevis.id));
+      ajouterJournal(`⛔ Devis ${numero} NON enregistré — retiré de la liste, AUCUN courriel envoyé (pas de lien mort). Vérifie la connexion et recrée le devis.`);
       return;
     }
     if (destinataires.length === 0) {
@@ -12983,8 +12988,19 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   const [employeId, setEmployeId] = useState(employeIdInitial || "");
   const [description, setDescription] = useState(tache.description || "");
   // 📇 Contact sur place — repris du carnet du client ; « actuel »
-  // couvre un contact déjà attaché à la tâche mais absent du carnet.
-  const [contactTacheId, setContactTacheId] = useState(() => (tache.contactSurPlace ? tache.contactSurPlace.id || "actuel" : ""));
+  // couvre un contact déjà attaché à la tâche mais absent du carnet
+  // (retiré du carnet, ou client non résolu). ⚠️ On vérifie VRAIMENT
+  // l'appartenance au carnet (audit 2026-08-17) : initialiser avec un
+  // id introuvable faisait afficher « Aucun » au sélecteur alors que
+  // l'enregistrement CONSERVAIT le contact — l'écran mentait et le
+  // contact devenait impossible à retirer.
+  const [contactTacheId, setContactTacheId] = useState(() => {
+    if (!tache.contactSurPlace) return "";
+    const ficheClient =
+      (clients || []).find((c) => c.id === tache.clientId) || (clients || []).find((c) => c.nom === tache.clientNom);
+    const dansCarnet = (ficheClient?.contacts || []).some((x) => x.id === tache.contactSurPlace.id);
+    return dansCarnet ? tache.contactSurPlace.id : "actuel";
+  });
   const dejaPlanifiee = !!employeIdInitial;
   // Assignation MULTIPLE à la création (édition rapide) : tous les
   // techniciens cochés reçoivent la tâche avec la même date/heure/durée
@@ -13759,12 +13775,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [contactRole, setContactRole] = useState("");
   const [contactTel, setContactTel] = useState("");
   // Changer de client invalide le contact choisi (il appartient à
-  // l'ancien client) — on repart à « Aucun ».
+  // l'ancien client) — on repart à « Aucun ». Le DEVIS choisi aussi
+  // (audit 2026-08-17) : sinon il restait sélectionné mais INVISIBLE
+  // (filtré de la liste) et s'attachait au mauvais client.
   useEffect(() => {
     setContactSurPlaceId("");
     setContactNom("");
     setContactRole("");
     setContactTel("");
+    setNouveauDevisId("");
   }, [nouveauClientId]);
   // TRANSITION QUICKBOOKS : numéro d'un devis EXISTANT (hors application)
   // à attacher à la tâche — il suit jusqu'au bon de travail et à la
@@ -13936,7 +13955,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     }
 
     if (nouveauType === "devis" || nouveauType === "entretien_contrat") {
-      const devis = devisListe.find((d) => d.id === nouveauDevisId);
+      // Ceinture-bretelles : un devis d'un AUTRE client ne s'attache
+      // jamais (le sélecteur filtre déjà, ceci couvre tout état résiduel).
+      const devis = devisListe.find(
+        (d) => d.id === nouveauDevisId && (!nouveauClientId || !d.clientId || d.clientId === nouveauClientId)
+      );
       // « Travaux avec devis » accepte AUSSI un numéro tapé à la main
       // (devis fait hors de l'app — retour de tests 2026-08-17). Le
       // contrat d'entretien, lui, exige un vrai contrat de la liste.
@@ -14178,7 +14201,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         // directement — sinon la question s'ouvre juste après
         // (l'assignation part facturable en attendant la réponse).
         const choixDejaFait = facturablePredetermine === true || facturablePredetermine === false;
-        if (autreTechnicienALaTache(tache.id, employeId)) {
+        // « conserver » (audit 2026-08-17) : modification ou déplacement
+        // d'une assignation EXISTANTE — on ne repose pas la question et
+        // on n'écrit pas facturable (le choix déjà en base reste).
+        const conserverChoix = facturablePredetermine === "conserver";
+        if (autreTechnicienALaTache(tache.id, employeId) && !conserverChoix) {
           if (choixDejaFait) {
             onMajFacturable?.(tache.id, employe.courriel, facturablePredetermine);
             ajouterJournal(
@@ -14195,8 +14222,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           // la première case de la grille (c'était le bogue de minuit).
           heureDebut: heureDepart || heuresCibles[0] || null,
           date: dateISO(dateDepart),
-          // Le choix fait à la création part avec l'assignation même.
-          facturable: choixDejaFait ? facturablePredetermine : true,
+          // Le choix fait à la création part avec l'assignation même ;
+          // sans choix explicite, la clé est OMISE — la valeur en base
+          // reste (nouvelle ligne : défaut true de la base).
+          ...(choixDejaFait ? { facturable: facturablePredetermine } : {}),
         }).catch((e) => {
           // Échec d'écriture Supabase (hors-ligne, table/colonne absente,
           // droits) — visible dans le Journal au lieu d'un silence total.
@@ -14356,7 +14385,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       contactSurPlace: champs.contactSurPlace !== undefined ? champs.contactSurPlace : tache.contactSurPlace || null,
     };
     if (champs.employeId) {
-      assigner(tacheMiseAJour, champs.employeId, new Date(`${champs.date}T00:00:00`), champs.heureDebut);
+      // « conserver » : une modification/un déplacement ne repose jamais
+      // la question 💰/🤝 et n'écrase pas le choix déjà enregistré.
+      assigner(tacheMiseAJour, champs.employeId, new Date(`${champs.date}T00:00:00`), champs.heureDebut, "conserver");
     } else {
       // Technicien retiré — la tâche retourne dans "Tâches en attente"
       // plutôt que de disparaître.
@@ -14412,15 +14443,19 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // contact voyagent intacts.
   const deplacerTache = (tacheId, ancienEmployeId, employeCibleId, dateCible, heureCible) => {
     if (lectureSeule) return;
-    // Retrouver l'objet tâche dans la grille (sa version la plus à jour).
+    // Retrouver l'objet tâche dans la grille (sa version la plus à jour)
+    // ET sa première case horaire actuelle : un dépôt sur un JOUR
+    // (vue Semaine/Mois, heureCible null) conserve l'heure existante —
+    // avant, elle retombait à 07:00 sans avertir (audit 2026-08-17).
     let tache = null;
-    Object.values(planning).some((cellule) => {
-      const t = listeCellule(cellule).find((x) => x.id === tacheId && x.employeId === ancienEmployeId);
-      if (t) {
-        tache = t;
-        return true;
-      }
-      return false;
+    let heureActuelle = null;
+    Object.keys(planning).forEach((cle) => {
+      const [, empCle, hCle] = cle.split("|");
+      if (empCle !== String(ancienEmployeId)) return;
+      const t = listeCellule(planning[cle]).find((x) => x.id === tacheId);
+      if (!t) return;
+      if (!tache) tache = t;
+      if (heureActuelle === null || hCle < heureActuelle) heureActuelle = hCle;
     });
     if (!tache || tache.est_tache_systeme) return;
     // ON NE DÉPLACE PAS LE PASSÉ : des heures déjà pointées sur cette
@@ -14440,7 +14475,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       description: tache.description,
       employeId: employeCibleId,
       date: dateStr,
-      heureDebut: heureCible,
+      // Dépôt sur une case horaire = nouvelle heure ; dépôt sur un jour
+      // = l'heure ACTUELLE suit la tâche.
+      heureDebut: heureCible || heureActuelle || HEURE_PAR_DEFAUT,
     });
   };
 
@@ -14463,7 +14500,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     if (!data) return;
     const objet = JSON.parse(data);
     if (objet?.deplacement) {
-      deplacerTache(objet.tacheId, objet.employeId, employeId, date, HEURE_PAR_DEFAUT);
+      // heure null = « garde l'heure actuelle de la tâche ».
+      deplacerTache(objet.tacheId, objet.employeId, employeId, date, null);
       return;
     }
     assigner(objet, employeId, date, HEURE_PAR_DEFAUT);
