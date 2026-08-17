@@ -11600,11 +11600,18 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
       frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
     };
     setDevisListe((prev) => [nouveauDevis, ...prev]);
-    persisterDevis?.(nouveauDevis);
     setLignes([]);
     setEstContrat(false);
     setFrequenceContrat(4);
     setCourrielModalOuvert(false);
+    // ON ATTEND la confirmation d'enregistrement AVANT tout envoi : un
+    // devis qui n'est pas en base ne doit JAMAIS générer un courriel
+    // (sinon le client reçoit un lien mort — vécu avec DEV-3509).
+    const enregistre = await persisterDevis?.(nouveauDevis);
+    if (enregistre === false) {
+      ajouterJournal(`⛔ Devis ${numero} NON enregistré — AUCUN courriel envoyé (pas de lien mort). Vérifie la connexion et recrée le devis.`);
+      return;
+    }
     if (destinataires.length === 0) {
       ajouterJournal(`Devis ${numero} créé pour ${client.nom} (${totaux.vendant.toFixed(2)} $) — aucun courriel disponible pour l'envoi`);
       return;
@@ -18888,17 +18895,22 @@ export default function App() {
           devisListe={devisListe}
           setDevisListe={setDevisListe}
           persisterDevis={async (d) => {
+            // Retourne true si le devis est BEL ET BIEN en base, false
+            // sinon. L'appelant s'en sert pour ne JAMAIS envoyer le
+            // courriel d'un devis qui n'a pas été enregistré (sinon le
+            // client reçoit un lien mort — vécu avec DEV-3509).
             try {
               await sauvegarderDevis(d);
             } catch {
               ajouterJournal(`⚠️ Devis ${d.numero} affiché localement mais NON enregistré — vérifie la connexion (table devis_app absente ?).`);
-              return;
+              return false;
             }
             // MIROIR QUICKBOOKS (décision du propriétaire : ses devis
             // vivaient dans QuickBooks — on préserve sa pratique). UN
             // estimate par dossier, mis à jour aux révisions. Un échec
-            // ne bloque JAMAIS la sauvegarde du devis lui-même.
-            if (!d?.clientNom || !Array.isArray(d.lignes) || d.lignes.length === 0) return;
+            // ne bloque JAMAIS la sauvegarde du devis lui-même — le
+            // miroir part en arrière-plan et n'affecte pas le retour.
+            if (!d?.clientNom || !Array.isArray(d.lignes) || d.lignes.length === 0) return true;
             const ficheClient = clients.find((c) => (c.nom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase());
             creerEstimateQbo({
               clientId: ficheClient?.id || null,
@@ -18927,6 +18939,9 @@ export default function App() {
                 // reste la référence, le miroir se fera plus tard.
               })
               .catch(() => {});
+            // Le devis est enregistré — le miroir QuickBooks ci-dessus
+            // tourne en arrière-plan sans bloquer ce retour.
+            return true;
           }}
           ajouterJournal={ajouterJournal}
           ajouterTacheAgenda={ajouterTacheAgenda}
