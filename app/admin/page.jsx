@@ -19595,8 +19595,11 @@ export default function App() {
             // client reçoit un lien mort — vécu avec DEV-3509).
             try {
               await sauvegarderDevis(d);
-            } catch {
-              ajouterJournal(`⚠️ Devis ${d.numero} affiché localement mais NON enregistré — vérifie la connexion (table devis_app absente ?).`);
+            } catch (e) {
+              // L'erreur RÉELLE au journal (2026-08-17, vécu : une
+              // colonne manquante a bloqué tous les devis pendant une
+              // semaine et le message générique cachait la cause).
+              ajouterJournal(`⚠️ Devis ${d.numero} affiché localement mais NON enregistré — erreur de la base : ${e?.message || "connexion impossible"}.`);
               return false;
             }
             // MIROIR QUICKBOOKS (décision du propriétaire : ses devis

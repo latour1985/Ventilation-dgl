@@ -2440,3 +2440,13 @@ grant execute on function bon_travail_public(text) to anon, authenticated;
 -- courriels (facturation). [{ id, nom, role, telephone }]
 -- ============================================================
 alter table clients_app add column if not exists contacts jsonb not null default '[]'::jsonb;
+
+-- ============================================================
+-- SNIPPET « 73 » — RATTRAPAGE : colonne manquante de devis_app
+-- ------------------------------------------------------------
+-- Le snippet 48 (miroir estimate QuickBooks) n'avait jamais été passé
+-- au complet en production : la colonne manquait et CHAQUE devis créé
+-- depuis le 2026-08-15 échouait à l'enregistrement (diagnostic
+-- empirique du 2026-08-17, erreur PGRST204 capturée dans l'app).
+-- ============================================================
+alter table devis_app add column if not exists qbo_estimate_id text;
