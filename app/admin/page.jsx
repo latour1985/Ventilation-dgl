@@ -17398,10 +17398,18 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   // La demande est ouverte à qui voit la facturation ; la VALIDATION
   // est réservée à l'Admin principal. Tout passe au journal — aucune
   // facture ne disparaît sans trace.
+  // ⚠️ CIBLAGE (corrigé 2026-08-17, vécu) : le retrait s'applique par
+  // TÂCHE (un travail à plusieurs techniciens se retire d'un bloc) —
+  // mais un bon SANS identifiant de tâche (cartes de démonstration,
+  // anciennes données) faisait « indéfini = indéfini » : demander le
+  // retrait d'UNE carte l'affichait sur TOUTES. Sans tacheId, on cible
+  // le bon lui-même, et rien ne part en base (aucune ligne à modifier).
+  const memeCibleRetrait = (b) => (x) => (b.tacheId ? x.tacheId === b.tacheId : x.id === b.id);
   const demanderRetrait = async (b, raison, note) => {
     try {
-      await demanderRetraitFacturation(b.tacheId, raison, note);
-      setBons((prev) => prev.map((x) => (x.tacheId === b.tacheId ? { ...x, retraitStatut: "demande", retraitRaison: raison, retraitNote: note || "" } : x)));
+      if (b.tacheId) await demanderRetraitFacturation(b.tacheId, raison, note);
+      const cible = memeCibleRetrait(b);
+      setBons((prev) => prev.map((x) => (cible(x) ? { ...x, retraitStatut: "demande", retraitRaison: raison, retraitNote: note || "" } : x)));
       ajouterJournal(`🕓 Retrait de facturation DEMANDÉ — ${b.client} : ${RAISONS_RETRAIT[raison] || raison}. Un Admin principal doit valider.`);
     } catch {
       ajouterJournal("⚠️ Demande de retrait NON enregistrée — réessaie.");
@@ -17409,9 +17417,10 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   };
   const validerRetrait = async (b, approuve) => {
     try {
-      await validerRetraitFacturation(b.tacheId, approuve, b.retraitRaison);
+      if (b.tacheId) await validerRetraitFacturation(b.tacheId, approuve, b.retraitRaison);
+      const cible = memeCibleRetrait(b);
       setBons((prev) => prev.map((x) => {
-        if (x.tacheId !== b.tacheId) return x;
+        if (!cible(x)) return x;
         if (!approuve) return { ...x, retraitStatut: null, retraitRaison: null, retraitNote: "" };
         if (b.retraitRaison === "travaux_en_cours") return { ...x, retraitStatut: "reporte" };
         return { ...x, retraitStatut: "retire", statutQb: "retire" };
@@ -17429,8 +17438,9 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   };
   const remettreBonAFacturer = async (b) => {
     try {
-      await remettreAFacturer(b.tacheId);
-      setBons((prev) => prev.map((x) => (x.tacheId === b.tacheId ? { ...x, retraitStatut: null, retraitRaison: null, retraitNote: "", statutQb: "en_attente" } : x)));
+      if (b.tacheId) await remettreAFacturer(b.tacheId);
+      const cible = memeCibleRetrait(b);
+      setBons((prev) => prev.map((x) => (cible(x) ? { ...x, retraitStatut: null, retraitRaison: null, retraitNote: "", statutQb: "en_attente" } : x)));
       ajouterJournal(`↩️ ${b.client} REMIS à facturer.`);
     } catch {
       ajouterJournal("⚠️ Remise à facturer NON enregistrée — réessaie.");
