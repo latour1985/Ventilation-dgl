@@ -13040,6 +13040,16 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   const [fermBon, setFermBon] = useState(false); // décochée par défaut (choix du propriétaire)
   const [fermErreur, setFermErreur] = useState("");
   const nomTechOuvert = employes?.find((e) => e.id === employeIdInitial)?.nom || "le technicien";
+
+  // 📸 VISIONNEUSE des photos du technicien (retour de tests
+  // 2026-08-17) : avant, chaque vignette ouvrait un onglet — il fallait
+  // ouvrir/fermer les photos une à une. Même visionneuse que partout
+  // ailleurs : flèches, glissement de doigt, clavier.
+  const photosTravail = [
+    ...((travailFait?.photosAvantUrls || []).map((u, i) => ({ url: u, etiquette: `Avant ${i + 1}` }))),
+    ...((travailFait?.photosApresUrls || []).map((u, i) => ({ url: u, etiquette: `Après ${i + 1}` }))),
+  ];
+  const [photoOuverte, setPhotoOuverte] = useState(null);
   const validerFermetureBureau = () => {
     if (!fermFin) {
       setFermErreur("Entre son heure de fin.");
@@ -13182,23 +13192,36 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
         {travailFait && (travailFait.photosAvantUrls?.length > 0 || travailFait.photosApresUrls?.length > 0) && (
           <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
             {[
-              ["📷 Photos avant travaux", travailFait.photosAvantUrls],
-              ["📷 Photos après travaux", travailFait.photosApresUrls],
-            ].map(([titre, urls]) =>
+              ["📷 Photos avant travaux", travailFait.photosAvantUrls, 0],
+              ["📷 Photos après travaux", travailFait.photosApresUrls, (travailFait.photosAvantUrls || []).length],
+            ].map(([titre, urls, decalage]) =>
               urls?.length > 0 ? (
                 <div key={titre}>
                   <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{titre}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {urls.map((u, i) => (
-                      <a key={i} href={u} target="_blank" rel="noreferrer" className="block h-20 w-20 overflow-hidden rounded-lg border border-slate-200">
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setPhotoOuverte(decalage + i)}
+                        title="Ouvrir la visionneuse (flèches pour naviguer)"
+                        className="block h-20 w-20 overflow-hidden rounded-lg border border-slate-200 hover:border-slate-400"
+                      >
                         <img src={u} alt={`${titre} ${i + 1}`} loading="lazy" decoding="async" className="h-full w-full object-cover" />
-                      </a>
+                      </button>
                     ))}
                   </div>
                 </div>
               ) : null
             )}
           </div>
+        )}
+        {photoOuverte != null && photosTravail.length > 0 && (
+          <VisionneusePhotos
+            photos={photosTravail}
+            indexDepart={photoOuverte}
+            onFermer={() => setPhotoOuverte(null)}
+          />
         )}
 
         <div className="space-y-3">
