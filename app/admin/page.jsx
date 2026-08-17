@@ -12860,7 +12860,9 @@ function reconstruirePlanning(rows, employesRef) {
     const joursCibles = calculerJoursCibles(new Date(`${r.date_debut}T00:00:00`), nbJours, !!tache.sauterWeekend);
     const indexDepart = r.heure_debut ? Math.max(0, indexCaseHeure(r.heure_debut)) : 0;
     const nbHeures = Math.max(0, Math.min(tache.heures ?? 1, HEURES.length - indexDepart));
-    const heuresCibles = blocJourComplet ? HEURES : HEURES.slice(indexDepart, indexDepart + nbHeures);
+    // Même correction que dans assigner() : le bloc « journée complète »
+    // part de l'heure de début enregistrée, pas de minuit.
+    const heuresCibles = blocJourComplet ? HEURES.slice(indexDepart) : HEURES.slice(indexDepart, indexDepart + nbHeures);
     joursCibles.forEach((d) => {
       heuresCibles.forEach((h) => {
         const cle = `${dateISO(d)}|${emp.id}|${h}`;
@@ -13263,9 +13265,16 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
             </div>
           )}
 
-          <Button onClick={enregistrer} className="w-full">
-            {dejaPlanifiee ? "Enregistrer les modifications" : employeId ? "Enregistrer et assigner" : "Enregistrer"}
-          </Button>
+          {/* BOUTON COLLANT (2026-08-17, vécu) : il était enfoui sous les
+              sections « Appliquer à… » et « Ajouter un technicien » — on
+              modifiait le nombre de jours puis on fermait la fenêtre sans
+              le trouver, et RIEN n'était enregistré. Il reste maintenant
+              visible au bas de la fenêtre pendant qu'on défile. */}
+          <div className="sticky bottom-0 -mx-1 border-t border-slate-200 bg-white px-1 pb-1 pt-2">
+            <Button onClick={enregistrer} className="w-full">
+              {dejaPlanifiee ? "Enregistrer les modifications" : employeId ? "Enregistrer et assigner" : "Enregistrer"}
+            </Button>
+          </div>
 
           {/* RETRAIT DE L'HORAIRE — le même geste que « Laisser en
               attente » du menu déroulant, mais VISIBLE : personne ne
@@ -13754,19 +13763,28 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 
     if (nouveauType === "devis" || nouveauType === "entretien_contrat") {
       const devis = devisListe.find((d) => d.id === nouveauDevisId);
-      if (!devis) return; // un devis/contrat doit être sélectionné pour ces types
-      nouvelle.devisNumero = devis.numero;
-      // Texte du devis transmis sur la tâche, SANS les prix — ajouté à la
-      // suite de la description saisie manuellement (si elle existe).
-      // UN ITEM PAR LIGNE pour rester facile à lire.
-      const texteDevis = devis.lignes.map((l) => `${l.quantite} × ${l.nom}`).join("\n");
-      nouvelle.description = nouvelleDescription.trim() ? `${nouvelleDescription.trim()}\n${texteDevis}` : texteDevis;
-      // Lignes du devis SANS AUCUN PRIX ni total — pour la fenêtre
-      // « Voir le devis » de l'app technicien. Les montants ne quittent
-      // jamais l'admin : seuls nom, quantité et unité sont transmis.
-      nouvelle.devisLignes = devis.lignes.map((l) => ({ nom: l.nom, quantite: l.quantite, unite: l.unite || "" }));
-      if (nouveauType === "entretien_contrat") {
-        nouvelle.frequenceFacturationAnnuelle = nouvelleFrequence;
+      // « Travaux avec devis » accepte AUSSI un numéro tapé à la main
+      // (devis fait hors de l'app — retour de tests 2026-08-17). Le
+      // contrat d'entretien, lui, exige un vrai contrat de la liste.
+      if (!devis && nouveauType === "devis" && numeroDevisExistant.trim()) {
+        nouvelle.devisNumero = numeroDevisExistant.trim();
+      } else if (!devis) {
+        return; // un devis/contrat doit être sélectionné pour ces types
+      }
+      if (devis) {
+        nouvelle.devisNumero = devis.numero;
+        // Texte du devis transmis sur la tâche, SANS les prix — ajouté à la
+        // suite de la description saisie manuellement (si elle existe).
+        // UN ITEM PAR LIGNE pour rester facile à lire.
+        const texteDevis = devis.lignes.map((l) => `${l.quantite} × ${l.nom}`).join("\n");
+        nouvelle.description = nouvelleDescription.trim() ? `${nouvelleDescription.trim()}\n${texteDevis}` : texteDevis;
+        // Lignes du devis SANS AUCUN PRIX ni total — pour la fenêtre
+        // « Voir le devis » de l'app technicien. Les montants ne quittent
+        // jamais l'admin : seuls nom, quantité et unité sont transmis.
+        nouvelle.devisLignes = devis.lignes.map((l) => ({ nom: l.nom, quantite: l.quantite, unite: l.unite || "" }));
+        if (nouveauType === "entretien_contrat") {
+          nouvelle.frequenceFacturationAnnuelle = nouvelleFrequence;
+        }
       }
     }
 
@@ -13910,13 +13928,18 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     const blocageJourComplet = nbJoursSpecifie >= 1;
     const joursCibles = calculerJoursCibles(dateDepart, nbJoursSpecifie, tache.sauterWeekend);
     const indexDepart = heureDepart ? Math.max(0, indexCaseHeure(heureDepart)) : 0;
+    // ⏰ BOGUE DE MINUIT (corrigé 2026-08-17, vécu) : « journée complète »
+    // partait de la case 00:00 — la barre commençait à minuit hors de
+    // l'écran (la tâche semblait disparue) et le technicien recevait
+    // « 00:00 » comme heure de début. Le blocage part maintenant de
+    // l'heure CHOISIE jusqu'à la fin de la journée.
     // tache.heures peut valoir 0 (saisi explicitement) — on ne le
     // remplace plus par 1 via `|| 1`. Math.max(0, ...) plutôt que
     // Math.max(1, ...) : 0 case horaire bloquée est un résultat valide
     // si l'utilisateur a choisi 0 heure et 0 jour.
     const nbHeuresSpecifie = tache.heures ?? 1;
     const nbHeures = Math.max(0, Math.min(nbHeuresSpecifie, HEURES.length - indexDepart));
-    const heuresCibles = blocageJourComplet ? HEURES : HEURES.slice(indexDepart, indexDepart + nbHeures);
+    const heuresCibles = blocageJourComplet ? HEURES.slice(indexDepart) : HEURES.slice(indexDepart, indexDepart + nbHeures);
 
     setPlanning((prev) => {
       const copie = { ...prev };
@@ -13941,7 +13964,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     const derniereDate = joursCibles[joursCibles.length - 1];
     const detailJours = joursCibles.length > 1 ? `du ${dateISO(dateDepart)} au ${dateISO(derniereDate)}${tache.sauterWeekend ? " (fins de semaine sautées)" : ""}` : `le ${dateISO(dateDepart)}`;
     const detailHeures = blocageJourComplet
-      ? "journée complète bloquée"
+      ? `journée bloquée à partir de ${heureDepart || heuresCibles[0] || "07:00"}`
       : nbHeures > 0
       ? `à partir de ${heuresCibles[0]} (${nbHeures} h/jour)`
       : "aucune case horaire bloquée (0 h)";
@@ -13966,8 +13989,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           setChoixFacturable({ tacheId: tache.id, titre: tache.titre || tache.clientNom || "cette tâche", employe });
         }
         assignerTacheSupabase(tache, employe, {
+          // L'heure CHOISIE d'abord (quarts d'heure conservés) — jamais
+          // la première case de la grille (c'était le bogue de minuit).
+          heureDebut: heureDepart || heuresCibles[0] || null,
           date: dateISO(dateDepart),
-          heureDebut: heuresCibles[0] || heureDepart || null,
         }).catch((e) => {
           // Échec d'écriture Supabase (hors-ligne, table/colonne absente,
           // droits) — visible dans le Journal au lieu d'un silence total.
@@ -14654,6 +14679,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     <option value="" disabled>Sélectionner un devis...</option>
                     {devisListe
                       .slice()
+                      // 🎯 SEULEMENT les devis DU CLIENT choisi (retour de
+                      // tests 2026-08-17) : la liste montrait les devis de
+                      // TOUS les clients — risque de lier le mauvais devis
+                      // à la tâche. Sans client choisi, liste complète.
+                      .filter((d) => !nouveauClientId || d.clientId === nouveauClientId)
                       // Pour une tâche « Entretien selon contrat », les
                       // CONTRATS apparaissent en premier, clairement marqués.
                       .sort((a, b) => (nouveauType === "entretien_contrat" ? (b.estContrat ? 1 : 0) - (a.estContrat ? 1 : 0) : 0))
@@ -14663,6 +14693,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         </option>
                       ))}
                   </select>
+                  {!nouveauClientId && devisListe.length > 0 && (
+                    <p className="mt-1 text-[10px] text-slate-400">Choisis d&apos;abord le client plus bas : la liste ne montrera que SES devis.</p>
+                  )}
+                  {nouveauClientId && devisListe.filter((d) => d.clientId === nouveauClientId).length === 0 && (
+                    <p className="mt-1 text-[10px] text-amber-600">
+                      Aucun devis au dossier de ce client{nouveauType !== "entretien_contrat" ? " — entre un numéro manuellement ci-dessous, ou crée le devis dans l'onglet Devis" : " — crée d'abord le contrat dans l'onglet Devis"}.
+                    </p>
+                  )}
                   {devisListe.length === 0 && (
                     <p className="mt-1 text-[10px] text-red-500">Aucun devis disponible — crée-en un dans l'onglet Devis.</p>
                   )}
@@ -14685,11 +14723,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               )}
 
               {/* Nº DE DEVIS EXISTANT (transition QuickBooks) — pour les
-                  jobs vendues avec un devis d'AVANT l'application. */}
-              {nouveauType !== "devis" && nouveauType !== "entretien_contrat" && (
+                  jobs vendues avec un devis d'AVANT l'application. Offert
+                  AUSSI pour « Travaux avec devis » (retour de tests
+                  2026-08-17) : un devis fait hors de l'app se tape à la
+                  main quand il n'est pas dans la liste. Pas pour les
+                  contrats d'entretien (la fréquence vient du contrat). */}
+              {nouveauType !== "entretien_contrat" && (
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                    Nº de devis existant (QuickBooks) <span className="font-normal normal-case text-slate-400">— optionnel</span>
+                    {nouveauType === "devis" ? "…ou entre un Nº de devis manuellement (devis fait hors de l'app)" : "Nº de devis existant (QuickBooks)"} <span className="font-normal normal-case text-slate-400">— optionnel</span>
                   </label>
                   <input
                     value={numeroDevisExistant}
@@ -14698,7 +14740,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-64"
                   />
                   <p className="mt-0.5 text-[9px] text-slate-400">
-                    Pour la transition : le numéro suivra la tâche jusqu&apos;au bon de travail et à la facturation.
+                    {nouveauType === "devis"
+                      ? "Le numéro suivra la tâche jusqu'au bon de travail et à la facturation. Le contenu du devis ne sera pas copié automatiquement (l'app ne le connaît pas) — écris l'essentiel dans la description."
+                      : "Pour la transition : le numéro suivra la tâche jusqu'au bon de travail et à la facturation."}
                   </p>
                 </div>
               )}
@@ -14933,19 +14977,35 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         ⚠️ Choisis un montant de dépôt (liste de prix ou tarif sur mesure) pour pouvoir créer la tâche.
                       </p>
                     )}
-                    <div className="flex items-center gap-2">
-                      <Button
-                        onClick={creerTache}
-                        disabled={
-                          !nouveauTitre.trim() ||
-                          ((nouveauType === "devis" || nouveauType === "entretien_contrat") && !nouveauDevisId) ||
-                          (depotRequis && !(parseFloat(depotMontant) > 0))
-                        }
-                        className="min-h-0 flex-1 py-2.5 text-xs"
-                      >
-                        Créer la tâche
-                      </Button>
-                    </div>
+                    {/* LE BOUTON GRIS S'EXPLIQUE (règle de la maison) : la
+                        liste des raisons s'affiche au lieu de laisser
+                        deviner. Un devis TAPÉ À LA MAIN débloque aussi le
+                        type « Travaux avec devis » (2026-08-17). */}
+                    {(() => {
+                      const raisons = [];
+                      if (!nouveauTitre.trim()) raisons.push("un titre");
+                      if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un devis (de la liste, ou un numéro tapé à la main)");
+                      if (nouveauType === "entretien_contrat" && !nouveauDevisId) raisons.push("un contrat de la liste");
+                      if (depotRequis && !(parseFloat(depotMontant) > 0)) raisons.push("un montant de dépôt");
+                      return (
+                        <>
+                          {raisons.length > 0 && (
+                            <p className="mb-2 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-semibold text-slate-500">
+                              Pour créer la tâche, il manque : {raisons.join(" · ")}.
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2">
+                            <Button
+                              onClick={creerTache}
+                              disabled={raisons.length > 0}
+                              className="min-h-0 flex-1 py-2.5 text-xs"
+                            >
+                              Créer la tâche
+                            </Button>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
               </div>
             </div>
