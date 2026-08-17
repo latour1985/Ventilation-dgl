@@ -11857,17 +11857,23 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
             })()}
           </div>
 
-          <div className="rounded-xl bg-slate-50 p-3">
-            <label className="mb-1 block text-xs font-bold text-slate-500">Ajouter une adresse au dossier client</label>
-            <input
-              value={nouvelleAdresseNom}
-              onChange={(e) => setNouvelleAdresseNom(e.target.value)}
-              placeholder="Nom de l'adresse (ex: Chantier Sud)"
-              className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-            />
-            <AutocompleteAdresse onSelection={enregistrerAdresse} />
-            <p className="mt-1 text-[11px] text-slate-400">Sélectionner un résultat enregistre l'adresse au dossier de {client.nom}.</p>
-          </div>
+          {/* Ajouter une adresse — SEULEMENT quand un client est choisi :
+              sans client sélectionné, `client` est undefined et lire
+              `client.nom` faisait planter tout l'onglet Devis (depuis le
+              retrait de la présélection, 2026-08-17). */}
+          {client && (
+            <div className="rounded-xl bg-slate-50 p-3">
+              <label className="mb-1 block text-xs font-bold text-slate-500">Ajouter une adresse au dossier client</label>
+              <input
+                value={nouvelleAdresseNom}
+                onChange={(e) => setNouvelleAdresseNom(e.target.value)}
+                placeholder="Nom de l'adresse (ex: Chantier Sud)"
+                className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+              <AutocompleteAdresse onSelection={enregistrerAdresse} />
+              <p className="mt-1 text-[11px] text-slate-400">Sélectionner un résultat enregistre l'adresse au dossier de {client.nom}.</p>
+            </div>
+          )}
 
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
