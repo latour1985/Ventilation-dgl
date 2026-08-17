@@ -13606,7 +13606,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // Trouvé par le propriétaire en production, 2026-08-15.)
   // PROJET choisi (option validée par le propriétaire), Commercial par
   // défaut, changeable au cas par cas.
-  const [nouveauSecteur, setNouveauSecteur] = useState("commercial");
+  // AUCUNE présélection (demande du propriétaire, 2026-08-17) : le
+  // secteur décide du taux coûtant CCQ figé — un « Commercial » oublié
+  // faussait la paie de toute la tâche. Choix obligatoire à la création
+  // (sauf types sans heures) ; un projet choisi l'hérite quand même.
+  const [nouveauSecteur, setNouveauSecteur] = useState("");
   useEffect(() => {
     const projetChoisi = (projets || []).find((pr) => pr.id === nouveauProjetId);
     if (projetChoisi?.secteur) setNouveauSecteur(projetChoisi.secteur);
@@ -13626,6 +13630,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // additionnées, une seule facturation) — fini le détour « créer puis
   // ajouter dans l'agenda ».
   const [nouveauxEmployesEnPlus, setNouveauxEmployesEnPlus] = useState([]);
+  // 💰/🤝 Choix facturable PAR technicien supplémentaire, fait À LA
+  // CRÉATION (demande du propriétaire, 2026-08-17) : { employeId: true
+  // (facturable) | false (aide interne) }. Obligatoire — remplace la
+  // fenêtre posée après coup, qui s'écrasait quand on cochait deux
+  // techniciens d'un coup (un des choix n'était jamais demandé).
+  const [facturablesEnPlus, setFacturablesEnPlus] = useState({});
   // TRANSITION QUICKBOOKS : numéro d'un devis EXISTANT (hors application)
   // à attacher à la tâche — il suit jusqu'au bon de travail et à la
   // facturation.
@@ -13849,7 +13859,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       // MULTI-TECHNICIENS : chaque coché EN PLUS reçoit la MÊME tâche
       // partagée (id identique = heures additionnées, une facturation).
       const enPlus = nouveauxEmployesEnPlus.filter((id) => id && id !== nouveauEmployeId);
-      enPlus.forEach((id) => assigner(nouvelle, id, new Date(`${nouvelleDate}T00:00:00`), nouvelleHeureDebut));
+      // Chaque technicien EN PLUS part avec SON choix 💰/🤝 fait dans le
+      // formulaire (obligatoire — le bouton Créer le garantit).
+      enPlus.forEach((id) => assigner(nouvelle, id, new Date(`${nouvelleDate}T00:00:00`), nouvelleHeureDebut, facturablesEnPlus[id]));
       const nomsEquipe = [nouveauEmployeId, ...enPlus]
         .map((id) => employes.find((e) => e.id === id)?.nom)
         .filter(Boolean)
@@ -13879,6 +13891,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setNouvelleHeureDebut(HEURE_PAR_DEFAUT);
     setNouveauEmployeId("");
     setNouveauxEmployesEnPlus([]);
+    setFacturablesEnPlus({});
+    setNouveauSecteur("");
     setNumeroDevisExistant("");
     setFiltreClientTache("");
     setFiltreAdresseTache("");
@@ -13896,7 +13910,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // seule assignerJours (Semaine/Mois) en tenait compte, donc assigner
   // une tâche multi-jours depuis la vue Jour (la vue par défaut) la
   // limitait silencieusement à une seule journée.
-  const assigner = (tache, employeId, dateDepart, heureDepart) => {
+  // `facturablePredetermine` (facultatif) : true/false quand le choix
+  // 💰/🤝 a DÉJÀ été fait (cases de la création de tâche) — la fenêtre
+  // après coup ne s'ouvre alors pas. Absent : comportement habituel
+  // (question posée dès qu'un 2e technicien rejoint la tâche).
+  const assigner = (tache, employeId, dateDepart, heureDepart, facturablePredetermine) => {
     if (lectureSeule) return;
     // Blocage strict : impossible d'assigner tant que le dépôt requis
     // n'est pas payé (ou si le délai de 24 h l'a annulé).
@@ -13982,17 +14000,30 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           `⚠️ "${tache.titre || tache.clientNom}" reste dans l'agenda mais N'A PAS été envoyée à l'app technicien — ${employe?.nom || employeId} n'a pas de courriel dans le Répertoire`
         );
       } else {
-        // 2e technicien et plus : la question OBLIGATOIRE s'ouvre juste
-        // après (l'assignation part facturable en attendant la réponse —
-        // la fenêtre bloque l'écran, la réponse suit immédiatement).
+        // 2e technicien et plus : le choix 💰/🤝 est OBLIGATOIRE. S'il a
+        // déjà été fait à la création (cases à cocher), on l'applique
+        // directement — sinon la question s'ouvre juste après
+        // (l'assignation part facturable en attendant la réponse).
+        const choixDejaFait = facturablePredetermine === true || facturablePredetermine === false;
         if (autreTechnicienALaTache(tache.id, employeId)) {
-          setChoixFacturable({ tacheId: tache.id, titre: tache.titre || tache.clientNom || "cette tâche", employe });
+          if (choixDejaFait) {
+            onMajFacturable?.(tache.id, employe.courriel, facturablePredetermine);
+            ajouterJournal(
+              facturablePredetermine
+                ? `💰 ${employe.nom} ajouté sur « ${tache.titre || tache.clientNom || "cette tâche"} » — FACTURABLE au client.`
+                : `🤝 ${employe.nom} ajouté sur « ${tache.titre || tache.clientNom || "cette tâche"} » — NON facturable (aide interne) : ses heures ne seront pas comptées dans la facturation.`
+            );
+          } else {
+            setChoixFacturable({ tacheId: tache.id, titre: tache.titre || tache.clientNom || "cette tâche", employe });
+          }
         }
         assignerTacheSupabase(tache, employe, {
           // L'heure CHOISIE d'abord (quarts d'heure conservés) — jamais
           // la première case de la grille (c'était le bogue de minuit).
           heureDebut: heureDepart || heuresCibles[0] || null,
           date: dateISO(dateDepart),
+          // Le choix fait à la création part avec l'assignation même.
+          facturable: choixDejaFait ? facturablePredetermine : true,
         }).catch((e) => {
           // Échec d'écriture Supabase (hors-ligne, table/colonne absente,
           // droits) — visible dans le Journal au lieu d'un silence total.
@@ -14820,21 +14851,60 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     <div className="space-y-1">
                       {employes
                         .filter((e) => e.id !== nouveauEmployeId)
-                        .map((e) => (
-                          <label key={e.id} className="flex items-center gap-2 text-[11px] text-slate-700">
-                            <input
-                              type="checkbox"
-                              checked={nouveauxEmployesEnPlus.includes(e.id)}
-                              onChange={() =>
-                                setNouveauxEmployesEnPlus((prev) =>
-                                  prev.includes(e.id) ? prev.filter((x) => x !== e.id) : [...prev, e.id]
-                                )
-                              }
-                              className="h-3.5 w-3.5 accent-[#131B2E]"
-                            />
-                            {e.nom}
-                          </label>
-                        ))}
+                        .map((e) => {
+                          const coche = nouveauxEmployesEnPlus.includes(e.id);
+                          const choix = facturablesEnPlus[e.id]; // true | false | undefined
+                          return (
+                            <div key={e.id}>
+                              <label className="flex items-center gap-2 text-[11px] text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={coche}
+                                  onChange={() => {
+                                    setNouveauxEmployesEnPlus((prev) =>
+                                      prev.includes(e.id) ? prev.filter((x) => x !== e.id) : [...prev, e.id]
+                                    );
+                                    // Décoché = son choix 💰/🤝 s'efface
+                                    // aussi (pas de choix fantôme si on
+                                    // le recoche plus tard).
+                                    setFacturablesEnPlus((prev) => {
+                                      const maj = { ...prev };
+                                      delete maj[e.id];
+                                      return maj;
+                                    });
+                                  }}
+                                  className="h-3.5 w-3.5 accent-[#131B2E]"
+                                />
+                                {e.nom}
+                              </label>
+                              {/* CHOIX OBLIGATOIRE fait ICI (2026-08-17) —
+                                  aucune présélection : facturable au client,
+                                  ou aide interne non facturable. */}
+                              {coche && (
+                                <div className="mt-1 flex gap-1.5 pl-5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setFacturablesEnPlus((prev) => ({ ...prev, [e.id]: true }))}
+                                    className={`flex-1 rounded-lg border px-2 py-1 text-[10px] font-bold ${
+                                      choix === true ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-300 bg-white text-slate-600"
+                                    }`}
+                                  >
+                                    💰 Facturable
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setFacturablesEnPlus((prev) => ({ ...prev, [e.id]: false }))}
+                                    className={`flex-1 rounded-lg border px-2 py-1 text-[10px] font-bold ${
+                                      choix === false ? "border-slate-700 bg-slate-700 text-white" : "border-slate-300 bg-white text-slate-600"
+                                    }`}
+                                  >
+                                    🤝 Non facturable (aide)
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                     </div>
                     <p className="mt-1 text-[9px] text-slate-400">
                       Même job à plusieurs bras : heures additionnées, UNE facturation. Chacun reste ajustable
@@ -14984,9 +15054,21 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     {(() => {
                       const raisons = [];
                       if (!nouveauTitre.trim()) raisons.push("un titre");
+                      // Secteur CCQ : obligatoire, AUCUNE présélection
+                      // (2026-08-17) — il fige le taux coûtant de chaque
+                      // heure. Sans objet pour course/congé (masqué).
+                      if (!estTypeSansClient(nouveauType) && !nouveauSecteur) raisons.push("le secteur (taux CCQ — Commercial ou Résidentiel)");
                       if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un devis (de la liste, ou un numéro tapé à la main)");
                       if (nouveauType === "entretien_contrat" && !nouveauDevisId) raisons.push("un contrat de la liste");
                       if (depotRequis && !(parseFloat(depotMontant) > 0)) raisons.push("un montant de dépôt");
+                      // Choix 💰/🤝 obligatoire pour chaque technicien
+                      // supplémentaire coché (2026-08-17).
+                      nouveauxEmployesEnPlus
+                        .filter((id) => id !== nouveauEmployeId && facturablesEnPlus[id] !== true && facturablesEnPlus[id] !== false)
+                        .forEach((id) => {
+                          const nomTech = employes.find((e) => e.id === id)?.nom || "un technicien ajouté";
+                          raisons.push(`le choix facturable ou non pour ${nomTech}`);
+                        });
                       return (
                         <>
                           {raisons.length > 0 && (
