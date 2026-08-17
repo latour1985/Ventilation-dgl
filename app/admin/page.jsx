@@ -13728,6 +13728,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [adresseTravauxDifferente, setAdresseTravauxDifferente] = useState(false);
   const [adresseTravauxId, setAdresseTravauxId] = useState("");
   const [nouvelleAdresseTravaux, setNouvelleAdresseTravaux] = useState(null); // résultat de l'autocomplétion
+  // 📌 Une NOUVELLE adresse tapée s'enregistre au dossier du client
+  // (coché d'avance — retour de tests 2026-08-17 : l'adresse d'une tâche
+  // précédente n'était jamais offerte à la suivante).
+  const [enregistrerAdresseFiche, setEnregistrerAdresseFiche] = useState(true);
   // Planification directe dès la création — si date + technicien sont
   // tous les deux renseignés, la tâche se positionne immédiatement
   // dans la grille plutôt que d'atterrir dans "Tâches en attente".
@@ -13880,6 +13884,26 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       if (nouvelleAdresseTravaux) {
         // Appartement/unité ajouté à l'adresse choisie (retour de tests).
         nouvelle.adresseTravaux = `${nouvelleAdresseTravaux.label}${nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}`;
+        // 📌 ADRESSE AU DOSSIER (retour de tests 2026-08-17) : avant,
+        // l'adresse tapée partait avec la tâche seulement — jamais
+        // offerte à la tâche suivante du même client. Anti-doublon :
+        // une adresse déjà au dossier n'est pas dupliquée.
+        if (enregistrerAdresseFiche && client) {
+          const ligne1 = nouvelleAdresseTravaux.label;
+          const dejaAuDossier = (client.adresses || []).some(
+            (a) => (a.ligne1 || "").trim().toLowerCase() === ligne1.trim().toLowerCase()
+          );
+          if (!dejaAuDossier) {
+            const entree = {
+              id: `adr-${Date.now()}`,
+              nom: "Chantier",
+              ligne1,
+              ...(nouvelleAdresseApp.trim() ? { appartement: nouvelleAdresseApp.trim() } : {}),
+            };
+            setClients((prev) => prev.map((x) => (x.id === client.id ? { ...x, adresses: [...(x.adresses || []), entree] } : x)));
+            ajouterJournal(`📌 Adresse « ${ligne1} » enregistrée au dossier de ${client.nom}`);
+          }
+        }
       } else if (adresseTravauxId) {
         const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
         if (a) nouvelle.adresseTravaux = `${a.nom} — ${libelleAdresse(a)}`;
@@ -14029,10 +14053,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setNouvelleAdresseTravaux(null);
     setNouvelleDate("");
     setNouvelleHeureDebut(HEURE_PAR_DEFAUT);
+    // Le CLIENT repart vide lui aussi (bogue vécu : le dernier client
+    // restait « collé » d'une création à l'autre — exactement l'erreur
+    // que la règle « aucun client présélectionné » devait empêcher).
+    setNouveauClientId("");
     setNouveauEmployeId("");
     setNouveauxEmployesEnPlus([]);
     setFacturablesEnPlus({});
     setNouveauSecteur("");
+    setEnregistrerAdresseFiche(true);
     setContactSurPlaceId("");
     setContactNom("");
     setContactRole("");
@@ -14572,6 +14601,69 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   </p>
                 )}
               </div>
+              {/* CLIENT EN DEUXIÈME (demande du propriétaire, 2026-08-17) :
+                  c'est lui qui décide de tout le reste — devis offerts,
+                  contact sur place, adresses enregistrées, courriels du
+                  dépôt. On le choisit donc juste après le type. */}
+              {!estTypeSansClient(nouveauType) && (
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Client</label>
+                {/* ➕ TOUJOURS PREMIER À L'ÉCRAN (demande du propriétaire,
+                    2026-08-17) : créer un client est l'action la plus
+                    fréquente à rater — elle ne se cache plus dans un menu. */}
+                <button
+                  type="button"
+                  onClick={() => setModalNouveauClientTache(true)}
+                  className="mb-1 flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 active:scale-[0.99]"
+                >
+                  ➕ Nouveau client…
+                </button>
+                {/* SUGGESTIONS VISIBLES : la liste rétrécit à chaque
+                    lettre, sous les yeux — plus de menu à ouvrir. Les
+                    noms qui commencent pareil se départagent à mesure. */}
+                <input
+                  value={filtreClientTache}
+                  onChange={(e) => setFiltreClientTache(e.target.value)}
+                  placeholder="🔍 Tape le nom — la liste rétrécit à chaque lettre…"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+                />
+                {filtreClientTache.trim() !== "" && (
+                  <div className="mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    {clients
+                      .filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase()))
+                      .slice(0, 8)
+                      .map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => { choisirClientTache(c.id); setFiltreClientTache(""); }}
+                          className="block w-full border-b border-slate-100 px-2 py-2 text-left text-xs font-semibold text-slate-700 last:border-0 active:bg-orange-50"
+                        >
+                          {nomAffichageClient(c)}
+                        </button>
+                      ))}
+                    {clients.filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase())).length === 0 && (
+                      <p className="px-2 py-2 text-[11px] text-slate-400">
+                        Aucun client trouvé — crée-le avec « ➕ Nouveau client… » juste au-dessus.
+                      </p>
+                    )}
+                  </div>
+                )}
+                {(() => {
+                  const c = clients.find((x) => x.id === nouveauClientId);
+                  return c ? (
+                    <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-[#FF6A13] bg-orange-50 px-2 py-1.5">
+                      <span className="min-w-0 truncate text-xs font-bold text-slate-800">{nomAffichageClient(c)}</span>
+                      <button type="button" onClick={() => choisirClientTache("")} className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2">
+                        changer
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[10px] font-bold text-amber-600">— Choisis le client (tape son nom, ou crée-le avec ➕) —</p>
+                  );
+                })()}
+              </div>
+              )}
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Titre / description courte</label>
                 <input
@@ -14668,66 +14760,6 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   </div>
                 )}
               </div>
-              {!estTypeSansClient(nouveauType) && (
-              <div>
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Client</label>
-                {/* ➕ TOUJOURS PREMIER À L'ÉCRAN (demande du propriétaire,
-                    2026-08-17) : créer un client est l'action la plus
-                    fréquente à rater — elle ne se cache plus dans un menu. */}
-                <button
-                  type="button"
-                  onClick={() => setModalNouveauClientTache(true)}
-                  className="mb-1 flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 active:scale-[0.99]"
-                >
-                  ➕ Nouveau client…
-                </button>
-                {/* SUGGESTIONS VISIBLES : la liste rétrécit à chaque
-                    lettre, sous les yeux — plus de menu à ouvrir. Les
-                    noms qui commencent pareil se départagent à mesure. */}
-                <input
-                  value={filtreClientTache}
-                  onChange={(e) => setFiltreClientTache(e.target.value)}
-                  placeholder="🔍 Tape le nom — la liste rétrécit à chaque lettre…"
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
-                />
-                {filtreClientTache.trim() !== "" && (
-                  <div className="mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white">
-                    {clients
-                      .filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase()))
-                      .slice(0, 8)
-                      .map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => { choisirClientTache(c.id); setFiltreClientTache(""); }}
-                          className="block w-full border-b border-slate-100 px-2 py-2 text-left text-xs font-semibold text-slate-700 last:border-0 active:bg-orange-50"
-                        >
-                          {nomAffichageClient(c)}
-                        </button>
-                      ))}
-                    {clients.filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase())).length === 0 && (
-                      <p className="px-2 py-2 text-[11px] text-slate-400">
-                        Aucun client trouvé — crée-le avec « ➕ Nouveau client… » juste au-dessus.
-                      </p>
-                    )}
-                  </div>
-                )}
-                {(() => {
-                  const c = clients.find((x) => x.id === nouveauClientId);
-                  return c ? (
-                    <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-[#FF6A13] bg-orange-50 px-2 py-1.5">
-                      <span className="min-w-0 truncate text-xs font-bold text-slate-800">{nomAffichageClient(c)}</span>
-                      <button type="button" onClick={() => choisirClientTache("")} className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2">
-                        changer
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-[10px] font-bold text-amber-600">— Choisis le client (tape son nom, ou crée-le avec ➕) —</p>
-                  );
-                })()}
-              </div>
-              )}
-
               {/* 📇 CONTACT SUR PLACE — la personne à voir sur le
                   chantier, choisie dans le carnet du client ou créée ici
                   (et mémorisée au carnet). Le technicien la verra avec
@@ -14890,10 +14922,26 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
                     />
                     {nouvelleAdresseTravaux && (
-                      <p className="flex items-center gap-1 text-[11px] text-emerald-600">
-                        <Check size={12} /> {nouvelleAdresseTravaux.label}
-                        {nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}
-                      </p>
+                      <>
+                        <p className="flex items-center gap-1 text-[11px] text-emerald-600">
+                          <Check size={12} /> {nouvelleAdresseTravaux.label}
+                          {nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}
+                        </p>
+                        {/* 📌 Cochée d'avance : l'adresse rejoint le dossier
+                            du client et sera offerte dans la liste à la
+                            prochaine tâche (anti-doublon à la création). */}
+                        {nouveauClientId && (
+                          <label className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={enregistrerAdresseFiche}
+                              onChange={(e) => setEnregistrerAdresseFiche(e.target.checked)}
+                              className="h-3.5 w-3.5 accent-[#FF6A13]"
+                            />
+                            📌 Enregistrer cette adresse au dossier de {nomAffichageClient(clients.find((c) => c.id === nouveauClientId)) || "ce client"}
+                          </label>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
