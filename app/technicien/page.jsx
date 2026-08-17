@@ -4794,6 +4794,8 @@ function AppTechnicien() {
                   // atteindre un téléphone qui avait déjà la tâche en
                   // mémoire, sinon la question ne se pose jamais.
                   fermetureEquipe: d.fermetureEquipe,
+                  // Fermeture par le BUREAU (oubli) — même raison.
+                  fermetureBureau: d.fermetureBureau,
                   date: d.date,
                   heure: d.heure,
                 }
@@ -4915,6 +4917,9 @@ function AppTechnicien() {
   // l'ouverture de l'app). « Plus tard » : mémorisé pour la session.
   const [fermetureEquipePour, setFermetureEquipePour] = useState(null);
   const fermeturesReporteesRef = useRef(new Set());
+  // 🏢 Le bureau a fermé une de mes tâches (oubli) : avis à l'écran —
+  // les heures sont déjà écrites par le bureau, rien à confirmer.
+  const [avisFermetureBureau, setAvisFermetureBureau] = useState(null);
 
   // Transport de FIN DE JOURNÉE encore ouvert le même jour que `t` —
   // c'est lui qu'on propose de fermer du même geste quand le technicien
@@ -5485,6 +5490,29 @@ function AppTechnicien() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taches, session?.user?.email, fermetureEquipePour]);
 
+  // 🏢 FERMETURE PAR LE BUREAU (oubli) — la marque arrive par
+  // l'assignation (Realtime ou ouverture de l'app) : la carte se ferme
+  // et un avis s'affiche. Aucune question — les heures sont déjà
+  // écrites par le bureau ; en cas de désaccord, le technicien appelle.
+  useEffect(() => {
+    const c = taches.find(
+      (t) =>
+        t.supabase &&
+        t.type === "travail" &&
+        t.etat !== "complete" &&
+        t.fermetureBureau &&
+        (!t.fermetureBureau.jour || t.fermetureBureau.jour === t.date)
+    );
+    if (!c) return;
+    majTache(c.id, { etat: "complete", tempsDebutSegment: null });
+    setAvisFermetureBureau({
+      titre: c.titre || c.clientNom || "ta tâche",
+      debut: c.fermetureBureau.debut,
+      fin: c.fermetureBureau.fin,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taches]);
+
   // Vérification au démarrage de l'app, puis toutes les 5 minutes.
   // Pas de processus en arrière-plan : c'est l'ouverture de l'app qui
   // déclenche le rattrapage (lundi matin pour un oubli du vendredi).
@@ -5773,6 +5801,26 @@ function AppTechnicien() {
           />
         );
       })()}
+
+      {/* 🏢 AVIS — le bureau a fermé une tâche pour le technicien
+          (oubli) : ses heures sont déjà écrites, transparence complète. */}
+      {avisFermetureBureau && (
+        <div className="fixed inset-x-3 top-3 z-50 rounded-2xl border-2 border-amber-400 bg-amber-50 p-3 shadow-lg sm:inset-x-auto sm:left-1/2 sm:w-full sm:max-w-sm sm:-translate-x-1/2">
+          <p className="text-[13px] font-bold leading-snug text-amber-900">
+            🏢 Le bureau a fermé « {avisFermetureBureau.titre} » pour toi
+            {avisFermetureBureau.debut ? ` (${avisFermetureBureau.debut} → ${avisFermetureBureau.fin})` : ""}.
+          </p>
+          <p className="mt-0.5 text-[11px] leading-snug text-amber-800">
+            Tes heures sont déjà enregistrées au bureau. Si c&apos;est inexact, appelle l&apos;administration.
+          </p>
+          <button
+            onClick={() => setAvisFermetureBureau(null)}
+            className="mt-2 min-h-[40px] w-full rounded-xl bg-amber-500 text-[12px] font-extrabold text-white active:scale-[0.99]"
+          >
+            OK, compris
+          </button>
+        </div>
+      )}
 
       {/* 🤝 FERMETURE D'ÉQUIPE — un coéquipier a fermé la tâche pour
           tout le monde : confirmation (automatique) ou ajustement (à

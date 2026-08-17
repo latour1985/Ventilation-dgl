@@ -18,10 +18,10 @@ import GestionAcces from "@/components/GestionAcces";
 import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
 import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
-import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation } from "@/lib/supabase/tachesAssignees";
+import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation } from "@/lib/supabase/tachesAssignees";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
-import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee } from "@/lib/supabase/travauxEffectues";
-import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT } from "@/lib/supabase/bonsTravail";
+import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
+import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
@@ -12972,7 +12972,7 @@ function techniciensPourTache(planning, tacheId, employes) {
   });
 }
 
-function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation }) {
+function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -13031,6 +13031,26 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
       jours: ajoutJours,
       dupliquer,
     });
+
+  // 🏢 FERMER POUR LE TECHNICIEN (oubli) — demande du propriétaire,
+  // 2026-08-17. Offert SEULEMENT quand ce technicien n'a AUCUNE heure
+  // sur la tâche : on ne réécrit jamais ce qu'il a pointé lui-même.
+  const [fermDebut, setFermDebut] = useState(heureInitiale || HEURE_PAR_DEFAUT);
+  const [fermFin, setFermFin] = useState("");
+  const [fermBon, setFermBon] = useState(false); // décochée par défaut (choix du propriétaire)
+  const [fermErreur, setFermErreur] = useState("");
+  const nomTechOuvert = employes?.find((e) => e.id === employeIdInitial)?.nom || "le technicien";
+  const validerFermetureBureau = () => {
+    if (!fermFin) {
+      setFermErreur("Entre son heure de fin.");
+      return;
+    }
+    if (fermFin <= fermDebut) {
+      setFermErreur("L'heure de fin doit être après l'heure de début.");
+      return;
+    }
+    onFermerPourTechnicien?.({ debutHM: fermDebut, finHM: fermFin, creerBon: fermBon });
+  };
 
   // Fiche client complète — via clientId si disponible (tâches créées
   // récemment), sinon repli sur une recherche par nom (tâches plus
@@ -13387,6 +13407,54 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
                 En résumé : même job à plusieurs bras = Ajouter · deux jobs séparées = Dupliquer. Les transports
                 Début/Fin se créent automatiquement dans les deux cas.
               </p>
+            </div>
+          )}
+
+          {/* 🏢 FERMER POUR LE TECHNICIEN (oubli) — visible seulement si
+              AUCUNE heure n'est enregistrée par lui sur cette tâche.
+              L'admin déclare début/fin : paie au taux figé, carte fermée
+              sur le téléphone (avec avis), facturation en OPTION
+              (bon sans signature ni photos — décochée par défaut). */}
+          {dejaPlanifiee && !travailFait && onFermerPourTechnicien && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-amber-800">
+                🕐 Fermer cette tâche pour {nomTechOuvert} (oubli)
+              </p>
+              <p className="mt-1 text-[10px] leading-snug text-amber-800">
+                Aucune heure enregistrée par {nomTechOuvert} sur cette tâche. Déclare ses heures réelles : elles entrent
+                en paie au taux figé, sa tâche se ferme sur son téléphone et il en est avisé.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-amber-700">Son heure de début</label>
+                  <select value={fermDebut} onChange={(e) => { setFermDebut(e.target.value); setFermErreur(""); }} className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs">
+                    {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-amber-700">Son heure de fin</label>
+                  <select value={fermFin} onChange={(e) => { setFermFin(e.target.value); setFermErreur(""); }} className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs">
+                    <option value="">— choisir —</option>
+                    {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                </div>
+              </div>
+              <label className="mt-2 flex cursor-pointer items-start gap-2">
+                <input type="checkbox" checked={fermBon} onChange={(e) => setFermBon(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600" />
+                <span className="text-[10px] leading-snug text-amber-800">
+                  Créer aussi la <span className="font-bold">demande de facturation</span> — le bon sera{" "}
+                  <span className="font-bold">sans signature, sans photos ni notes terrain</span> (alerte « non signé »
+                  visible au bureau). Décochée : paie seulement.
+                </span>
+              </label>
+              {fermErreur && <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[11px] font-bold text-red-700">{fermErreur}</p>}
+              <button
+                type="button"
+                onClick={validerFermetureBureau}
+                className="mt-2 w-full rounded-lg border-2 border-amber-500 bg-white py-2 text-xs font-extrabold text-amber-700 active:scale-[0.99]"
+              >
+                🏢 Fermer pour {nomTechOuvert}
+              </button>
             </div>
           )}
 
@@ -14479,6 +14547,87 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       // = l'heure ACTUELLE suit la tâche.
       heureDebut: heureCible || heureActuelle || HEURE_PAR_DEFAUT,
     });
+  };
+
+  // 🏢 FERMER LA TÂCHE POUR UN TECHNICIEN QUI A OUBLIÉ (2026-08-17).
+  // L'admin déclare début/fin depuis la fiche de la tâche : la ligne
+  // d'heures s'écrit au nom du TECHNICIEN (taux figé de son secteur),
+  // sa carte se ferme sur son téléphone (marque fermetureBureau, même
+  // canal temps réel que la fermeture d'équipe), et la facturation est
+  // créée SEULEMENT si demandé (bon sans signature — alerte au bureau).
+  // Jamais offert quand des heures existent déjà : on ne réécrit pas
+  // ce que le technicien a pointé.
+  const fermerTachePourTechnicien = async (tache, employe, jour, { debutHM, finHM, creerBon }) => {
+    if (lectureSeule) return;
+    const nbJours = Math.max(1, Number(tache.jours) || 1);
+    // Chantier multi-jours : les heures se rangent sous la clé de LA
+    // journée ouverte (id::AAAA-MM-JJ) — même règle que le téléphone.
+    const cleHeures = nbJours > 1 ? `${tache.id}::${jour}` : tache.id;
+    const debutTs = new Date(`${jour}T${debutHM}:00`).getTime();
+    const finTs = new Date(`${jour}T${finHM}:00`).getTime();
+    const heures = Math.max(0, (finTs - debutTs) / 3600000);
+    try {
+      await enregistrerTravailPourEmploye(
+        {
+          tacheId: cleHeures,
+          secteur: tache.secteur || "commercial",
+          titre: tache.titre || tache.clientNom || undefined,
+          clientNom: tache.clientNom || null,
+          date: jour,
+          heures,
+          estTransport: false,
+          categorieHeures: tache.categorieHeures || "projet",
+          kilometres: null,
+          projetId: tache.projetId || null,
+          noteTerrain: "",
+          noteInterne: `🏢 FERMÉE PAR LE BUREAU — heures déclarées par l'administration (${debutHM} → ${finHM}) : le technicien avait oublié de fermer.`,
+          debutReel: debutTs,
+          finReelle: finTs,
+          photosAvant: [],
+          photosApres: [],
+        },
+        employe
+      );
+      // Avis au téléphone du technicien (sa carte se ferme) — meilleur
+      // effort : un échec ici ne bloque pas la paie déjà écrite.
+      majDonneesAssignation(tache.id, employe.courriel, {
+        fermetureBureau: { par: "le bureau", a: new Date().toISOString(), debut: debutHM, fin: finHM, jour },
+      }).catch(() => {});
+      if (creerBon && !tache.nonFacturable) {
+        await enregistrerBonTravailBureau(
+          {
+            tacheId: tache.id,
+            titre: tache.titre || tache.clientNom || "Travail complété",
+            clientNom: tache.clientNom || null,
+            description: `${tache.description || ""}${tache.description ? "\n" : ""}(Fermée par le bureau — sans signature ni photos.)`,
+            date: jour,
+            heures,
+            typeTache: tache.typeTache || null,
+            secteur: tache.secteur || "commercial",
+            devisNumero: tache.devisNumero || null,
+            adresseTravaux: tache.adresseTravaux || tache.adresseIntervention || null,
+            projetId: tache.projetId || null,
+            photosAvant: [],
+            photosApres: [],
+            courrielsEnvoi: [],
+            signeParNom: "",
+            signeParCollegue: false,
+            clientAbsent: false,
+            unites: [],
+            pieceACommander: false,
+            pieceRequise: null,
+          },
+          employe
+        );
+      }
+      ajouterJournal(
+        `🏢 « ${tache.titre || tache.clientNom} » fermée par le bureau pour ${employe.nom || employe.courriel} — ${debutHM} → ${finHM} (${heures.toFixed(2)} h)${creerBon && !tache.nonFacturable ? " — demande de facturation créée (bon NON signé)" : " — paie seulement, rien en facturation"}.`
+      );
+    } catch (e) {
+      ajouterJournal(
+        `⚠️ Fermeture par le bureau ÉCHOUÉE pour « ${tache.titre || tache.clientNom} » (${employe.nom || employe.courriel}) — ${e?.message || "connexion impossible"}. Réessaie.`
+      );
+    }
   };
 
   const onDropHeure = (e, employeId, heure) => {
@@ -16304,6 +16453,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 }
           }
           annulation={contexteAnnulation(tacheDetailOuverte.tache)}
+          onFermerPourTechnicien={
+            lectureSeule
+              ? undefined
+              : (champs) => {
+                  fermerTachePourTechnicien(tacheDetailOuverte.tache, tacheDetailOuverte.employe, tacheDetailOuverte.date, champs);
+                  setTacheDetailOuverte(null);
+                }
+          }
           onAnnulerTache={
             peutOuvrirAnnulation
               ? (raison) => {
