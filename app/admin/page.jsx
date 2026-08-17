@@ -11388,20 +11388,28 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
         return;
       }
     }
+    const dejaAccepte = devis.reponseClient === "accepte";
     const r = await envoyerCourriel({
       a: adresses,
-      sujet: `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      sujet: dejaAccepte
+        ? `Votre copie du devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`
+        : `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
       html: gabaritDevis({
         config: configEnt,
         numero: devis.numero,
         clientNom: devis.clientNom,
         total: null,
         lien: lienDevisPublic(jeton),
+        dejaAccepte,
       }),
     });
     setEnvoiDevisEnCours(false);
     if (r.envoye) {
-      ajouterJournal(`✉️ Devis ${devis.numero} ENVOYÉ à ${adresses.join(", ")} — le client peut répondre en ligne.`);
+      ajouterJournal(
+        dejaAccepte
+          ? `✉️ Copie du devis ${devis.numero} (déjà accepté) renvoyée à ${adresses.join(", ")}.`
+          : `✉️ Devis ${devis.numero} ENVOYÉ à ${adresses.join(", ")} — le client peut répondre en ligne.`
+      );
       setEnvoiDevis(null);
     } else if (r.simule) {
       ajouterJournal(
@@ -12205,14 +12213,17 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                 {/* ENVOI AU CLIENT — le courriel avec le lien d'acceptation.
                     « Copier le lien » reste là comme plan B (téléphone,
                     texto, ou service d'envoi pas encore configuré). */}
-                {estActive && !affichee.reponseClient && envoiDevis?.devisId !== affichee.id && (
+                {/* ENVOI / RENVOI — disponible tant que le client n'a pas
+                    répondu, ET aussi pour un devis DÉJÀ ACCEPTÉ (le client
+                    a perdu sa copie et la redemande). */}
+                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId !== affichee.id && (
                   <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                    ✉️ Envoyer au client
+                    {affichee.reponseClient === "accepte" ? "✉️ Renvoyer la copie au client" : "✉️ Envoyer au client"}
                   </Button>
                 )}
-                {estActive && !affichee.reponseClient && envoiDevis?.devisId === affichee.id && (
+                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId === affichee.id && (
                   <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
-                    <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">Envoyer le devis à :</p>
+                    <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">{affichee.reponseClient === "accepte" ? "Renvoyer la copie à :" : "Envoyer le devis à :"}</p>
                     {(ficheClientDe(affichee)?.courriels || []).map((c) => {
                       const adresse = typeof c === "string" ? c : c.email;
                       if (!adresse) return null;
@@ -12265,13 +12276,13 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                     </div>
                   </div>
                 )}
-                {estActive && !affichee.reponseClient && (
+                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && (
                   <Button
                     variant="outline"
                     onClick={() => creerLienAcceptation(affichee)}
                     className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
                   >
-                    <Copy size={13} /> {lienCopie === affichee.id ? "Lien copié ✓" : "Copier le lien d'acceptation"}
+                    <Copy size={13} /> {lienCopie === affichee.id ? "Lien copié ✓" : affichee.reponseClient === "accepte" ? "Copier le lien du devis" : "Copier le lien d'acceptation"}
                   </Button>
                 )}
 
