@@ -2129,7 +2129,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
 // ============================================================
 // SÉLECTEUR CLIENT / ADRESSE
 // ============================================================
-function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId, lectureSeule, clientNomFallback }) {
+function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId, lectureSeule, clientNomFallback, clientTelephone }) {
   const client = CLIENTS.find((c) => c.id === clientId);
   const [choixTrajetOuvert, setChoixTrajetOuvert] = useState(false);
   const adresseActive = client?.adresses.find((a) => a.id === adresseId);
@@ -2143,6 +2143,21 @@ function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId
         <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold text-slate-800">
           {clientNomFallback || "Client assigné par l'administration"}
         </p>
+        {/* NUMÉRO DU CLIENT sous le nom (demande du 2026-08-17) : en
+            GROS pour être lisible si le technicien appelle d'un autre
+            téléphone, et cliquable — le lien tel: ouvre le composeur
+            du téléphone avec le numéro déjà entré (aucune permission
+            à demander : le téléphone confirme l'appel lui-même). */}
+        {clientTelephone && (
+          <a
+            href={`tel:${String(clientTelephone).replace(/[^+0-9]/g, "")}`}
+            className="mt-1.5 flex min-h-[48px] items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 active:scale-[0.99]"
+          >
+            <Phone size={16} className="shrink-0 text-[#FF6A13]" />
+            <span className="text-lg font-extrabold tabular-nums tracking-wide text-slate-900">{clientTelephone}</span>
+            <span className="ml-auto text-[11px] font-bold uppercase text-slate-400">Appeler</span>
+          </a>
+        )}
         <p className="mt-1 text-[11px] text-slate-400">Détails de la tâche dans la description ci-dessous.</p>
       </div>
     );
@@ -3559,6 +3574,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           setAdresseId={changerAdresse}
           lectureSeule={lectureSeule}
           clientNomFallback={tache.clientNom || tache.titre}
+          clientTelephone={tache.clientTelephone}
         />
 
         {/* ÉQUIPE SUR CE TRAVAIL — affiché dès l'ouverture, pas au
