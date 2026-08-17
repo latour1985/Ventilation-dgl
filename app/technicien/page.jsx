@@ -3976,7 +3976,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                   className="block overflow-hidden rounded-xl border border-slate-200 active:scale-[0.98]"
                 >
                   {pj.type === "image" ? (
-                    <img src={pj.url} alt={pj.nom} className="h-20 w-full object-cover" />
+                    <img src={pj.url} alt={pj.nom} loading="lazy" decoding="async" className="h-20 w-full object-cover" />
                   ) : (
                     <span className="flex h-20 flex-col items-center justify-center gap-1 bg-slate-50 px-1">
                       <span className="text-2xl">📄</span>

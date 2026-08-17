@@ -123,7 +123,7 @@ export default function VisionneusePhotos({
             <ChevronLeft size={30} />
           </button>
         )}
-        <img src={photo.url} alt={photo.etiquette || ""} className="max-h-full max-w-full object-contain" />
+        <img src={photo.url} alt={photo.etiquette || ""} decoding="async" className="max-h-full max-w-full object-contain" />
         {photos.length > 1 && (
           <button
             onClick={suivante}

@@ -1267,7 +1267,7 @@ function PhotosInspection({ photos }) {
             title="Ouvrir en pleine taille"
             className="block overflow-hidden rounded-lg border border-slate-200 hover:border-slate-400"
           >
-            <img src={url} alt={`Anomalie ${idx + 1}`} className="h-16 w-20 object-cover" />
+            <img src={url} alt={`Anomalie ${idx + 1}`} loading="lazy" decoding="async" className="h-16 w-20 object-cover" />
           </a>
         ))}
       </div>
@@ -5742,7 +5742,7 @@ function GalerieAvantApres({ travail, enMarge = false }) {
       className="relative block aspect-square w-full overflow-hidden rounded-lg border border-slate-200"
       title="Ouvrir la visionneuse (flèches pour naviguer)"
     >
-      <img src={p.url} alt={p.etiquette} className="h-full w-full object-cover" />
+      <img src={p.url} alt={p.etiquette} loading="lazy" decoding="async" className="h-full w-full object-cover" />
       {p.url.includes("-galerie") && (
         <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white">📁 importée</span>
       )}
@@ -13155,7 +13155,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
                   <div className="flex flex-wrap gap-1.5">
                     {urls.map((u, i) => (
                       <a key={i} href={u} target="_blank" rel="noreferrer" className="block h-20 w-20 overflow-hidden rounded-lg border border-slate-200">
-                        <img src={u} alt={`${titre} ${i + 1}`} className="h-full w-full object-cover" />
+                        <img src={u} alt={`${titre} ${i + 1}`} loading="lazy" decoding="async" className="h-full w-full object-cover" />
                       </a>
                     ))}
                   </div>
@@ -14740,7 +14740,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         {pj.type === "image" ? (
                           // Vignette cliquable — on vérifie ce qu'on envoie.
                           <a href={pj.url} target="_blank" rel="noreferrer" className="shrink-0">
-                            <img src={pj.url} alt={pj.nom} className="h-8 w-8 rounded object-cover" />
+                            <img src={pj.url} alt={pj.nom} loading="lazy" decoding="async" className="h-8 w-8 rounded object-cover" />
                           </a>
                         ) : (
                           <span className="shrink-0 text-base">📄</span>
