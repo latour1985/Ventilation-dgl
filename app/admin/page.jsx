@@ -5500,6 +5500,14 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   // nouvelle choisie via Google la remplace.
   const [nouvelleAdresse, setNouvelleAdresse] = useState(null);
   const actuelle = adresseFacturationClient(client);
+  // 📇 CARNET DE CONTACTS SUR PLACE (SQL 72, 2026-08-17) — chargé de
+  // projet, concierge, gérant… réutilisables de chantier en chantier.
+  const [contacts, setContacts] = useState(() => (client.contacts || []).map((c) => ({ ...c })));
+  const majContact = (id, champs) =>
+    setContacts((prev) => prev.map((c) => (c.id === id ? { ...c, ...champs } : c)));
+  const ajouterContact = () =>
+    setContacts((prev) => [...prev, { id: `ct-${Date.now()}`, nom: "", role: "", telephone: "" }]);
+  const retirerContact = (id) => setContacts((prev) => prev.filter((c) => c.id !== id));
 
   const enregistrer = () => {
     if (!nom.trim()) return;
@@ -5509,6 +5517,10 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
       // Sans entreprise, afficher l'entreprise n'a pas de sens.
       nomAffichage: entreprise.trim() ? nomAffichage : "nom",
       telephone: telephone.trim(),
+      // Lignes vides écartées (un contact sans nom ne sert à rien).
+      contacts: contacts
+        .map((c) => ({ ...c, nom: (c.nom || "").trim(), role: (c.role || "").trim(), telephone: (c.telephone || "").trim() }))
+        .filter((c) => c.nom),
       ...(nouvelleAdresse ? { adresseFacturation: nouvelleAdresse.label } : {}),
     });
     onFermer();
@@ -5564,6 +5576,61 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
               Cette adresse s'imprime sous « Facturé à » sur les devis, bons de travail et factures.
             </p>
           </div>
+
+          {/* 📇 CONTACTS SUR PLACE — le carnet du client. Offerts en
+              liste déroulante à la création de tâche ; le technicien
+              voit le contact choisi avec son bouton d'appel. */}
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Contacts sur place (chantiers)</label>
+            {contacts.length === 0 && (
+              <p className="mb-1 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] italic text-slate-500">
+                Aucun contact — ajoute la personne à voir sur place (chargé de projet, concierge…).
+              </p>
+            )}
+            <div className="space-y-1.5">
+              {contacts.map((c) => (
+                <div key={c.id} className="rounded-lg border border-slate-200 p-2">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      value={c.nom}
+                      onChange={(e) => majContact(c.id, { nom: e.target.value })}
+                      placeholder="Nom (ex. : Marc Tremblay)"
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <input
+                      value={c.role || ""}
+                      onChange={(e) => majContact(c.id, { role: e.target.value })}
+                      placeholder="Rôle (chargé de projet…)"
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <input
+                      value={c.telephone || ""}
+                      onChange={(e) => majContact(c.id, { telephone: e.target.value })}
+                      placeholder="Téléphone"
+                      className="flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => retirerContact(c.id)}
+                      className="shrink-0 rounded-lg border border-red-200 px-2 py-1.5 text-[10px] font-bold text-red-600"
+                    >
+                      Retirer
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={ajouterContact}
+              className="mt-1.5 w-full rounded-lg border border-dashed border-slate-300 py-1.5 text-[11px] font-bold text-slate-500"
+            >
+              ➕ Ajouter un contact
+            </button>
+          </div>
+
           <Button onClick={enregistrer} disabled={!nom.trim()} className="w-full">Enregistrer les modifications</Button>
         </div>
       </div>
@@ -12915,6 +12982,9 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   const [sauterWeekend, setSauterWeekend] = useState(!!tache.sauterWeekend);
   const [employeId, setEmployeId] = useState(employeIdInitial || "");
   const [description, setDescription] = useState(tache.description || "");
+  // 📇 Contact sur place — repris du carnet du client ; « actuel »
+  // couvre un contact déjà attaché à la tâche mais absent du carnet.
+  const [contactTacheId, setContactTacheId] = useState(() => (tache.contactSurPlace ? tache.contactSurPlace.id || "actuel" : ""));
   const dejaPlanifiee = !!employeIdInitial;
   // Assignation MULTIPLE à la création (édition rapide) : tous les
   // techniciens cochés reçoivent la tâche avec la même date/heure/durée
@@ -12960,6 +13030,17 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   const adresseFacturationDefaut = client?.adresses?.[0];
 
   const enregistrer = () => {
+    // Contact sur place résolu depuis le carnet (ou conservé tel quel).
+    const carnetClient = client?.contacts || [];
+    const contactChoisi =
+      contactTacheId === ""
+        ? null
+        : contactTacheId === "actuel"
+          ? tache.contactSurPlace || null
+          : (() => {
+              const c = carnetClient.find((x) => x.id === contactTacheId);
+              return c ? { id: c.id, nom: c.nom, role: c.role || "", telephone: c.telephone || "" } : tache.contactSurPlace || null;
+            })();
     onEnregistrer({
       heures: Math.max(0, heures),
       jours: Math.max(0, jours),
@@ -12971,6 +13052,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
       date,
       heureDebut,
       description,
+      contactSurPlace: contactChoisi,
       // Autres techniciens cochés dans « Appliquer la modification à… » —
       // ils reçoivent les mêmes date/heure/durée/description sur leurs plages.
       autresCibles,
@@ -13176,6 +13258,33 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
               className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
             />
           </div>
+
+          {/* 📇 CONTACT SUR PLACE — se confirme souvent APRÈS la création
+              (« finalement c'est le concierge qui t'ouvre ») ; la mise à
+              jour part en direct vers le téléphone du technicien. Les
+              contacts s'ajoutent au carnet via la fiche client. */}
+          {(client?.contacts?.length > 0 || tache.contactSurPlace) && (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Contact sur place</label>
+              <select
+                value={contactTacheId}
+                onChange={(e) => setContactTacheId(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+              >
+                <option value="">Aucun — numéro de la fiche client</option>
+                {tache.contactSurPlace && !(client?.contacts || []).some((x) => x.id === tache.contactSurPlace.id) && (
+                  <option value="actuel">
+                    {tache.contactSurPlace.nom}{tache.contactSurPlace.role ? ` — ${tache.contactSurPlace.role}` : ""} (actuel)
+                  </option>
+                )}
+                {(client?.contacts || []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nom}{c.role ? ` — ${c.role}` : ""}{c.telephone ? ` (${c.telephone})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* APPLIQUER LA MODIFICATION À… — visible dès que la tâche est
               partagée entre plusieurs techniciens. */}
@@ -13636,6 +13745,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // fenêtre posée après coup, qui s'écrasait quand on cochait deux
   // techniciens d'un coup (un des choix n'était jamais demandé).
   const [facturablesEnPlus, setFacturablesEnPlus] = useState({});
+  // 📇 CONTACT SUR PLACE (demande du propriétaire, 2026-08-17) : la
+  // personne à voir sur le chantier (chargé de projet, concierge…) —
+  // souvent PAS le numéro de la fiche client. Choisi dans le carnet du
+  // client, ou créé ici (et enregistré au carnet pour la prochaine
+  // fois). "" = aucun (numéro de la fiche client), "nouveau" = saisie.
+  const [contactSurPlaceId, setContactSurPlaceId] = useState("");
+  const [contactNom, setContactNom] = useState("");
+  const [contactRole, setContactRole] = useState("");
+  const [contactTel, setContactTel] = useState("");
+  // Changer de client invalide le contact choisi (il appartient à
+  // l'ancien client) — on repart à « Aucun ».
+  useEffect(() => {
+    setContactSurPlaceId("");
+    setContactNom("");
+    setContactRole("");
+    setContactTel("");
+  }, [nouveauClientId]);
   // TRANSITION QUICKBOOKS : numéro d'un devis EXISTANT (hors application)
   // à attacher à la tâche — il suit jusqu'au bon de travail et à la
   // facturation.
@@ -13771,6 +13897,20 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       nouvelle.adresseTravaux ||
       (adressePrincipale ? `${adressePrincipale.nom} — ${adressePrincipale.ligne1}` : null);
 
+    // 📇 CONTACT SUR PLACE — attaché à la tâche. « Nouveau » est AUSSI
+    // enregistré au carnet du client (réutilisable à la prochaine tâche).
+    if (contactSurPlaceId === "nouveau" && contactNom.trim() && contactTel.trim()) {
+      const fiche = { id: `ct-${Date.now()}`, nom: contactNom.trim(), role: contactRole.trim(), telephone: contactTel.trim() };
+      nouvelle.contactSurPlace = { ...fiche };
+      if (client) {
+        setClients((prev) => prev.map((x) => (x.id === client.id ? { ...x, contacts: [...(x.contacts || []), fiche] } : x)));
+        ajouterJournal(`📇 Contact « ${fiche.nom} » ajouté au carnet de ${client.nom}`);
+      }
+    } else if (contactSurPlaceId && contactSurPlaceId !== "nouveau" && client) {
+      const c = (client.contacts || []).find((x) => x.id === contactSurPlaceId);
+      if (c) nouvelle.contactSurPlace = { id: c.id, nom: c.nom, role: c.role || "", telephone: c.telephone || "" };
+    }
+
     if (nouveauType === "devis" || nouveauType === "entretien_contrat") {
       const devis = devisListe.find((d) => d.id === nouveauDevisId);
       // « Travaux avec devis » accepte AUSSI un numéro tapé à la main
@@ -13893,6 +14033,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setNouveauxEmployesEnPlus([]);
     setFacturablesEnPlus({});
     setNouveauSecteur("");
+    setContactSurPlaceId("");
+    setContactNom("");
+    setContactRole("");
+    setContactTel("");
     setNumeroDevisExistant("");
     setFiltreClientTache("");
     setFiltreAdresseTache("");
@@ -14178,6 +14322,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       jours: champs.jours,
       sauterWeekend: champs.sauterWeekend,
       description: champs.description,
+      // Contact sur place : suit la modification (null = retiré) ; si la
+      // modale ne l'a pas touché (undefined), l'existant est conservé.
+      contactSurPlace: champs.contactSurPlace !== undefined ? champs.contactSurPlace : tache.contactSurPlace || null,
     };
     if (champs.employeId) {
       assigner(tacheMiseAJour, champs.employeId, new Date(`${champs.date}T00:00:00`), champs.heureDebut);
@@ -14198,11 +14345,18 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, employeId, employeIds, date, heureDebut, description }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, employeId, employeIds, date, heureDebut, description, contactSurPlace }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
-    const tacheMiseAJour = { ...tache, heures, jours, sauterWeekend, description: description ?? tache.description };
+    const tacheMiseAJour = {
+      ...tache,
+      heures,
+      jours,
+      sauterWeekend,
+      description: description ?? tache.description,
+      contactSurPlace: contactSurPlace !== undefined ? contactSurPlace : tache.contactSurPlace || null,
+    };
     // Assignation multiple : tous les techniciens cochés reçoivent la
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
     // individuellement en cliquant son bloc dans la grille.
@@ -14573,6 +14727,62 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 })()}
               </div>
               )}
+
+              {/* 📇 CONTACT SUR PLACE — la personne à voir sur le
+                  chantier, choisie dans le carnet du client ou créée ici
+                  (et mémorisée au carnet). Le technicien la verra avec
+                  un bouton d'appel direct. */}
+              {!estTypeSansClient(nouveauType) && nouveauClientId && (() => {
+                const clientChoisi = clients.find((c) => c.id === nouveauClientId);
+                const carnet = clientChoisi?.contacts || [];
+                return (
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                      Contact sur place <span className="font-normal normal-case text-slate-400">— optionnel (chargé de projet, concierge…)</span>
+                    </label>
+                    <select
+                      value={contactSurPlaceId}
+                      onChange={(e) => setContactSurPlaceId(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    >
+                      <option value="">Aucun — le technicien verra le numéro de la fiche client</option>
+                      {carnet.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nom}{c.role ? ` — ${c.role}` : ""}{c.telephone ? ` (${c.telephone})` : ""}
+                        </option>
+                      ))}
+                      <option value="nouveau">➕ Nouveau contact…</option>
+                    </select>
+                    {contactSurPlaceId === "nouveau" && (
+                      <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <input
+                            value={contactNom}
+                            onChange={(e) => setContactNom(e.target.value)}
+                            placeholder="Nom (ex. : Marc Tremblay)"
+                            className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                          />
+                          <input
+                            value={contactRole}
+                            onChange={(e) => setContactRole(e.target.value)}
+                            placeholder="Rôle (chargé de projet…)"
+                            className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                          />
+                        </div>
+                        <input
+                          value={contactTel}
+                          onChange={(e) => setContactTel(e.target.value)}
+                          placeholder="Téléphone"
+                          className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                        />
+                        <p className="mt-1 text-[9px] text-slate-400">
+                          Sera enregistré au carnet de {nomAffichageClient(clientChoisi) || "ce client"} — offert automatiquement à la prochaine tâche.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* SECTEUR CCQ — commercial/résidentiel : décide du taux
                   coûtant. Hérité du projet choisi, changeable ici.
@@ -15061,6 +15271,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un devis (de la liste, ou un numéro tapé à la main)");
                       if (nouveauType === "entretien_contrat" && !nouveauDevisId) raisons.push("un contrat de la liste");
                       if (depotRequis && !(parseFloat(depotMontant) > 0)) raisons.push("un montant de dépôt");
+                      // « Nouveau contact » choisi mais incomplet : on ne
+                      // crée pas une tâche avec un contact fantôme.
+                      if (contactSurPlaceId === "nouveau" && (!contactNom.trim() || !contactTel.trim()))
+                        raisons.push("le nom et le téléphone du nouveau contact sur place");
                       // Choix 💰/🤝 obligatoire pour chaque technicien
                       // supplémentaire coché (2026-08-17).
                       nouveauxEmployesEnPlus

@@ -3863,6 +3863,14 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 <p className="mt-0.5 text-sm font-bold leading-snug text-slate-800">
                   {tache.adresseIntervention || tache.adresseTravaux}
                 </p>
+                {/* Sur un gros chantier, savoir QUI demander vaut autant
+                    que l'adresse elle-même. */}
+                {tache.contactSurPlace?.nom && (
+                  <p className="mt-1 text-[12px] font-semibold text-[#FF6A13]">
+                    👤 Demander {tache.contactSurPlace.nom}
+                    {tache.contactSurPlace.role ? ` (${tache.contactSurPlace.role})` : ""}
+                  </p>
+                )}
               </div>
             </div>
             <button
@@ -3874,32 +3882,52 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           </div>
         )}
 
-        {/* TÉLÉPHONE DU CLIENT + BOUTON D'APPEL
+        {/* TÉLÉPHONE — QUI APPELER SUR PLACE
             ------------------------------------------------------------
-            Retour de tests du 2026-08-17 : le numéro du client
-            n'apparaissait nulle part sur la fiche du technicien — il
-            devait appeler le bureau juste pour l'obtenir. Le bureau le
-            transmet maintenant avec la tâche (comme les courriels) et
-            le bouton compose directement — gros bouton, gants. */}
-        {tache.clientTelephone && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="flex items-start gap-2">
-              <Phone size={16} className="mt-0.5 shrink-0 text-[#FF6A13]" />
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Téléphone du client</p>
-                <p className="mt-0.5 text-sm font-bold leading-snug text-slate-800">
-                  {tache.clientNom ? `${tache.clientNom} — ` : ""}{tache.clientTelephone}
-                </p>
+            Retour de tests du 2026-08-17 : le numéro n'apparaissait
+            nulle part sur la fiche du technicien. Et souvent la bonne
+            personne n'est PAS le numéro de la fiche client : c'est le
+            CONTACT SUR PLACE choisi par le bureau (chargé de projet,
+            concierge…). Il s'affiche en premier avec le bouton d'appel ;
+            le numéro général du client reste en plan B dessous. Numéro
+            en GROS (lisible pour composer d'un autre téléphone), lien
+            tel: = composition directe, gros bouton, gants. */}
+        {(tache.contactSurPlace?.telephone || tache.clientTelephone) && (() => {
+          const contact = tache.contactSurPlace?.telephone ? tache.contactSurPlace : null;
+          const numeroPrincipal = contact ? contact.telephone : tache.clientTelephone;
+          const nomPrincipal = contact
+            ? `${contact.nom}${contact.role ? ` — ${contact.role}` : ""}`
+            : tache.clientNom || "";
+          const planB = contact && tache.clientTelephone && tache.clientTelephone !== contact.telephone;
+          return (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex items-start gap-2">
+                <Phone size={16} className="mt-0.5 shrink-0 text-[#FF6A13]" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                    {contact ? "Contact sur place" : "Téléphone du client"}
+                  </p>
+                  {nomPrincipal && <p className="mt-0.5 text-sm font-bold leading-snug text-slate-800">{nomPrincipal}</p>}
+                  <p className="text-lg font-extrabold tabular-nums tracking-wide text-slate-900">{numeroPrincipal}</p>
+                </div>
               </div>
+              <a
+                href={`tel:${String(numeroPrincipal).replace(/[^+0-9]/g, "")}`}
+                className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
+              >
+                <Phone size={16} /> {contact ? "Appeler le contact sur place" : "Appeler le client"}
+              </a>
+              {planB && (
+                <a
+                  href={`tel:${String(tache.clientTelephone).replace(/[^+0-9]/g, "")}`}
+                  className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-slate-300 text-[13px] font-bold text-slate-600 active:scale-[0.99]"
+                >
+                  <Phone size={14} /> {tache.clientNom || "Client"} — {tache.clientTelephone}
+                </a>
+              )}
             </div>
-            <a
-              href={`tel:${String(tache.clientTelephone).replace(/[^+0-9]/g, "")}`}
-              className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
-            >
-              <Phone size={16} /> Appeler le client
-            </a>
-          </div>
-        )}
+          );
+        })()}
 
         {/* DEVIS LIÉ — le numéro est cliquable et ouvre la fenêtre de
             consultation (items et quantités SEULEMENT, jamais de prix). */}
@@ -4737,6 +4765,7 @@ function AppTechnicien() {
                   adresseTravaux: d.adresseTravaux,
                   clientCourriels: d.clientCourriels,
                   clientTelephone: d.clientTelephone,
+                  contactSurPlace: d.contactSurPlace,
                   piecesJointes: d.piecesJointes,
                   // Fermeture d'équipe déclarée par un coéquipier — doit
                   // atteindre un téléphone qui avait déjà la tâche en

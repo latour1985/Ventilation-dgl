@@ -2431,3 +2431,12 @@ as $$
 $$;
 
 grant execute on function bon_travail_public(text) to anon, authenticated;
+
+-- ============================================================
+-- SNIPPET « 72 » — CARNET DE CONTACTS PAR CLIENT (2026-08-17)
+-- ------------------------------------------------------------
+-- Les personnes à voir SUR PLACE (chargé de projet, concierge,
+-- gérant…), réutilisables de chantier en chantier. Distinct des
+-- courriels (facturation). [{ id, nom, role, telephone }]
+-- ============================================================
+alter table clients_app add column if not exists contacts jsonb not null default '[]'::jsonb;
