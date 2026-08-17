@@ -14403,18 +14403,70 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setTacheEnEditionId(null);
   };
 
+  // 🖱️ DÉPLACER UNE TÂCHE DÉJÀ PLACÉE (demande du propriétaire,
+  // 2026-08-17) : attraper un bloc et le déposer sur une autre heure,
+  // un autre technicien ou un autre jour — sans ouvrir la modale. En
+  // dessous : EXACTEMENT le même chemin que « Enregistrer les
+  // modifications » (modifierTachePlanifiee), donc mêmes garanties
+  // (Supabase, temps réel, journal). Durée, jours, description et
+  // contact voyagent intacts.
+  const deplacerTache = (tacheId, ancienEmployeId, employeCibleId, dateCible, heureCible) => {
+    if (lectureSeule) return;
+    // Retrouver l'objet tâche dans la grille (sa version la plus à jour).
+    let tache = null;
+    Object.values(planning).some((cellule) => {
+      const t = listeCellule(cellule).find((x) => x.id === tacheId && x.employeId === ancienEmployeId);
+      if (t) {
+        tache = t;
+        return true;
+      }
+      return false;
+    });
+    if (!tache || tache.est_tache_systeme) return;
+    // ON NE DÉPLACE PAS LE PASSÉ : des heures déjà pointées sur cette
+    // tâche par ce technicien = déplacement refusé, expliqué au journal.
+    const ancienEmploye = employes.find((x) => x.id === ancienEmployeId);
+    if (travailTermine(tache, ancienEmploye)) {
+      ajouterJournal(
+        `⛔ « ${tache.titre || tache.clientNom} » n'a pas été déplacée — ${ancienEmploye?.nom || "le technicien"} y a déjà des heures enregistrées. Passe par la fiche de la tâche au besoin.`
+      );
+      return;
+    }
+    const dateStr = typeof dateCible === "string" ? dateCible : dateISO(dateCible);
+    modifierTachePlanifiee(tache, ancienEmployeId, {
+      heures: tache.heures,
+      jours: tache.jours,
+      sauterWeekend: tache.sauterWeekend,
+      description: tache.description,
+      employeId: employeCibleId,
+      date: dateStr,
+      heureDebut: heureCible,
+    });
+  };
+
   const onDropHeure = (e, employeId, heure) => {
     e.preventDefault();
     const data = e.dataTransfer.getData("text/plain");
     if (!data) return;
-    assigner(JSON.parse(data), employeId, jourAffiche, heure);
+    const objet = JSON.parse(data);
+    // Bloc déjà placé qu'on déplace — sinon, tâche en attente qu'on assigne.
+    if (objet?.deplacement) {
+      deplacerTache(objet.tacheId, objet.employeId, employeId, dateISO(jourAffiche), heure);
+      return;
+    }
+    assigner(objet, employeId, jourAffiche, heure);
   };
 
   const onDropJour = (e, employeId, date) => {
     e.preventDefault();
     const data = e.dataTransfer.getData("text/plain");
     if (!data) return;
-    assigner(JSON.parse(data), employeId, date, HEURE_PAR_DEFAUT);
+    const objet = JSON.parse(data);
+    if (objet?.deplacement) {
+      deplacerTache(objet.tacheId, objet.employeId, employeId, date, HEURE_PAR_DEFAUT);
+      return;
+    }
+    assigner(objet, employeId, date, HEURE_PAR_DEFAUT);
   };
 
   return (
@@ -15876,7 +15928,18 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                           }}
                           className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
                         >
+                          {/* 🖱️ Clic simple = ouvrir la fiche ; clic
+                              maintenu + déplacement = déplacer le bloc
+                              (autre heure, autre technicien). */}
                           <button
+                            draggable={!lectureSeule && !seg.tache.est_tache_systeme}
+                            onDragStart={(ev) => {
+                              ev.dataTransfer.setData(
+                                "text/plain",
+                                JSON.stringify({ deplacement: true, tacheId: seg.tache.id, employeId: emp.id })
+                              );
+                              ev.dataTransfer.effectAllowed = "move";
+                            }}
                             onClick={() => !redim && !lectureSeule && !seg.tache.est_tache_systeme && setTacheDetailOuverte({ tache: seg.tache, employe: emp, date: jourKey, heure: h })}
                             className={`flex h-full w-full items-start gap-1 rounded-lg p-1 text-left text-[9px] font-semibold leading-tight ${
                               estTerminee(seg.tache, emp)
@@ -15982,6 +16045,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                           ) : (
                             <button
                               key={tache.id}
+                              draggable={!lectureSeule && !tache.est_tache_systeme}
+                              onDragStart={(ev) => {
+                                ev.dataTransfer.setData(
+                                  "text/plain",
+                                  JSON.stringify({ deplacement: true, tacheId: tache.id, employeId: emp.id })
+                                );
+                                ev.dataTransfer.effectAllowed = "move";
+                              }}
                               onClick={() => !lectureSeule && !tache.est_tache_systeme && setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT })}
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className={`block w-full rounded-lg border-l-4 p-1 text-left text-[9px] font-semibold leading-tight ${
