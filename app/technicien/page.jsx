@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import {
   MapPin, Navigation2, Camera, Mic, MicOff, CheckCircle2,
   AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Plus, Trash2,
-  Clock, User, Loader2, Play, Pause, Square, Car, Lock, LogOut, RotateCcw, X, FileText, Check,
+  Clock, User, Loader2, Play, Pause, Square, Car, Lock, LogOut, RotateCcw, X, FileText, Check, Phone,
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionTechnicien from "@/components/ConnexionTechnicien";
@@ -16,7 +16,7 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { televerserPhotoTravail, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { enregistrerBonTravail } from "@/lib/supabase/bonsTravail";
+import { enregistrerBonTravail, bonExistePourTache } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
@@ -3330,7 +3330,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
 
   // Étape 2 : envoi du bon signé au(x) client(s) + création de la
   // DEMANDE DE FACTURATION pour le bureau.
-  const envoyer = (destinataires) => {
+  const envoyer = async (destinataires) => {
     setModalCourriels(false);
     setEnvoiEnCours(true);
     const heures = dureeEcoulee(tache) / 3600;
@@ -3353,10 +3353,38 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     // Les heures de tout le monde, elles, partent quand même (elles
     // sont enregistrées séparément, dans travaux_effectues).
     if (!jeSuisLeDernier) {
-      setEnvoiEnCours(false);
       onTerminer();
-      onRetour();
-      return;
+      // ------------------------------------------------------------
+      // ANTI-COURSE (2026-08-17 — vécu : Dominic et Philippe ferment la
+      // même tâche à 170 ms d'écart ; chacun voit l'autre « pas fini »,
+      // chacun se croit « pas le dernier », et PERSONNE ne crée le bon —
+      // la tâche n'atteint jamais la facturation ni le client).
+      // Après avoir enregistré MES heures : on redemande au serveur qui
+      // manque VRAIMENT. Si en réalité tous mes collègues ont fini,
+      // c'est moi le dernier — je poursuis et crée le bon. Garde
+      // anti-doublon : si un coéquipier l'a déjà créé, on s'arrête.
+      // ------------------------------------------------------------
+      let dernierEnRealite = false;
+      try {
+        // Petit délai : le temps que les heures du coéquipier (parties
+        // en même temps que les miennes) soient visibles côté serveur.
+        await new Promise((r) => setTimeout(r, 1500));
+        const etatFrais = await etatEquipeTache(tache.tacheOrigineId || tache.id, tache.date || null);
+        dernierEnRealite =
+          !etatFrais?.partage || (etatFrais.manquants || []).every((m) => m.email === monCourriel);
+        if (dernierEnRealite && (await bonExistePourTache(tache.tacheOrigineId || tache.id))) {
+          dernierEnRealite = false; // un coéquipier l'a déjà créé — parfait
+        }
+      } catch {
+        dernierEnRealite = false; // hors-ligne : comportement d'avant
+      }
+      if (!dernierEnRealite) {
+        setEnvoiEnCours(false);
+        onRetour();
+        return;
+      }
+      // Je suis en réalité le dernier : le code ci-dessous crée le bon,
+      // exactement comme si l'app l'avait su du premier coup.
     }
     enregistrerBonTravail(
       {
@@ -3630,6 +3658,33 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             >
               <Navigation2 size={16} /> M&apos;y rendre
             </button>
+          </div>
+        )}
+
+        {/* TÉLÉPHONE DU CLIENT + BOUTON D'APPEL
+            ------------------------------------------------------------
+            Retour de tests du 2026-08-17 : le numéro du client
+            n'apparaissait nulle part sur la fiche du technicien — il
+            devait appeler le bureau juste pour l'obtenir. Le bureau le
+            transmet maintenant avec la tâche (comme les courriels) et
+            le bouton compose directement — gros bouton, gants. */}
+        {tache.clientTelephone && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex items-start gap-2">
+              <Phone size={16} className="mt-0.5 shrink-0 text-[#FF6A13]" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Téléphone du client</p>
+                <p className="mt-0.5 text-sm font-bold leading-snug text-slate-800">
+                  {tache.clientNom ? `${tache.clientNom} — ` : ""}{tache.clientTelephone}
+                </p>
+              </div>
+            </div>
+            <a
+              href={`tel:${String(tache.clientTelephone).replace(/[^+0-9]/g, "")}`}
+              className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
+            >
+              <Phone size={16} /> Appeler le client
+            </a>
           </div>
         )}
 
@@ -4422,6 +4477,7 @@ function AppTechnicien() {
                   adresseIntervention: d.adresseIntervention,
                   adresseTravaux: d.adresseTravaux,
                   clientCourriels: d.clientCourriels,
+                  clientTelephone: d.clientTelephone,
                   piecesJointes: d.piecesJointes,
                   date: d.date,
                   heure: d.heure,

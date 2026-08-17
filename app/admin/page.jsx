@@ -13688,6 +13688,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       // ainsi choisir à quelles adresses envoyer le bon de travail signé
       // (choix multiple) sans avoir accès au dossier client complet.
       clientCourriels: (client?.courriels || []).map((c) => ({ id: c.id, email: c.email, label: c.label, defaut: !!c.defaut })),
+      // Téléphone du client transmis aussi (retour de tests 2026-08-17) :
+      // le technicien sur place doit pouvoir appeler sans passer par le
+      // bureau — bouton d'appel direct dans sa fiche de tâche.
+      clientTelephone: client?.telephone || null,
       titre: nouveauTitre.trim(),
       typeTache: nouveauType,
       statut: "a_planifier",
@@ -17928,6 +17932,9 @@ export default function App() {
           // (même forme qu'à la création dans l'agenda) ; celle-ci doit
           // les porter aussi.
           clientCourriels: (clientFiche?.courriels || []).map((c) => ({ id: c.id, email: c.email, label: c.label, defaut: !!c.defaut })),
+          // Téléphone du client — même raison que les courriels : le
+          // technicien doit pouvoir appeler le client depuis sa fiche.
+          clientTelephone: clientFiche?.telephone || null,
           depotRequis: false,
           // Trace : d'où vient cette tâche.
           issueDePieceTacheId: b.tacheId,
