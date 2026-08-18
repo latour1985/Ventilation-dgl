@@ -12,8 +12,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Ventilation DGL — Gestion",
-  description: "Applications de gestion Ventilation DGL inc. (admin + technicien)",
+  // FLUXYA — la marque du PRODUIT (brief 2026-08-18). Neutre : vendable
+  // à d'autres entreprises CVC. © Ventilation DGL inc. (mention légale
+  // sur les documents exportés et la page de conditions).
+  title: "Fluxya",
+  description: "Gestion de temps, bons de travail, devis et projets — intégrée à QuickBooks.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    title: "Fluxya",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 // CADRAGE iOS (constat du propriétaire, 2026-08-17) : sans
@@ -24,6 +33,7 @@ export const viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  themeColor: "#134e4a",
 };
 
 export default function RootLayout({ children }) {

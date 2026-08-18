@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionTechnicien from "@/components/ConnexionTechnicien";
+import Logo from "@/components/Logo";
 import { supabase } from "@/lib/supabase/client";
 import { permissionsEffectives } from "@/lib/permissions";
 import { enregistrerInspection } from "@/lib/supabase/inspections";
@@ -711,7 +712,7 @@ function compresserImage(file) {
 function PiedCopyright() {
   return (
     <div className="py-3 text-center text-[11px] text-slate-400 tracking-wide">
-      © {ANNEE} Ventilation DGL inc. — Tous droits réservés.
+      Fluxya · © {ANNEE} Ventilation DGL inc. — Tous droits réservés.
       <br />
       Application confidentielle — usage interne uniquement.
     </div>
@@ -1124,7 +1125,7 @@ function EcranConnexion({ compte, setCompte, onConnecte }) {
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#FF6A13]">
             <Lock size={24} className="text-white" />
           </div>
-          <h1 className="text-lg font-extrabold text-white">Ventilation DGL inc.</h1>
+          <div className="flex justify-center"><Logo variant="compact" sombre /></div>
           <p className="text-xs text-slate-400">Portail technicien</p>
           {MODE_DEVELOPPEMENT && (
             <p className="mt-2 rounded-full bg-amber-400/20 px-3 py-1 text-[10px] font-bold text-amber-300">
@@ -1182,7 +1183,7 @@ function EcranConnexion({ compte, setCompte, onConnecte }) {
           </div>
         )}
       </div>
-      <p className="mt-8 text-[10px] text-slate-500">© {ANNEE} Ventilation DGL inc.</p>
+      <p className="mt-8 text-[10px] text-slate-500">Fluxya · © {ANNEE} Ventilation DGL inc.</p>
     </div>
   );
 }

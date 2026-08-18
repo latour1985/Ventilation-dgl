@@ -200,6 +200,9 @@ function PiedPage({ config }) {
     `© ${new Date().getFullYear()} ${e.nomLegal}`,
     e.numeroRbq ? `RBQ# ${e.numeroRbq}` : null,
     e.membreCmmtq ? "Membre de la CMMTQ" : null,
+    // La marque PRODUIT, discrète — les documents restent ceux de
+    // L'ENTREPRISE (c'est elle qui facture ses clients).
+    "Propulsé par Fluxya",
   ].filter(Boolean).join(" · ");
   return (
     <View style={sLogo.rangeePied}>

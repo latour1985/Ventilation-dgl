@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionAdmin from "@/components/ConnexionAdmin";
+import Logo from "@/components/Logo";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { supabase } from "@/lib/supabase/client";
 import { permissionsEffectives, permissionsPour, ORDRE_SECTIONS, LIBELLES_SECTIONS, aAutorisation } from "@/lib/permissions";
@@ -1054,10 +1055,12 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
   const contenu = (estReduit, avecBascule) => (
     <>
       <div className={`flex items-center border-b border-white/10 py-4 ${estReduit ? "justify-center px-2" : "gap-2.5 px-4"}`}>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#FF6A13] text-sm font-extrabold text-white">V</span>
-        {!estReduit && (
+        {/* FLUXYA — la marque produit dans l'en-tête (brief 2026-08-18). */}
+        {estReduit ? (
+          <Logo variant="icon" taille={32} className="shrink-0" />
+        ) : (
           <div className="min-w-0">
-            <p className="truncate text-xs font-extrabold text-white">Ventilation DGL</p>
+            <Logo variant="compact" sombre />
             <p className="text-[10px] text-slate-500">Administration</p>
           </div>
         )}

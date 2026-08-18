@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { seConnecterSurveille, demanderReinitialisation } from "@/lib/connexionSurveillee";
+import Logo from "@/components/Logo";
 
 export default function ConnexionTechnicien() {
   const [courriel, setCourriel] = useState("");
@@ -38,10 +39,9 @@ export default function ConnexionTechnicien() {
     <div className="flex h-full flex-col bg-[#131B2E] text-white">
       <div className="flex flex-1 flex-col justify-center px-6">
         <div className="mb-8 flex items-center gap-3">
-          {/* Logo de l'entreprise (version blanche pour le fond marine). */}
-          <img src="/logo-dgl-blanc.png" alt="Ventilation DGL inc." className="h-14 w-auto shrink-0" />
+          {/* FLUXYA — marque produit neutre (brief 2026-08-18). */}
           <div>
-            <p className="text-base font-extrabold">Ventilation DGL inc.</p>
+            <Logo variant="full" sombre className="mb-1 scale-90 origin-left" />
             <p className="text-xs text-slate-400">Application technicien</p>
           </div>
         </div>
@@ -114,7 +114,7 @@ export default function ConnexionTechnicien() {
           </button>
         </form>
       </div>
-      <p className="pb-6 text-center text-[10px] text-slate-500">© {new Date().getFullYear()} Ventilation DGL inc.</p>
+      <p className="pb-6 text-center text-[10px] text-slate-500">Fluxya · © {new Date().getFullYear()} Ventilation DGL inc.</p>
     </div>
   );
 }

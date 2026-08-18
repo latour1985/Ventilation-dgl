@@ -1,22 +1,13 @@
 import Link from "next/link";
-import Image from "next/image";
+import Logo from "@/components/Logo";
 
 export default function Home() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-zinc-100 px-6 py-16">
       <main className="w-full max-w-2xl">
         <div className="mb-10 flex flex-col items-center text-center">
-          <Image
-            src="/logo-dgl.png"
-            alt="Ventilation DGL inc."
-            width={229}
-            height={200}
-            priority
-            className="mb-5 h-20 w-auto"
-          />
-          <h1 className="text-3xl font-bold tracking-tight text-zinc-900">
-            Ventilation DGL inc.
-          </h1>
+          <Logo variant="full" className="mb-4" />
+          <h1 className="sr-only">Fluxya</h1>
           <p className="mt-2 text-zinc-600">
             Choisis l&apos;application à ouvrir
           </p>

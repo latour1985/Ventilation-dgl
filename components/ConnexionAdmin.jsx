@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { seConnecterSurveille, demanderReinitialisation } from "@/lib/connexionSurveillee";
+import Logo from "@/components/Logo";
 
 export default function ConnexionAdmin() {
   const [courriel, setCourriel] = useState("");
@@ -39,13 +40,11 @@ export default function ConnexionAdmin() {
       <div className="w-full max-w-sm">
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
           <div className="bg-[#131B2E] px-6 pb-6 pt-7 text-white">
-            <div className="flex items-center gap-3">
-              {/* Logo de l'entreprise (version blanche pour le fond marine). */}
-              <img src="/logo-dgl-blanc.png" alt="Ventilation DGL inc." className="h-11 w-auto shrink-0" />
-              <div>
-                <p className="text-sm font-extrabold">Ventilation DGL inc.</p>
-                <p className="text-[11px] text-slate-400">Portail d'administration</p>
-              </div>
+            {/* FLUXYA — marque produit neutre (brief 2026-08-18) :
+                aucune mention d'entreprise sur l'écran de connexion. */}
+            <div>
+              <Logo variant="compact" sombre />
+              <p className="mt-0.5 text-[11px] text-slate-400">Portail d'administration</p>
             </div>
             <h1 className="mt-5 text-xl font-extrabold">Connexion</h1>
             <p className="mt-0.5 text-xs text-slate-300">Accède à la gestion de tes projets, devis et véhicules.</p>
@@ -117,7 +116,7 @@ export default function ConnexionAdmin() {
           </form>
         </div>
         <p className="mt-4 text-center text-[10px] text-slate-400">
-          © {new Date().getFullYear()} Ventilation DGL inc. — Application confidentielle, usage interne.
+          Fluxya · application confidentielle — usage autorisé seulement.
         </p>
       </div>
     </div>

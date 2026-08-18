@@ -208,6 +208,7 @@ export default function PageBonPublic({ params }) {
           <p className="mt-3 text-center text-[11px] text-slate-400">
             Document descriptif des travaux réalisés — ne constitue ni une soumission ni une facture.
           </p>
+          <p className="mt-1 text-center text-[10px] text-slate-300">Propulsé par Fluxya</p>
         </div>
       </div>
 
