@@ -20,6 +20,7 @@ import { enregistrerBonTravail, bonExistePourTache } from "@/lib/supabase/bonsTr
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
+import { pushSupporte, activerNotificationsPush, resouscrireSiPermis } from "@/lib/notificationsPush";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, declarerEquipeTerminee } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue, travailDejaEnregistre } from "@/lib/supabase/travauxEffectues";
@@ -1851,6 +1852,8 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
   const [courseNote, setCourseNote] = useState("");
   const [courseEnCours, setCourseEnCours] = useState(false);
   const [courseMsg, setCourseMsg] = useState("");
+  // 🔔 État du bouton d'activation des notifications push.
+  const [etatPush, setEtatPush] = useState(null);
   // 📍 Autocomplétion Google sur l'adresse de la course — comme
   // partout ailleurs. Recherche différée de 300 ms, jeton de session
   // (une seule unité de facturation Google par saisie).
@@ -2116,6 +2119,33 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         >
           🚗 Course / déplacement (sans client)
         </button>
+        {/* 🔔 NOTIFICATIONS PUSH (2026-08-18) : « nouvelle tâche »,
+            « matériel commandé » — reçues même application fermée.
+            Le bouton disparaît une fois la permission accordée.
+            iPhone : exige l'app AJOUTÉE À L'ÉCRAN D'ACCUEIL (iOS 16.4+). */}
+        {pushSupporte() && typeof Notification !== "undefined" && Notification.permission === "default" && etatPush !== "active" && (
+          <button
+            onClick={async () => {
+              setEtatPush("demande");
+              const r = await activerNotificationsPush();
+              setEtatPush(r);
+            }}
+            disabled={etatPush === "demande"}
+            className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 text-xs font-extrabold text-amber-800 active:bg-amber-100 disabled:opacity-60"
+          >
+            {etatPush === "demande" ? "Activation…" : "🔔 Activer les notifications (nouvelle tâche, matériel…)"}
+          </button>
+        )}
+        {etatPush === "active" && (
+          <p className="mb-2 rounded-xl bg-emerald-50 px-3 py-2 text-center text-[11px] font-bold text-emerald-700">
+            ✅ Notifications activées — tu recevras les nouvelles tâches sur ce téléphone.
+          </p>
+        )}
+        {etatPush === "refuse" && (
+          <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-center text-[11px] font-bold text-red-700">
+            Notifications refusées — réactive-les dans les réglages du navigateur si tu changes d'idée.
+          </p>
+        )}
         {courseOuverte && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onClick={() => !courseEnCours && setCourseOuverte(false)}>
             <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
@@ -4759,6 +4789,10 @@ function AppTechnicien() {
   useEffect(() => {
     if (!session?.user?.email) return;
     let annule = false;
+    // 🔔 Permission déjà accordée : l'abonnement push se rafraîchit en
+    // silence (il peut expirer côté navigateur) — le bouton d'activation
+    // de l'accueil reste le chemin pour la première fois.
+    resouscrireSiPermis();
     const chargerAssignees = async () => {
       try {
         const distantes = await listerTachesPourEmploye(session.user.email);

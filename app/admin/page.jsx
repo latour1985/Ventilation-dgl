@@ -38,6 +38,7 @@ import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse 
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
 import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres, listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
+import { envoyerPushA } from "@/lib/notificationsPush";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
@@ -14389,6 +14390,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           // sans choix explicite, la clé est OMISE — la valeur en base
           // reste (nouvelle ligne : défaut true de la base).
           ...(choixDejaFait ? { facturable: facturablePredetermine } : {}),
+        }).then(() => {
+          // 🔔 Notification push au technicien — un bonus, jamais un
+          // bloqueur : l'échec est silencieux (la tâche est déjà chez lui
+          // par la synchronisation temps réel de toute façon).
+          envoyerPushA(
+            employe.courriel,
+            "📋 Nouvelle tâche",
+            `${tache.titre || tache.clientNom || "Tâche"} — ${dateISO(dateDepart)}${heureDepart ? ` à ${heureDepart}` : ""}`
+          );
         }).catch((e) => {
           // Échec d'écriture Supabase (hors-ligne, table/colonne absente,
           // droits) — visible dans le Journal au lieu d'un silence total.
@@ -18692,7 +18702,13 @@ export default function App() {
     const c = commandesCamion.find((x) => x.id === id);
     setCommandesCamion((prev) => prev.map((x) => (x.id === id ? { ...x, statut: "commandee", noteBureau: note || "" } : x)));
     marquerCommandeCamionPassee(id, note, session)
-      .then(() => ajouterJournal("🧰 Matériel camion COMMANDÉ pour " + (c?.technicienNom || "?") + (note ? " — note : " + note : "")))
+      .then(() => {
+        ajouterJournal("🧰 Matériel camion COMMANDÉ pour " + (c?.technicienNom || "?") + (note ? " — note : " + note : ""));
+        // 🔔 Le demandeur le sait sans ouvrir l'application.
+        if (c?.technicienEmail) {
+          envoyerPushA(c.technicienEmail, "🧰 Matériel commandé", note ? `Ta demande est commandée — ${note}` : "Ta demande de matériel est commandée.");
+        }
+      })
       .catch(() => ajouterJournal("⚠️ Commande camion NON marquée — réessaie."));
   };
   // BC LIBRE — numéro officiel ; projet choisi = coûts du projet

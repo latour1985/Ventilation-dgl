@@ -2051,6 +2051,19 @@ alter table camions add column if not exists indispo_note text;
 --    que SES métiers) — les taux restent conservés, réaffichable.
 alter table entreprises add column if not exists metiers_masques jsonb not null default '[]'::jsonb;
 
+-- SNIPPET « 74 » — NOTIFICATIONS PUSH (2026-08-18).
+-- Un abonnement push par employé (clé : son courriel de connexion) —
+-- le téléphone du technicien reçoit « nouvelle tâche assignée » et
+-- « matériel commandé » sans ouvrir l'application. AUCUNE policy :
+-- la table n'est touchée que par la route serveur /api/notifications
+-- (service role) — invisible depuis le navigateur.
+create table if not exists push_abonnements (
+  courriel   text primary key,
+  abonnement jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table push_abonnements enable row level security;
+
 -- SNIPPET « 71 » — TECHNICIEN FACTURABLE OU NON (2026-08-18).
 -- Le PREMIER technicien d'une tâche est toujours facturable. À partir
 -- du 2e, le bureau CHOISIT à l'assignation (obligé de choisir — jamais
