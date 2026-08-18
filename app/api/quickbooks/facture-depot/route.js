@@ -94,7 +94,7 @@ export async function POST(request) {
     const [customerId, itemId, entreprise] = await Promise.all([
       clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
       articleServiceQboPour(acces),
-      admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels").limit(1).maybeSingle(),
+      admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels, note_facture").limit(1).maybeSingle(),
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
@@ -123,7 +123,14 @@ export async function POST(request) {
       ...((Array.isArray(corps?.envoyerA) ? corps.envoyerA : []).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || "").trim())).length > 0
         ? { BillEmail: { Address: corps.envoyerA.map((e) => String(e).trim()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).slice(0, 5).join(", ") } }
         : {}),
-      ...(corps?.messageClient ? { CustomerMemo: { value: String(corps.messageClient).slice(0, 900) } } : {}),
+      // 💳 Les MODALITÉS DE PAIEMENT de l'entreprise (Paramètres) sont
+      // ajoutées au message — sur CHAQUE facture de dépôt (2026-08-17).
+      ...((() => {
+        const memo = [String(corps?.messageClient || "").trim(), String(reglages.note_facture || "").trim()]
+          .filter(Boolean)
+          .join("\n\n");
+        return memo ? { CustomerMemo: { value: memo.slice(0, 900) } } : {};
+      })()),
       PrivateNote: `Dépôt d'appel de service — tâche ${corps?.tacheId || "?"} — créé par l'application Ventilation DGL`,
       AllowOnlineCreditCardPayment: carteOfferte,
       AllowOnlineACHPayment: virementOffert,

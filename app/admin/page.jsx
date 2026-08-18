@@ -5509,13 +5509,20 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
     setContacts((prev) => [...prev, { id: `ct-${Date.now()}`, nom: "", role: "", telephone: "" }]);
   const retirerContact = (id) => setContacts((prev) => prev.filter((c) => c.id !== id));
 
+  // PERSONNE OU ENTREPRISE + téléphone obligatoire (2026-08-17) —
+  // mêmes règles qu'à la création.
+  const personneOk = nom.trim().length > 0 && nom.trim() !== entreprise.trim();
+  const identiteOk = personneOk || entreprise.trim().length > 0;
+  const raisonsFiche = [];
+  if (!identiteOk) raisonsFiche.push("une personne OU une entreprise");
+  if (!telephone.trim()) raisonsFiche.push("un téléphone");
   const enregistrer = () => {
-    if (!nom.trim()) return;
+    if (raisonsFiche.length > 0) return;
     onEnregistrer({
-      nom: nom.trim(),
+      // Entreprise seule : elle sert de nom et d'affichage.
+      nom: personneOk ? nom.trim() : entreprise.trim(),
       entreprise: entreprise.trim(),
-      // Sans entreprise, afficher l'entreprise n'a pas de sens.
-      nomAffichage: entreprise.trim() ? nomAffichage : "nom",
+      nomAffichage: personneOk ? (entreprise.trim() ? nomAffichage : "nom") : "entreprise",
       telephone: telephone.trim(),
       // Lignes vides écartées (un contact sans nom ne sert à rien).
       contacts: contacts
@@ -5631,7 +5638,12 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
             </button>
           </div>
 
-          <Button onClick={enregistrer} disabled={!nom.trim()} className="w-full">Enregistrer les modifications</Button>
+          {raisonsFiche.length > 0 && (
+            <p className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">
+              Pour enregistrer, il manque : {raisonsFiche.join(" · ")}.
+            </p>
+          )}
+          <Button onClick={enregistrer} disabled={raisonsFiche.length > 0} className="w-full">Enregistrer les modifications</Button>
         </div>
       </div>
     </div>
@@ -7771,15 +7783,22 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
               <ChampParametre {...propsChamp} cle="termePaiementDefaut" libelle="Terme de paiement par défaut" placeholder="Net 30" />
             </div>
             <div className="mt-2.5">
-              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Note affichée au bas des factures</label>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                Note et modalités de paiement (chèque, virement Interac…)
+              </label>
               <textarea
-                rows={2}
+                rows={4}
                 value={brouillon.noteFacture ?? ""}
                 disabled={!estAdminPrincipal}
-                placeholder="Ex. : Intérêt de 1,5 % par mois sur tout solde en souffrance."
+                placeholder={"Ex. :\nChèque à l'ordre de Ventilation DGL inc. — 771 rue Exemple, Blainville.\nVirement Interac : paiements@ventilationdgl.com (réponse : dgl2026).\nIntérêt de 1,5 % par mois sur tout solde en souffrance."}
                 onChange={(e) => champ("noteFacture", e.target.value)}
                 className={`w-full rounded-lg border px-2 py-1.5 text-xs outline-none disabled:text-slate-400 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}
               />
+              <p className="mt-0.5 text-[9px] leading-snug text-slate-400">
+                Ce texte part sur les factures QuickBooks (message au client) et dans les courriels de demande de
+                paiement. 💡 Conseil : active le <span className="font-bold">dépôt automatique Interac</span> à ta
+                banque — plus besoin de partager une question/réponse.
+              </p>
             </div>
           </div>
 
@@ -9679,7 +9698,15 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     setNomAffichageChoix("nom");
   };
 
-  const peutCreer = prenom.trim() && nomFamille.trim() && courriel.trim();
+  // PERSONNE OU ENTREPRISE (retour de tests 2026-08-17) : bien des
+  // clients n'ont qu'un nom d'entreprise — l'un OU l'autre débloque.
+  // TÉLÉPHONE désormais obligatoire (il voyage jusqu'au technicien).
+  const personneRemplie = !!(prenom.trim() && nomFamille.trim());
+  const peutCreer = (personneRemplie || entreprise.trim()) && courriel.trim() && telephone.trim();
+  const raisonsCreation = [];
+  if (!personneRemplie && !entreprise.trim()) raisonsCreation.push("une personne (prénom + nom) OU une entreprise");
+  if (!courriel.trim()) raisonsCreation.push("un courriel");
+  if (!telephone.trim()) raisonsCreation.push("un téléphone");
   // Erreurs de validation bloquantes avant le transfert vers QuickBooks.
   const [erreursCreation, setErreursCreation] = useState([]);
 
@@ -9697,8 +9724,10 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     const nouveauClient = {
       id,
       entreprise: entreprise.trim(),
-      nomAffichage: entreprise.trim() ? nomAffichageChoix : "nom",
-      nom: `${prenom.trim()} ${nomFamille.trim()}`,
+      // Entreprise seule : elle sert de nom ET d'affichage — aucune
+      // fiche « sans nom » ne circule (listes, QuickBooks, documents).
+      nomAffichage: personneRemplie ? (entreprise.trim() ? nomAffichageChoix : "nom") : "entreprise",
+      nom: personneRemplie ? `${prenom.trim()} ${nomFamille.trim()}` : entreprise.trim(),
       courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: courriel.trim(), defaut: true }],
       telephone: telephone.trim(),
       termeFacturation,
@@ -9912,6 +9941,11 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
               </div>
             )}
 
+            {raisonsCreation.length > 0 && (
+              <p className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">
+                Pour créer le client, il manque : {raisonsCreation.join(" · ")}.
+              </p>
+            )}
             <Button onClick={creerClient} disabled={!peutCreer} className="w-full">
               Créer le client et transférer vers QuickBooks
             </Button>
@@ -10977,16 +11011,26 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
   const [ncAdresse, setNcAdresse] = useState(null);
   const [ncErreurs, setNcErreurs] = useState([]);
   // Doublon probable : même courriel, ou nom identique à un client existant.
+  // PERSONNE OU ENTREPRISE (retour de tests 2026-08-17) + téléphone
+  // obligatoire — mêmes règles que le grand formulaire de l'onglet
+  // Clients (une seule logique, deux portes d'entrée).
+  const ncPersonne = !!(ncPrenom.trim() && ncNomFamille.trim());
+  const ncIdentiteOk = ncPersonne || !!ncEntreprise.trim();
+  const ncComplet = ncIdentiteOk && ncCourriel.trim() && ncTelephone.trim();
+  const ncRaisons = [];
+  if (!ncIdentiteOk) ncRaisons.push("une personne (prénom + nom) OU une entreprise");
+  if (!ncCourriel.trim()) ncRaisons.push("un courriel");
+  if (!ncTelephone.trim()) ncRaisons.push("un téléphone");
   const doublonPossible = (clients || []).find((c) => {
     const courrielSaisi = ncCourriel.trim().toLowerCase();
     // Insensible aux ACCENTS et aux espaces : « Raphaël  Gélinas » =
     // « raphael gelinas » — c'est comme ça que le doublon est passé.
-    const nomSaisi = nomClientNormalise(`${ncPrenom} ${ncNomFamille}`);
+    const nomSaisi = nomClientNormalise(ncPersonne ? `${ncPrenom} ${ncNomFamille}` : ncEntreprise);
     if (courrielSaisi && (c.courriels || []).some((cc) => cc.email.toLowerCase() === courrielSaisi)) return true;
-    return nomSaisi.length > 3 && nomClientNormalise(c.nom) === nomSaisi;
+    return nomSaisi.length > 3 && (nomClientNormalise(c.nom) === nomSaisi || nomClientNormalise(c.entreprise || "") === nomSaisi);
   });
   const creer = () => {
-    if (!(ncPrenom.trim() && ncNomFamille.trim() && ncCourriel.trim())) return;
+    if (!ncComplet) return;
     // Conformité : aucune donnée invalide ne part vers QuickBooks.
     const erreurs = erreursClientPourQuickBooks({ courriel: ncCourriel, adresse: ncAdresse });
     if (erreurs.length > 0) {
@@ -10997,7 +11041,9 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
     const nouveauClient = {
       id,
       entreprise: ncEntreprise.trim(),
-      nom: `${ncPrenom.trim()} ${ncNomFamille.trim()}`,
+      // Entreprise seule : elle sert de nom et d'affichage.
+      nomAffichage: ncPersonne ? "nom" : "entreprise",
+      nom: ncPersonne ? `${ncPrenom.trim()} ${ncNomFamille.trim()}` : ncEntreprise.trim(),
       courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: ncCourriel.trim(), defaut: true }],
       telephone: ncTelephone.trim(),
       termeFacturation: TERMES_FACTURATION[0],
@@ -11044,13 +11090,16 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
         </div>
         <div className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
-            <input value={ncPrenom} onChange={(e) => setNcPrenom(e.target.value)} placeholder="Prénom *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
-            <input value={ncNomFamille} onChange={(e) => setNcNomFamille(e.target.value)} placeholder="Nom *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            <input value={ncPrenom} onChange={(e) => setNcPrenom(e.target.value)} placeholder="Prénom" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            <input value={ncNomFamille} onChange={(e) => setNcNomFamille(e.target.value)} placeholder="Nom" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
           </div>
-          <input value={ncEntreprise} onChange={(e) => setNcEntreprise(e.target.value)} placeholder="Entreprise (optionnel)" className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          <input value={ncEntreprise} onChange={(e) => setNcEntreprise(e.target.value)} placeholder="Entreprise" className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          <p className="text-[10px] leading-snug text-slate-400">
+            Personne (prénom + nom) OU entreprise — au moins un des deux. Les deux ensemble : encore mieux.
+          </p>
           <div className="grid grid-cols-2 gap-2">
             <input value={ncCourriel} onChange={(e) => setNcCourriel(e.target.value)} placeholder="Courriel *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
-            <input value={ncTelephone} onChange={(e) => setNcTelephone(e.target.value)} placeholder="Téléphone" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            <input value={ncTelephone} onChange={(e) => setNcTelephone(e.target.value)} placeholder="Téléphone *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
           </div>
           <div>
             <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse de facturation *</label>
@@ -11080,11 +11129,12 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
               {ncErreurs.map((e, i) => <li key={i}>• {e}</li>)}
             </ul>
           )}
-          <Button
-            onClick={creer}
-            disabled={!(ncPrenom.trim() && ncNomFamille.trim() && ncCourriel.trim())}
-            className="w-full"
-          >
+          {ncRaisons.length > 0 && (
+            <p className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">
+              Pour créer le client, il manque : {ncRaisons.join(" · ")}.
+            </p>
+          )}
+          <Button onClick={creer} disabled={!ncComplet} className="w-full">
             Créer le client et l'utiliser
           </Button>
         </div>
@@ -11914,7 +11964,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                       onClick={() => { setClientId(c.id); setFiltreClientDevis(""); }}
                       className="block w-full border-b border-slate-100 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 last:border-0 active:bg-orange-50"
                     >
-                      {c.nom}
+                      <span className="block truncate">{nomAffichageClient(c)}</span>
                     </button>
                   ))}
                 {clients.filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientDevis.trim().toLowerCase())).length === 0 && (
@@ -13722,6 +13772,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   // « ➕ Nouveau client » depuis la création de tâche (fenêtre partagée).
   const [modalNouveauClientTache, setModalNouveauClientTache] = useState(false);
+  // ✏️ Correction rapide de la fiche du client choisi, sans quitter la
+  // création de tâche (retour de tests 2026-08-17 : « où est l'option
+  // pour modifier les clients ? » — elle existait dans l'onglet Clients,
+  // maintenant elle est aussi ICI, là où on en a besoin).
+  const [clientEnEditionAgenda, setClientEnEditionAgenda] = useState(null);
   // Onglets du panneau « Tâches en attente » : PRÊTES à planifier
   // (glissables maintenant) vs EN ATTENTE (bloquées par un dépôt non
   // payé/annulé). Une tâche change d'onglet automatiquement dès que son
@@ -14093,6 +14148,16 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         ? `Entretien selon contrat #${nouvelle.devisNumero}, ${nouvelleFrequence} factures/an`
         : TYPES_TACHE.find((t) => t.id === nouveauType).label;
 
+    // 👥 Techniciens EN PLUS cochés SANS date (2026-08-17) : mémorisés
+    // sur la tâche avec leurs choix 💰/🤝 — ils s'assigneront d'un coup
+    // dès qu'elle entrera à l'horaire (dépôt payé, glisser-déposer ou
+    // édition). Avec date + technicien, le chemin direct plus bas les
+    // assigne immédiatement, comme avant.
+    const enPlusPrevus = nouveauxEmployesEnPlus.filter((id) => id && id !== nouveauEmployeId);
+    if (!(nouvelleDate && nouveauEmployeId) && enPlusPrevus.length > 0) {
+      nouvelle.equipePrevue = enPlusPrevus.map((id) => ({ employeId: id, facturable: facturablesEnPlus[id] }));
+    }
+
     // Dépôt préalable : la tâche porte l'info et le dépôt est créé
     // (24 h pour payer). Une tâche avec dépôt en attente NE PEUT PAS
     // être placée dans l'horaire — même si date/technicien sont saisis.
@@ -14201,8 +14266,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // 💰/🤝 a DÉJÀ été fait (cases de la création de tâche) — la fenêtre
   // après coup ne s'ouvre alors pas. Absent : comportement habituel
   // (question posée dès qu'un 2e technicien rejoint la tâche).
-  const assigner = (tache, employeId, dateDepart, heureDepart, facturablePredetermine) => {
+  const assigner = (tacheParam, employeId, dateDepart, heureDepart, facturablePredetermine) => {
     if (lectureSeule) return;
+    // 👥 ÉQUIPE PRÉVUE (cochée à la création SANS date, 2026-08-17) :
+    // détachée de l'objet dès l'entrée — elle ne doit ni vivre dans les
+    // cases de la grille ni voyager dans `donnees` (sinon chaque
+    // déplacement futur ré-assignerait les coéquipiers). Elle sert UNE
+    // fois, à la fin de cette assignation, pour placer le reste de
+    // l'équipe d'un coup avec leurs choix 💰/🤝.
+    const { equipePrevue, ...tache } = tacheParam || {};
     // Blocage strict : impossible d'assigner tant que le dépôt requis
     // n'est pas payé (ou si le délai de 24 h l'a annulé).
     if (depotBloque(tache.id)) {
@@ -14325,6 +14397,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           );
         });
       }
+    }
+    // 👥 Le reste de l'équipe prévue s'assigne maintenant, d'un coup —
+    // chacun avec le choix 💰/🤝 fait à la création. L'objet transmis
+    // est déjà nettoyé (pas d'equipePrevue) : aucune récursion infinie.
+    if (Array.isArray(equipePrevue) && equipePrevue.length > 0) {
+      equipePrevue
+        .filter((m) => m.employeId && m.employeId !== employeId)
+        .forEach((m) => assigner(tache, m.employeId, dateDepart, heureDepart, m.facturable));
     }
   };
 
@@ -14901,7 +14981,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                           onClick={() => { choisirClientTache(c.id); setFiltreClientTache(""); }}
                           className="block w-full border-b border-slate-100 px-2 py-2 text-left text-xs font-semibold text-slate-700 last:border-0 active:bg-orange-50"
                         >
-                          {nomAffichageClient(c)}
+                          {/* truncate : un nom accidentellement TRÈS long
+                              (texte collé — vécu 2026-08-17) reste sur
+                              UNE ligne au lieu d'inonder la liste. */}
+                          <span className="block truncate">{nomAffichageClient(c)}</span>
                         </button>
                       ))}
                     {clients.filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase())).length === 0 && (
@@ -14916,6 +14999,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   return c ? (
                     <div className="mt-1 flex items-center justify-between gap-2 rounded-lg border border-[#FF6A13] bg-orange-50 px-2 py-1.5">
                       <span className="min-w-0 truncate text-xs font-bold text-slate-800">{nomAffichageClient(c)}</span>
+                      <button
+                        type="button"
+                        onClick={() => setClientEnEditionAgenda(c.id)}
+                        title="Modifier la fiche du client (téléphone, entreprise, contacts...)"
+                        className="shrink-0 text-slate-400 hover:text-slate-700"
+                        aria-label="Modifier la fiche du client"
+                      >
+                        <Pencil size={12} />
+                      </button>
                       <button type="button" onClick={() => choisirClientTache("")} className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2">
                         changer
                       </button>
@@ -15362,12 +15454,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   </select>
                 </div>
                 {/* MULTI-TECHNICIENS (retour de tests) : les cochés
-                    rejoignent la MÊME tâche, planifiés d'un seul coup. */}
-                {nouveauEmployeId && nouvelleDate && employes.filter((e) => e.id !== nouveauEmployeId).length > 0 && (
+                    rejoignent la MÊME tâche, planifiés d'un seul coup.
+                    ⚠️ SANS DATE AUSSI (retour de tests 2026-08-17) : la
+                    section n'apparaissait qu'avec une date — impossible
+                    d'ajouter un 2e technicien sur un appel avec dépôt
+                    (encore sans date). Sans date, les cochés sont
+                    MÉMORISÉS sur la tâche et s'assignent d'un coup dès
+                    qu'elle entre à l'horaire. */}
+                {nouveauEmployeId && employes.filter((e) => e.id !== nouveauEmployeId).length > 0 && (
                   <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
                     <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                       Ajouter d&apos;autres techniciens sur la même tâche
                     </p>
+                    {!nouvelleDate && (
+                      <p className="mb-1 rounded-lg bg-amber-50 px-2 py-1 text-[10px] leading-snug text-amber-700">
+                        Sans date : ils seront assignés automatiquement avec la tâche quand elle sera placée à l&apos;horaire.
+                      </p>
+                    )}
                     <div className="space-y-1">
                       {employes
                         .filter((e) => e.id !== nouveauEmployeId)
@@ -16512,6 +16615,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           }
         />
       )}
+      {/* ✏️ FICHE CLIENT modifiable depuis la création de tâche (même
+          fenêtre que l'onglet Clients — une seule logique). */}
+      {clientEnEditionAgenda && (() => {
+        const c = clients.find((x) => x.id === clientEnEditionAgenda);
+        if (!c) return null;
+        return (
+          <ModalEditionClient
+            client={c}
+            onFermer={() => setClientEnEditionAgenda(null)}
+            onEnregistrer={(champs) => {
+              setClients((prev) => prev.map((x) => (x.id === c.id ? { ...x, ...champs } : x)));
+              ajouterJournal(`✏️ Fiche client modifiée : ${champs.entreprise && champs.nomAffichage !== "nom" ? champs.entreprise : champs.nom}`);
+            }}
+          />
+        );
+      })()}
+
       {/* FENÊTRE — NOUVEAU CLIENT depuis la création de tâche (composant
           partagé avec l'onglet Devis, mêmes validations QuickBooks). */}
       {choixFacturable && (

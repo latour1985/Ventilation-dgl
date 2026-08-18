@@ -97,7 +97,21 @@ export async function POST(request) {
       ...(envoyerA.length > 0 ? { BillEmail: { Address: envoyerA.join(", ") } } : {}),
       // Notre MESSAGE au client — il apparaît sur la facture et dans le
       // courriel QuickBooks (contexte : réservation, délai, référence).
-      ...(corps?.customerMemo ? { CustomerMemo: { value: String(corps.customerMemo).slice(0, 900) } } : {}),
+      // 💳 Les MODALITÉS DE PAIEMENT de l'entreprise (Paramètres →
+      // « Note et modalités de paiement » : chèque, virement Interac…)
+      // s'ajoutent À CHAQUE facture, côté serveur — aucun appelant ne
+      // peut les oublier (2026-08-17).
+      ...(await (async () => {
+        let note = "";
+        try {
+          const { data } = await clientSupabaseService().from("entreprises").select("note_facture").order("created_at").limit(1);
+          note = data?.[0]?.note_facture || "";
+        } catch {
+          // note indisponible — la facture part sans, jamais bloquée
+        }
+        const memo = [String(corps?.customerMemo || "").trim(), note.trim()].filter(Boolean).join("\n\n");
+        return memo ? { CustomerMemo: { value: memo.slice(0, 900) } } : {};
+      })()),
       // L'ADRESSE DES TRAVAUX — elle change à chaque job, donc elle vit
       // sur la FACTURE (champ livraison), pas sur la fiche client.
       ...(corps?.adresseTravaux ? { ShipAddr: { Line1: String(corps.adresseTravaux).slice(0, 500) } } : {}),
