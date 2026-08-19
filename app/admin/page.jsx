@@ -1001,7 +1001,7 @@ function adresseFacturationClient(client) {
   if (client?.adresseFacturation) return client.adresseFacturation;
   const principale = client?.adresses?.[0];
   if (!principale) return "";
-  return [principale.ligne1, principale.codePostal].filter(Boolean).join(", ");
+  return [libelleAdresse(principale), principale.codePostal].filter(Boolean).join(", ");
 }
 
 // Nom normalisé pour la détection de DOUBLONS : minuscules, accents
@@ -1149,7 +1149,7 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
       </aside>
       {/* Mobile : tiroir par-dessus (toujours complet) */}
       {ouvert && (
-        <div className="fixed inset-0 z-40 md:hidden" onClick={onFermer}>
+        <div className="fixed inset-0 z-40 md:hidden" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
           <div className="absolute inset-0 bg-black/50" />
           <aside className="absolute left-0 top-0 flex h-full w-64 flex-col bg-[#131B2E]" onClick={(e) => e.stopPropagation()}>
             {contenu(false, false)}
@@ -2341,7 +2341,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
 
       {/* FENÊTRE — DEMANDE DE PAIEMENT AU CLIENT */}
       {demandePour && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDemandePour(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setDemandePour(null))(); }}>
           <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-extrabold text-slate-900">💰 Demande de paiement — {demandePour.clientNom}</h3>
             <p className="mt-0.5 text-[11px] text-slate-400">{demandePour.pieceRequise}</p>
@@ -3249,7 +3249,7 @@ function OngletInspectionsVehicules({ inspections, setInspections, entretiens, s
           setOngletDossier("etat");
         };
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={fermer}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (fermer)(); }}>
             <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div>
@@ -3902,7 +3902,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
       {/* CONFIRMATION DU DÉBLOCAGE — geste volontaire : on ne veut pas
           qu'un clic distrait remette des heures fausses dans la paie. */}
       {deblocageDemande && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeblocageDemande(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setDeblocageDemande(null))(); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-start gap-2.5">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
@@ -3936,7 +3936,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
 
       {/* AVERTISSEMENT AVANT DE COPIER UNE PAIE INCOMPLÈTE */}
       {avertissementPaieOuvert && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setAvertissementPaieOuvert(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setAvertissementPaieOuvert(false))(); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-start gap-2.5">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100">
@@ -4366,7 +4366,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                   );
                   const labelJour = new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
                   return (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); }}>
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); })(); }}>
                       <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
                         <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-blue-700">
                           📅 <span className="capitalize">{labelJour}</span> — journée de {e.nom} ({hM(tj.total)})
@@ -4790,7 +4790,7 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
   const fmt$ = (v) => `${(Number(v) || 0).toFixed(0)} $`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 md:p-6" onClick={onFermer}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 md:p-6" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="w-full max-w-4xl rounded-2xl bg-white p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -5603,6 +5603,7 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   // Adresse de facturation : l'actuelle (règle complète) affichée, une
   // nouvelle choisie via Google la remplace.
   const [nouvelleAdresse, setNouvelleAdresse] = useState(null);
+  const [nouvelleAdresseUnite, setNouvelleAdresseUnite] = useState("");
   const actuelle = adresseFacturationClient(client);
   // 📇 CARNET DE CONTACTS SUR PLACE (SQL 72, 2026-08-17) — chargé de
   // projet, concierge, gérant… réutilisables de chantier en chantier.
@@ -5632,13 +5633,19 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
       contacts: contacts
         .map((c) => ({ ...c, nom: (c.nom || "").trim(), role: (c.role || "").trim(), telephone: (c.telephone || "").trim() }))
         .filter((c) => c.nom),
-      ...(nouvelleAdresse ? { adresseFacturation: nouvelleAdresse.label } : {}),
+      ...(nouvelleAdresse
+        ? {
+            adresseFacturation: [nouvelleAdresse.label, nouvelleAdresseUnite.trim() ? `app. ${nouvelleAdresseUnite.trim()}` : ""]
+              .filter(Boolean)
+              .join(", "),
+          }
+        : {}),
     });
     onFermer();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between">
           <h3 className="text-sm font-extrabold text-slate-900">✏️ Modifier la fiche — {nomAffichageClient(client)}</h3>
@@ -5683,6 +5690,12 @@ function ModalEditionClient({ client, onFermer, onEnregistrer }) {
               </p>
             )}
             <AutocompleteAdresse onSelection={setNouvelleAdresse} />
+            <input
+              value={nouvelleAdresseUnite}
+              onChange={(e) => setNouvelleAdresseUnite(e.target.value)}
+              placeholder="App. / bureau / casier postal (facultatif)"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
             <p className="mt-0.5 text-[9px] text-slate-400">
               Cette adresse s'imprime sous « Facturé à » sur les devis, bons de travail et factures.
             </p>
@@ -6089,7 +6102,7 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }
               {c.telephone && <div className="flex items-center gap-1.5"><Phone size={11} /> {c.telephone}</div>}
               {(c.adresses || []).map((a, idx) => (
                 <div key={a.id} className="flex items-center gap-1.5">
-                  <MapPin size={11} /> {a.nom} — {a.ligne1}
+                  <MapPin size={11} /> {a.nom} — {libelleAdresse(a)}
                   {idx === 0 && (
                     <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-extrabold text-slate-500" title="La première adresse de la fiche sert d'adresse de facturation">
                       Principale (facturation)
@@ -6118,7 +6131,7 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }
 // ============================================================
 function ApercuBonTravailClient({ travail, clients, onFermer }) {
   const client = (clients || []).find((c) => c.id === travail.clientId);
-  const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${client.adresses[0].ligne1}` : null);
+  const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${libelleAdresse(client.adresses[0])}` : null);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
@@ -6944,7 +6957,7 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMeti
 
       {/* CONFIRMATION — sauvegarde de la grille des taux */}
       {confirmationTauxOuverte && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmationTauxOuverte(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setConfirmationTauxOuverte(false))(); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-start gap-2.5">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
@@ -7147,7 +7160,7 @@ function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMeti
 
       {/* CONFIRMATION — sauvegarde de la liste de prix des dépôts */}
       {confirmationPrixOuverte && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmationPrixOuverte(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setConfirmationPrixOuverte(false))(); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-start gap-2.5">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
@@ -7236,7 +7249,7 @@ function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between">
           <h3 className="text-sm font-extrabold text-slate-800">{item?.id ? "Modifier l'item" : "Nouvel item"}</h3>
@@ -7363,7 +7376,7 @@ function SelecteurItem({ catalogue, onChoisir, libelle = "+ Ajouter un produit" 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-16" onClick={() => setOuvert(false)}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-16" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setOuvert(false))(); }}>
       <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 rounded-lg border border-slate-300 px-2.5 py-2">
           <Search size={15} className="shrink-0 text-slate-400" />
@@ -8194,7 +8207,7 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
 
       {/* APERÇU EN DIRECT — l'en-tête tel qu'il sortira, avec le brouillon */}
       {apercuOuvert && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setApercuOuvert(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setApercuOuvert(false))(); }}>
           <div className="w-full max-w-md rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-start justify-between">
               <h3 className="text-sm font-extrabold text-slate-500">Aperçu — en-tête des documents</h3>
@@ -8226,7 +8239,7 @@ function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJou
 
       {/* CONFIRMATION avant d'écrire */}
       {confirmationOuverte && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setConfirmationOuverte(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setConfirmationOuverte(false))(); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-start gap-2.5">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100">
@@ -9119,7 +9132,7 @@ function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, trans
       {/* ENVOI DU BON DE COMMANDE AU FOURNISSEUR — choix multiple des
           adresses + aperçu de ce qui part. */}
       {envoiOuvert && fournisseurChoisi && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEnvoiOuvert(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setEnvoiOuvert(false))(); }}>
           <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-extrabold text-slate-900">📧 Envoyer le bon de commande</h3>
             <p className="mt-0.5 text-xs text-slate-500">À {fournisseurChoisi.nom} — coche une ou plusieurs adresses.</p>
@@ -9699,6 +9712,8 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
   const [telephone, setTelephone] = useState("");
   const [termeFacturation, setTermeFacturation] = useState(TERMES_FACTURATION[0]);
   const [adresseFacturation, setAdresseFacturation] = useState(null);
+  // 🚪 App./bureau/casier postal — certains clients fonctionnent ainsi.
+  const [adresseFacturationApp, setAdresseFacturationApp] = useState("");
   const [dejaSyncQb, setDejaSyncQb] = useState(false);
   const [syncEnCours, setSyncEnCours] = useState(false);
   const [clientOuvertId, setClientOuvertId] = useState(null);
@@ -9864,7 +9879,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
       adresseTravaux = nouveauProjetNouvelleAdresse.label;
     } else if (nouveauProjetAdresseId) {
       const a = client?.adresses?.find((x) => x.id === nouveauProjetAdresseId);
-      if (a) adresseTravaux = `${a.nom} — ${a.ligne1}`;
+      if (a) adresseTravaux = `${a.nom} — ${libelleAdresse(a)}`;
     }
     const moHeures = nb(nouveauProjetMoHeures);
     const moCoutant = nb(nouveauProjetMoCoutant);
@@ -9938,6 +9953,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     setTelephone("");
     setTermeFacturation(TERMES_FACTURATION[0]);
     setAdresseFacturation(null);
+    setAdresseFacturationApp("");
     setNomAffichageChoix("nom");
   };
 
@@ -9974,9 +9990,13 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
       courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: courriel.trim(), defaut: true }],
       telephone: telephone.trim(),
       termeFacturation,
-      adresseFacturation: adresseFacturation?.label || "",
+      // 🚪 L'unité suit l'adresse partout : chaîne de facturation (QB et
+      // documents) ET fiche d'adresse (champ appartement).
+      adresseFacturation: adresseFacturation
+        ? [adresseFacturation.label, adresseFacturationApp.trim() ? `app. ${adresseFacturationApp.trim()}` : ""].filter(Boolean).join(", ")
+        : "",
       adresses: adresseFacturation
-        ? [{ id: `a-${Date.now()}`, nom: "Facturation", ligne1: adresseFacturation.label, codePostal: adresseFacturation.codePostal }]
+        ? [{ id: `a-${Date.now()}`, nom: "Facturation", ligne1: adresseFacturation.label, ...(adresseFacturationApp.trim() ? { appartement: adresseFacturationApp.trim() } : {}), codePostal: adresseFacturation.codePostal }]
         : [],
       quickbooksCustomerId: null,
       syncQb: "en_cours",
@@ -10126,6 +10146,12 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                   <Check size={12} /> {adresseFacturation.label}
                 </p>
               )}
+              <input
+                value={adresseFacturationApp}
+                onChange={(e) => setAdresseFacturationApp(e.target.value)}
+                placeholder="App. / bureau / casier postal (facultatif)"
+                className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
             </div>
 
             <div>
@@ -10485,7 +10511,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                             >
                               <option value="">— Choisir une adresse enregistrée —</option>
                               {(c.adresses || []).map((a) => (
-                                <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
+                                <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
                               ))}
                             </select>
                           )}
@@ -11112,7 +11138,7 @@ function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravail, onCh
 
   const adresseChoisie = () => {
     const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
-    return a ? `${a.nom} — ${a.ligne1}` : null;
+    return a ? `${a.nom} — ${libelleAdresse(a)}` : null;
   };
 
   return (
@@ -11169,7 +11195,7 @@ function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravail, onCh
                 >
                   <option value="">— Adresse de facturation par défaut —</option>
                   {client.adresses.map((a) => (
-                    <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
+                    <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
                   ))}
                 </select>
               ) : (
@@ -11195,7 +11221,7 @@ function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravail, onCh
                 >
                   <option value="">— Adresse de facturation par défaut —</option>
                   {client.adresses.map((a) => (
-                    <option key={a.id} value={a.id}>{a.nom} — {a.ligne1}</option>
+                    <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
                   ))}
                 </select>
               ) : (
@@ -11252,6 +11278,7 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
   const [ncCourriel, setNcCourriel] = useState("");
   const [ncTelephone, setNcTelephone] = useState("");
   const [ncAdresse, setNcAdresse] = useState(null);
+  const [ncAdresseApp, setNcAdresseApp] = useState("");
   const [ncErreurs, setNcErreurs] = useState([]);
   // Doublon probable : même courriel, ou nom identique à un client existant.
   // PERSONNE OU ENTREPRISE (retour de tests 2026-08-17) + téléphone
@@ -11290,9 +11317,11 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
       courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: ncCourriel.trim(), defaut: true }],
       telephone: ncTelephone.trim(),
       termeFacturation: TERMES_FACTURATION[0],
-      adresseFacturation: ncAdresse?.label || "",
+      adresseFacturation: ncAdresse
+        ? [ncAdresse.label, ncAdresseApp.trim() ? `app. ${ncAdresseApp.trim()}` : ""].filter(Boolean).join(", ")
+        : "",
       adresses: ncAdresse
-        ? [{ id: `a-${Date.now()}`, nom: "Facturation", ligne1: ncAdresse.label, codePostal: ncAdresse.codePostal }]
+        ? [{ id: `a-${Date.now()}`, nom: "Facturation", ligne1: ncAdresse.label, ...(ncAdresseApp.trim() ? { appartement: ncAdresseApp.trim() } : {}), codePostal: ncAdresse.codePostal }]
         : [],
       quickbooksCustomerId: null,
       syncQb: "en_cours",
@@ -11322,7 +11351,7 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
       .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement mais transfert QuickBooks à reprendre`));
   };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
@@ -11355,6 +11384,12 @@ function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onS
             ) : (
               <p className="mt-1 text-[10px] text-slate-400">Écris le numéro et la rue, puis précise la ville et clique « Utiliser cette adresse ».</p>
             )}
+            <input
+              value={ncAdresseApp}
+              onChange={(e) => setNcAdresseApp(e.target.value)}
+              placeholder="App. / bureau / casier postal (facultatif)"
+              className="mt-1.5 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+            />
           </div>
           {doublonPossible && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] font-semibold text-amber-800">
@@ -11432,7 +11467,7 @@ function ModalNouveauFournisseur({ fournisseurs, setFournisseurs, ajouterJournal
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
@@ -11484,7 +11519,7 @@ function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, onConfirm
   const [reporter, setReporter] = useState(false);
   const { item, saisi, auCatalogue } = info;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-extrabold text-slate-900">Coût saisi sur cette ligne</h3>
         <p className="mt-1 text-xs font-semibold text-slate-700">{item.nom}</p>
@@ -11544,6 +11579,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
     if (clientCible && clients.some((c) => c.id === clientCible)) setClientId(clientCible);
   }, [clientCible, clients]);
   const [nouvelleAdresseNom, setNouvelleAdresseNom] = useState("");
+  const [nouvelleAdresseNomUnite, setNouvelleAdresseNomUnite] = useState("");
   const [lignes, setLignes] = useState([]);
   const [pdfAperçu, setPdfAperçu] = useState(null);
   const [devisAperçu, setDevisAperçu] = useState(null);
@@ -11805,7 +11841,13 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
 
   const enregistrerAdresse = (place) => {
     if (!nouvelleAdresseNom.trim()) return;
-    const nouvelle = { id: `a-${Date.now()}`, nom: nouvelleAdresseNom, ligne1: place.label, codePostal: place.codePostal };
+    const nouvelle = {
+      id: `a-${Date.now()}`,
+      nom: nouvelleAdresseNom,
+      ligne1: place.label,
+      ...(nouvelleAdresseNomUnite.trim() ? { appartement: nouvelleAdresseNomUnite.trim() } : {}),
+      codePostal: place.codePostal,
+    };
     setClients((prev) =>
       prev.map((c) => (c.id === clientId ? { ...c, adresses: [...(c.adresses || []), nouvelle] } : c))
     );
@@ -12241,6 +12283,12 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                 value={nouvelleAdresseNom}
                 onChange={(e) => setNouvelleAdresseNom(e.target.value)}
                 placeholder="Nom de l'adresse (ex: Chantier Sud)"
+                className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+              <input
+                value={nouvelleAdresseNomUnite}
+                onChange={(e) => setNouvelleAdresseNomUnite(e.target.value)}
+                placeholder="App. / bureau / casier postal (facultatif)"
                 className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
               <AutocompleteAdresse onSelection={enregistrerAdresse} />
@@ -13449,7 +13497,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
                   <MapPin size={11} /> Adresse de facturation (par défaut — aucune adresse de travaux distincte définie)
                 </p>
                 <p className="mt-0.5 text-xs font-semibold text-slate-800">
-                  {adresseFacturationDefaut.nom} — {adresseFacturationDefaut.ligne1}
+                  {adresseFacturationDefaut.nom} — {libelleAdresse(adresseFacturationDefaut)}
                 </p>
               </>
             ) : (
@@ -14385,6 +14433,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       if (nouvelleAdresseTravaux) {
         // Appartement/unité ajouté à l'adresse choisie (retour de tests).
         nouvelle.adresseTravaux = `${nouvelleAdresseTravaux.label}${nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}`;
+        // 🚪 L'unité voyage AUSSI à part : l'app technicien l'affiche en
+        // évidence, et le lien Google Maps reste SANS elle (Maps se perd
+        // avec « app. 4 » dans une recherche).
+        if (nouvelleAdresseApp.trim()) nouvelle.adresseUnite = nouvelleAdresseApp.trim();
         // 📌 ADRESSE AU DOSSIER (retour de tests 2026-08-17) : avant,
         // l'adresse tapée partait avec la tâche seulement — jamais
         // offerte à la tâche suivante du même client. Anti-doublon :
@@ -14407,7 +14459,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         }
       } else if (adresseTravauxId) {
         const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
-        if (a) nouvelle.adresseTravaux = `${a.nom} — ${libelleAdresse(a)}`;
+        if (a) {
+          nouvelle.adresseTravaux = `${a.nom} — ${libelleAdresse(a)}`;
+          if (a.appartement) nouvelle.adresseUnite = a.appartement;
+        }
       }
     }
 
@@ -14421,6 +14476,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     nouvelle.adresseIntervention =
       nouvelle.adresseTravaux ||
       (adressePrincipale ? `${adressePrincipale.nom} — ${adressePrincipale.ligne1}` : null);
+    if (!nouvelle.adresseUnite && adressePrincipale?.appartement && !nouvelle.adresseTravaux) {
+      nouvelle.adresseUnite = adressePrincipale.appartement;
+    }
 
     // 📇 CONTACT SUR PLACE — attaché à la tâche. « Nouveau » est AUSSI
     // enregistré au carnet du client (réutilisable à la prochaine tâche).
@@ -16509,6 +16567,32 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     }
                   });
                 }
+                // ⏱️ HEURES RÉELLES (2026-08-19, demande du propriétaire) :
+                // une tâche TERMINÉE se replace sur la grille selon son
+                // VRAI début/fin chronométrés — avant, trois tâches
+                // planifiées à la même heure restaient empilées l'une sur
+                // l'autre alors que la journée s'était déroulée en
+                // séquence (7 h, 9 h, 13 h…).
+                segments.forEach((seg) => {
+                  if (seg.tache.est_tache_systeme) return;
+                  const reel = (travaux || []).find(
+                    (t) =>
+                      t.supabase &&
+                      cleTacheDesHeures(t.tacheId) === seg.tache.id &&
+                      (t.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
+                      t.date === jourKey &&
+                      t.debutReel &&
+                      t.finReelle
+                  );
+                  if (!reel) return;
+                  const d = new Date(reel.debutReel);
+                  const f = new Date(new Date(reel.finReelle).getTime() - 60000);
+                  const iDeb = Math.max(0, Math.min(HEURES.length - 1, d.getHours()));
+                  const iFin = Math.max(iDeb, Math.min(HEURES.length - 1, f.getHours()));
+                  seg.index = iDeb;
+                  seg.fin = iFin;
+                  seg.span = iFin - iDeb + 1;
+                });
                 // PISTES : les tâches qui se chevauchent s'empilent — chaque
                 // segment prend la première piste libre. La rangée s'étire
                 // en hauteur selon le nombre de pistes : AUCUNE tâche ne
@@ -16696,6 +16780,27 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     // vue Semaine, pastilles côte à côte en vue Mois : aucune
                     // tâche n'est cachée quand elles partagent la journée.
                     const tachesJour = tachesDuJourPourEmploye(planning, dateISO(d), emp.id);
+                    // ⏱️ Ordre CHRONOLOGIQUE réel dans la pile du jour —
+                    // les tâches terminées suivent leur vrai début.
+                    const debutReelDe = (t) => {
+                      const r = (travaux || []).find(
+                        (x) =>
+                          x.supabase &&
+                          cleTacheDesHeures(x.tacheId) === t.id &&
+                          (x.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
+                          x.date === dateISO(d) &&
+                          x.debutReel
+                      );
+                      return r ? new Date(r.debutReel).getTime() : null;
+                    };
+                    tachesJour.sort((a, b) => {
+                      const ra = debutReelDe(a);
+                      const rb = debutReelDe(b);
+                      if (ra != null && rb != null) return ra - rb;
+                      if (ra != null) return -1;
+                      if (rb != null) return 1;
+                      return String(a.heure || "").localeCompare(String(b.heure || ""));
+                    });
                     const weekend = d.getDay() === 0 || d.getDay() === 6;
                     return (
                       <div
@@ -16879,7 +16984,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 
       {/* MODALE — DÉPÔT REÇU MANUELLEMENT */}
       {depotModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDepotModal(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setDepotModal(null))(); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-extrabold text-slate-900">Dépôt reçu manuellement</h3>
             <p className="mt-1 text-xs text-slate-500">
@@ -17029,7 +17134,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               })
             : null;
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalFicheST(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setModalFicheST(null))(); }}>
             <div className="max-h-[88vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-sm font-extrabold text-slate-900">🤝 {f.id ? "Modifier le sous-traitant" : "Nouveau sous-traitant"}</h3>
               <div className="mt-3 space-y-2.5">
@@ -17129,7 +17234,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           setModalStatutST(null);
         };
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalStatutST(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setModalStatutST(null))(); }}>
             <div className="max-h-[88vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-sm font-extrabold text-slate-900">🤝 {employe.nom}</h3>
               <p className="mt-0.5 text-xs text-slate-500">
@@ -17826,7 +17931,7 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   const fraisCarte = montant * 0.029 + 0.25;
   const fraisVirement = montant * 0.01;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onFermer}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-extrabold text-slate-900">💳 Paiement en ligne pour cette facture ?</h3>
         <p className="mt-1 text-xs text-slate-500">

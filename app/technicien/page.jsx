@@ -530,7 +530,10 @@ function projetImputeAuTransport(tache, taches) {
 }
 
 function ouvrirTrajet(adresseTexte, app = "auto") {
-  const encodee = encodeURIComponent(adresseTexte);
+  // 🚪 L'unité (« , app. 4 ») est RETIRÉE de la recherche : Maps/Waze se
+  // perdent avec un numéro d'appartement — on navigue vers l'immeuble,
+  // l'unité est affichée sur la fiche de tâche à côté de l'adresse.
+  const encodee = encodeURIComponent(String(adresseTexte || "").replace(/,\s*app\.\s*[^,]+/gi, ""));
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   let url;
   if (app === "waze") {
@@ -2148,7 +2151,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           </p>
         )}
         {courseOuverte && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onClick={() => !courseEnCours && setCourseOuverte(false)}>
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => !courseEnCours && setCourseOuverte(false))(); }}>
             <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-base font-extrabold text-slate-900">🚗 Nouvelle course</h3>
               <p className="mt-0.5 text-xs text-slate-500">
@@ -3992,6 +3995,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 <p className="mt-0.5 text-sm font-bold leading-snug text-slate-800">
                   {tache.adresseIntervention || tache.adresseTravaux}
                 </p>
+                {/* 🚪 L'unité en ÉVIDENCE (demande du propriétaire,
+                    2026-08-19) — un technicien devant un immeuble doit
+                    savoir à quelle porte frapper sans fouiller. */}
+                {tache.adresseUnite && (
+                  <p className="mt-0.5 text-[13px] font-extrabold text-[#FF6A13]">🚪 App. / local : {tache.adresseUnite}</p>
+                )}
                 {/* Sur un gros chantier, savoir QUI demander vaut autant
                     que l'adresse elle-même. */}
                 {tache.contactSurPlace?.nom && (
@@ -4122,7 +4131,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             jamais transmis à l'app technicien : seuls le nom, la quantité
             et l'unité de chaque item arrivent jusqu'ici. */}
         {modaleDevis && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModaleDevis(false)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setModaleDevis(false))(); }}>
             <div className="max-h-[80vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div>
@@ -4728,7 +4737,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           courriel(s) cochés du client, puis la demande de facturation
           est créée pour le bureau. */}
       {modalCourriels && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onClick={() => setModalCourriels(false)}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setModalCourriels(false))(); }}>
           <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-extrabold text-slate-900">📧 Envoyer le bon au client</h3>
             <p className="mt-0.5 text-xs text-slate-500">
