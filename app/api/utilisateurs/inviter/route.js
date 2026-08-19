@@ -202,18 +202,41 @@ export async function POST(request) {
   if (!cle) {
     return Response.json({ simule: true, nouveau, lien });
   }
+  // 📧 AU NOM DE L'ENTREPRISE (niveau 1, 2026-08-19) : le nouvel employé
+  // reçoit l'invitation au nom de SON entreprise — même mécanique que la
+  // porte d'envoi générale (/api/courriel).
+  let nomEntreprise = "";
+  let repondreEntreprise = "";
+  try {
+    const { data: ent } = await clientSupabaseService()
+      .from("entreprises")
+      .select("nom_commercial, nom_legal, courriel_facturation, courriel")
+      .order("created_at")
+      .limit(1);
+    nomEntreprise = ent?.[0]?.nom_commercial || ent?.[0]?.nom_legal || "";
+    repondreEntreprise = ent?.[0]?.courriel_facturation || ent?.[0]?.courriel || "";
+  } catch {
+    // fiche indisponible — les valeurs de repli s'appliquent
+  }
+  const adresseExpedition =
+    process.env.COURRIEL_ADRESSE_EXPEDITION ||
+    (process.env.COURRIEL_EXPEDITEUR || "").match(/<([^>]+)>/)?.[1] ||
+    "info@ventilationdgl.com";
+  const expediteur = nomEntreprise
+    ? `"${nomEntreprise.replace(/"/g, "'")}" <${adresseExpedition}>`
+    : process.env.COURRIEL_EXPEDITEUR || `Ventilation DGL inc. <${adresseExpedition}>`;
   try {
     const reponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cle}` },
       body: JSON.stringify({
-        from: process.env.COURRIEL_EXPEDITEUR || "Ventilation DGL inc. <info@ventilationdgl.com>",
+        from: expediteur,
         to: [courriel],
         subject: nouveau
-          ? "Ton accès à l'application Fluxya (Ventilation DGL) — choisis ton mot de passe"
-          : "Réinitialisation de ton mot de passe — Fluxya (Ventilation DGL)",
+          ? `Ton accès à l'application Fluxya${nomEntreprise ? ` (${nomEntreprise})` : ""} — choisis ton mot de passe`
+          : `Réinitialisation de ton mot de passe — Fluxya${nomEntreprise ? ` (${nomEntreprise})` : ""}`,
         html: gabaritInvitation({ nom, lien, nouveau }),
-        reply_to: process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
+        reply_to: repondreEntreprise || process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
       }),
     });
     const resultat = await reponse.json().catch(() => ({}));

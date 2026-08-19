@@ -26,6 +26,8 @@
 // posée dans Vercel, tout se met à envoyer pour vrai — aucun autre
 // changement.
 
+import { clientSupabaseService } from "@/lib/quickbooksServeur";
+
 const MAX_DESTINATAIRES = 10;
 
 function courrielValide(adresse) {
@@ -89,9 +91,39 @@ export async function POST(request) {
     return Response.json({ simule: true });
   }
 
-  // 4. Envoi réel via Resend. L'expéditeur DOIT appartenir au domaine
-  //    vérifié chez Resend, sinon Resend refuse.
-  const expediteur = process.env.COURRIEL_EXPEDITEUR || "Ventilation DGL inc. <info@ventilationdgl.com>";
+  // 4. Envoi réel via Resend. L'ADRESSE d'expédition DOIT appartenir au
+  //    domaine vérifié chez Resend, sinon Resend refuse.
+  //
+  // 📧 AU NOM DE L'ENTREPRISE (décision du propriétaire, 2026-08-19 —
+  // « niveau 1 », le modèle QuickBooks/Intuit) : le NOM AFFICHÉ dans la
+  // boîte de réception est celui de L'ENTREPRISE utilisatrice (lu en
+  // base, jamais du corps de la demande), l'adresse technique reste
+  // celle du domaine vérifié (variable COURRIEL_ADRESSE_EXPEDITION —
+  // passera à notifications@fluxya.ca quand son DNS sera vérifié), et
+  // les RÉPONSES vont à l'adresse choisie par l'entreprise.
+  let nomEntreprise = "";
+  let repondreEntreprise = "";
+  try {
+    const { data: ent } = await clientSupabaseService()
+      .from("entreprises")
+      .select("nom_commercial, nom_legal, courriel_facturation, courriel")
+      .order("created_at")
+      .limit(1);
+    nomEntreprise = ent?.[0]?.nom_commercial || ent?.[0]?.nom_legal || "";
+    repondreEntreprise = ent?.[0]?.courriel_facturation || ent?.[0]?.courriel || "";
+  } catch {
+    // fiche indisponible — les valeurs de repli s'appliquent
+  }
+  const adresseExpedition =
+    process.env.COURRIEL_ADRESSE_EXPEDITION ||
+    (process.env.COURRIEL_EXPEDITEUR || "").match(/<([^>]+)>/)?.[1] ||
+    "info@ventilationdgl.com";
+  // Guillemets autour du nom : certains noms d'entreprise contiennent
+  // une virgule ou un point — sans guillemets, l'en-tête serait invalide.
+  const expediteur = nomEntreprise
+    ? `"${nomEntreprise.replace(/"/g, "'")}" <${adresseExpedition}>`
+    : process.env.COURRIEL_EXPEDITEUR || `Ventilation DGL inc. <${adresseExpedition}>`;
+  const adresseReponse = repondreEntreprise || process.env.COURRIEL_REPONSE || "info@ventilationdgl.com";
   try {
     const reponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -105,9 +137,7 @@ export async function POST(request) {
         // Les réponses reviennent dans une vraie boîte, pas dans un trou
         // noir : celle de l'expéditeur (bons de commande — c'est lui qui
         // ajuste la date), avec la boîte générale en filet de sécurité.
-        reply_to: copieExpediteur
-          ? [utilisateur.email, process.env.COURRIEL_REPONSE || "info@ventilationdgl.com"]
-          : process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
+        reply_to: copieExpediteur ? [utilisateur.email, adresseReponse] : adresseReponse,
       }),
     });
     const resultat = await reponse.json().catch(() => ({}));
