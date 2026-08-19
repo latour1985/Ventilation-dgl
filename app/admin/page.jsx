@@ -16608,6 +16608,31 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   seg.fin = iFin;
                   seg.span = iFin - iDeb + 1;
                 });
+                // 🚚 LES TRANSPORTS SYSTÈME SUIVENT LE MOUVEMENT (retour
+                // de tests 2026-08-19) : une tâche replacée à son vrai
+                // départ passait PAR-DESSUS le « Début de journée » resté
+                // à l'heure planifiée — les deux blocs s'empilaient.
+                // Début = la case juste AVANT la première vraie tâche
+                // affichée ; Fin = juste APRÈS la dernière.
+                {
+                  const reelsAffiches = segments.filter((s) => !s.tache.est_tache_systeme);
+                  if (reelsAffiches.length > 0) {
+                    const premier = Math.min(...reelsAffiches.map((s) => s.index));
+                    const dernier = Math.max(...reelsAffiches.map((s) => s.fin));
+                    segments.forEach((seg) => {
+                      if (!seg.tache.est_tache_systeme) return;
+                      if (seg.tache.momentTransport === "debut") {
+                        seg.index = Math.max(0, premier - 1);
+                        seg.fin = seg.index;
+                        seg.span = 1;
+                      } else if (seg.tache.momentTransport === "fin") {
+                        seg.index = Math.min(HEURES.length - 1, dernier + 1);
+                        seg.fin = seg.index;
+                        seg.span = 1;
+                      }
+                    });
+                  }
+                }
                 // PISTES : les tâches qui se chevauchent s'empilent — chaque
                 // segment prend la première piste libre. La rangée s'étire
                 // en hauteur selon le nombre de pistes : AUCUNE tâche ne
