@@ -20,6 +20,7 @@ import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquer
 import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees } from "@/lib/supabase/tachesAssignees";
+import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau } from "@/lib/supabase/bonsTravail";
@@ -13878,14 +13879,47 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   );
 }
 
-function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role, onMajFacturable, statutsAssignations }) {
+function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role, onMajFacturable, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
+  // ============================================================
+  // SECTIONS DE L'AGENDA (2026-08-19, demande du propriétaire) :
+  //   🔧 Équipe terrain (en haut, comme avant)
+  //   🗂️ Personnel de bureau (repliée — congés et déplacements)
+  //   🤝 Sous-traitants (repliée — planification + suivi Présent/Absent)
+  // Le choix ouvert/replié survit au rechargement (localStorage).
+  // ============================================================
+  const [bureauOuvert, setBureauOuvert] = useState(() => {
+    try { return localStorage.getItem("agenda-bureau-ouvert") === "1"; } catch { return false; }
+  });
+  const [stOuvert, setStOuvert] = useState(() => {
+    try { return localStorage.getItem("agenda-st-ouvert") === "1"; } catch { return false; }
+  });
+  const basculerSection = (quoi) => {
+    if (quoi === "bureau") {
+      setBureauOuvert((v) => { try { localStorage.setItem("agenda-bureau-ouvert", v ? "0" : "1"); } catch {} return !v; });
+    } else {
+      setStOuvert((v) => { try { localStorage.setItem("agenda-st-ouvert", v ? "0" : "1"); } catch {} return !v; });
+    }
+  };
+  // Fiche sous-traitant (création/édition) et statut d'un bloc ST.
+  const [modalFicheST, setModalFicheST] = useState(null); // { id?, nom, specialite, telephone, note, clientId }
+  const [modalStatutST, setModalStatutST] = useState(null); // { tache, employe, date }
+  // Statut d'un bloc de sous-traitant — lu dans SES assignations.
+  const statutBlocST = (tacheId, courrielSt) => {
+    const a = (assignationsST || []).find((x) => x.tache_id === tacheId && x.employe_email === courrielSt);
+    return a?.donnees?.stStatut || "prevu";
+  };
   // 💰/🤝 Le choix « facturable » en attente de réponse — { tacheId, titre, employe }.
   const [choixFacturable, setChoixFacturable] = useState(null);
   // Un AUTRE technicien tient-il déjà cette tâche dans la grille ?
   const autreTechnicienALaTache = (tacheId, employeIdCourant) =>
     Object.entries(planning || {}).some(
       ([cle, cellule]) =>
-        cle.split("|")[1] !== String(employeIdCourant) && listeCellule(cellule).some((x) => x.id === tacheId)
+        cle.split("|")[1] !== String(employeIdCourant) &&
+        // 🤝 Les rangées de SOUS-TRAITANTS ne comptent pas : un ST sur la
+        // tâche ne fait pas du technicien un « 2e technicien » (pas de
+        // question 💰/🤝 à cause d'un sous-traitant).
+        !cle.split("|")[1].startsWith("st-") &&
+        listeCellule(cellule).some((x) => x.id === tacheId)
     );
   // Taux de taxes des Paramètres — dépôts affichés taxes incluses.
   const configEnt = useEntreprise();
@@ -14209,6 +14243,58 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   });
 
   const jourKey = dateISO(jourAffiche);
+  // ---- Les trois groupes de rangées + en-têtes intercalés ----
+  const groupeTerrain = (employes || []).filter((e) => !e.estBureau && !e.estSousTraitant);
+  const groupeBureau = (employes || []).filter((e) => e.estBureau);
+  const groupeST = (employes || []).filter((e) => e.estSousTraitant);
+  const entreesDuJourPour = (groupe) =>
+    groupe.reduce((n, e) => n + tachesDuJourPourEmploye(planning, jourKey, e.id).length, 0);
+  const rangeesAgenda = [
+    ...groupeTerrain,
+    ...(groupeBureau.length > 0 ? [{ enteteSection: "bureau" }] : []),
+    ...(bureauOuvert ? groupeBureau : []),
+    { enteteSection: "st" },
+    ...(stOuvert ? groupeST : []),
+  ];
+  // Couleurs et icônes des blocs de SOUS-TRAITANTS, par statut.
+  const ST_COULEURS = {
+    prevu: ["border-amber-400 bg-amber-50", "bg-amber-100 text-amber-900", "bg-amber-500"],
+    present: ["border-emerald-500 bg-emerald-50", "bg-emerald-100 text-emerald-900", "bg-emerald-500"],
+    absent: ["border-red-400 bg-red-50", "bg-red-100 text-red-800", "bg-red-500"],
+  };
+  const ST_ICONES = { prevu: "⏳", present: "✅", absent: "❌" };
+  const stAConfirmer = (tacheId, courrielSt, dateIso) =>
+    statutBlocST(tacheId, courrielSt) === "prevu" && dateIso < dateISO(new Date());
+  const renderEnteteSection = (type) => {
+    const estBureauSec = type === "bureau";
+    const ouvert = estBureauSec ? bureauOuvert : stOuvert;
+    const groupe = estBureauSec ? groupeBureau : groupeST;
+    const nbEntrees = entreesDuJourPour(groupe);
+    return (
+      <div key={`entete-${type}`} className="flex items-center justify-between gap-2 border-t-2 border-slate-200 bg-slate-100/80 px-3 py-1.5">
+        <button
+          onClick={() => basculerSection(type)}
+          className="flex min-w-0 items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-600"
+        >
+          <ChevronDown size={13} className={`shrink-0 transition-transform ${ouvert ? "rotate-180" : ""}`} />
+          {estBureauSec ? "🗂️ Personnel de bureau" : "🤝 Sous-traitants"} ({groupe.length})
+          {!ouvert && nbEntrees > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-700">
+              {nbEntrees} entrée{nbEntrees > 1 ? "s" : ""} aujourd&apos;hui
+            </span>
+          )}
+        </button>
+        {!estBureauSec && !lectureSeule && (
+          <button
+            onClick={() => setModalFicheST({ nom: "", specialite: "", telephone: "", note: "", clientId: "" })}
+            className="shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600"
+          >
+            ➕ Sous-traitant
+          </button>
+        )}
+      </div>
+    );
+  };
   const jourLabel = jourAffiche.toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
   const moisLabel = jourAffiche.toLocaleDateString("fr-CA", { month: "long", year: "numeric" });
 
@@ -14618,7 +14704,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         // d'une assignation EXISTANTE — on ne repose pas la question et
         // on n'écrit pas facturable (le choix déjà en base reste).
         const conserverChoix = facturablePredetermine === "conserver";
-        if (autreTechnicienALaTache(tache.id, employeId) && !conserverChoix) {
+        if (autreTechnicienALaTache(tache.id, employeId) && !conserverChoix && !employe.estSousTraitant) {
           if (choixDejaFait) {
             onMajFacturable?.(tache.id, employe.courriel, facturablePredetermine);
             ajouterJournal(
@@ -14642,7 +14728,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         }).then(() => {
           // 🔔 Notification push au technicien — un bonus, jamais un
           // bloqueur : l'échec est silencieux (la tâche est déjà chez lui
-          // par la synchronisation temps réel de toute façon).
+          // par la synchronisation temps réel de toute façon). Jamais
+          // pour un sous-traitant (pas d'application, pas d'abonnement).
+          if (estCourrielST(employe.courriel)) return;
           envoyerPushA(
             employe.courriel,
             "📋 Nouvelle tâche",
@@ -16400,7 +16488,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   <div key={h} className="border-b border-slate-200 px-1 py-2 text-center text-[10px] font-semibold text-slate-400 tabular-nums">{h}</div>
                 ))}
               </div>
-              {employes.map((emp) => {
+              {rangeesAgenda.map((emp) => {
+                if (emp.enteteSection) return renderEnteteSection(emp.enteteSection);
                 // SEGMENTS : une entrée par tâche (id unique) de la journée,
                 // avec sa case de départ (index) et sa durée (span) — les
                 // cases contiennent maintenant des LISTES de tâches, donc
@@ -16498,7 +16587,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             onDropHeure(ev, emp.id, HEURES[idx]);
                             setTacheSurvolee(null);
                           }}
-                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : estEnCours(seg.tache, emp) ? "border-fuchsia-500 bg-fuchsia-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
+                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${emp.estSousTraitant ? ST_COULEURS[statutBlocST(seg.tache.id, emp.courriel)][0] : estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : estEnCours(seg.tache, emp) ? "border-fuchsia-500 bg-fuchsia-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
                         >
                           {/* 🖱️ Clic simple = ouvrir la fiche ; clic
                               maintenu + déplacement = déplacer le bloc
@@ -16512,9 +16601,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                               );
                               ev.dataTransfer.effectAllowed = "move";
                             }}
-                            onClick={() => !redim && !lectureSeule && !seg.tache.est_tache_systeme && setTacheDetailOuverte({ tache: seg.tache, employe: emp, date: jourKey, heure: h })}
+                            onClick={() => !redim && !lectureSeule && !seg.tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache: seg.tache, employe: emp, date: jourKey }) : setTacheDetailOuverte({ tache: seg.tache, employe: emp, date: jourKey, heure: h }))}
                             className={`flex h-full w-full items-start gap-1 rounded-lg p-1 text-left text-[9px] font-semibold leading-tight ${
-                              estTerminee(seg.tache, emp)
+                              emp.estSousTraitant
+                                ? ST_COULEURS[statutBlocST(seg.tache.id, emp.courriel)][1]
+                                : estTerminee(seg.tache, emp)
                                 ? "bg-emerald-100 text-emerald-900"
                                 : estEnCours(seg.tache, emp)
                                 ? "bg-fuchsia-100 text-fuchsia-900"
@@ -16523,8 +16614,16 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                                 : `text-black ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
                             } ${enRedimensionnement ? "ring-2 ring-[#FF6A13]" : ""}`}
                           >
-                            {estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
-                            {estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
+                            {emp.estSousTraitant && (
+                              <span className="mt-px shrink-0 text-[9px]">
+                                {ST_ICONES[statutBlocST(seg.tache.id, emp.courriel)]}
+                                {stAConfirmer(seg.tache.id, emp.courriel, jourKey) && (
+                                  <span className="ml-1 animate-pulse rounded bg-amber-200 px-1 text-[8px] font-extrabold text-amber-800">à confirmer</span>
+                                )}
+                              </span>
+                            )}
+                            {!emp.estSousTraitant && estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
+                            {!emp.estSousTraitant && estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
                               {seg.tache.titre || seg.tache.clientNom}
@@ -16586,7 +16685,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   );
                 })}
               </div>
-              {employes.map((emp) => (
+              {rangeesAgenda.map((emp) => {
+                if (emp.enteteSection) return renderEnteteSection(emp.enteteSection);
+                return (
                 <div key={emp.id} className="grid border-t border-slate-100" style={{ gridTemplateColumns: `120px repeat(${joursAffiches.length}, minmax(${vue === "mois" ? 34 : 84}px, 1fr))` }}>
                   <div className="sticky left-0 z-10 flex items-center border-r border-slate-100 bg-white px-2 py-2 text-xs font-bold text-slate-700">{emp.nom}</div>
                   {joursAffiches.map((d) => {
@@ -16611,11 +16712,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                           vue === "mois" ? (
                             <button
                               key={tache.id}
-                              onClick={() => !lectureSeule && !tache.est_tache_systeme && setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT })}
+                              onClick={() => !lectureSeule && !tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache, employe: emp, date: dateISO(d) }) : setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT }))}
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className="p-0.5"
                             >
-                              <span className={`block h-2 w-2 rounded-full ${estTerminee(tache, emp) ? "bg-emerald-500" : estEnCours(tache, emp) ? "animate-pulse bg-fuchsia-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
+                              <span className={`block h-2 w-2 rounded-full ${emp.estSousTraitant ? ST_COULEURS[statutBlocST(tache.id, emp.courriel)][2] : estTerminee(tache, emp) ? "bg-emerald-500" : estEnCours(tache, emp) ? "animate-pulse bg-fuchsia-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
                             </button>
                           ) : (
                             <button
@@ -16628,10 +16729,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                                 );
                                 ev.dataTransfer.effectAllowed = "move";
                               }}
-                              onClick={() => !lectureSeule && !tache.est_tache_systeme && setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT })}
+                              onClick={() => !lectureSeule && !tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache, employe: emp, date: dateISO(d) }) : setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT }))}
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className={`block w-full rounded-lg border-l-4 p-1 text-left text-[9px] font-semibold leading-tight ${
-                                estTerminee(tache, emp)
+                                emp.estSousTraitant
+                                  ? `${ST_COULEURS[statutBlocST(tache.id, emp.courriel)][0]} ${ST_COULEURS[statutBlocST(tache.id, emp.courriel)][1]}`
+                                  : estTerminee(tache, emp)
                                   ? "border-emerald-500 bg-emerald-100 text-emerald-900"
                                   : estEnCours(tache, emp)
                                   ? "border-fuchsia-500 bg-fuchsia-100 text-fuchsia-900"
@@ -16641,8 +16744,16 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                               }`}
                             >
                               <span className="flex items-start gap-1">
-                                {estTerminee(tache, emp) && <Check size={9} className="mt-px shrink-0 text-emerald-600" />}
-                                {estEnCours(tache, emp) && <span className="mt-0.5 block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
+                                {emp.estSousTraitant && (
+                                  <span className="mt-px shrink-0 text-[9px]">
+                                    {ST_ICONES[statutBlocST(tache.id, emp.courriel)]}
+                                    {stAConfirmer(tache.id, emp.courriel, dateISO(d)) && (
+                                      <span className="ml-1 animate-pulse rounded bg-amber-200 px-1 text-[8px] font-extrabold text-amber-800">à confirmer</span>
+                                    )}
+                                  </span>
+                                )}
+                                {!emp.estSousTraitant && estTerminee(tache, emp) && <Check size={9} className="mt-px shrink-0 text-emerald-600" />}
+                                {!emp.estSousTraitant && estEnCours(tache, emp) && <span className="mt-0.5 block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                                 {tache.est_tache_systeme && <Car size={9} className="mt-px shrink-0" />}
                                 <span className="min-w-0">
                                   {tache.titre || tache.clientNom}
@@ -16665,7 +16776,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     );
                   })}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -16899,6 +17011,182 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 
       {/* FENÊTRE — NOUVEAU CLIENT depuis la création de tâche (composant
           partagé avec l'onglet Devis, mêmes validations QuickBooks). */}
+      {/* 🤝 FICHE SOUS-TRAITANT — création/édition, avec lien FACULTATIF
+          vers une fiche client (même identité, deux rôles : ce qu'il te
+          facture = coût, ce que tu lui factures = revenu — jamais
+          mélangés). Un sous-traitant pur ne crée RIEN dans les clients. */}
+      {modalFicheST && (() => {
+        const f = modalFicheST;
+        const clientsTries = (clients || []).slice().sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
+        const clientLie = clientsTries.find((c) => c.id === f.clientId);
+        // Suggestion automatique : le nom tapé ressemble à un client ?
+        const nomTape = (f.nom || "").trim().toLowerCase();
+        const suggestion =
+          !f.clientId && nomTape.length >= 3
+            ? clientsTries.find((c) => {
+                const n = (c.nom || "").toLowerCase();
+                return n.includes(nomTape) || nomTape.includes(n);
+              })
+            : null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalFicheST(null)}>
+            <div className="max-h-[88vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-extrabold text-slate-900">🤝 {f.id ? "Modifier le sous-traitant" : "Nouveau sous-traitant"}</h3>
+              <div className="mt-3 space-y-2.5">
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Nom de l&apos;entreprise</label>
+                  <input value={f.nom} onChange={(e) => setModalFicheST({ ...f, nom: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  {suggestion && (
+                    <button
+                      onClick={() => setModalFicheST({ ...f, clientId: suggestion.id })}
+                      className="mt-1.5 w-full rounded-lg border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-left text-[11px] font-bold text-sky-800"
+                    >
+                      🔗 « {suggestion.nom} » existe dans tes clients — lier ce sous-traitant à sa fiche ?
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-500">Spécialité</label>
+                    <input value={f.specialite} onChange={(e) => setModalFicheST({ ...f, specialite: e.target.value })} placeholder="Électricien, plombier…" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-bold text-slate-500">Téléphone</label>
+                    <input type="tel" value={f.telephone} onChange={(e) => setModalFicheST({ ...f, telephone: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Aussi un client ?</label>
+                  <select
+                    value={f.clientId || ""}
+                    onChange={(e) => setModalFicheST({ ...f, clientId: e.target.value || "" })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">— Aucun lien (sous-traitant seulement) —</option>
+                    {clientsTries.map((c) => (
+                      <option key={c.id} value={c.id}>{c.nom}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] leading-snug text-slate-400">
+                    {clientLie
+                      ? `🔗 Lié à la fiche client « ${clientLie.nom} » — ses coordonnées font foi (une seule source de vérité).`
+                      : "Lier seulement si cette entreprise est AUSSI ton client — sinon laisse « aucun lien » : ta liste de clients reste propre."}
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Note</label>
+                  <input value={f.note} onChange={(e) => setModalFicheST({ ...f, note: e.target.value })} placeholder="Taux habituel, particularités…" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+                <Button
+                  onClick={() => {
+                    onEnregistrerSousTraitant?.({
+                      id: f.id || String(Date.now()),
+                      nom: f.nom.trim(),
+                      specialite: f.specialite.trim(),
+                      telephone: f.telephone.trim(),
+                      note: f.note.trim(),
+                      clientId: f.clientId || null,
+                      actif: true,
+                    });
+                    setModalFicheST(null);
+                    if (!stOuvert) basculerSection("st");
+                  }}
+                  disabled={!f.nom.trim()}
+                  className="w-full"
+                >
+                  Enregistrer le sous-traitant
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 🤝 STATUT D'UN BLOC SOUS-TRAITANT — Présent / Pas venu (+ note,
+          + montant facturé qui alimente les coûts réels du projet lié). */}
+      {modalStatutST && (() => {
+        const { tache, employe, date } = modalStatutST;
+        const a = (assignationsST || []).find((x) => x.tache_id === tache.id && x.employe_email === employe.courriel);
+        const d = a?.donnees || {};
+        const statut = d.stStatut || "prevu";
+        const note = modalStatutST.note ?? d.stNote ?? "";
+        const montant = modalStatutST.montant ?? (d.stMontant || "");
+        const ficheSt = (sousTraitants || []).find((x) => `st-${x.id}` === employe.id);
+        const projetLie = (projets || []).find((p) => p.id === tache.projetId);
+        const valider = (nouveau) => {
+          const montantNum = Math.max(0, Number(montant) || 0);
+          onStatutST?.(
+            tache.id,
+            employe.courriel,
+            { stStatut: nouveau, stNote: String(note || ""), stMontant: montantNum, stStatutLe: new Date().toISOString() },
+            `🤝 ${employe.nom} — « ${tache.titre || tache.clientNom || "tâche"} » (${date}) : ${
+              nouveau === "present" ? "PRÉSENT ✅" : nouveau === "absent" ? "PAS VENU ❌" : "remis à « prévu »"
+            }`
+          );
+          if (nouveau === "present" && montantNum > 0 && tache.projetId) {
+            onAjouterCoutSousTraitant?.(tache.projetId, employe.nom, montantNum, `${tache.id}|${employe.courriel}`);
+          }
+          setModalStatutST(null);
+        };
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setModalStatutST(null)}>
+            <div className="max-h-[88vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-extrabold text-slate-900">🤝 {employe.nom}</h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {tache.titre || tache.clientNom || "Tâche"}{tache.clientNom && tache.titre ? ` — ${tache.clientNom}` : ""} · {date}
+                {ficheSt?.telephone ? ` · 📞 ${ficheSt.telephone}` : ""}
+              </p>
+              <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-600">
+                Statut actuel : {ST_ICONES[statut]} {statut === "present" ? "Présent" : statut === "absent" ? "Pas venu" : "Prévu — à confirmer après la visite"}
+              </p>
+              <div className="mt-3 space-y-2.5">
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Note (facultative)</label>
+                  <input
+                    value={note}
+                    onChange={(e) => setModalStatutST({ ...modalStatutST, note: e.target.value })}
+                    placeholder="Arrivé à 9 h, travaux du sous-sol faits…"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Montant qu&apos;il TE facture ($, avant taxes)</label>
+                  <InputNombreDecimal
+                    valeur={montant || 0}
+                    onChange={(v) => setModalStatutST({ ...modalStatutST, montant: v })}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums"
+                  />
+                  <p className="mt-1 text-[10px] leading-snug text-slate-400">
+                    {projetLie
+                      ? `S'ajoute aux coûts réels du projet « ${projetLie.nom} » en marquant Présent.`
+                      : "Aucun projet lié à cette tâche — le montant est noté sur le bloc, sans coût de projet."}
+                  </p>
+                </div>
+                <button onClick={() => valider("present")} className="min-h-[48px] w-full rounded-xl bg-emerald-600 text-sm font-extrabold text-white active:scale-[0.99]">
+                  ✅ Présent — il est venu faire les travaux
+                </button>
+                <button onClick={() => valider("absent")} className="min-h-[48px] w-full rounded-xl border-2 border-red-300 bg-red-50 text-sm font-extrabold text-red-700 active:scale-[0.99]">
+                  ❌ Pas venu
+                </button>
+                {statut !== "prevu" && (
+                  <button onClick={() => valider("prevu")} className="min-h-[44px] w-full rounded-xl border border-slate-300 text-xs font-bold text-slate-600 active:scale-[0.99]">
+                    ↩︎ Remettre « prévu »
+                  </button>
+                )}
+                {ficheSt && !lectureSeule && (
+                  <button
+                    onClick={() => { setModalStatutST(null); setModalFicheST({ ...ficheSt }); }}
+                    className="min-h-[40px] w-full rounded-xl text-[11px] font-bold text-slate-400 active:scale-[0.99]"
+                  >
+                    ✏️ Modifier la fiche du sous-traitant
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {choixFacturable && (
         <ModalChoixFacturable
           info={choixFacturable}
@@ -17582,7 +17870,7 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   );
 }
 
-function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {} }) {
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture }) {
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
   // Sans ce raccord, la révision de prix demandait le PLEIN montant
@@ -18126,6 +18414,47 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+      {/* 🤝 SOUS-TRAITANCE À FACTURER (2026-08-19) — la ceinture de
+          sécurité : chaque visite de sous-traitant marquée « Présent »
+          reste ici tant que le client n'a pas été facturé. */}
+      {(() => {
+        const aFacturer = (assignationsST || []).filter(
+          (a) => a?.donnees?.stStatut === "present" && !a?.donnees?.stFacture
+        );
+        if (aFacturer.length === 0) return null;
+        return (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-amber-700">
+              🤝 Sous-traitance à facturer au client ({aFacturer.length})
+            </p>
+            <div className="mt-2 space-y-1.5">
+              {aFacturer.map((a) => (
+                <div key={`${a.tache_id}|${a.employe_email}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-bold text-slate-800">
+                      {a.titre || "Tâche"}{a.client_nom ? ` — ${a.client_nom}` : ""}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {a.employe_nom || "Sous-traitant"} · {a.date_debut}
+                      {Number(a?.donnees?.stMontant) > 0 ? ` · il te facture ${Number(a.donnees.stMontant).toFixed(2)} $` : ""}
+                      {a?.donnees?.stNote ? ` · 📝 ${a.donnees.stNote}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => onMarquerSTFacture?.(a.tache_id, a.employe_email)}
+                    className="shrink-0 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-bold text-white"
+                  >
+                    ✓ Facturé au client
+                  </button>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[10px] leading-snug text-amber-700">
+              Une visite disparaît d&apos;ici quand tu la marques facturée — rien ne s&apos;oublie.
+            </p>
+          </div>
+        );
+      })()}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
         <button
           onClick={() => basculerFiltre("rouge")}
@@ -18676,6 +19005,15 @@ export default function App() {
   // et au Terminer. Colore les blocs de l'agenda en rose vif « en cours » :
   // le bureau voit où chacun est rendu dans sa journée (2026-08-18).
   const [statutsAssignations, setStatutsAssignations] = useState({});
+  // 🤝 SOUS-TRAITANTS (2026-08-19) : le répertoire (table
+  // sous_traitants_app) et LEURS assignations (taches_assignees avec le
+  // courriel synthétique « st::<id> ») — pour la section d'agenda, les
+  // statuts Présent/Pas venu et la liste « Sous-traitance à facturer ».
+  const [sousTraitants, setSousTraitants] = useState([]);
+  const [assignationsST, setAssignationsST] = useState([]);
+  // (le chargement vit plus bas, après la déclaration de `session` —
+  // le référencer ici plantait la page entière : « Cannot access
+  // before initialization », même piège que le 2026-08-17.)
   // ⬅️➡️ RECULER/AVANCER DU NAVIGATEUR (demande du propriétaire,
   // 2026-08-17) : chaque onglet s'inscrit dans l'adresse (#agenda…).
   // Reculer revient à l'onglet précédent au lieu de quitter l'appli ;
@@ -18780,6 +19118,13 @@ export default function App() {
 
   // --- Authentification Supabase ---
   const [session, setSession] = useState(null);
+  // 🤝 Chargement du répertoire des sous-traitants + leurs assignations
+  // (états déclarés plus haut, près des statuts d'assignations).
+  useEffect(() => {
+    if (!session) return;
+    listerSousTraitants().then(setSousTraitants).catch(() => {});
+    listerAssignationsSousTraitants().then(setAssignationsST).catch(() => {});
+  }, [session]);
   const [authVerifie, setAuthVerifie] = useState(false);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -18854,6 +19199,9 @@ export default function App() {
           ...(courrielSession && !utilisateurs.some((u) => (u.courriel || "").toLowerCase() === courrielSession)
             ? [{ id: "compte-connecte", courriel: courrielSession }]
             : []),
+          // 🤝 Les sous-traitants ont leur rangée aussi — sinon la
+          // reconstruction de l'agenda jetterait leurs blocs.
+          ...sousTraitants.map((st) => ({ id: `st-${st.id}`, courriel: COURRIEL_ST(st.id) })),
         ];
         setPlanning((prev) => {
           // Grille considérée valide seulement si TOUTES ses tâches
@@ -18875,7 +19223,7 @@ export default function App() {
     return () => {
       annule = true;
     };
-  }, [session, repertoireCharge, utilisateurs]);
+  }, [session, repertoireCharge, utilisateurs, sousTraitants]);
 
   // Dépôts préalables — chargés depuis Supabase + Realtime. Un dépôt en
   // attente BLOQUE la planification de sa tâche ; après 24 h sans
@@ -19279,6 +19627,15 @@ export default function App() {
         ...prev,
         [`${ligne.tache_id}|${ligne.employe_email.toLowerCase()}`]: ligne.statut || "planifiee",
       }));
+      // 🤝 Assignation d'un sous-traitant modifiée (statut Présent/Pas
+      // venu posé sur l'autre poste, nouveau bloc…) : la liste locale
+      // suit en direct.
+      if (estCourrielST(ligne.employe_email)) {
+        setAssignationsST((prev) => {
+          const restantes = prev.filter((a) => !(a.tache_id === ligne.tache_id && a.employe_email === ligne.employe_email));
+          return [ligne, ...restantes];
+        });
+      }
     });
     return desabonner;
   }, [session]);
@@ -20160,7 +20517,14 @@ export default function App() {
             // Rangées de l'agenda : le répertoire des employés + le compte
             // CONNECTÉ (ajouté d'office s'il n'a pas encore de fiche —
             // pratique pour qu'un admin principal s'assigne des tâches).
-            const liste = utilisateurs.map((u) => ({ id: u.id, nom: u.nom, courriel: u.courriel }));
+            // `estBureau` (métier de bureau) range la personne dans la
+            // section repliable « Personnel de bureau » (2026-08-19).
+            const liste = utilisateurs.map((u) => ({
+              id: u.id,
+              nom: u.nom,
+              courriel: u.courriel,
+              estBureau: estMetierBureau(u.metier),
+            }));
             const courrielSession = session.user?.email?.toLowerCase();
             if (courrielSession && !liste.some((e) => (e.courriel || "").toLowerCase() === courrielSession)) {
               liste.unshift({
@@ -20169,14 +20533,85 @@ export default function App() {
                 courriel: courrielSession,
               });
             }
+            // 🤝 Les sous-traitants — rangées de la section du bas.
+            sousTraitants
+              .filter((st) => st.actif !== false)
+              .forEach((st) =>
+                liste.push({
+                  id: `st-${st.id}`,
+                  nom: st.nom,
+                  courriel: COURRIEL_ST(st.id),
+                  estSousTraitant: true,
+                  specialite: st.specialite,
+                  clientIdLie: st.clientId || null,
+                })
+              );
             return liste;
           })()}
+          sousTraitants={sousTraitants}
+          assignationsST={assignationsST}
+          onEnregistrerSousTraitant={async (st) => {
+            try {
+              await sauvegarderSousTraitant(st);
+              setSousTraitants(await listerSousTraitants());
+              ajouterJournal(`🤝 Sous-traitant « ${st.nom} » enregistré${st.clientId ? " (lié à une fiche client)" : ""}.`);
+            } catch {
+              ajouterJournal(`⚠️ Sous-traitant « ${st.nom} » NON enregistré — la table sous_traitants_app existe-t-elle (snippet SQL 75) ?`);
+            }
+          }}
+          onStatutST={async (tacheId, courrielSt, complement, resume) => {
+            // Statut Présent / Pas venu (+ note, + montant) — écrit dans
+            // la fiche `donnees` de l'assignation du sous-traitant.
+            try {
+              await majDonneesAssignation(tacheId, courrielSt, complement);
+              setAssignationsST((prev) =>
+                prev.map((a) =>
+                  a.tache_id === tacheId && a.employe_email === courrielSt
+                    ? { ...a, donnees: { ...(a.donnees || {}), ...complement } }
+                    : a
+                )
+              );
+              if (resume) ajouterJournal(resume);
+            } catch {
+              ajouterJournal("⚠️ Statut du sous-traitant NON enregistré — réessaie.");
+            }
+          }}
+          onAjouterCoutSousTraitant={(projetId, nomSt, montant, refUnique) => {
+            // Le montant facturé PAR le sous-traitant entre aux coûts
+            // réels du projet lié — sans double saisie ni doublon (la
+            // référence unique tacheId|st est réécrite, jamais ajoutée
+            // deux fois).
+            setProjets((prev) =>
+              prev.map((p) => {
+                if (p.id !== projetId) return p;
+                const existants = (p.sousTraitants || []).filter((x) => x.stRef !== refUnique);
+                return { ...p, sousTraitants: [...existants, { nom: nomSt, facture: "", coutant: montant, stRef: refUnique }] };
+              })
+            );
+            ajouterJournal(`🤝 ${montant.toFixed(2)} $ de sous-traitance (${nomSt}) ajoutés aux coûts réels du projet.`);
+          }}
         />
       )}
       {vue === "facturation" && (
         <OngletFacturation
           bons={bons}
           setBons={setBons}
+          assignationsST={assignationsST}
+          onMarquerSTFacture={async (tacheId, courrielSt) => {
+            try {
+              await majDonneesAssignation(tacheId, courrielSt, { stFacture: true, stFactureLe: new Date().toISOString() });
+              setAssignationsST((prev) =>
+                prev.map((a) =>
+                  a.tache_id === tacheId && a.employe_email === courrielSt
+                    ? { ...a, donnees: { ...(a.donnees || {}), stFacture: true } }
+                    : a
+                )
+              );
+              ajouterJournal("🤝 Sous-traitance marquée FACTURÉE au client — retirée de la liste de rappel.");
+            } catch {
+              ajouterJournal("⚠️ Marquage « facturé » NON enregistré — réessaie.");
+            }
+          }}
           ajouterJournal={ajouterJournal}
           devisListe={devisListe}
           clients={clients}

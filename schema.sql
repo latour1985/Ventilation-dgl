@@ -2463,3 +2463,38 @@ alter table clients_app add column if not exists contacts jsonb not null default
 -- empirique du 2026-08-17, erreur PGRST204 capturée dans l'app).
 -- ============================================================
 alter table devis_app add column if not exists qbo_estimate_id text;
+
+-- ============================================================
+-- 75 - SOUS-TRAITANTS À L'AGENDA (2026-08-19)
+-- ------------------------------------------------------------
+-- Répertoire des sous-traitants planifiables à l'agenda (section
+-- « 🤝 Sous-traitants »). Un sous-traitant n'a PAS l'application :
+-- pas de compte, pas de chronomètre — sa présence se confirme à la
+-- main (statut Présent / Pas venu sur son bloc d'agenda, rangé dans
+-- taches_assignees.donnees avec employe_email = 'st::<id>').
+-- `client_id` : lien FACULTATIF vers la fiche client quand le
+-- sous-traitant est AUSSI un client (une seule identité, deux rôles —
+-- les coordonnées restent sur la fiche client, jamais dupliquées).
+-- ============================================================
+create table if not exists sous_traitants_app (
+  id text primary key,
+  nom text not null,
+  specialite text,
+  telephone text,
+  courriel text,
+  note text,
+  client_id text,
+  actif boolean not null default true,
+  entreprise_id text not null default 'dgl',
+  cree_le timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table sous_traitants_app enable row level security;
+
+drop policy if exists "sous_traitants_lecture_test" on sous_traitants_app;
+drop policy if exists "sous_traitants_ecriture_test" on sous_traitants_app;
+create policy "sous_traitants_lecture_test" on sous_traitants_app
+  for select to authenticated using (true);
+create policy "sous_traitants_ecriture_test" on sous_traitants_app
+  for all to authenticated using (true) with check (true);
