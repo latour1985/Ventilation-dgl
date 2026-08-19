@@ -13108,6 +13108,12 @@ const TYPES_TACHE = [
   // un camion au garage, aller chercher une pièce. Heures payées en
   // « divers », jamais facturable.
   { id: "course", label: "🚗 Course / interne (sans client)", description: "Aucun client — porter un camion au garage, chercher une pièce. Heures payées (divers), jamais facturable.", nonFacturable: true, sansClient: true },
+  // 🏭 TRAVAIL AU SHOP (demande du propriétaire, 2026-08-19) — heures
+  // payées à l'atelier : fabrication, préparation, ménage. Aucun client.
+  // « Divers » par défaut ; LIÉ À UN PROJET, les heures comptent dans
+  // SES coûts réels (fabriquer les conduits d'un chantier, c'est du
+  // temps de chantier fait au shop).
+  { id: "shop", label: "🏭 Travail au shop", description: "Aucun client — travail à l'atelier. Heures payées (divers — ou comptées au projet si un projet est lié). Jamais facturable.", nonFacturable: true, sansClient: true },
   // CONGÉ : ce n'est pas du travail. Aucun chronomètre, aucune heure —
   // seulement un marqueur qui bloque la journée dans l'agenda pour
   // qu'on n'y place pas de travail par erreur.
@@ -13141,6 +13147,9 @@ const COULEUR_TYPE_TACHE = {
   visite_soumission: { fond: "bg-indigo-500", pastille: "bg-indigo-500", bordurePastille: "border-indigo-500", texte: "text-indigo-700", clair: "bg-indigo-100" },
   divers: { fond: "bg-stone-400", pastille: "bg-stone-400", bordurePastille: "border-stone-400", texte: "text-stone-700", clair: "bg-stone-100" },
   course: { fond: "bg-stone-500", pastille: "bg-stone-500", bordurePastille: "border-stone-500", texte: "text-stone-700", clair: "bg-stone-100" },
+  // 🏭 Travail au shop — lime : la seule teinte encore libre qui reste
+  // discrète (interne, non facturable) sans se confondre avec divers.
+  shop: { fond: "bg-lime-400", pastille: "bg-lime-500", bordurePastille: "border-lime-500", texte: "text-lime-700", clair: "bg-lime-100" },
   conge: { fond: "bg-zinc-300", pastille: "bg-zinc-400", bordurePastille: "border-zinc-400", texte: "text-zinc-600", clair: "bg-zinc-100" },
 };
 const COULEUR_TYPE_DEFAUT = COULEUR_TYPE_TACHE.temps_materiel;
@@ -14422,6 +14431,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       sansHeures: estTypeSansHeures(nouveauType),
       categorieHeures: estTypeSansHeures(nouveauType)
         ? "aucune"
+        : nouveauType === "shop"
+        ? (nouveauProjetId ? "projet" : "divers")
         : nouveauType === "divers" || nouveauType === "course"
         ? "divers"
         : estTypeAdministratif(nouveauType) && !tempsSurProjet

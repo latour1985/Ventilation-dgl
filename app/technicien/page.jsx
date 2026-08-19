@@ -23,7 +23,7 @@ import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAu
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { pushSupporte, activerNotificationsPush, resouscrireSiPermis } from "@/lib/notificationsPush";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
-import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
+import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, creerTravailShopTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue, travailDejaEnregistre } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
@@ -1884,6 +1884,30 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
       clearTimeout(minuterie);
     };
   }, [courseAdresse, courseOuverte, courseAdresseChoisie]);
+  // 🏭 TRAVAIL AU SHOP — mêmes états et même recette que la course.
+  const [shopOuvert, setShopOuvert] = useState(false);
+  const [shopTitre, setShopTitre] = useState("");
+  const [shopNote, setShopNote] = useState("");
+  const [shopEnCours, setShopEnCours] = useState(false);
+  const [shopMsg, setShopMsg] = useState("");
+  const creerShop = async () => {
+    if (!shopTitre.trim()) return;
+    setShopEnCours(true);
+    setShopMsg("");
+    try {
+      await creerTravailShopTechnicien({ titre: shopTitre.trim(), note: shopNote.trim() }, session);
+      setShopMsg("ok");
+      setShopTitre("");
+      setShopNote("");
+      setTimeout(() => {
+        setShopOuvert(false);
+        setShopMsg("");
+      }, 1200);
+    } catch {
+      setShopMsg("erreur");
+    }
+    setShopEnCours(false);
+  };
   const creerCourse = async () => {
     if (!courseTitre.trim()) return;
     setCourseEnCours(true);
@@ -2123,6 +2147,15 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         >
           🚗 Course / déplacement (sans client)
         </button>
+        {/* 🏭 TRAVAIL AU SHOP (demande du propriétaire, 2026-08-19) : il
+            finit sa dernière tâche, arrive au bureau — ses heures
+            continuent de compter, sans rien demander au répartiteur. */}
+        <button
+          onClick={() => setShopOuvert(true)}
+          className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:bg-slate-100"
+        >
+          🏭 Travail au shop (atelier)
+        </button>
         {/* 🔔 NOTIFICATIONS PUSH (2026-08-18) : « nouvelle tâche »,
             « matériel commandé » — reçues même application fermée.
             Le bouton disparaît une fois la permission accordée.
@@ -2212,6 +2245,48 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 </Button>
                 <Button onClick={creerCourse} disabled={courseEnCours || !courseTitre.trim()} className="w-full">
                   {courseEnCours ? "Création…" : "Créer la course"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* 🏭 FENÊTRE — TRAVAIL AU SHOP : quoi + note, c'est tout.
+            Aucun client, aucune adresse — le chrono roule comme sur
+            n'importe quelle tâche, la fermeture est simple (pas de bon). */}
+        {shopOuvert && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; if (!shopEnCours) setShopOuvert(false); }}>
+            <div className="w-full max-w-md rounded-2xl bg-white p-4">
+              <h3 className="text-base font-extrabold text-slate-900">🏭 Travail au shop</h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Pour toi, aujourd&apos;hui. Aucun client, rien à facturer — tes heures sont payées et le bureau le voit dans l&apos;agenda.
+              </p>
+              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">Quoi ?</label>
+              <input
+                value={shopTitre}
+                onChange={(e) => setShopTitre(e.target.value)}
+                placeholder="Ex : fabrication de conduits, ménage du camion"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              />
+              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Note (facultatif)</label>
+              <textarea
+                rows={2}
+                value={shopNote}
+                onChange={(e) => setShopNote(e.target.value)}
+                placeholder="Détails utiles…"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              />
+              {shopMsg === "ok" && (
+                <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">✅ Tâche créée — elle apparaît dans ton horaire, pèse Débuter en arrivant.</p>
+              )}
+              {shopMsg === "erreur" && (
+                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold text-red-700">Impossible de créer la tâche — vérifie ta connexion et réessaie.</p>
+              )}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setShopOuvert(false)} disabled={shopEnCours} className="w-full">
+                  Annuler
+                </Button>
+                <Button onClick={creerShop} disabled={shopEnCours || !shopTitre.trim()} className="w-full">
+                  {shopEnCours ? "Création…" : "Créer la tâche"}
                 </Button>
               </div>
             </div>
