@@ -13,10 +13,10 @@ self.addEventListener("push", (evenement) => {
     donnees = { corps: evenement.data ? evenement.data.text() : "" };
   }
   evenement.waitUntil(
-    self.registration.showNotification(donnees.titre || "Ventilation DGL", {
+    self.registration.showNotification(donnees.titre || "Fluxya", {
       body: donnees.corps || "",
-      icon: "/logo-dgl.png",
-      badge: "/logo-dgl.png",
+      icon: "/icons/fluxya-192.png",
+      badge: "/icons/fluxya-192.png",
       data: { url: donnees.url || "/technicien" },
     })
   );

@@ -23,7 +23,7 @@ import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAu
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { pushSupporte, activerNotificationsPush, resouscrireSiPermis } from "@/lib/notificationsPush";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
-import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, declarerEquipeTerminee } from "@/lib/supabase/tachesAssignees";
+import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue, travailDejaEnregistre } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
@@ -3254,6 +3254,13 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // aucun bon créé. La réf, elle, est à jour immédiatement.
   const equipeTermineeRef = useRef(!!tache.equipeTerminee);
   const [modalEquipe, setModalEquipe] = useState(false);
+  // 🚪 « JE PARS EN PREMIER DU CHANTIER » (demande du propriétaire,
+  // 2026-08-18) : celui qui quitte avant les autres ferme SA carte —
+  // heures enregistrées, aucune description/photo/signature exigée
+  // (c'est le travail de celui qui reste avec le client).
+  const [modalPartirPremier, setModalPartirPremier] = useState(false);
+  const [partirEnCours, setPartirEnCours] = useState(false);
+  const [partirRefus, setPartirRefus] = useState("");
 
   const jeSuisSeul = !equipe || !equipe.partage;
   const jeSuisLeDernier =
@@ -3534,18 +3541,68 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // Avertit si des journées restent prévues : un technicien qui clique
   // par habitude le premier soir fermerait le chantier trop tôt, et le
   // bureau facturerait un travail inachevé.
+  // LA QUESTION D'ÉQUIPE — avec relecture FRAÎCHE au moment du clic
+  // (rapport des techniciens, 2026-08-18 : la composition de l'équipe
+  // lue à l'ouverture de la page pouvait avoir échoué en silence —
+  // réseau de chantier — et l'application se croyait « seule sur la
+  // tâche » : la question n'était jamais posée). TOUTES les portes de
+  // fermeture passent maintenant par ici, y compris les confirmations
+  // multi-jours qui court-circuitaient la question avant.
+  const verifierEquipePuisFermer = async () => {
+    let e = equipe;
+    try {
+      const frais = await etatEquipeTache(tache.tacheOrigineId || tache.id, tache.date || null);
+      if (frais) {
+        e = frais;
+        setEquipe(frais);
+      }
+    } catch {
+      // hors-ligne : on continue avec la lecture faite à l'ouverture
+    }
+    const restants = !e || !e.partage ? [] : e.manquants.filter((m) => m.email !== monCourriel);
+    if (restants.length > 0 && !termineSeul && !equipeTermineeRef.current) {
+      setModalEquipe(true);
+      return;
+    }
+    demarrerEnvoi();
+  };
+
   const demarrerFermetureTravaux = () => {
     if (tache.nbJoursPrevus > 1 && !tache.dernierJourPrevu) {
       setConfirmation("tropTot");
       return;
     }
-    // Tâche partagée et des coéquipiers n'ont pas encore fermé : LA
-    // question avant tout — « est-ce que toute l'équipe a terminé ? »
-    if (!jeSuisSeul && colleguesRestants.length > 0 && !termineSeul && !equipeTerminee) {
-      setModalEquipe(true);
-      return;
+    verifierEquipePuisFermer();
+  };
+
+  // 🚪 Confirmation du départ en premier. GARDE : relecture fraîche du
+  // serveur — si en réalité tous les autres ont DÉJÀ fermé, celui-ci
+  // est le dernier et la sortie rapide est refusée (sinon personne ne
+  // ferait signer le client). Hors-ligne : on laisse partir — le
+  // comportement d'avant, le bureau réactive au besoin.
+  const confirmerPartirPremier = async () => {
+    setPartirEnCours(true);
+    try {
+      const frais = await etatEquipeTache(tache.tacheOrigineId || tache.id, tache.date || null);
+      if (frais) {
+        setEquipe(frais);
+        const restants = (frais.manquants || []).filter((m) => m.email !== monCourriel);
+        if (!frais.partage || restants.length === 0) {
+          setPartirEnCours(false);
+          setPartirRefus(
+            "Tes coéquipiers ont déjà tous fermé leur tâche : tu es le DERNIER sur ce travail. C'est toi qui fais signer le client — remplis le bon et utilise « Terminer et envoyer »."
+          );
+          return;
+        }
+      }
+    } catch {
+      // hors-ligne : on laisse partir quand même
     }
-    demarrerEnvoi();
+    signalerDepartPremier(tache.tacheOrigineId || tache.id, tache.date || null).catch(() => {});
+    setPartirEnCours(false);
+    setModalPartirPremier(false);
+    onTerminer();
+    onRetour();
   };
 
   // Réponse à la question d'équipe. « Oui » : je deviens le dernier —
@@ -3579,6 +3636,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     // Facturation — il n'y a donc rien à refuser ni à oublier. Les
     // heures, elles, sont enregistrées normalement et payées.
     if (tache.nonFacturable) {
+      // 🤝 Même sans facturation, les coéquipiers déclarés « terminés »
+      // doivent recevoir leur demande de confirmation d'heures — cet
+      // avertissement était sauté par le raccourci (corrigé 2026-08-18).
+      if (equipeTermineeRef.current && colleguesRestants.length > 0) {
+        declarerEquipeTerminee(tache.tacheOrigineId || tache.id, tache.date || null).catch(() => {});
+      }
       setEnvoiEnCours(false);
       onTerminer();
       // Retour au menu des tâches — l'écran restait planté ici (constat
@@ -4488,7 +4551,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               <p className="mt-2 text-[13px] font-bold text-slate-800">Les travaux sont-ils vraiment terminés ?</p>
               <div className="mt-4 space-y-2">
                 <button
-                  onClick={() => { setConfirmation(null); demarrerEnvoi(); }}
+                  onClick={() => { setConfirmation(null); verifierEquipePuisFermer(); }}
                   className="min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
                 >
                   Oui, les travaux sont terminés
@@ -4514,7 +4577,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               </p>
               <div className="mt-4 space-y-2">
                 <button
-                  onClick={() => { setConfirmation(null); demarrerEnvoi(); }}
+                  onClick={() => { setConfirmation(null); verifierEquipePuisFermer(); }}
                   className="min-h-[48px] w-full rounded-xl bg-[#FF6A13] text-sm font-extrabold text-white active:scale-[0.99]"
                 >
                   ✓ Les travaux sont terminés
@@ -4616,6 +4679,18 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 de travail, une signature du client et une demande de
                 facturation. Trois fois pour une seule job.
                 ============================================================ */}
+            {/* 🚪 JE PARS EN PREMIER — visible seulement quand des
+                coéquipiers restent sur place : ferme MA carte (heures)
+                sans exiger le bon — description, photo et signature
+                restent au dernier, qui est averti sur son téléphone. */}
+            {!jeSuisSeul && colleguesRestants.length > 0 && !termineSeul && !equipeTerminee && !tache.envoye && !lectureSeule && (
+              <button
+                onClick={() => { setPartirRefus(""); setModalPartirPremier(true); }}
+                className="mb-2 min-h-[52px] w-full rounded-xl border-2 border-sky-300 bg-sky-50 text-sm font-extrabold text-sky-800 active:scale-[0.99]"
+              >
+                🚪 Je pars en premier — {colleguesRestants.map((c) => c.nom).join(", ")} fera signer le client
+              </button>
+            )}
             {tache.nbJoursPrevus > 1 && (
               <button
                 onClick={fermerLaJournee}
@@ -4676,6 +4751,53 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 Terminer sans envoyer de courriel
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* FENÊTRE — « JE PARS EN PREMIER DU CHANTIER » (2026-08-18).
+          Confirmation avant de fermer SA carte sans bon : les heures
+          partent, le coéquipier restant fait signer et il est averti
+          par notification. Refusée si tous les autres ont déjà fermé. */}
+      {modalPartirPremier && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <h3 className="text-base font-extrabold text-slate-900">🚪 Tu pars en premier du chantier ?</h3>
+            {partirRefus ? (
+              <>
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[13px] leading-snug text-amber-800">⚠️ {partirRefus}</p>
+                <button
+                  onClick={() => setModalPartirPremier(false)}
+                  className="mt-3 min-h-[48px] w-full rounded-xl bg-[#FF6A13] text-sm font-extrabold text-white active:scale-[0.99]"
+                >
+                  Compris
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="mt-1.5 text-[13px] leading-snug text-slate-600">
+                  Tes <span className="font-extrabold">{(dureeEcoulee(tache) / 3600).toFixed(2)} h</span> partent au bureau et ta
+                  carte se ferme — sans description, photo ni signature.{" "}
+                  <span className="font-bold">{colleguesRestants.map((c) => c.nom).join(", ")}</span> reste sur place : c&apos;est
+                  lui qui remplit le bon, fait signer le client et l&apos;envoie. Il reçoit l&apos;avis sur son téléphone.
+                </p>
+                <div className="mt-4 space-y-2">
+                  <button
+                    onClick={confirmerPartirPremier}
+                    disabled={partirEnCours}
+                    className="min-h-[52px] w-full rounded-xl bg-sky-600 px-3 text-sm font-extrabold text-white active:scale-[0.99] disabled:opacity-60"
+                  >
+                    {partirEnCours ? "Un instant…" : "✅ Oui, je pars — fermer ma carte"}
+                  </button>
+                  <button
+                    onClick={() => setModalPartirPremier(false)}
+                    className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
+                  >
+                    Non, je reste
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -5149,6 +5271,12 @@ function AppTechnicien() {
     // la fin pour l'affichage « 7 h 42 → 11 h 15 » et les ajustements.
     const cible = taches.find((x) => x.id === id);
     majTache(id, { etat: "en_cours", tempsDebutSegment: Date.now(), debutReel: cible?.debutReel || Date.now() });
+    // ⏱️ AGENDA EN DIRECT (2026-08-18) : le bloc du bureau passe « en
+    // cours » (bleu) dès le Débuter. Un bonus, jamais un bloqueur — en
+    // cas d'échec réseau, le chronomètre local roule quand même.
+    if (cible?.supabase && cible.tacheOrigineId && cible.type === "travail") {
+      majStatutAssignation(cible.tacheOrigineId, session?.user?.email, "en_cours").catch(() => {});
+    }
   };
 
   const mettreEnPause = (id) => {
@@ -5208,6 +5336,11 @@ function AppTechnicien() {
             `⚠️ Travail terminé NON transmis au bureau (« ${t.titre || "tâche"} ») — ${e?.message || "connexion impossible"}. L'agenda admin ne passera pas au vert.`
           );
         });
+      // ⏱️ AGENDA EN DIRECT : la carte se ferme — le bloc du bureau
+      // quitte le bleu « en cours » (le VERT, lui, vient des heures).
+      if (t.supabase && t.tacheOrigineId && t.type === "travail") {
+        majStatutAssignation(t.tacheOrigineId, session?.user?.email, "planifiee").catch(() => {});
+      }
     }
     setTaches((prev) =>
       prev.map((t) => {

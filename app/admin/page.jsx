@@ -19,7 +19,7 @@ import GestionAcces from "@/components/GestionAcces";
 import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
 import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
-import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation } from "@/lib/supabase/tachesAssignees";
+import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees } from "@/lib/supabase/tachesAssignees";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau } from "@/lib/supabase/bonsTravail";
@@ -13640,7 +13640,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   );
 }
 
-function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role, onMajFacturable }) {
+function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role, onMajFacturable, statutsAssignations }) {
   // 💰/🤝 Le choix « facturable » en attente de réponse — { tacheId, titre, employe }.
   const [choixFacturable, setChoixFacturable] = useState(null);
   // Un AUTRE technicien tient-il déjà cette tâche dans la grille ?
@@ -13693,6 +13693,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     if (!(Number(tache.jours) > 1)) return true;
     return (bons || []).some((b) => b.tacheId === tache.id);
   };
+  // ⏱️ BLEU = CHRONOMÈTRE PARTI (2026-08-18) : le technicien a pesé
+  // Débuter et n'a pas encore fermé sa carte. Le vert (travaux fermés)
+  // a toujours priorité sur le bleu.
+  const estEnCours = (tache, emp) =>
+    !estTerminee(tache, emp) &&
+    statutsAssignations?.[`${tache.id}|${(emp?.courriel || "").toLowerCase()}`] === "en_cours";
   const [jourAffiche, setJourAffiche] = useState(new Date());
   const [vue, setVue] = useState("jour"); // "jour" | "semaine" | "mois"
   const grilleScrollRef = useRef(null);
@@ -16252,7 +16258,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             onDropHeure(ev, emp.id, HEURES[idx]);
                             setTacheSurvolee(null);
                           }}
-                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
+                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : estEnCours(seg.tache, emp) ? "border-sky-500 bg-sky-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
                         >
                           {/* 🖱️ Clic simple = ouvrir la fiche ; clic
                               maintenu + déplacement = déplacer le bloc
@@ -16270,12 +16276,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             className={`flex h-full w-full items-start gap-1 rounded-lg p-1 text-left text-[9px] font-semibold leading-tight ${
                               estTerminee(seg.tache, emp)
                                 ? "bg-emerald-100 text-emerald-900"
+                                : estEnCours(seg.tache, emp)
+                                ? "bg-sky-100 text-sky-900"
                                 : seg.tache.est_tache_systeme
                                 ? "bg-slate-200 text-slate-600"
                                 : `text-black ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
                             } ${enRedimensionnement ? "ring-2 ring-[#FF6A13]" : ""}`}
                           >
                             {estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
+                            {estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-sky-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
                               {seg.tache.titre || seg.tache.clientNom}
@@ -16366,7 +16375,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className="p-0.5"
                             >
-                              <span className={`block h-2 w-2 rounded-full ${estTerminee(tache, emp) ? "bg-emerald-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
+                              <span className={`block h-2 w-2 rounded-full ${estTerminee(tache, emp) ? "bg-emerald-500" : estEnCours(tache, emp) ? "animate-pulse bg-sky-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
                             </button>
                           ) : (
                             <button
@@ -16384,6 +16393,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                               className={`block w-full rounded-lg border-l-4 p-1 text-left text-[9px] font-semibold leading-tight ${
                                 estTerminee(tache, emp)
                                   ? "border-emerald-500 bg-emerald-100 text-emerald-900"
+                                  : estEnCours(tache, emp)
+                                  ? "border-sky-500 bg-sky-100 text-sky-900"
                                   : tache.est_tache_systeme
                                   ? "border-slate-400 bg-slate-200 text-slate-600"
                                   : `border-transparent text-black ${(COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
@@ -16391,6 +16402,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             >
                               <span className="flex items-start gap-1">
                                 {estTerminee(tache, emp) && <Check size={9} className="mt-px shrink-0 text-emerald-600" />}
+                                {estEnCours(tache, emp) && <span className="mt-0.5 block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-500" />}
                                 {tache.est_tache_systeme && <Car size={9} className="mt-px shrink-0" />}
                                 <span className="min-w-0">
                                   {tache.titre || tache.clientNom}
@@ -18419,6 +18431,11 @@ export default function App() {
   // jour au choix du répartiteur. La facturation s'en sert pour exclure
   // les heures des non-facturables du temps supplémentaire suggéré.
   const [facturablesAssignations, setFacturablesAssignations] = useState({});
+  // ⏱️ STATUT EN DIRECT des assignations (« tacheId|courriel » →
+  // « en_cours »/« planifiee ») — écrit par l'app technicien au Débuter
+  // et au Terminer. Colore les blocs de l'agenda en bleu « en cours » :
+  // le bureau voit où chacun est rendu dans sa journée (2026-08-18).
+  const [statutsAssignations, setStatutsAssignations] = useState({});
   // ⬅️➡️ RECULER/AVANCER DU NAVIGATEUR (demande du propriétaire,
   // 2026-08-17) : chaque onglet s'inscrit dans l'adresse (#agenda…).
   // Reculer revient à l'onglet précédent au lieu de quitter l'appli ;
@@ -18581,6 +18598,13 @@ export default function App() {
           const maj = { ...prev };
           rows.forEach((r) => {
             maj[`${r.tache_id}|${(r.employe_email || "").toLowerCase()}`] = r.facturable !== false;
+          });
+          return maj;
+        });
+        setStatutsAssignations((prev) => {
+          const maj = { ...prev };
+          rows.forEach((r) => {
+            maj[`${r.tache_id}|${(r.employe_email || "").toLowerCase()}`] = r.statut || "planifiee";
           });
           return maj;
         });
@@ -19001,6 +19025,22 @@ export default function App() {
       annule = true;
       desabonner();
     };
+  }, [session]);
+
+  // ⏱️ Le statut « en cours » arrive en DIRECT (Realtime) : dès qu'un
+  // technicien pèse Débuter ou Terminer, son bloc d'agenda change de
+  // couleur ici — sans recharger la page.
+  useEffect(() => {
+    if (!session) return;
+    const desabonner = sAbonnerTachesAssignees((p) => {
+      const ligne = p?.new;
+      if (!ligne?.tache_id || !ligne?.employe_email) return;
+      setStatutsAssignations((prev) => ({
+        ...prev,
+        [`${ligne.tache_id}|${ligne.employe_email.toLowerCase()}`]: ligne.statut || "planifiee",
+      }));
+    });
+    return desabonner;
   }, [session]);
 
   // BONS DE TRAVAIL signés sur le terrain (terrain -> bureau) : dès que
@@ -19849,6 +19889,7 @@ export default function App() {
           setTachesAttente={setTachesAttente}
           planning={planning}
           setPlanning={setPlanning}
+          statutsAssignations={statutsAssignations}
           ajouterJournal={ajouterJournal}
           clients={clients}
           setClients={setClients}

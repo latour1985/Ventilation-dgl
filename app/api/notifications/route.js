@@ -63,7 +63,7 @@ export async function POST(request) {
       await webpush.sendNotification(
         ligne.abonnement,
         JSON.stringify({
-          titre: String(corps?.titre || "Ventilation DGL").slice(0, 80),
+          titre: String(corps?.titre || "Fluxya").slice(0, 80),
           corps: String(corps?.corps || "").slice(0, 200),
           url: String(corps?.url || "/technicien").slice(0, 200),
         })
