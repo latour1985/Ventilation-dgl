@@ -8102,6 +8102,25 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
   const [toujoursCommercial, setToujoursCommercial] = useState(false);
   const [courrielAperçu, setCourrielAperçu] = useState(null);
   const [utilisateurOuvertId, setUtilisateurOuvertId] = useState(null);
+  // 🔎 LISTE MAÎTRISÉE (demande du propriétaire, 2026-08-18) : la liste
+  // défilait à l'infini. Recherche + filtre par type d'accès, fiches
+  // REPLIÉES (nom + rôle) — le détail et les boutons s'ouvrent au tap.
+  const [rechercheU, setRechercheU] = useState("");
+  const [filtreAcces, setFiltreAcces] = useState("tous");
+  const [uDeplie, setUDeplie] = useState(null);
+  const utilisateursAffiches = useMemo(() => {
+    const q = rechercheU.trim().toLowerCase();
+    return utilisateurs
+      .filter((u) => filtreAcces === "tous" || u.typeAcces === filtreAcces)
+      .filter(
+        (u) =>
+          !q ||
+          [u.nom, u.nomUtilisateur, u.courriel, u.telephone, u.metier, u.poste]
+            .filter(Boolean)
+            .some((c) => String(c).toLowerCase().includes(q))
+      )
+      .sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
+  }, [utilisateurs, rechercheU, filtreAcces]);
 
   // GRILLE DES ACCÈS dans le formulaire de création : suit le type
   // d'accès + métier choisis, ajustable case par case avant de créer.
@@ -8368,48 +8387,102 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
         )}
       </div>
 
-      {/* LISTE DES UTILISATEURS */}
+      {/* RECHERCHE + FILTRE — la liste défilait à l'infini (2026-08-18). */}
       <div className="space-y-2">
-        {utilisateurs.map((u) => (
-          <div key={u.id} className="rounded-xl border border-slate-200 bg-white p-3.5">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="text-sm font-bold text-slate-900">{u.nom}</p>
-                <p className="text-xs text-slate-400">@{u.nomUtilisateur}{u.poste ? ` · ${u.poste}` : ""}</p>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={rechercheU}
+            onChange={(e) => setRechercheU(e.target.value)}
+            placeholder="Chercher un nom, courriel, téléphone, métier…"
+            className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {["tous", ...TYPES_ACCES.filter((t) => utilisateurs.some((u) => u.typeAcces === t))].map((t) => (
+            <button
+              key={t}
+              onClick={() => setFiltreAcces(t)}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                filtreAcces === t ? "bg-[#131B2E] text-white" : "border border-slate-200 bg-white text-slate-600"
+              }`}
+            >
+              {t === "tous"
+                ? `Tous (${utilisateurs.length})`
+                : `${t} (${utilisateurs.filter((u) => u.typeAcces === t).length})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* LISTE DES UTILISATEURS — fiches repliées : le détail (contacts,
+          statut, boutons) s'ouvre au tap sur la ligne. */}
+      <div className="space-y-2">
+        {utilisateursAffiches.length === 0 && (
+          <p className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-xs text-slate-400">
+            Aucun utilisateur ne correspond à cette recherche.
+          </p>
+        )}
+        {utilisateursAffiches.map((u) => {
+          const ouvert = uDeplie === u.id;
+          return (
+          <div key={u.id} className="rounded-xl border border-slate-200 bg-white">
+            <button
+              onClick={() => setUDeplie(ouvert ? null : u.id)}
+              className="flex w-full items-center justify-between gap-2 p-3 text-left"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-900">{u.nom}</p>
+                <p className="truncate text-xs text-slate-400">
+                  @{u.nomUtilisateur}
+                  {u.metier ? ` · ${u.metier}` : u.poste ? ` · ${u.poste}` : ""}
+                </p>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${COULEUR_TYPE_ACCES[u.typeAcces] || "bg-slate-100 text-slate-600"}`}>
-                {u.typeAcces}
+              <span className="flex shrink-0 items-center gap-1.5">
+                {!u.motDePasseCree && (
+                  <span title="En attente de première connexion" className="h-2 w-2 rounded-full bg-amber-400" />
+                )}
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${COULEUR_TYPE_ACCES[u.typeAcces] || "bg-slate-100 text-slate-600"}`}>
+                  {u.typeAcces}
+                </span>
+                <ChevronDown size={14} className={`text-slate-400 transition-transform ${ouvert ? "rotate-180" : ""}`} />
               </span>
-            </div>
-            <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
-              {u.courriel && <div className="flex items-center gap-1.5"><Mail size={11} /> {u.courriel}</div>}
-              {u.telephone && <div className="flex items-center gap-1.5"><Phone size={11} /> {u.telephone}</div>}
-              <div className="flex items-center gap-1.5">
-                <ShieldCheck size={11} />
-                {u.motDePasseCree ? "Mot de passe déjà créé" : "En attente de première connexion"}
-              </div>
-              {u.metier && (
-                <div className="flex items-center gap-1.5">
-                  <Briefcase size={11} /> {u.metier} · {u.niveau}
-                  {Number(tauxMetiers?.[u.metier]?.[u.niveau]) > 0
-                    ? ` · ${Number(tauxMetiers[u.metier][u.niveau]).toFixed(2)} $/h`
-                    : " · taux à saisir"}
+            </button>
+            {ouvert && (
+              <div className="border-t border-slate-100 p-3.5 pt-2.5">
+                <div className="space-y-0.5 text-xs text-slate-500">
+                  {u.poste && <div className="flex items-center gap-1.5"><Briefcase size={11} /> {u.poste}</div>}
+                  {u.courriel && <div className="flex items-center gap-1.5"><Mail size={11} /> {u.courriel}</div>}
+                  {u.telephone && <div className="flex items-center gap-1.5"><Phone size={11} /> {u.telephone}</div>}
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck size={11} />
+                    {u.motDePasseCree ? "Mot de passe déjà créé" : "En attente de première connexion"}
+                  </div>
+                  {u.metier && (
+                    <div className="flex items-center gap-1.5">
+                      <Briefcase size={11} /> {u.metier} · {u.niveau}
+                      {Number(tauxMetiers?.[u.metier]?.[u.niveau]) > 0
+                        ? ` · ${Number(tauxMetiers[u.metier][u.niveau]).toFixed(2)} $/h`
+                        : " · taux à saisir"}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              <Button variant="outline" onClick={() => setUtilisateurOuvertId(u.id)} className="min-h-0 py-1.5 text-xs">
-                <Pencil size={12} /> Modifier
-              </Button>
-              <Button variant="outline" onClick={() => reinitialiserMotDePasse(u.id)} className="min-h-0 py-1.5 text-xs">
-                <KeyRound size={12} /> Mot de passe
-              </Button>
-              <Button onClick={() => envoyerLienConnexion(u)} className="min-h-0 py-1.5 text-xs">
-                <Send size={12} /> Lien
-              </Button>
-            </div>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  <Button variant="outline" onClick={() => setUtilisateurOuvertId(u.id)} className="min-h-0 py-1.5 text-xs">
+                    <Pencil size={12} /> Modifier
+                  </Button>
+                  <Button variant="outline" onClick={() => reinitialiserMotDePasse(u.id)} className="min-h-0 py-1.5 text-xs">
+                    <KeyRound size={12} /> Mot de passe
+                  </Button>
+                  <Button onClick={() => envoyerLienConnexion(u)} className="min-h-0 py-1.5 text-xs">
+                    <Send size={12} /> Lien
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {courrielAperçu && <ApercuCourrielConnexion utilisateur={courrielAperçu} onFermer={() => setCourrielAperçu(null)} />}
@@ -13693,9 +13766,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     if (!(Number(tache.jours) > 1)) return true;
     return (bons || []).some((b) => b.tacheId === tache.id);
   };
-  // ⏱️ BLEU = CHRONOMÈTRE PARTI (2026-08-18) : le technicien a pesé
-  // Débuter et n'a pas encore fermé sa carte. Le vert (travaux fermés)
-  // a toujours priorité sur le bleu.
+  // ⏱️ ROSE VIF (fuchsia) = CHRONOMÈTRE PARTI (2026-08-18) : le
+  // technicien a pesé Débuter et n'a pas encore fermé sa carte. Fuchsia
+  // parce que TOUT le reste de la palette est pris (le bleu ciel = les
+  // visites de chantier, remarque du propriétaire). Le vert (travaux
+  // fermés) garde priorité.
   const estEnCours = (tache, emp) =>
     !estTerminee(tache, emp) &&
     statutsAssignations?.[`${tache.id}|${(emp?.courriel || "").toLowerCase()}`] === "en_cours";
@@ -16258,7 +16333,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             onDropHeure(ev, emp.id, HEURES[idx]);
                             setTacheSurvolee(null);
                           }}
-                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : estEnCours(seg.tache, emp) ? "border-sky-500 bg-sky-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
+                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : estEnCours(seg.tache, emp) ? "border-fuchsia-500 bg-fuchsia-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
                         >
                           {/* 🖱️ Clic simple = ouvrir la fiche ; clic
                               maintenu + déplacement = déplacer le bloc
@@ -16277,14 +16352,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                               estTerminee(seg.tache, emp)
                                 ? "bg-emerald-100 text-emerald-900"
                                 : estEnCours(seg.tache, emp)
-                                ? "bg-sky-100 text-sky-900"
+                                ? "bg-fuchsia-100 text-fuchsia-900"
                                 : seg.tache.est_tache_systeme
                                 ? "bg-slate-200 text-slate-600"
                                 : `text-black ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
                             } ${enRedimensionnement ? "ring-2 ring-[#FF6A13]" : ""}`}
                           >
                             {estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
-                            {estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-sky-500" />}
+                            {estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
                               {seg.tache.titre || seg.tache.clientNom}
@@ -16375,7 +16450,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className="p-0.5"
                             >
-                              <span className={`block h-2 w-2 rounded-full ${estTerminee(tache, emp) ? "bg-emerald-500" : estEnCours(tache, emp) ? "animate-pulse bg-sky-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
+                              <span className={`block h-2 w-2 rounded-full ${estTerminee(tache, emp) ? "bg-emerald-500" : estEnCours(tache, emp) ? "animate-pulse bg-fuchsia-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
                             </button>
                           ) : (
                             <button
@@ -16394,7 +16469,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                                 estTerminee(tache, emp)
                                   ? "border-emerald-500 bg-emerald-100 text-emerald-900"
                                   : estEnCours(tache, emp)
-                                  ? "border-sky-500 bg-sky-100 text-sky-900"
+                                  ? "border-fuchsia-500 bg-fuchsia-100 text-fuchsia-900"
                                   : tache.est_tache_systeme
                                   ? "border-slate-400 bg-slate-200 text-slate-600"
                                   : `border-transparent text-black ${(COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
@@ -16402,7 +16477,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             >
                               <span className="flex items-start gap-1">
                                 {estTerminee(tache, emp) && <Check size={9} className="mt-px shrink-0 text-emerald-600" />}
-                                {estEnCours(tache, emp) && <span className="mt-0.5 block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-500" />}
+                                {estEnCours(tache, emp) && <span className="mt-0.5 block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                                 {tache.est_tache_systeme && <Car size={9} className="mt-px shrink-0" />}
                                 <span className="min-w-0">
                                   {tache.titre || tache.clientNom}
@@ -18433,7 +18508,7 @@ export default function App() {
   const [facturablesAssignations, setFacturablesAssignations] = useState({});
   // ⏱️ STATUT EN DIRECT des assignations (« tacheId|courriel » →
   // « en_cours »/« planifiee ») — écrit par l'app technicien au Débuter
-  // et au Terminer. Colore les blocs de l'agenda en bleu « en cours » :
+  // et au Terminer. Colore les blocs de l'agenda en rose vif « en cours » :
   // le bureau voit où chacun est rendu dans sa journée (2026-08-18).
   const [statutsAssignations, setStatutsAssignations] = useState({});
   // ⬅️➡️ RECULER/AVANCER DU NAVIGATEUR (demande du propriétaire,
