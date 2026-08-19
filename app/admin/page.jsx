@@ -13621,7 +13621,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
               <label className="mb-1 block text-xs font-bold text-slate-500">Technicien attribué</label>
               <select value={employeId} onChange={(e) => setEmployeId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm">
                 <option value="">— Laisser en attente (ne pas assigner) —</option>
-                {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                {employes.map((e) => <option key={e.id} value={e.id}>{e.estSousTraitant ? `🤝 ${e.nom} (sous-traitant)` : e.nom}</option>)}
               </select>
               <p className="mt-1 text-[10px] text-slate-400">
                 {employeId
@@ -13738,7 +13738,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Technicien</label>
                   <select value={ajoutEmployeId} onChange={(e) => setAjoutEmployeId(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
-                    {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                    {employes.map((e) => <option key={e.id} value={e.id}>{e.estSousTraitant ? `🤝 ${e.nom} (sous-traitant)` : e.nom}</option>)}
                   </select>
                 </div>
                 <div>
@@ -15870,7 +15870,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                   >
                     <option value="">— Laisser en attente (ne pas assigner) —</option>
-                    {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                    {employes.map((e) => <option key={e.id} value={e.id}>{e.estSousTraitant ? `🤝 ${e.nom} (sous-traitant)` : e.nom}</option>)}
                   </select>
                 </div>
                 {/* MULTI-TECHNICIENS (retour de tests) : les cochés
@@ -15918,12 +15918,22 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                                   }}
                                   className="h-3.5 w-3.5 accent-[#131B2E]"
                                 />
-                                {e.nom}
+                                {e.estSousTraitant ? `🤝 ${e.nom} (sous-traitant)` : e.nom}
                               </label>
+                              {/* 🤝 SOUS-TRAITANT en renfort (2026-08-19) :
+                                  pas de question 💰/🤝 (il n'est ni payé ni
+                                  dans l'équipe de signature) — son bloc sur
+                                  SA rangée sert au suivi Présent/Pas venu
+                                  et au coût réel du projet. */}
+                              {coche && e.estSousTraitant && (
+                                <p className="mt-1 pl-5 text-[10px] leading-snug text-slate-500">
+                                  Suivi Présent/Pas venu sur sa rangée — jamais compté dans l&apos;équipe de signature ni dans la paie.
+                                </p>
+                              )}
                               {/* CHOIX OBLIGATOIRE fait ICI (2026-08-17) —
                                   aucune présélection : facturable au client,
                                   ou aide interne non facturable. */}
-                              {coche && (
+                              {coche && !e.estSousTraitant && (
                                 <div className="mt-1 flex gap-1.5 pl-5">
                                   <button
                                     type="button"
@@ -16109,12 +16119,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       if (contactSurPlaceId === "nouveau" && (!contactNom.trim() || !contactTel.trim()))
                         raisons.push("le nom et le téléphone du nouveau contact sur place");
                       // Choix 💰/🤝 obligatoire pour chaque technicien
-                      // supplémentaire coché (2026-08-17).
+                      // supplémentaire coché (2026-08-17) — les SOUS-
+                      // TRAITANTS en sont exemptés (2026-08-19) : la
+                      // question n'a pas de sens pour eux.
                       nouveauxEmployesEnPlus
                         .filter((id) => id !== nouveauEmployeId && facturablesEnPlus[id] !== true && facturablesEnPlus[id] !== false)
                         .forEach((id) => {
-                          const nomTech = employes.find((e) => e.id === id)?.nom || "un technicien ajouté";
-                          raisons.push(`le choix facturable ou non pour ${nomTech}`);
+                          const fiche = employes.find((e) => e.id === id);
+                          if (fiche?.estSousTraitant) return;
+                          raisons.push(`le choix facturable ou non pour ${fiche?.nom || "un technicien ajouté"}`);
                         });
                       return (
                         <>
@@ -16497,7 +16510,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       onChange={(e) => setAssignationMobile({ ...assignationMobile, employeId: e.target.value })}
                       className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                     >
-                      {employes.map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                      {employes.map((e) => <option key={e.id} value={e.id}>{e.estSousTraitant ? `🤝 ${e.nom} (sous-traitant)` : e.nom}</option>)}
                     </select>
                     {vue === "jour" ? (
                       <select
