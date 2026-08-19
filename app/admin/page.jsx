@@ -14,7 +14,7 @@ import ConnexionAdmin from "@/components/ConnexionAdmin";
 import Logo from "@/components/Logo";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { supabase } from "@/lib/supabase/client";
-import { permissionsEffectives, permissionsPour, ORDRE_SECTIONS, LIBELLES_SECTIONS, aAutorisation } from "@/lib/permissions";
+import { permissionsEffectives, permissionsPour, ORDRE_SECTIONS, LIBELLES_SECTIONS, aAutorisation, AUTORISATIONS, LIBELLES_AUTORISATIONS, AIDES_AUTORISATIONS, ROLES_AVEC_AUTORISATIONS } from "@/lib/permissions";
 import GestionAcces from "@/components/GestionAcces";
 import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
 import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
@@ -6255,6 +6255,11 @@ function ApercuCourrielConnexion({ utilisateur, onFermer }) {
 function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSupprimer, estAdminPrincipal, tauxMetiers }) {
   // Confirmation explicite avant suppression (2 clics).
   const [confirmeSuppression, setConfirmeSuppression] = useState(false);
+  // ENCADRÉ DE CHOIX (demande du propriétaire, 2026-08-18) : tout le
+  // dossier de la personne dans UNE fenêtre — la fiche RH d'un côté,
+  // les accès fins de l'autre (l'ancien panneau « Gestion des accès »
+  // ne sert plus qu'aux accès sans fiche).
+  const [ongletModal, setOngletModal] = useState("fiche");
   // La fiche d'un administrateur est INTOUCHABLE pour un Admin régulier
   // (même règle que dans Gestion des accès).
   const ficheAdministrateur = ["Admin principal", "Admin régulier", "Administrateur"].includes(utilisateur.typeAcces);
@@ -6363,7 +6368,21 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
           <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
         </div>
 
+        {/* L'encadré de choix : Fiche employé ↔ Accès */}
+        <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+          {[["fiche", "👤 Fiche employé"], ["acces", "🔑 Accès"]].map(([id, libelle]) => (
+            <button
+              key={id}
+              onClick={() => setOngletModal(id)}
+              className={`rounded-lg py-2 text-xs font-extrabold ${ongletModal === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}
+            >
+              {libelle}
+            </button>
+          ))}
+        </div>
+
         <div className="space-y-3">
+          {ongletModal === "fiche" && (<>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Nom complet</label>
@@ -6379,7 +6398,7 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
               >
                 {(estAdminPrincipal || verrouillePourRegulier ? TYPES_ACCES : TYPES_ACCES.filter((t) => t !== "Admin principal" && t !== "Admin régulier")).map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
-              <p className="mt-1 text-[10px] text-slate-400">Enregistrer la fiche règle aussi les ACCÈS de ce compte (type + métier). Ajustements fins : « Gestion des accès ».</p>
+              <p className="mt-1 text-[10px] text-slate-400">Enregistrer la fiche règle aussi les ACCÈS de ce compte (type + métier). Ajustements fins : onglet « 🔑 Accès » ci-dessus.</p>
             </div>
           </div>
 
@@ -6434,11 +6453,6 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
             </div>
           )}
 
-          {/* GESTION DES ACCÈS directement dans la fiche : la grille se
-              remplit selon le type/métier, ajustable case par case, et
-              s'enregistre avec la fiche. */}
-          <GrilleAcces sections={sectionsAcces} onBasculer={basculerSectionAcces} desactive={verrouillePourRegulier} />
-
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Courriel</label>
@@ -6479,6 +6493,53 @@ function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSuppri
               </div>
             </div>
           </div>
+          </>)}
+
+          {/* ONGLET ACCÈS — la grille fine + les autorisations
+              particulières (l'ancien panneau « Gestion des accès »,
+              maintenant DANS le dossier de la personne). */}
+          {ongletModal === "acces" && (<>
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-snug text-slate-500">
+            Le type d&apos;accès et le métier se choisissent dans la fiche — ici tu ajustes finement les sections
+            visibles et les autorisations. Les changements prennent effet à sa <span className="font-bold">prochaine connexion</span>.
+          </p>
+          <GrilleAcces sections={sectionsAcces} onBasculer={basculerSectionAcces} desactive={verrouillePourRegulier} />
+          {ROLES_AVEC_AUTORISATIONS.includes(typeAcces) && (
+            <div>
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Autorisations particulières</p>
+              <div className="space-y-1.5">
+                {AUTORISATIONS.map((a) => {
+                  // L'Admin principal les possède d'office : case cochée
+                  // et verrouillée plutôt que de laisser croire qu'on
+                  // peut la lui retirer.
+                  const impose = typeAcces === "Admin principal";
+                  const coche = impose || sectionsAcces.includes(a);
+                  return (
+                    <label
+                      key={a}
+                      className={`flex items-start gap-2 rounded-lg border px-2.5 py-2 text-xs font-semibold ${
+                        coche ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-500"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={coche}
+                        disabled={impose || verrouillePourRegulier}
+                        onChange={() => basculerSectionAcces(a)}
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-[#131B2E]"
+                      />
+                      <span className="min-w-0">
+                        {LIBELLES_AUTORISATIONS[a]}
+                        {impose && <span className="ml-1 font-normal opacity-70">(toujours accordée à l&apos;Admin principal)</span>}
+                        <span className="mt-0.5 block text-[10px] font-normal leading-snug opacity-80">{AIDES_AUTORISATIONS[a]}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          </>)}
 
           <Button
             onClick={() =>

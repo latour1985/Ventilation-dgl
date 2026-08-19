@@ -144,22 +144,32 @@ export default function GestionAcces({ utilisateurs, estAdminPrincipal = false }
     if (!error) recharger();
   };
 
+  // DEPUIS LE 2026-08-18, les accès d'un employé se gèrent DANS son
+  // dossier (liste Utilisateurs → Modifier → onglet « 🔑 Accès »). Ce
+  // panneau ne montre plus que les accès SANS fiche employé (courriels
+  // orphelins — normalement il n'y en a pas : la règle maison veut que
+  // le courriel de la fiche soit le courriel de connexion) — et il
+  // disparaît complètement quand tout est en ordre.
+  const orphelines = entrees.filter(
+    (e) => !(utilisateurs || []).some((u) => (u.courriel || "").toLowerCase() === e.email)
+  );
+  if (!formOuvert && !erreur && (chargement || orphelines.length === 0)) return null;
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+    <div className="rounded-2xl border border-amber-200 bg-white p-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Gestion des accès</p>
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">⚠️ Accès sans fiche employé</p>
           <p className="mt-0.5 text-[11px] text-slate-400">
-            {estAdminPrincipal
-              ? "Personnalise le rôle et les sections de chaque utilisateur (prend effet à sa prochaine connexion)."
-              : "Tu peux donner des accès (Chargé de projet, Répartiteur, Technicien) — la création d'administrateurs est réservée aux Admins principaux."}
+            Les accès se gèrent maintenant dans le dossier de chaque employé (Modifier → onglet « 🔑 Accès »).
+            Les entrées ci-dessous sont configurées pour des courriels SANS fiche — crée la fiche correspondante ou retire l&apos;accès.
           </p>
         </div>
         <button
           onClick={() => (formOuvert ? setFormOuvert(false) : ouvrirPour(null))}
           className="shrink-0 rounded-lg bg-[#131B2E] px-3 py-1.5 text-xs font-bold text-white"
         >
-          {formOuvert ? "Fermer" : "+ Ajouter / modifier"}
+          {formOuvert ? "Fermer" : "Modifier"}
         </button>
       </div>
 
@@ -310,13 +320,13 @@ export default function GestionAcces({ utilisateurs, estAdminPrincipal = false }
       <div className="mt-3">
         {chargement ? (
           <p className="text-xs text-slate-400">Chargement…</p>
-        ) : entrees.length === 0 ? (
+        ) : orphelines.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">
-            Aucun accès personnalisé — chaque utilisateur suit les défauts de son rôle.
+            Aucun accès orphelin — tout se gère dans les dossiers d&apos;employés.
           </p>
         ) : (
           <div className="space-y-1.5">
-            {entrees.map((e) => (
+            {orphelines.map((e) => (
               <div key={e.email} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-bold text-slate-800">{e.email}</p>
