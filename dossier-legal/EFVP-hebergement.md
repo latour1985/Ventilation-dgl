@@ -9,8 +9,9 @@
 
 ## 1. Le projet
 
-Application de gestion pour entreprises de services (planification, feuilles de temps, devis,
-facturation), exploitée par Ventilation DGL inc. et offerte à des entreprises clientes.
+Application de gestion **Fluxya** pour entreprises de services (planification, feuilles de
+temps, devis, facturation), exploitée par Ventilation DGL inc. et offerte à des entreprises
+clientes.
 
 ## 2. Renseignements personnels concernés
 

@@ -10,7 +10,7 @@
 
 ## 1. Objet
 
-L'Exploitant donne au Client pionnier accès à son logiciel de gestion d'entreprise de services (applications bureau et mobile, ci-après « le Logiciel »), avec l'ensemble des modules disponibles, en version d'amélioration continue (« rodage »). Le Client pionnier agit comme partenaire de test : il utilise le Logiciel dans ses opérations réelles et contribue à son amélioration.
+L'Exploitant donne au Client pionnier accès à son logiciel de gestion d'entreprise de services, commercialisé sous la marque **Fluxya** (applications bureau et mobile, ci-après « le Logiciel »), avec l'ensemble des modules disponibles, en version d'amélioration continue (« rodage »). Toute référence à la marque Fluxya désigne le Logiciel exploité par Ventilation DGL inc. ; la marque ne constitue pas une entité juridique distincte. Le Client pionnier agit comme partenaire de test : il utilise le Logiciel dans ses opérations réelles et contribue à son amélioration.
 
 **PRÉCISION IMPORTANTE :** le terme « Client pionnier » désigne exclusivement un **statut tarifaire** (conditions d'essai privilégiées accordées aux trois premières entreprises utilisatrices). Il ne confère **aucune part, action, option, participation à l'actionnariat, droit de propriété, droit de gestion ni droit de regard** dans l'Exploitant, ses sociétés liées ou le Logiciel, et ne crée entre les parties **aucune société, société de fait, coentreprise ni mandat**. Le Client pionnier n'est pas un fondateur, un associé ni un actionnaire de l'Exploitant, et renonce à toute prétention en ce sens.
 

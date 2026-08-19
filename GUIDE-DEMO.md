@@ -1,10 +1,10 @@
-# Guide de démo — pour la présentation client
+# Guide de démo Fluxya — pour la présentation client
 
-*(préparé le 15 août 2026, veille de la démo — audit complet passé, tout est vert)*
+*(préparé le 15 août 2026 ; mis à jour le 19 août — l'application s'appelle maintenant **Fluxya** et l'adresse de présentation est **https://fluxya.vercel.app**)*
 
 ## Avant de partir (ce soir ou 1 h avant)
 
-1. **Teste tes deux connexions** sur https://ventilation-dgl.vercel.app : ton compte admin ET un compte technicien (sur ton téléphone).
+1. **Teste tes deux connexions** sur https://fluxya.vercel.app : ton compte admin ET un compte technicien (sur ton téléphone). Présente toujours cette adresse-là — plus professionnel que l'ancienne (qui fonctionne encore).
 2. **Prépare un client de démo** dans l'application (ex. « Client Démo inc. ») avec adresse et courriel — un courriel à toi, pour montrer la réception du devis en vrai.
 3. **Prépare une tâche de démo** déjà planifiée à l'agenda pour « aujourd'hui », assignée à ton compte technicien — tu gagnes 2 minutes pendant la démo.
 4. **Ferme les onglets inutiles**, mets le téléphone en mode « Ne pas déranger », charge-le.

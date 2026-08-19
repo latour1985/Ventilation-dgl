@@ -7,6 +7,8 @@
 
 **Entre :** Ventilation DGL inc. (« l'exploitant ») et ______________________ (« l'entreprise utilisatrice »)
 
+*L'« application » désigne **Fluxya**, le logiciel exploité par Ventilation DGL inc.*
+
 1. **Tes données t'appartiennent.** Tout ce que ton entreprise entre dans l'application —
    clients, employés, devis, heures, photos — reste ta propriété. En tout temps, tu peux en
    demander l'export complet (format lisible standard), et il t'est remis sans frais.
