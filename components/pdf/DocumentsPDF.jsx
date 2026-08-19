@@ -386,7 +386,7 @@ function GrillePhotosPDF({ titre, urls, legendes }) {
 }
 
 export function BonTravailPublicPDF({ bon, config }) {
-  const unites = (bon?.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim());
+  const unites = (bon?.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim() || (u.emplacement || "").trim());
   return (
     <Document>
       <Page size="A4" style={s.page}>
@@ -412,7 +412,7 @@ export function BonTravailPublicPDF({ bon, config }) {
             <Text style={[s.th, { marginBottom: 2 }]}>ÉQUIPEMENT VÉRIFIÉ</Text>
             {unites.map((u, i) => (
               <Text key={i} style={s.cell}>
-                {u.modele || "—"}{u.serie ? ` · Nº de série ${u.serie}` : ""}
+                {u.emplacement ? `${u.emplacement} — ` : ""}{u.modele || "—"}{u.serie ? ` · Nº de série ${u.serie}` : ""}
               </Text>
             ))}
           </View>

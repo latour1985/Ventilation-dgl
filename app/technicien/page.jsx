@@ -2725,12 +2725,28 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
   // (sélecteur du système), jamais le reste de la galerie.
   const inputGalerieRef = useRef(null);
 
+  // 🏷️ Les légendes existantes se chargent dès que des photos
+  // téléversées sont là (2026-08-19) : le champ sous chaque vignette les
+  // montre sans devoir ouvrir la visionneuse.
+  useEffect(() => {
+    const urls = photos.map((x) => x.urlDistante).filter(Boolean);
+    if (urls.length === 0) return;
+    listerLegendes(urls)
+      .then((l) => setLegendes((prev) => ({ ...l, ...prev })))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos.map((x) => x.urlDistante || "").join("|")]);
+
   const ajouterPhoto = (nouvellePhoto) => {
-    const nouvellesPhotos = [...photos, nouvellePhoto];
-    setPhotos(nouvellesPhotos);
-    // Action directe (ajout de photo) → on synchronise l'état global
-    // immédiatement, pas via un useEffect déclenché à chaque rendu.
-    if (onPhotosChange) onPhotosChange(nouvellesPhotos);
+    // Forme FONCTIONNELLE (2026-08-19) : l'ajout en LOT (sélection
+    // multiple de la galerie) appelle cette fonction plusieurs fois dans
+    // le même instant — avec l'ancienne forme, chaque ajout repartait de
+    // la liste périmée et seule la dernière photo survivait.
+    setPhotos((prev) => {
+      const nouvellesPhotos = [...prev, nouvellePhoto];
+      if (onPhotosChange) setTimeout(() => onPhotosChange(nouvellesPhotos), 0);
+      return nouvellesPhotos;
+    });
     // TÉLÉVERSEMENT EN ARRIÈRE-PLAN vers le stockage Supabase : l'URL
     // distante obtenue voyagera avec le travail complété (bureau, bon de
     // travail client, PDF). Hors-ligne : la photo reste locale — elle
@@ -2765,24 +2781,32 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
   };
 
   const gererFichier = async (e, origine = "camera") => {
-    const fichier = e.target.files[0];
-    if (!fichier) return;
+    // 📁 SÉLECTION MULTIPLE (retour de tests 2026-08-19) : la galerie
+    // accepte plusieurs photos d'un coup — chacune est compressée puis
+    // ajoutée ; une photo illisible n'arrête pas le reste du lot.
+    const fichiers = Array.from(e.target.files || []);
+    if (fichiers.length === 0) return;
     setEnCours(true);
     setErreur("");
-    try {
-      const resultat = await compresserImage(fichier);
-      // L'ORIGINE accompagne la photo : "camera" = prise en direct
-      // (valeur de preuve), "galerie" = importée du téléphone.
-      ajouterPhoto({ ...resultat, origine });
-    } catch (err) {
+    let echecs = 0;
+    for (const fichier of fichiers) {
+      try {
+        const resultat = await compresserImage(fichier);
+        // L'ORIGINE accompagne la photo : "camera" = prise en direct
+        // (valeur de preuve), "galerie" = importée du téléphone.
+        ajouterPhoto({ ...resultat, origine });
+      } catch {
+        echecs++;
+      }
+    }
+    if (echecs > 0) {
       // Ne jamais laisser l'interface bloquée en "chargement" si la
       // compression échoue — le technicien voit un message clair et
       // peut réessayer immédiatement.
-      setErreur(err.message || "Échec de l'ajout de la photo — réessaie.");
-    } finally {
-      setEnCours(false);
-      e.target.value = "";
+      setErreur(`${echecs} photo${echecs > 1 ? "s" : ""} n'a pas pu être ajoutée — réessaie.`);
     }
+    setEnCours(false);
+    e.target.value = "";
   };
 
   // Ouvre la capture caméra intégrée à l'app (avec demande explicite
@@ -2810,32 +2834,72 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
       </p>
       <div className="flex flex-wrap gap-2">
         {photos.map((p, i) => (
-          <div key={i} className="relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200">
-            <img
-              src={p.url}
-              alt=""
-              className="h-full w-full object-cover"
-              onClick={() => {
-                setVisionneuseIndex(i);
-                const urls = photos.map((x) => x.urlDistante).filter(Boolean);
-                if (urls.length) listerLegendes(urls).then(setLegendes).catch(() => {});
-              }}
-            />
-            {p.origine === "galerie" && (
-              <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[9px] text-white" title="Importée de la galerie">📁</span>
-            )}
-            <div className="absolute inset-x-0 bottom-0 bg-black/60 px-1 py-0.5 text-center text-[9px] text-white">
-              -{Math.round(100 - (p.tailleCompressee / p.tailleOriginale) * 100)}%
+          <div key={i} className="w-20">
+            <div className="relative h-20 w-20 overflow-hidden rounded-lg border border-slate-200">
+              {/* ⚠️ VIGNETTES GRISES (diagnostic 2026-08-19, vécu) :
+                  l'aperçu LOCAL (blob) meurt au rechargement de l'app,
+                  mais la photo TÉLÉVERSÉE existe toujours — on retombe
+                  sur son adresse serveur au lieu d'afficher du gris.
+                  Ni locale ni téléversée = photo réellement perdue,
+                  et on le DIT au lieu de faire semblant. */}
+              {p.url || p.urlDistante ? (
+                <img
+                  src={p.url || p.urlDistante}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    // Blob local mort mais copie serveur disponible :
+                    // on bascule une seule fois (pas de boucle).
+                    if (p.urlDistante && e.currentTarget.src !== p.urlDistante) e.currentTarget.src = p.urlDistante;
+                  }}
+                  onClick={() => {
+                    setVisionneuseIndex(i);
+                    const urls = photos.map((x) => x.urlDistante).filter(Boolean);
+                    if (urls.length) listerLegendes(urls).then(setLegendes).catch(() => {});
+                  }}
+                />
+              ) : (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-amber-50 px-1 text-center">
+                  <AlertTriangle size={14} className="text-amber-500" />
+                  <span className="text-[8px] font-bold leading-tight text-amber-700">Perdue — jamais téléversée</span>
+                </div>
+              )}
+              {p.origine === "galerie" && (
+                <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[9px] text-white" title="Importée de la galerie">📁</span>
+              )}
+              {/* (Le badge « -79 % » de compression a été retiré — info de
+                  développement, du bruit pour le terrain. 2026-08-19.) */}
+              {!lectureSeule && (
+                <button
+                  type="button"
+                  onClick={() => retirerPhoto(i)}
+                  aria-label="Retirer la photo"
+                  className="absolute right-0.5 top-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white active:scale-95"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
-            {!lectureSeule && (
-              <button
-                type="button"
-                onClick={() => retirerPhoto(i)}
-                aria-label="Retirer la photo"
-                className="absolute right-0.5 top-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white active:scale-95"
-              >
-                <X size={16} />
-              </button>
+            {/* 🏷️ NOM DE LA PHOTO (retour de tests 2026-08-19) : la
+                légende se tape directement sous la vignette — même
+                légende que la visionneuse, elle suit la photo jusqu'au
+                bureau et sur le bon public. Disponible dès que la photo
+                est téléversée (l'étiquette vit sur l'URL du dossier). */}
+            {p.urlDistante ? (
+              <input
+                value={legendes[p.urlDistante] || ""}
+                onChange={(e) => setLegendes((prev) => ({ ...prev, [p.urlDistante]: e.target.value }))}
+                onBlur={(e) => sauvegarderLegende(p.urlDistante, e.target.value, null).catch(() => {})}
+                placeholder="Nom…"
+                disabled={lectureSeule}
+                className="mt-0.5 w-20 rounded border border-slate-200 px-1 py-0.5 text-[10px] text-slate-700"
+              />
+            ) : (
+              <p className="mt-0.5 w-20 truncate text-center text-[9px] text-slate-300" title="Le nom pourra s'ajouter une fois la photo téléversée">
+                envoi…
+              </p>
             )}
           </div>
         ))}
@@ -2875,6 +2939,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
                 ref={inputGalerieRef}
                 type="file"
                 accept="image/*"
+                multiple
                 onChange={(e) => gererFichier(e, "galerie")}
                 className="hidden"
               />
@@ -2885,12 +2950,8 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
       {photos.length === 0 && lectureSeule && (
         <p className="mt-1 text-[11px] text-slate-400">Aucune photo.</p>
       )}
-      {photos.length > 0 && (
-        <p className="mt-1 text-[11px] text-slate-400">
-          {formatKo(photos.reduce((s, p) => s + p.tailleOriginale, 0))} →{" "}
-          {formatKo(photos.reduce((s, p) => s + p.tailleCompressee, 0))} compressé
-        </p>
-      )}
+      {/* (La ligne « 21097 Ko → 3797 Ko compressé » a été retirée —
+          demande du propriétaire, 2026-08-19.) */}
       {erreur && (
         <p className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-red-600">
           <AlertTriangle size={11} className="shrink-0" /> {erreur}
@@ -3820,7 +3881,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         // bon de travail : registre d'équipements du client et alerte
         // pour la personne des achats.
         // Liste des unites verifiees (un immeuble peut en avoir 3).
-        unites: (tache.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim()),
+        unites: (tache.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim() || (u.emplacement || "").trim()),
         pieceACommander: !!tache.pieceACommander,
         pieceRequise: tache.pieceRequise || null,
       },
@@ -4345,8 +4406,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 {(tache.unites && tache.unites.length > 0 ? tache.unites : [{ modele: "", serie: "" }]).map((u, i) => (
                   <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-2">
                     <div className="mb-1 flex items-center justify-between">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-                        Unité {i + 1}
+                      <span className="min-w-0 truncate text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                        {u.emplacement ? u.emplacement : `Unité ${i + 1}`}
                       </span>
                       {(tache.unites || []).length > 1 && (
                         <button
@@ -4379,6 +4440,21 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                         className="min-h-[48px] w-full rounded-xl border border-slate-300 px-3 text-sm"
                       />
                     </div>
+                    {/* 📍 EMPLACEMENT (retour de tests 2026-08-19) : « RTU
+                        toit côté nord », « bureau du gérant »… — dans deux
+                        ans, on saura encore QUELLE unité a été vérifiée.
+                        Suit la photo complète : bureau, bon public, PDF,
+                        registre d'équipements du client. */}
+                    <input
+                      value={u.emplacement || ""}
+                      onChange={(e) => {
+                        const liste = [...(tache.unites && tache.unites.length > 0 ? tache.unites : [{ modele: "", serie: "" }])];
+                        liste[i] = { ...liste[i], emplacement: e.target.value };
+                        onMajTache(tache.id, { unites: liste });
+                      }}
+                      placeholder="Emplacement / description (ex. : RTU toit côté nord)"
+                      className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 px-3 text-sm"
+                    />
                   </div>
                 ))}
                 <button

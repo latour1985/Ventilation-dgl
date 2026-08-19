@@ -87,7 +87,7 @@ export default function PageBonPublic({ params }) {
     );
   }
 
-  const unites = (bon.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim());
+  const unites = (bon.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim() || (u.emplacement || "").trim());
   // La liste unique pour la visionneuse : avant puis après, étiquetées.
   const photos = [
     ...bon.photosAvant.map((u, i) => ({ url: u, etiquette: `Avant ${i + 1}/${bon.photosAvant.length}` })),
@@ -172,7 +172,7 @@ export default function PageBonPublic({ params }) {
               {unites.map((u, i) => (
                 <p key={i} className="mt-1 flex items-center gap-1.5 text-xs text-slate-600">
                   <Wrench size={12} className="shrink-0 text-slate-400" />
-                  {u.modele || "—"}{u.serie ? ` · Nº de série ${u.serie}` : ""}
+                  {u.emplacement ? `${u.emplacement} — ` : ""}{u.modele || "—"}{u.serie ? ` · Nº de série ${u.serie}` : ""}
                 </p>
               ))}
             </div>

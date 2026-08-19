@@ -560,6 +560,10 @@ function recalculerTransports(planning) {
   });
   Object.values(groupes).forEach(({ date, employeId, indices }) => {
     if (indices.length === 0) return;
+    // 🤝 SOUS-TRAITANTS : jamais de transports système (retour de tests
+    // 2026-08-19) — on ne paie ni ne suit leur déplacement, leur rangée
+    // ne montre que leurs blocs de présence.
+    if (String(employeId).startsWith("st-")) return;
     const idxDebut = Math.min(...indices) - 1; // la case juste avant la 1re tâche
     const idxFin = Math.max(...indices) + 1; // la case juste après la dernière
     if (idxDebut >= 0) {
@@ -1599,7 +1603,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
   // vraie adresse de l'utilisateur : la réponse revient dans SA boîte.
   const lienCourrielBc = (p, adresse) => {
     const lignesUnites = (p.unites || [])
-      .map((u) => `- Modèle : ${u.modele || "—"} · Nº série : ${u.serie || "—"}`)
+      .map((u) => `- ${u.emplacement ? `${u.emplacement} — ` : ""}Modèle : ${u.modele || "—"} · Nº série : ${u.serie || "—"}`)
       .join("\n");
     // Livraison demandée — même contenu que le courriel envoyé par
     // l'application (date locale, jamais toISOString).
@@ -10675,16 +10679,30 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                         un rappel de fabricant. */}
                     {(() => {
                       const unites = [];
+                      // Toutes les unités de chaque bon (un immeuble peut
+                      // en avoir 3) — avant, seule la première comptait.
+                      // L'EMPLACEMENT (« RTU toit côté nord », 2026-08-19)
+                      // suit et se complète au fil des visites.
                       (bons || [])
-                        .filter((b) => b.client === c.nom && (b.modeleUnite || b.serieUnite))
+                        .filter((b) => b.client === c.nom)
                         .forEach((b) => {
-                          const cle = `${b.modeleUnite}|${b.serieUnite}`;
-                          const existe = unites.find((u) => `${u.modele}|${u.serie}` === cle);
-                          if (existe) {
-                            if (b.date > existe.derniereVisite) existe.derniereVisite = b.date;
-                          } else {
-                            unites.push({ modele: b.modeleUnite, serie: b.serieUnite, derniereVisite: b.date });
-                          }
+                          const listeU =
+                            Array.isArray(b.unites) && b.unites.length > 0
+                              ? b.unites
+                              : b.modeleUnite || b.serieUnite
+                                ? [{ modele: b.modeleUnite, serie: b.serieUnite }]
+                                : [];
+                          listeU.forEach((ub) => {
+                            if (!(ub.modele || ub.serie || ub.emplacement)) return;
+                            const cle = `${ub.modele || ""}|${ub.serie || ""}`;
+                            const existe = unites.find((u) => `${u.modele || ""}|${u.serie || ""}` === cle);
+                            if (existe) {
+                              if (b.date > existe.derniereVisite) existe.derniereVisite = b.date;
+                              if (ub.emplacement && !existe.emplacement) existe.emplacement = ub.emplacement;
+                            } else {
+                              unites.push({ modele: ub.modele, serie: ub.serie, emplacement: ub.emplacement || "", derniereVisite: b.date });
+                            }
+                          });
                         });
                       if (unites.length === 0) return null;
                       return (
@@ -10696,6 +10714,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                             {unites.map((u, i) => (
                               <div key={i} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1">
                                 <span className="text-[11px] font-bold text-slate-700">
+                                  {u.emplacement ? <span className="mr-1.5 rounded bg-slate-200 px-1 py-0.5 text-[10px] font-bold text-slate-600">📍 {u.emplacement}</span> : null}
                                   {u.modele || "Modèle non relevé"}
                                   {u.serie ? <span className="ml-1.5 font-normal text-slate-500">Nº {u.serie}</span> : null}
                                 </span>
