@@ -3,7 +3,7 @@
 > Ce fichier est le **briefing d'embarquement** pour une session de travail
 > sur un nouvel ordinateur (ou après une longue pause). Il résume ce qui ne
 > se devine pas en lisant le code. Mis à jour aux grandes étapes.
-> Dernière mise à jour : 2026-08-15.
+> Dernière mise à jour : 2026-08-19.
 
 ## Qui / quoi
 
@@ -222,3 +222,54 @@ ses Connexions), QuickBooks étant le premier adaptateur (fait, Sandbox).
   cache-écran). Tester les clés par le circuit réel, jamais par relecture du coffre.
 - Le propriétaire copie parfois le texte masqué « [SENSITIVE] » au lieu d'une vraie valeur —
   toujours vérifier le préfixe attendu (re_ pour Resend, etc.) avant de conclure.
+
+### Travaux des 2026-08-17 → 19 — TOUS PUBLIÉS (résumé pour vérification)
+- **MARQUE PRODUIT : FLUXYA** (spirale teal #134e4a, components/Logo.jsx) — le chrome de
+  l''application ne dit plus « DGL » ; les documents clients gardent le logo de L''ENTREPRISE
+  + « Propulsé par Fluxya » discret. PWA complète (manifest, icônes, plein écran) et
+  **notifications push** (sw.js, table push_abonnements SQL 74, clés VAPID dans Vercel) :
+  nouvelle tâche assignée, matériel commandé, fermeture d''équipe, « je pars en premier ».
+- **FERMETURE D''ÉQUIPE (2+ techniciens)** : à la fermeture, question « est-ce que toute
+  l''équipe a terminé ? » — Oui : un seul bon signé, chaque coéquipier confirme SES heures
+  sur son téléphone (exactes = automatique ; ajustées = validation admin, badge ⏳).
+  Bouton « Je pars en premier » (heures seulement, le dernier fait signer, push envoyé).
+  Route serveur /api/equipe/fermeture (RLS vérifiée par sonde : un tech n''écrit jamais
+  chez un collègue). Garde-signature : jamais de bon non signé créé par le rattrapage.
+- **FERMER DEPUIS L''AGENDA (oubli)** : l''admin déclare début/fin pour un technicien SANS
+  heures — paie au taux figé, carte fermée sur son téléphone avec avis, facturation en
+  OPTION (bon sans signature, badgé). Jamais offert si des heures existent déjà.
+- **AGENDA** : 3 sections repliables (Équipe terrain / Personnel de bureau / SOUS-TRAITANTS
+  — snippet 75 : fiches ST, statut Présent/Pas venu, coût réel au projet, liste
+  « sous-traitance à facturer au client ») ; déplacement des blocs par glisser-déposer
+  (heure/technicien/jour — même chemin que la modale, tâches travaillées protégées) ;
+  bloc ROSE pulsé « en cours » en Realtime ; blocs replacés aux heures RÉELLES une fois
+  terminés ; fin du bogue de minuit (jours ≥ 1 partait à 00:00).
+- **TÂCHES** : contact SUR PLACE par tâche (carnet de contacts par client, SQL 72) affiché
+  au technicien avec bouton d''appel ; téléphone du client transmis ; secteur CCQ
+  obligatoire sans présélection ; choix 💰/🤝 par technicien supplémentaire À LA CRÉATION
+  (mémorisé même sans date via equipePrevue) ; devis filtrés par client + numéro manuel ;
+  client remis à zéro après création ; « Travail au shop » (bureau + bouton technicien).
+- **CLIENTS** : personne OU entreprise (l''un des deux suffit), téléphone obligatoire,
+  crayon ✏️ de modification directement dans Nouvelle tâche, adresses de travaux
+  enregistrées au dossier (anti-doublon), app./casier partout, listes de suggestions
+  protégées contre les noms-fleuves.
+- **FACTURES/DEVIS — INCIDENT MAJEUR RÉSOLU** : la colonne devis_app.qbo_estimate_id
+  (snippet 48) n''avait jamais été créée en prod → TOUS les devis du 15 au 17 août
+  échouaient à l''enregistrement en silence (liens morts DEV-3509+). Correctif : reprise
+  sans la colonne + vraie erreur au journal + snippet 73 exécuté. Vérifié en prod.
+- **JOURNAL D''AUDIT (Loi 25) RÉPARÉ** : il n''écrivait RIEN en base depuis le début
+  (colonnes inexistantes + RLS scellée, échecs avalés). Route /api/journal (clé service,
+  auteur dérivé du jeton, lecture bureau seulement — testée contre l''auto-promotion de
+  rôle). « Note et modalités de paiement » (Paramètres) branchée sur les factures
+  QuickBooks (CustomerMemo) et les courriels de demande de paiement.
+- **HEURES DE LA SEMAINE** : refonte lisibilité (h min, colonnes vides masquées, détail en
+  fenêtre chronologique, zébrures), correcteur passe-minuit, barre de défilement collante,
+  bogue d''en-têtes décalées corrigé.
+- **Snippets SQL passés jusqu''au nº 75** (72 contacts · 73 qbo_estimate_id · 74 push ·
+  75 sous-traitants). Méthode de vérification : sondes empiriques en prod (comptes
+  jetables supprimés après), revue de code multi-angles le 17 (9 bogues corrigés).
+- **RESTE de la liste des 11 points** : file hors-ligne renforcée · export sauvegarde
+  hebdo · squelettes de chargement · polissage navigation · tour guidé (avant pionniers)
+  · découpage grosse page (pause). Backlog : facturation maison + crédits + exports
+  comptable (plan approuvé) · bascule QuickBooks production · RLS phase 2 · OTP 86400 à
+  confirmer · fiche client « texte ProgressionLive » à effacer (attente du OK).

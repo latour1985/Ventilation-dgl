@@ -14328,10 +14328,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     const groupe = estBureauSec ? groupeBureau : groupeST;
     const nbEntrees = entreesDuJourPour(groupe);
     return (
+      // ⚠️ COLLANT GAUCHE/DROITE (retour de tests 2026-08-19) : cette
+      // rangée vit DANS la grille à défilement horizontal — sans sticky,
+      // « Personnel de bureau » et « Sous-traitants » partaient hors
+      // écran dès qu'on défilait vers les heures d'après-midi.
       <div key={`entete-${type}`} className="flex items-center justify-between gap-2 border-t-2 border-slate-200 bg-slate-100/80 px-3 py-1.5">
         <button
           onClick={() => basculerSection(type)}
-          className="flex min-w-0 items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-600"
+          className="sticky left-3 z-[1] flex min-w-0 items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-600"
         >
           <ChevronDown size={13} className={`shrink-0 transition-transform ${ouvert ? "rotate-180" : ""}`} />
           {estBureauSec ? "🗂️ Personnel de bureau" : "🤝 Sous-traitants"} ({groupe.length})
@@ -14344,7 +14348,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         {!estBureauSec && !lectureSeule && (
           <button
             onClick={() => setModalFicheST({ nom: "", specialite: "", telephone: "", note: "", clientId: "" })}
-            className="shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600"
+            className="sticky right-3 z-[1] shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600"
           >
             ➕ Sous-traitant
           </button>
