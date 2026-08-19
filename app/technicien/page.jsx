@@ -3564,6 +3564,15 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       setModalEquipe(true);
       return;
     }
+    // GARDE (audit 2026-08-18) : les portes multi-jours (« dernier jour
+    // prévu », « il reste des jours ») arrivaient ici SANS passer par le
+    // bouton principal — un bon pouvait partir sans description, photo
+    // ni signature. Si les exigences manquent, on descend au formulaire
+    // (la liste des éléments requis s'y affiche) au lieu d'envoyer.
+    if (!peutEnvoyer) {
+      refSignature.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     demarrerEnvoi();
   };
 
@@ -3621,7 +3630,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     onMajTache(tache.id, { equipeTerminee: true });
     const signatureOk =
       clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions);
-    if (signatureOk) demarrerEnvoi();
+    // Description et photo « après » restent exigées aussi (la question
+    // d'équipe peut maintenant arriver par les portes multi-jours, qui
+    // ne passaient pas par le bouton principal — audit 2026-08-18).
+    if (signatureOk && !descriptionManquante && !photoApresManquante) demarrerEnvoi();
     else refSignature.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 

@@ -8343,7 +8343,7 @@ function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tau
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
-              <p className="mt-1 text-[10px] text-slate-400">Créer la fiche règle aussi les ACCÈS de ce compte (type + métier). Ajustements fins : « Gestion des accès ».</p>
+              <p className="mt-1 text-[10px] text-slate-400">Créer la fiche règle aussi les ACCÈS de ce compte (type + métier). Ajustements fins : bouton Modifier de la fiche → onglet « 🔑 Accès ».</p>
             </div>
 
             <div className="grid grid-cols-2 gap-2">

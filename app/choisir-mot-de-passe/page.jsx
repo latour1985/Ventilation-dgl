@@ -18,6 +18,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { deverrouillerApresReinitialisation } from "@/lib/connexionSurveillee";
+import Logo from "@/components/Logo";
 
 export default function ChoisirMotDePasse() {
   const [etat, setEtat] = useState("verification"); // verification | a_confirmer | pret | verification_en_cours | enregistrement | reussi | sans_session
@@ -99,7 +100,9 @@ export default function ChoisirMotDePasse() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4">
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-sm">
-        <p className="text-lg font-extrabold text-slate-900">Ventilation DGL inc.</p>
+        {/* FLUXYA — marque produit (oubli du rebranding, corrigé à
+            l'audit du 2026-08-18). */}
+        <Logo variant="compact" />
 
         {etat === "verification" && <p className="mt-3 text-sm text-slate-500">Un instant…</p>}
 
