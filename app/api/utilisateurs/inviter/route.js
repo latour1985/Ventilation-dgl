@@ -51,30 +51,55 @@ async function roleAppelant(admin, utilisateur) {
   return ROLES_CONNUS.includes(propre) ? propre : "Admin principal";
 }
 
+// GABARIT DU COURRIEL — aux couleurs FLUXYA (marque produit, rebranding
+// 2026-08-18) ; l'employeur (Ventilation DGL inc.) reste nommé dans le
+// texte. Contient la marche à suivre d'INSTALLATION Android/iPhone en 3
+// étapes : constat terrain du 2026-08-18, une astuce d'une ligne ne
+// suffit pas à un technicien peu à l'aise avec son téléphone.
 function gabaritInvitation({ nom, lien, nouveau }) {
+  const etapeInstallation = `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;background:#f0fdfa;border-radius:10px;">
+          <tr><td style="padding:14px 16px;">
+            <p style="margin:0 0 8px;color:#134e4a;font-size:13px;font-weight:bold;">2️⃣ Installe l'application sur ton téléphone</p>
+            <p style="margin:0 0 8px;color:#334155;font-size:13px;line-height:1.6;">
+              Ouvre cette adresse dans le navigateur de ton téléphone :<br/>
+              📱 <a href="https://ventilation-dgl.vercel.app/technicien" style="color:#0d9488;font-weight:bold;">ventilation-dgl.vercel.app/technicien</a>
+            </p>
+            <p style="margin:0 0 6px;color:#334155;font-size:12px;line-height:1.6;">
+              <strong>Sur Android (Chrome)</strong> : touche les 3 petits points ⋮ en haut à droite,
+              puis « Ajouter à l'écran d'accueil » (ou « Installer l'application »).
+            </p>
+            <p style="margin:0;color:#334155;font-size:12px;line-height:1.6;">
+              <strong>Sur iPhone (Safari)</strong> : touche le bouton Partager
+              (le carré avec la flèche vers le haut), puis « Sur l'écran d'accueil ».
+            </p>
+          </td></tr>
+        </table>
+        <p style="margin:0 0 16px;color:#334155;font-size:13px;line-height:1.6;">
+          3️⃣ Ouvre l'application <strong>Fluxya</strong> depuis ton écran d'accueil et
+          connecte-toi avec ton courriel et ton mot de passe. C'est tout!
+        </p>`;
   return `<!doctype html><html lang="fr"><body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 12px;"><tr><td align="center">
     <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
-      <tr><td style="background:#131B2E;padding:18px 24px;">
-        <span style="color:#ffffff;font-size:18px;font-weight:bold;">Ventilation DGL inc.</span>
+      <tr><td style="background:#134e4a;padding:18px 24px;">
+        <span style="color:#ffffff;font-size:20px;font-weight:bold;">Fluxya</span>
+        <span style="color:#99f6e4;font-size:12px;"> · l'application de Ventilation DGL inc.</span>
       </td></tr>
       <tr><td style="padding:24px;">
         <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">Bonjour${nom ? ` ${nom}` : ""},</p>
         <p style="margin:0 0 16px;color:#334155;font-size:14px;line-height:1.5;">
           ${nouveau
-            ? "Ton accès à l'application de gestion de Ventilation DGL est prêt. Clique le bouton ci-dessous pour choisir ton mot de passe :"
-            : "Voici ton lien pour réinitialiser ton mot de passe de l'application Ventilation DGL :"}
+            ? "Ton accès à Fluxya, l'application de gestion de Ventilation DGL inc., est prêt. Voici les 3 étapes pour commencer :"
+            : "Voici ton lien pour réinitialiser ton mot de passe de l'application Fluxya (Ventilation DGL inc.) :"}
         </p>
+        <p style="margin:0 0 8px;color:#134e4a;font-size:13px;font-weight:bold;">${nouveau ? "1️⃣ Choisis ton mot de passe" : ""}</p>
         <p style="margin:0 0 16px;text-align:center;">
-          <a href="${lien}" style="display:inline-block;background:#131B2E;color:#ffffff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:bold;font-size:14px;">
+          <a href="${lien}" style="display:inline-block;background:#134e4a;color:#ffffff;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:bold;font-size:14px;">
             Choisir mon mot de passe
           </a>
         </p>
-        <p style="margin:0 0 12px;color:#334155;font-size:13px;line-height:1.6;">
-          Ensuite, connecte-toi en tout temps avec ton courriel et ce mot de passe, à cette adresse :<br/>
-          📱 <a href="https://ventilation-dgl.vercel.app/technicien" style="color:#131B2E;font-weight:bold;">ventilation-dgl.vercel.app/technicien</a><br/>
-          <span style="color:#64748b;font-size:12px;">Astuce : ouvre cette adresse sur ton téléphone et ajoute-la à ton écran d'accueil — elle se comportera comme une application.</span>
-        </p>
+        ${etapeInstallation}
         <p style="margin:0;color:#64748b;font-size:12px;line-height:1.5;">
           Le lien du bouton est personnel et expire — s'il ne fonctionne plus, demande une nouvelle
           invitation à l'administration.
@@ -185,8 +210,8 @@ export async function POST(request) {
         from: process.env.COURRIEL_EXPEDITEUR || "Ventilation DGL inc. <info@ventilationdgl.com>",
         to: [courriel],
         subject: nouveau
-          ? "Ton accès à l'application Ventilation DGL — choisis ton mot de passe"
-          : "Réinitialisation de ton mot de passe — Ventilation DGL",
+          ? "Ton accès à l'application Fluxya (Ventilation DGL) — choisis ton mot de passe"
+          : "Réinitialisation de ton mot de passe — Fluxya (Ventilation DGL)",
         html: gabaritInvitation({ nom, lien, nouveau }),
         reply_to: process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
       }),
