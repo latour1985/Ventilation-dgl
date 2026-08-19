@@ -506,6 +506,13 @@ function nomAffichageClient(c) {
   return nom || entreprise;
 }
 
+// Heure locale « HH:MM » d'un horodatage — pour afficher les heures
+// RÉELLES chronométrées sur les blocs terminés de l'agenda (2026-08-19).
+function heureLocaleHHMM(horodatage) {
+  const d = new Date(horodatage);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 // Étiquette d'une adresse de chantier — avec l'appartement s'il existe.
 function libelleAdresse(a) {
   if (!a) return "";
@@ -16639,6 +16646,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   seg.index = iDeb;
                   seg.fin = iFin;
                   seg.span = iFin - iDeb + 1;
+                  // Conservé sur le segment : l'étiquette du bloc affiche
+                  // les heures RÉELLES (début → fin · total pointé).
+                  seg.reel = reel;
                 });
                 // 🚚 LES TRANSPORTS SYSTÈME SUIVENT LE MOUVEMENT (retour
                 // de tests 2026-08-19) : une tâche replacée à son vrai
@@ -16783,7 +16793,17 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
                               {seg.tache.titre || seg.tache.clientNom}
-                              {spanAffiche > 1 && <span className="ml-1 opacity-60">· {spanAffiche} h</span>}
+                              {/* ⏱️ Tâche TERMINÉE : les heures RÉELLES
+                                  chronométrées remplacent la durée
+                                  planifiée — début → fin · total pointé
+                                  (demande du propriétaire, 2026-08-19). */}
+                              {seg.reel && seg.reel.debutReel && seg.reel.finReelle ? (
+                                <span className="ml-1 font-bold text-emerald-800">
+                                  · {heureLocaleHHMM(seg.reel.debutReel)} → {heureLocaleHHMM(seg.reel.finReelle)} · {(Number(seg.reel.heures) || 0).toFixed(2)} h
+                                </span>
+                              ) : (
+                                spanAffiche > 1 && <span className="ml-1 opacity-60">· {spanAffiche} h</span>
+                              )}
                               {seg.tache.description && spanAffiche >= 2 && (
                                 <span className="mt-0.5 line-clamp-2 text-[8px] font-normal leading-tight opacity-75">
                                   {seg.tache.description}
@@ -16934,6 +16954,25 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                                 {tache.est_tache_systeme && <Car size={9} className="mt-px shrink-0" />}
                                 <span className="min-w-0">
                                   {tache.titre || tache.clientNom}
+                                  {/* ⏱️ Heures RÉELLES du bloc terminé —
+                                      début → fin · total pointé, pour CE
+                                      technicien et CETTE journée. */}
+                                  {(() => {
+                                    const r = (travaux || []).find(
+                                      (x) =>
+                                        x.supabase &&
+                                        cleTacheDesHeures(x.tacheId) === tache.id &&
+                                        (x.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
+                                        x.date === dateISO(d) &&
+                                        x.debutReel &&
+                                        x.finReelle
+                                    );
+                                    return r ? (
+                                      <span className="ml-1 font-bold text-emerald-800">
+                                        · {heureLocaleHHMM(r.debutReel)} → {heureLocaleHHMM(r.finReelle)} · {(Number(r.heures) || 0).toFixed(2)} h
+                                      </span>
+                                    ) : null;
+                                  })()}
                                   {tache.description && (
                                     <span className="mt-0.5 line-clamp-2 text-[8px] font-normal leading-tight opacity-75">
                                       {tache.description}
