@@ -3746,6 +3746,29 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
     { parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, total: 0 }
   );
 
+  // 🕐 HORLOGE STANDARD (demande du propriétaire, 2026-08-19) : à
+  // l'écran « 1 h 22 » se lit mieux que « 1.37 h ». L'export « Copier
+  // pour la paie », lui, garde les DÉCIMALES — c'est ce que les
+  // logiciels de paie attendent.
+  const hM = (h) => {
+    const totalMin = Math.round(Math.abs(Number(h) || 0) * 60);
+    return `${Number(h) < 0 ? "-" : ""}${Math.floor(totalMin / 60)} h ${String(totalMin % 60).padStart(2, "0")}`;
+  };
+  // COLONNES VIDES MASQUÉES (2026-08-19) : la moitié des colonnes
+  // n'affichait que des « — ». Une colonne n'apparaît que si au moins
+  // un technicien y a des heures cette semaine. (Chantier, Transport et
+  // TOTAL restent toujours là.)
+  const colVisibles = {
+    ccq: Math.abs(totauxEquipe.transportCcq) > 0.004,
+    admin: Math.abs(totauxEquipe.administratif) > 0.004,
+    divers: Math.abs(totauxEquipe.divers) > 0.004,
+    diner: Math.abs(totauxEquipe.diner) > 0.004,
+    nuit: Math.abs(totauxEquipe.nuit) > 0.004,
+    weekend: Math.abs(totauxEquipe.weekend) > 0.004,
+    report: Math.abs(totauxEquipe.report) > 0.004,
+  };
+  const nbColonnes = 11 + Object.values(colVisibles).filter(Boolean).length;
+
   // Copie le tableau en format tabulé — prêt à coller dans Excel ou
   // dans le logiciel de paie.
   // EXPORT DE PAIE — refuse de copier en SILENCE s'il reste une journée
@@ -3977,7 +4000,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                       <p key={t.id} className="text-[11px] text-slate-700">
                         <span className="tabular-nums text-slate-400">{t.date}</span> · <span className="font-bold">{t.employeNom || t.employeEmail}</span> · {t.titre} :{" "}
                         <span className="font-bold tabular-nums">
-                          {(Number(t.heures) || 0).toFixed(2)} h → {(Number(t.heuresProposees) || 0).toFixed(2)} h
+                          {hM(t.heures)} → {hM(t.heuresProposees)}
                         </span>
                         {t.debutPropose && t.finPropose && (
                           <span className="tabular-nums text-slate-400"> ({heureLocaleDe(t.debutPropose)} → {heureLocaleDe(t.finPropose)})</span>
@@ -4030,26 +4053,28 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                   ))}
                   <th className="px-2 py-2 text-right font-bold text-slate-500">Chantier</th>
                   <th className="px-2 py-2 text-right font-bold text-slate-500">Transport</th>
-                  <th className="px-2 py-2 text-right font-bold text-slate-500">Transport journalier</th>
-                  <th className="px-2 py-2 text-right font-bold text-slate-500">Dîner</th>
-                  <th className="px-2 py-2 text-right font-bold text-indigo-500">🌙 Nuit</th>
-                  <th className="px-2 py-2 text-right font-bold text-sky-600">Sam/Dim</th>
-                  <th className="px-2 py-2 text-right font-bold text-purple-600">Report ±</th>
-                  <th className="px-3 py-2 text-right font-extrabold text-slate-700">TOTAL</th>
+                  {colVisibles.ccq && <th className="px-2 py-2 text-right font-bold text-slate-500">Transport journalier</th>}
+                  {colVisibles.admin && <th className="px-2 py-2 text-right font-bold text-sky-600">Administratif</th>}
+                  {colVisibles.divers && <th className="px-2 py-2 text-right font-bold text-stone-500">Divers</th>}
+                  {colVisibles.diner && <th className="px-2 py-2 text-right font-bold text-rose-500">Dîner</th>}
+                  {colVisibles.nuit && <th className="px-2 py-2 text-right font-bold text-indigo-500">🌙 Nuit</th>}
+                  {colVisibles.weekend && <th className="px-2 py-2 text-right font-bold text-sky-600">Sam/Dim</th>}
+                  {colVisibles.report && <th className="px-2 py-2 text-right font-bold text-purple-600">Report ±</th>}
+                  <th className="bg-slate-100 px-3 py-2 text-right font-extrabold text-slate-700">TOTAL</th>
                 </tr>
               </thead>
               <tbody>
-                {employesSemaine.map((e) => (
+                {employesSemaine.map((e, idxEmp) => (
                   <React.Fragment key={e.email}>
                     <tr
                       onClick={() => setDetailEmail(detailEmail === e.email ? null : e.email)}
-                      className="group cursor-pointer border-b border-slate-100 hover:bg-slate-50"
+                      className={`group cursor-pointer border-b border-slate-100 hover:bg-slate-50 ${idxEmp % 2 === 1 ? "bg-slate-50/60" : ""}`}
                       title="Cliquer pour voir le détail des tâches"
                     >
                       {/* Nom figé à gauche. Le survol de la ligne doit être
                           repris ici (group-hover) : le fond opaque de la
                           cellule masquerait sinon le hover de la ligne. */}
-                      <td className="sticky left-0 z-10 border-r border-slate-100 bg-white px-3 py-2.5 group-hover:bg-slate-50">
+                      <td className={`sticky left-0 z-10 border-r border-slate-100 ${idxEmp % 2 === 1 ? "bg-slate-50" : "bg-white"} px-3 py-2.5 group-hover:bg-slate-50`}>
                         <p className="font-bold text-slate-800">{e.nom}</p>
                         <p className="text-[10px] text-slate-400">{e.email}</p>
                       </td>
@@ -4090,72 +4115,90 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                               actif ? "bg-blue-100 font-extrabold text-blue-700" : "text-slate-600"
                             }`}
                           >
-                            {e.parJour[iso] ? e.parJour[iso].toFixed(1) : <span className="text-slate-200">—</span>}
+                            {e.parJour[iso] ? hM(e.parJour[iso]) : <span className="text-slate-200">—</span>}
                           </td>
                         );
                       })}
                       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
                         {(e.residentielChantier || 0) > 0.001 ? (
                           <>
-                            <span className="block font-bold">🏢 {(e.chantier - e.residentielChantier).toFixed(2)} h</span>
-                            <span className="block font-bold text-emerald-700" title="Heures de chantier payées au taux RÉSIDENTIEL">🏠 {e.residentielChantier.toFixed(2)} h</span>
+                            <span className="block font-bold">🏢 {hM(e.chantier - e.residentielChantier)}</span>
+                            <span className="block font-bold text-emerald-700" title="Heures de chantier payées au taux RÉSIDENTIEL">🏠 {hM(e.residentielChantier)}</span>
                           </>
+                        ) : e.chantier > 0.004 ? (
+                          hM(e.chantier)
                         ) : (
-                          `${e.chantier.toFixed(2)} h`
+                          <span className="text-slate-200">—</span>
                         )}
                       </td>
                       <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">
                         {(e.residentielTransport || 0) > 0.001 ? (
                           <>
-                            <span className="block font-bold">🏢 {(e.transport - e.residentielTransport).toFixed(2)} h</span>
-                            <span className="block font-bold text-emerald-700" title="Transports payés au taux RÉSIDENTIEL">🏠 {e.residentielTransport.toFixed(2)} h</span>
+                            <span className="block font-bold">🏢 {hM(e.transport - e.residentielTransport)}</span>
+                            <span className="block font-bold text-emerald-700" title="Transports payés au taux RÉSIDENTIEL">🏠 {hM(e.residentielTransport)}</span>
                           </>
+                        ) : e.transport > 0.004 ? (
+                          hM(e.transport)
                         ) : (
-                          `${e.transport.toFixed(2)} h`
+                          <span className="text-slate-200">—</span>
                         )}
                       </td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transportCcq.toFixed(2)} h</td>
+                      {colVisibles.ccq && (
+                        <td className="px-2 py-2.5 text-right tabular-nums text-slate-600">{e.transportCcq > 0.004 ? hM(e.transportCcq) : <span className="text-slate-200">—</span>}</td>
+                      )}
                       {/* ADMINISTRATIF cliquable : ouvre le detail des
                           visites (quel client, quel projet on est alle
                           voir) — c est la question qu on se pose en
                           regardant un cumul d heures administratives. */}
+                      {colVisibles.admin && (
                       <td
                         onClick={(ev) => { if (e.administratif > 0) { ev.stopPropagation(); setDetailAdmin(detailAdmin === e.email ? null : e.email); } }}
                         title={e.administratif > 0 ? "Voir les visites" : undefined}
-                        className={`px-2 py-2.5 text-right tabular-nums ${e.administratif > 0 ? "cursor-pointer font-bold text-sky-700 hover:bg-sky-50" : "text-slate-300"}`}
-                      >{e.administratif > 0 ? `${e.administratif.toFixed(2)} h` : "—"}</td>
-                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.divers > 0 ? "font-bold text-stone-600" : "text-slate-300"}`}>{e.divers > 0 ? `${e.divers.toFixed(2)} h` : "—"}</td>
-                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.diner < 0 ? "font-bold text-rose-600" : "text-slate-300"}`}>
-                        {e.diner < 0 ? `${e.diner.toFixed(2)} h` : "—"}
+                        className={`px-2 py-2.5 text-right tabular-nums ${e.administratif > 0 ? "cursor-pointer font-bold text-sky-700 hover:bg-sky-50" : "text-slate-200"}`}
+                      >{e.administratif > 0 ? hM(e.administratif) : "—"}</td>
+                      )}
+                      {colVisibles.divers && (
+                        <td className={`px-2 py-2.5 text-right tabular-nums ${e.divers > 0 ? "font-bold text-stone-600" : "text-slate-200"}`}>{e.divers > 0 ? hM(e.divers) : "—"}</td>
+                      )}
+                      {colVisibles.diner && (
+                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.diner < 0 ? "font-bold text-rose-600" : "text-slate-200"}`}>
+                        {e.diner < 0 ? hM(e.diner) : "—"}
                       </td>
-                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.nuit !== 0 ? "font-bold text-indigo-600" : "text-slate-300"}`}>
-                        {e.nuit !== 0 ? `${e.nuit.toFixed(2)} h` : "—"}
+                      )}
+                      {colVisibles.nuit && (
+                      <td className={`px-2 py-2.5 text-right tabular-nums ${e.nuit !== 0 ? "font-bold text-indigo-600" : "text-slate-200"}`}>
+                        {e.nuit !== 0 ? hM(e.nuit) : "—"}
                       </td>
+                      )}
+                      {colVisibles.weekend && (
                       <td
-                        className={`px-2 py-2.5 text-right tabular-nums ${e.weekend !== 0 ? "font-bold text-sky-600" : "text-slate-300"}`}
+                        className={`px-2 py-2.5 text-right tabular-nums ${e.weekend !== 0 ? "font-bold text-sky-600" : "text-slate-200"}`}
                       >
-                        {e.weekend !== 0 ? `${e.weekend.toFixed(2)} h` : "—"}
+                        {e.weekend !== 0 ? hM(e.weekend) : "—"}
                       </td>
+                      )}
+                      {colVisibles.report && (
                       <td
-                        className={`px-2 py-2.5 text-right tabular-nums ${e.report !== 0 ? "font-bold text-purple-600" : "text-slate-300"}`}
+                        className={`px-2 py-2.5 text-right tabular-nums ${e.report !== 0 ? "font-bold text-purple-600" : "text-slate-200"}`}
                         title={
                           e.report !== 0
                             ? e.reportDetails.map((r) => `${r.date} · ${r.titre} : ${r.delta > 0 ? "+" : ""}${r.delta.toFixed(2)} h`).join("\n")
                             : undefined
                         }
                       >
-                        {e.report !== 0 ? `${e.report > 0 ? "+" : ""}${e.report.toFixed(2)} h` : "—"}
+                        {e.report !== 0 ? `${e.report > 0 ? "+" : ""}${hM(e.report)}` : "—"}
                       </td>
-                      <td className="px-3 py-2.5 text-right">
-                        <span className="font-extrabold tabular-nums text-slate-900">{(e.total + e.report).toFixed(2)} h</span>
+                      )}
+                      <td className="bg-slate-100/60 px-3 py-2.5 text-right">
+                        <span className="font-extrabold tabular-nums text-slate-900">{hM(e.total + e.report)}</span>
                         {e.report !== 0 && (
                           <p className="text-[10px] font-bold tabular-nums text-purple-600">
-                            {e.total.toFixed(2)} trav. {e.report > 0 ? "+" : ""}{e.report.toFixed(2)} report
+                            {hM(e.total)} trav. {e.report > 0 ? "+" : ""}{hM(e.report)} report
                           </p>
                         )}
                         {e.supplementaires > 0 && (
                           <p className="text-[10px] font-bold text-amber-600">
-                            {seuilSupp.toFixed(2).replace(".", ",")} rég. + {e.supplementaires.toFixed(2)} sup.
+                            {hM(seuilSupp)} rég. + {hM(e.supplementaires)} sup.
                           </p>
                         )}
                       </td>
@@ -4169,9 +4212,9 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                       if (visites.length === 0) return null;
                       return (
                         <tr className="border-b-2 border-sky-200 bg-sky-50">
-                          <td colSpan={18} className="px-4 py-3">
+                          <td colSpan={nbColonnes} className="px-4 py-3">
                             <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wide text-sky-700">
-                              🔎 Heures administratives de {e.nom} — {e.administratif.toFixed(2)} h
+                              🔎 Heures administratives de {e.nom} — {hM(e.administratif)}
                             </p>
                             <div className="space-y-1">
                               {visites.slice().sort((a, b) => a.date.localeCompare(b.date)).map((t) => {
@@ -4184,7 +4227,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                                       {projet ? <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">{projet.nom}</span> : null}
                                     </span>
                                     <span className="shrink-0 text-[11px] tabular-nums text-slate-500">
-                                      {t.date} · <span className="font-bold text-slate-700">{(Number(t.heures) || 0).toFixed(2)} h</span>
+                                      {t.date} · <span className="font-bold text-slate-700">{hM(t.heures)}</span>
                                     </span>
                                   </div>
                                 );
@@ -4199,211 +4242,9 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                       );
                     })()}
 
-                    {/* DÉTAIL D'UNE JOURNÉE — ouvert au clic sur la cellule
-                        d'un jour : déroulement de la journée avec une
-                        étiquette de catégorie par entrée + récapitulatif. */}
-                    {detailJour?.email === e.email && (() => {
-                      const iso = detailJour.iso;
-                      // Une journée BLOQUÉE n'est pas dans `details` (elle
-                      // est exclue des totaux) — mais l'admin doit voir
-                      // ses lignes pour les corriger. On les reprend
-                      // alors directement dans les lignes brutes.
-                      const jourBloqueIci = estBloque(e.email, iso);
-                      const lignesJour = jourBloqueIci
-                        ? lignesSemaineBrutes.filter((t) => t.date === iso && (t.employeEmail || "").toLowerCase() === e.email)
-                        : e.details.filter((t) => t.date === iso);
-                      if (lignesJour.length === 0) return null;
-                      // Ordre lisible : Transport Début en premier, Fin en
-                      // dernier (pas d'heure exacte sur les lignes — seulement
-                      // des durées par tâche).
-                      const rang = (t) => (/début/i.test(t.titre || "") ? 0 : /fin de journée/i.test(t.titre || "") ? 2 : 1);
-                      const ordonnees = lignesJour.slice().sort((a, b) => rang(a) - rang(b));
-                      const catDe = (t) =>
-                        estLunch(t)
-                          ? { label: "DÎNER", cls: "bg-rose-100 text-rose-700" }
-                          : estCcq(t)
-                          ? { label: "TRANSP. JOURNALIER", cls: "bg-amber-100 text-amber-700" }
-                          : t.estTransport
-                          ? { label: t.secteur === "residentiel" ? "TRANSPORT 🏠" : "TRANSPORT", cls: "bg-slate-200 text-slate-600" }
-                          : t.secteur === "residentiel"
-                          ? { label: "CHANTIER 🏠 RÉS.", cls: "bg-emerald-200 text-emerald-800" }
-                          : { label: "CHANTIER", cls: "bg-emerald-100 text-emerald-700" };
-                      const tj = lignesJour.reduce(
-                        (acc, t) => {
-                          const h = Number(t.heures) || 0;
-                          if (estLunch(t)) acc.diner += h;
-                          else if (estCcq(t)) acc.ccq += h;
-                          else if (t.estTransport) acc.transport += h;
-                          else acc.chantier += h;
-                          acc.total += h;
-                          return acc;
-                        },
-                        { chantier: 0, transport: 0, ccq: 0, diner: 0, total: 0 }
-                      );
-                      const labelJour = new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
-                      return (
-                        <tr className="border-b-2 border-blue-200 bg-blue-50">
-                          <td colSpan={18} className="px-4 py-3">
-                            <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-blue-700">
-                              📅 <span className="capitalize">{labelJour}</span> — journée de {e.nom} ({tj.total.toFixed(2)} h)
-                              {(() => {
-                                // Badge de classification de la journée (règle Nuit/Sam-Dim).
-                                const classe = classificationJournee(lignesJour, iso);
-                                if (classe === "nuit")
-                                  return <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] text-indigo-700">🌙 NUIT — 1re intervention à {heureNuit} h+</span>;
-                                if (classe === "weekend")
-                                  return <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[9px] text-sky-700">SAM/DIM — fin de semaine</span>;
-                                return null;
-                              })()}
-                            </p>
-                            <div className="space-y-1.5">
-                              {ordonnees.map((t) => {
-                                const cat = catDe(t);
-                                return (
-                                  <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-white px-3 py-1.5">
-                                    <p className="min-w-0 flex-1 truncate text-[11px] text-slate-700">
-                                      <span className={`mr-2 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${cat.cls}`}>{cat.label}</span>
-                                      {t.titre || "Travail"}
-                                      {t.clientNom ? ` — ${t.clientNom}` : ""}
-                                    </p>
-                                    <div className="flex shrink-0 items-center gap-1.5">
-                                      {editionLigne?.id === t.id ? (
-                                        <div className="flex flex-wrap items-center gap-1.5">
-                                          <input
-                                            type="time"
-                                            value={editionLigne.debut}
-                                            onChange={(ev) => setEditionLigne({ ...editionLigne, debut: ev.target.value })}
-                                            className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums"
-                                          />
-                                          <span className="text-[10px] text-slate-400">→</span>
-                                          <input
-                                            type="time"
-                                            value={editionLigne.fin}
-                                            onChange={(ev) => setEditionLigne({ ...editionLigne, fin: ev.target.value })}
-                                            className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums"
-                                          />
-                                          {(() => {
-                                            // Durée calculée EN DIRECT — et mention claire
-                                            // quand la fin tombe le lendemain (passe minuit).
-                                            const d0 = new Date(`${t.date}T${editionLigne.debut || "00:00"}:00`);
-                                            const f0 = new Date(`${t.date}T${editionLigne.fin || "00:00"}:00`);
-                                            const lendemain = f0 < d0;
-                                            if (lendemain) f0.setDate(f0.getDate() + 1);
-                                            const h = (f0 - d0) / 3600000;
-                                            return (
-                                              <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tabular-nums ${lendemain ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>
-                                                = {h.toFixed(2)} h{lendemain ? " · 🌙 le lendemain" : ""}
-                                              </span>
-                                            );
-                                          })()}
-                                          <button
-                                            onClick={() => {
-                                              const plan = planAjustement(t, editionLigne.debut, editionLigne.fin, lignesJour);
-                                              if (plan.erreur) {
-                                                setErreurEdition(plan.erreur);
-                                                return;
-                                              }
-                                              onAjusterPlan?.(plan.ajustements);
-                                              setEditionLigne(null);
-                                              setErreurEdition("");
-                                            }}
-                                            className="rounded-md bg-[#131B2E] px-2.5 py-1.5 text-[10px] font-bold text-white"
-                                          >
-                                            {droitHeures === "direct" ? "OK" : "Proposer"}
-                                          </button>
-                                          <button
-                                            onClick={() => {
-                                              setEditionLigne(null);
-                                              setErreurEdition("");
-                                            }}
-                                            aria-label="Annuler"
-                                            className="rounded-md border border-slate-300 px-2 py-1.5 text-[10px] font-bold text-slate-500"
-                                          >
-                                            ✗
-                                          </button>
-                                          {/* L'erreur COLLÉE à la ligne éditée — avant, elle
-                                              s'affichait sous toute la liste, hors de vue. */}
-                                          {erreurEdition && (
-                                            <span className="w-full text-[10px] font-bold text-red-600">⚠️ {erreurEdition}</span>
-                                          )}
-                                        </div>
-                                      ) : (
-                                        <>
-                                          {t.debutReel && t.finReelle && (
-                                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold tabular-nums text-slate-500">
-                                              {heureLocaleDe(t.debutReel)} → {heureLocaleDe(t.finReelle)}
-                                            </span>
-                                          )}
-                                          <p className="text-[11px] font-extrabold tabular-nums text-slate-800">{(Number(t.heures) || 0).toFixed(2)} h</p>
-                                          {t.corrigeLe && t.heuresAvantCorrection != null && (
-                                            <span
-                                              className="rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700"
-                                              title={`Corrigée après la fermeture de cette semaine de paie (avant : ${(Number(t.heuresAvantCorrection) || 0).toFixed(2)} h) — la différence est reportée sur la semaine du ${dimancheDeSemaineISO(t.corrigeLe)}.`}
-                                            >
-                                              ✏️ reportée → sem. du {dimancheDeSemaineISO(t.corrigeLe)}
-                                            </span>
-                                          )}
-                                          {t.heuresProposees != null && (
-                                            <span
-                                              className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700"
-                                              title={`Proposé par ${t.propositionPar || "?"} — à valider par un administrateur`}
-                                            >
-                                              ⏳ → {(Number(t.heuresProposees) || 0).toFixed(2)} h
-                                            </span>
-                                          )}
-                                          {droitHeures && t.supabase && !estLunch(t) && (
-                                            <button
-                                              onClick={() => {
-                                                // Point de départ : heures réelles si connues, sinon
-                                                // 07:00 + durée (ligne d'avant la capture).
-                                                const debut = heureLocaleDe(t.debutReel) || "07:00";
-                                                const fin =
-                                                  heureLocaleDe(t.finReelle) ||
-                                                  (() => {
-                                                    const d = new Date(`${t.date}T${debut}:00`);
-                                                    d.setMinutes(d.getMinutes() + Math.round((Number(t.heures) || 1) * 60));
-                                                    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-                                                  })();
-                                                setEditionLigne({ id: t.id, debut, fin });
-                                                setErreurEdition("");
-                                              }}
-                                              title={droitHeures === "direct" ? "Corriger les heures de début/fin (effet immédiat)" : "Proposer une correction (validée par un administrateur)"}
-                                              className="rounded-md border border-slate-200 p-1.5 text-slate-400 hover:text-slate-700"
-                                            >
-                                              <Pencil size={11} />
-                                            </button>
-                                          )}
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            {erreurEdition && (
-                              <p className="mt-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
-                                ⚠️ {erreurEdition}
-                              </p>
-                            )}
-                            <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-bold text-slate-700">
-                              <span>🟢 Chantier : <span className="tabular-nums">{tj.chantier.toFixed(2)} h</span></span>
-                              {lignesJour.some((t) => t.secteur === "residentiel") && (
-                                <span className="text-emerald-700">🏠 Résidentiel : <span className="tabular-nums">{lignesJour.filter((t) => t.secteur === "residentiel" && !estLunch(t)).reduce((s, t) => s + (Number(t.heures) || 0), 0).toFixed(2)} h</span></span>
-                              )}
-                              <span>⚪ Transport : <span className="tabular-nums">{tj.transport.toFixed(2)} h</span></span>
-                              <span>🟡 Transport journalier : <span className="tabular-nums">{tj.ccq.toFixed(2)} h</span></span>
-                              {tj.diner < 0 && (
-                                <span className="text-rose-600">🍴 Dîner (non payé) : <span className="tabular-nums">{tj.diner.toFixed(2)} h</span></span>
-                              )}
-                              <span>Σ Total du jour : <span className="tabular-nums">{tj.total.toFixed(2)} h</span></span>
-                            </p>
-                          </td>
-                        </tr>
-                      );
-                    })()}
                     {detailEmail === e.email && (
                       <tr className="border-b border-slate-100 bg-slate-50">
-                        <td colSpan={14} className="px-4 py-3">
+                        <td colSpan={nbColonnes} className="px-4 py-3">
                           <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Détail des tâches de {e.nom}</p>
                           <div className="space-y-1">
                             {e.details
@@ -4413,7 +4254,7 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                                 <p key={t.id} className="text-[11px] text-slate-600">
                                   <span className="tabular-nums text-slate-400">{t.date}</span> · {t.estTransport ? "🚚 " : ""}{t.titre || "Travail"}
                                   {t.clientNom ? ` — ${t.clientNom}` : ""} ·{" "}
-                                  <span className="font-bold tabular-nums">{(Number(t.heures) || 0).toFixed(2)} h</span>
+                                  <span className="font-bold tabular-nums">{hM(t.heures)}</span>
                                 </p>
                               ))}
                           </div>
@@ -4433,31 +4274,263 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                   <td className="sticky left-0 z-10 border-r border-slate-300 bg-slate-100 px-3 py-2.5 font-extrabold uppercase tracking-wide text-slate-700">Total équipe</td>
                   {isoJours.map((iso) => (
                     <td key={iso} className="px-2 py-2.5 text-center font-bold tabular-nums text-slate-700">
-                      {totauxEquipe.parJour[iso] ? totauxEquipe.parJour[iso].toFixed(1) : <span className="text-slate-300">—</span>}
+                      {totauxEquipe.parJour[iso] ? hM(totauxEquipe.parJour[iso]) : <span className="text-slate-300">—</span>}
                     </td>
                   ))}
-                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{totauxEquipe.chantier.toFixed(2)} h</td>
-                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{totauxEquipe.transport.toFixed(2)} h</td>
-                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{totauxEquipe.transportCcq.toFixed(2)} h</td>
-                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-sky-700">{totauxEquipe.administratif.toFixed(2)} h</td>
-                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-stone-600">{totauxEquipe.divers.toFixed(2)} h</td>
+                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{hM(totauxEquipe.chantier)}</td>
+                  <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{hM(totauxEquipe.transport)}</td>
+                  {colVisibles.ccq && <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{hM(totauxEquipe.transportCcq)}</td>}
+                  {colVisibles.admin && <td className="px-2 py-2.5 text-right font-bold tabular-nums text-sky-700">{hM(totauxEquipe.administratif)}</td>}
+                  {colVisibles.divers && <td className="px-2 py-2.5 text-right font-bold tabular-nums text-stone-600">{hM(totauxEquipe.divers)}</td>}
+                  {colVisibles.diner && (
                   <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.diner < 0 ? "text-rose-600" : "text-slate-400"}`}>
-                    {totauxEquipe.diner < 0 ? `${totauxEquipe.diner.toFixed(2)} h` : "—"}
+                    {totauxEquipe.diner < 0 ? hM(totauxEquipe.diner) : "—"}
                   </td>
+                  )}
+                  {colVisibles.nuit && (
                   <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.nuit !== 0 ? "text-indigo-600" : "text-slate-400"}`}>
-                    {totauxEquipe.nuit !== 0 ? `${totauxEquipe.nuit.toFixed(2)} h` : "—"}
+                    {totauxEquipe.nuit !== 0 ? hM(totauxEquipe.nuit) : "—"}
                   </td>
+                  )}
+                  {colVisibles.weekend && (
                   <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.weekend !== 0 ? "text-sky-600" : "text-slate-400"}`}>
-                    {totauxEquipe.weekend !== 0 ? `${totauxEquipe.weekend.toFixed(2)} h` : "—"}
+                    {totauxEquipe.weekend !== 0 ? hM(totauxEquipe.weekend) : "—"}
                   </td>
+                  )}
+                  {colVisibles.report && (
                   <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.report !== 0 ? "text-purple-600" : "text-slate-400"}`}>
-                    {totauxEquipe.report !== 0 ? `${totauxEquipe.report > 0 ? "+" : ""}${totauxEquipe.report.toFixed(2)} h` : "—"}
+                    {totauxEquipe.report !== 0 ? `${totauxEquipe.report > 0 ? "+" : ""}${hM(totauxEquipe.report)}` : "—"}
                   </td>
-                  <td className="px-3 py-2.5 text-right text-sm font-extrabold tabular-nums text-slate-900">{(totauxEquipe.total + totauxEquipe.report).toFixed(2)} h</td>
+                  )}
+                  <td className="bg-slate-200/70 px-3 py-2.5 text-right text-sm font-extrabold tabular-nums text-slate-900">{hM(totauxEquipe.total + totauxEquipe.report)}</td>
                 </tr>
               </tfoot>
             </table>
           </DefilementHorizontal>
+
+          {/* FENÊTRE — DÉTAIL D'UNE JOURNÉE (sortie du tableau le 2026-08-19). */}
+                {/* DÉTAIL D'UNE JOURNÉE — ouvert au clic sur la cellule
+                    d'un jour : déroulement de la journée avec une
+                    étiquette de catégorie par entrée + récapitulatif. */}
+                {detailJour && (() => {
+                  const e = employesSemaine.find((x) => x.email === detailJour.email);
+                  if (!e) return null;
+                  const iso = detailJour.iso;
+                  // Une journée BLOQUÉE n'est pas dans `details` (elle
+                  // est exclue des totaux) — mais l'admin doit voir
+                  // ses lignes pour les corriger. On les reprend
+                  // alors directement dans les lignes brutes.
+                  const jourBloqueIci = estBloque(e.email, iso);
+                  const lignesJour = jourBloqueIci
+                    ? lignesSemaineBrutes.filter((t) => t.date === iso && (t.employeEmail || "").toLowerCase() === e.email)
+                    : e.details.filter((t) => t.date === iso);
+                  if (lignesJour.length === 0) return null;
+                  // Ordre lisible : Transport Début en premier, Fin en
+                  // dernier (pas d'heure exacte sur les lignes — seulement
+                  // des durées par tâche).
+                  const rang = (t) => (/début/i.test(t.titre || "") ? 0 : /fin de journée/i.test(t.titre || "") ? 2 : 1);
+                  // ORDRE CHRONOLOGIQUE (2026-08-19) : l'heure réelle de
+                  // début d'abord — on voit d'un coup d'œil où une
+                  // correction doit commencer et finir. Les lignes sans
+                  // heure captée retombent sur l'ancien ordre logique.
+                  const ordonnees = lignesJour.slice().sort((a, b) => {
+                    const ta = a.debutReel ? new Date(a.debutReel).getTime() : null;
+                    const tb = b.debutReel ? new Date(b.debutReel).getTime() : null;
+                    if (ta != null && tb != null) return ta - tb;
+                    if (ta != null) return -1;
+                    if (tb != null) return 1;
+                    return rang(a) - rang(b);
+                  });
+                  const catDe = (t) =>
+                    estLunch(t)
+                      ? { label: "DÎNER", cls: "bg-rose-100 text-rose-700" }
+                      : estCcq(t)
+                      ? { label: "TRANSP. JOURNALIER", cls: "bg-amber-100 text-amber-700" }
+                      : t.estTransport
+                      ? { label: t.secteur === "residentiel" ? "TRANSPORT 🏠" : "TRANSPORT", cls: "bg-slate-200 text-slate-600" }
+                      : t.secteur === "residentiel"
+                      ? { label: "CHANTIER 🏠 RÉS.", cls: "bg-emerald-200 text-emerald-800" }
+                      : { label: "CHANTIER", cls: "bg-emerald-100 text-emerald-700" };
+                  const tj = lignesJour.reduce(
+                    (acc, t) => {
+                      const h = Number(t.heures) || 0;
+                      if (estLunch(t)) acc.diner += h;
+                      else if (estCcq(t)) acc.ccq += h;
+                      else if (t.estTransport) acc.transport += h;
+                      else acc.chantier += h;
+                      acc.total += h;
+                      return acc;
+                    },
+                    { chantier: 0, transport: 0, ccq: 0, diner: 0, total: 0 }
+                  );
+                  const labelJour = new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
+                  return (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); }}>
+                      <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
+                        <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-blue-700">
+                          📅 <span className="capitalize">{labelJour}</span> — journée de {e.nom} ({hM(tj.total)})
+                          {(() => {
+                            // Badge de classification de la journée (règle Nuit/Sam-Dim).
+                            const classe = classificationJournee(lignesJour, iso);
+                            if (classe === "nuit")
+                              return <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] text-indigo-700">🌙 NUIT — 1re intervention à {heureNuit} h+</span>;
+                            if (classe === "weekend")
+                              return <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[9px] text-sky-700">SAM/DIM — fin de semaine</span>;
+                            return null;
+                          })()}
+                        </p>
+                        <div className="space-y-1.5">
+                          {ordonnees.map((t) => {
+                            const cat = catDe(t);
+                            return (
+                              <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-white px-3 py-1.5">
+                                <p className="min-w-0 flex-1 truncate text-[11px] text-slate-700">
+                                  <span className={`mr-2 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${cat.cls}`}>{cat.label}</span>
+                                  {t.titre || "Travail"}
+                                  {t.clientNom ? ` — ${t.clientNom}` : ""}
+                                </p>
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                  {editionLigne?.id === t.id ? (
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <input
+                                        type="time"
+                                        value={editionLigne.debut}
+                                        onChange={(ev) => setEditionLigne({ ...editionLigne, debut: ev.target.value })}
+                                        className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums"
+                                      />
+                                      <span className="text-[10px] text-slate-400">→</span>
+                                      <input
+                                        type="time"
+                                        value={editionLigne.fin}
+                                        onChange={(ev) => setEditionLigne({ ...editionLigne, fin: ev.target.value })}
+                                        className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums"
+                                      />
+                                      {(() => {
+                                        // Durée calculée EN DIRECT — et mention claire
+                                        // quand la fin tombe le lendemain (passe minuit).
+                                        const d0 = new Date(`${t.date}T${editionLigne.debut || "00:00"}:00`);
+                                        const f0 = new Date(`${t.date}T${editionLigne.fin || "00:00"}:00`);
+                                        const lendemain = f0 < d0;
+                                        if (lendemain) f0.setDate(f0.getDate() + 1);
+                                        const h = (f0 - d0) / 3600000;
+                                        return (
+                                          <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tabular-nums ${lendemain ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>
+                                            = {hM(h)}{lendemain ? " · 🌙 le lendemain" : ""}
+                                          </span>
+                                        );
+                                      })()}
+                                      <button
+                                        onClick={() => {
+                                          const plan = planAjustement(t, editionLigne.debut, editionLigne.fin, lignesJour);
+                                          if (plan.erreur) {
+                                            setErreurEdition(plan.erreur);
+                                            return;
+                                          }
+                                          onAjusterPlan?.(plan.ajustements);
+                                          setEditionLigne(null);
+                                          setErreurEdition("");
+                                        }}
+                                        className="rounded-md bg-[#131B2E] px-2.5 py-1.5 text-[10px] font-bold text-white"
+                                      >
+                                        {droitHeures === "direct" ? "OK" : "Proposer"}
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setEditionLigne(null);
+                                          setErreurEdition("");
+                                        }}
+                                        aria-label="Annuler"
+                                        className="rounded-md border border-slate-300 px-2 py-1.5 text-[10px] font-bold text-slate-500"
+                                      >
+                                        ✗
+                                      </button>
+                                      {/* L'erreur COLLÉE à la ligne éditée — avant, elle
+                                          s'affichait sous toute la liste, hors de vue. */}
+                                      {erreurEdition && (
+                                        <span className="w-full text-[10px] font-bold text-red-600">⚠️ {erreurEdition}</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {t.debutReel && t.finReelle && (
+                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold tabular-nums text-slate-500">
+                                          {heureLocaleDe(t.debutReel)} → {heureLocaleDe(t.finReelle)}
+                                        </span>
+                                      )}
+                                      <p className="text-[11px] font-extrabold tabular-nums text-slate-800">{hM(t.heures)}</p>
+                                      {t.corrigeLe && t.heuresAvantCorrection != null && (
+                                        <span
+                                          className="rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700"
+                                          title={`Corrigée après la fermeture de cette semaine de paie (avant : ${(Number(t.heuresAvantCorrection) || 0).toFixed(2)} h) — la différence est reportée sur la semaine du ${dimancheDeSemaineISO(t.corrigeLe)}.`}
+                                        >
+                                          ✏️ reportée → sem. du {dimancheDeSemaineISO(t.corrigeLe)}
+                                        </span>
+                                      )}
+                                      {t.heuresProposees != null && (
+                                        <span
+                                          className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700"
+                                          title={`Proposé par ${t.propositionPar || "?"} — à valider par un administrateur`}
+                                        >
+                                          ⏳ → {hM(t.heuresProposees)}
+                                        </span>
+                                      )}
+                                      {droitHeures && t.supabase && !estLunch(t) && (
+                                        <button
+                                          onClick={() => {
+                                            // Point de départ : heures réelles si connues, sinon
+                                            // 07:00 + durée (ligne d'avant la capture).
+                                            const debut = heureLocaleDe(t.debutReel) || "07:00";
+                                            const fin =
+                                              heureLocaleDe(t.finReelle) ||
+                                              (() => {
+                                                const d = new Date(`${t.date}T${debut}:00`);
+                                                d.setMinutes(d.getMinutes() + Math.round((Number(t.heures) || 1) * 60));
+                                                return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+                                              })();
+                                            setEditionLigne({ id: t.id, debut, fin });
+                                            setErreurEdition("");
+                                          }}
+                                          title={droitHeures === "direct" ? "Corriger les heures de début/fin (effet immédiat)" : "Proposer une correction (validée par un administrateur)"}
+                                          className="rounded-md border border-slate-200 p-1.5 text-slate-400 hover:text-slate-700"
+                                        >
+                                          <Pencil size={11} />
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {erreurEdition && (
+                          <p className="mt-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
+                            ⚠️ {erreurEdition}
+                          </p>
+                        )}
+                        <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-bold text-slate-700">
+                          <span>🟢 Chantier : <span className="tabular-nums">{hM(tj.chantier)}</span></span>
+                          {lignesJour.some((t) => t.secteur === "residentiel") && (
+                            <span className="text-emerald-700">🏠 Résidentiel : <span className="tabular-nums">{hM(lignesJour.filter((t) => t.secteur === "residentiel" && !estLunch(t)).reduce((s, t) => s + (Number(t.heures) || 0), 0))}</span></span>
+                          )}
+                          <span>⚪ Transport : <span className="tabular-nums">{hM(tj.transport)}</span></span>
+                          <span>🟡 Transport journalier : <span className="tabular-nums">{hM(tj.ccq)}</span></span>
+                          {tj.diner < 0 && (
+                            <span className="text-rose-600">🍴 Dîner (non payé) : <span className="tabular-nums">{hM(tj.diner)}</span></span>
+                          )}
+                          <span>Σ Total du jour : <span className="tabular-nums">{hM(tj.total)}</span></span>
+                        </p>
+                        <button
+                          onClick={() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); }}
+                          className="mt-3 min-h-[44px] w-full rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
+                        >
+                          Fermer
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[11px] text-slate-400">
