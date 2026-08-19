@@ -3598,7 +3598,14 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
     const date = travail.date;
     const nouveauDebut = new Date(`${date}T${debutStr}:00`);
     const nouvelleFin = new Date(`${date}T${finStr}:00`);
-    if (!(nouvelleFin > nouveauDebut)) return { erreur: "La fin doit être après le début." };
+    if (+nouvelleFin === +nouveauDebut) return { erreur: "La fin doit être différente du début." };
+    // 🌙 PASSE MINUIT (bogue vécu 2026-08-19 : journée bloquée 11:26 →
+    // 03:26 — « OK » refusait « la fin doit être après le début » et le
+    // message s'affichait sous toute la liste : l'admin ne voyait rien
+    // se passer). Une fin PLUS PETITE que le début veut dire « le
+    // lendemain », exactement comme le chrono l'a vécu — la durée
+    // s'affiche en direct à côté des champs, pas de surprise.
+    if (nouvelleFin < nouveauDebut) nouvelleFin.setDate(nouvelleFin.getDate() + 1);
     const ISO = (d) => d.toISOString();
     // Ligne sans heures réelles enregistrées (complétée avant la capture) :
     // édition simple — durée = fin − début, aucun voisin touché.
@@ -4275,6 +4282,20 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                                             onChange={(ev) => setEditionLigne({ ...editionLigne, fin: ev.target.value })}
                                             className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums"
                                           />
+                                          {(() => {
+                                            // Durée calculée EN DIRECT — et mention claire
+                                            // quand la fin tombe le lendemain (passe minuit).
+                                            const d0 = new Date(`${t.date}T${editionLigne.debut || "00:00"}:00`);
+                                            const f0 = new Date(`${t.date}T${editionLigne.fin || "00:00"}:00`);
+                                            const lendemain = f0 < d0;
+                                            if (lendemain) f0.setDate(f0.getDate() + 1);
+                                            const h = (f0 - d0) / 3600000;
+                                            return (
+                                              <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tabular-nums ${lendemain ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>
+                                                = {h.toFixed(2)} h{lendemain ? " · 🌙 le lendemain" : ""}
+                                              </span>
+                                            );
+                                          })()}
                                           <button
                                             onClick={() => {
                                               const plan = planAjustement(t, editionLigne.debut, editionLigne.fin, lignesJour);
@@ -4300,6 +4321,11 @@ function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onVali
                                           >
                                             ✗
                                           </button>
+                                          {/* L'erreur COLLÉE à la ligne éditée — avant, elle
+                                              s'affichait sous toute la liste, hors de vue. */}
+                                          {erreurEdition && (
+                                            <span className="w-full text-[10px] font-bold text-red-600">⚠️ {erreurEdition}</span>
+                                          )}
                                         </div>
                                       ) : (
                                         <>
