@@ -5789,7 +5789,12 @@ function DefilementHorizontal({ children }) {
   }, []);
   return (
     <div className="rounded-2xl border border-slate-200 bg-white">
-      <div ref={hautRef} className="barre-defilement overflow-x-scroll border-b border-slate-100" aria-hidden="true">
+      {/* COLLANTE (demande du propriétaire, 2026-08-19) : en descendant
+          dans un long tableau, la barre suivait le haut du tableau et
+          sortait de l'écran — il fallait remonter (et perdre sa ligne)
+          pour glisser gauche-droite. Elle reste maintenant collée au
+          haut de la fenêtre tant que le tableau est à l'écran. */}
+      <div ref={hautRef} className="barre-defilement sticky top-0 z-30 overflow-x-scroll rounded-t-2xl border-b border-slate-100 bg-white" aria-hidden="true">
         <div ref={fantomeRef} style={{ height: 1 }} />
       </div>
       <div ref={basRef} className="barre-defilement overflow-x-auto">{children}</div>
