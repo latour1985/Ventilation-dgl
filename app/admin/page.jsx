@@ -16629,12 +16629,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                               {seg.tache.titre || seg.tache.clientNom}
                               {spanAffiche > 1 && <span className="ml-1 opacity-60">· {spanAffiche} h</span>}
                               {seg.tache.description && spanAffiche >= 2 && (
-                                <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal leading-tight opacity-75">
+                                <span className="mt-0.5 line-clamp-2 text-[8px] font-normal leading-tight opacity-75">
                                   {seg.tache.description}
                                 </span>
                               )}
                               {travailTermine(seg.tache, emp)?.noteTerrain && spanAffiche >= 2 && (
-                                <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal italic leading-tight text-emerald-800">
+                                <span className="mt-0.5 line-clamp-2 text-[8px] font-normal italic leading-tight text-emerald-800">
                                   📝 Note du technicien : {travailTermine(seg.tache, emp).noteTerrain}
                                 </span>
                               )}
@@ -16758,12 +16758,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                                 <span className="min-w-0">
                                   {tache.titre || tache.clientNom}
                                   {tache.description && (
-                                    <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal leading-tight opacity-75">
+                                    <span className="mt-0.5 line-clamp-2 text-[8px] font-normal leading-tight opacity-75">
                                       {tache.description}
                                     </span>
                                   )}
                                   {travailTermine(tache, emp)?.noteTerrain && (
-                                    <span className="mt-0.5 line-clamp-2 block text-[8px] font-normal italic leading-tight text-emerald-800">
+                                    <span className="mt-0.5 line-clamp-2 text-[8px] font-normal italic leading-tight text-emerald-800">
                                       📝 Note du technicien : {travailTermine(tache, emp).noteTerrain}
                                     </span>
                                   )}
