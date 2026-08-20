@@ -24,7 +24,7 @@ import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { pushSupporte, activerNotificationsPush, resouscrireSiPermis } from "@/lib/notificationsPush";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, creerTravailShopTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
-import { enregistrerTravailEffectue, travailDejaEnregistre } from "@/lib/supabase/travauxEffectues";
+import { enregistrerTravailEffectue, travailDejaEnregistre, infoTravailEnregistre } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
@@ -3588,6 +3588,32 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   //   accès visuel — lecture seule.
   // ------------------------------------------------------------
   const DELAI_MODIFICATION_MS = 10 * 60 * 1000;
+  // ⚠️ LE BUREAU FAIT FOI (correctif 2026-08-20, vécu) : « déjà
+  // envoyée » ne vivait que dans la mémoire de CE téléphone. PWA
+  // réinstallée, cache vidé ou autre appareil, et une tâche fermée
+  // redevenait modifiable pour toujours — le délai de 10 minutes ne
+  // s'appliquait plus et le bon pouvait repartir des jours après. On
+  // relit donc la ligne d'heures au bureau : si elle existe, la tâche
+  // EST fermée, et le délai court depuis son écriture réelle.
+  useEffect(() => {
+    if (tache.envoye) return;
+    const email = (session?.user?.email || "").toLowerCase();
+    if (!email) return;
+    let annule = false;
+    infoTravailEnregistre(tache.cleHeures || tache.tacheOrigineId || tache.id, email)
+      .then((info) => {
+        if (annule || !info.existe) return;
+        onMajTache(tache.id, {
+          envoye: true,
+          envoyeA: info.creeLe ? new Date(info.creeLe).getTime() : Date.now() - DELAI_MODIFICATION_MS - 1,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tache.id, tache.envoye, session?.user?.email]);
   const fermee = !!tache.envoye;
   const dansDelai = fermee && tache.envoyeA && Date.now() - tache.envoyeA <= DELAI_MODIFICATION_MS;
   const modifReactivee = !!tache.modifReactivee;
