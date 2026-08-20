@@ -13600,6 +13600,20 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
           />
         )}
 
+        {/* 🎥 VIDÉOS DU CHANTIER (2026-08-20) — un bruit, une vibration,
+            une fuite : ce qu'une photo ne montre pas. Lecture directe
+            dans la fiche, rien à télécharger. */}
+        {(travailFait?.videosUrls || []).length > 0 && (
+          <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              🎥 Vidéos du technicien ({travailFait.videosUrls.length})
+            </p>
+            {travailFait.videosUrls.map((u, i) => (
+              <video key={i} src={u} controls preload="metadata" className="w-full rounded-lg bg-black" />
+            ))}
+          </div>
+        )}
+
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <div>

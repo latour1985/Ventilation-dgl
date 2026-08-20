@@ -15,7 +15,7 @@ import { enregistrerInspection } from "@/lib/supabase/inspections";
 import { listerAnnuaireEmployes } from "@/lib/supabase/repertoireEmployes";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
-import { televerserPhotoTravail, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
+import { televerserPhotoTravail, televerserVideoTravail, VIDEO_MAX_OCTETS, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail, bonExistePourTache } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
@@ -1903,8 +1903,10 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         setShopOuvert(false);
         setShopMsg("");
       }, 1200);
-    } catch {
-      setShopMsg("erreur");
+    } catch (e) {
+      // La VRAIE raison, pas « vérifie ta connexion » (2026-08-20) :
+      // le message générique cachait une tâche pourtant créée.
+      setShopMsg(e?.message ? `erreur:${e.message}` : "erreur");
     }
     setShopEnCours(false);
   };
@@ -1922,8 +1924,8 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         setCourseOuverte(false);
         setCourseMsg("");
       }, 1200);
-    } catch {
-      setCourseMsg("erreur");
+    } catch (e) {
+      setCourseMsg(e?.message ? `erreur:${e.message}` : "erreur");
     }
     setCourseEnCours(false);
   };
@@ -2236,8 +2238,13 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
               {courseMsg === "ok" && (
                 <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">✅ Course créée — elle apparaît dans ton horaire.</p>
               )}
-              {courseMsg === "erreur" && (
-                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold text-red-700">Impossible de créer la course — vérifie ta connexion et réessaie.</p>
+              {courseMsg.startsWith("erreur") && (
+                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">
+                  Course NON créée — {courseMsg.slice(7) || "connexion impossible"}.
+                  <span className="mt-1 block font-normal">
+                    Regarde ton horaire avant de recommencer : si elle y est déjà, c&apos;est qu&apos;elle a bien été créée.
+                  </span>
+                </p>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => setCourseOuverte(false)} disabled={courseEnCours} className="w-full">
@@ -2278,8 +2285,13 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
               {shopMsg === "ok" && (
                 <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">✅ Tâche créée — elle apparaît dans ton horaire, pèse Débuter en arrivant.</p>
               )}
-              {shopMsg === "erreur" && (
-                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold text-red-700">Impossible de créer la tâche — vérifie ta connexion et réessaie.</p>
+              {shopMsg.startsWith("erreur") && (
+                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">
+                  Tâche NON créée — {shopMsg.slice(7) || "connexion impossible"}.
+                  <span className="mt-1 block font-normal">
+                    Regarde ton horaire avant de recommencer : si la tâche y est déjà, c&apos;est qu&apos;elle a bien été créée.
+                  </span>
+                </p>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => setShopOuvert(false)} disabled={shopEnCours} className="w-full">
@@ -2990,6 +3002,103 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
 }
 
 // ============================================================
+// 🎥 VIDÉOS DU CHANTIER (2026-08-20, demande du propriétaire)
+// ------------------------------------------------------------
+// Une courte séquence dit ce que dix photos n'expliquent pas : un bruit
+// anormal, une vibration, une fuite qui coule. Différence importante
+// avec les photos : AUCUNE compression n'est possible dans le
+// navigateur — le fichier part tel quel, d'où le plafond annoncé
+// d'avance et l'envoi immédiat (jamais de vidéo « en attente » qui
+// dormirait dans le téléphone).
+// ============================================================
+function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
+  const [enCours, setEnCours] = useState(false);
+  const [erreur, setErreur] = useState("");
+  const inputRef = useRef(null);
+
+  const ajouter = async (e) => {
+    const fichiers = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (fichiers.length === 0) return;
+    setEnCours(true);
+    setErreur("");
+    for (const fichier of fichiers) {
+      try {
+        const urlDistante = await televerserVideoTravail(fichier);
+        setVideos((prev) => {
+          const maj = [...prev, { urlDistante, nom: fichier.name || "vidéo" }];
+          if (onVideosChange) setTimeout(() => onVideosChange(maj), 0);
+          return maj;
+        });
+      } catch (err) {
+        // La VRAIE raison (trop lourde, hors ligne…) — jamais un
+        // échec muet : le technicien doit savoir quoi faire.
+        setErreur(err?.message || "Vidéo non envoyée — réessaie.");
+      }
+    }
+    setEnCours(false);
+  };
+
+  const retirer = (i) => {
+    setVideos((prev) => {
+      const maj = prev.filter((_, j) => j !== i);
+      if (onVideosChange) setTimeout(() => onVideosChange(maj), 0);
+      return maj;
+    });
+  };
+
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">🎥 Vidéos (facultatif)</p>
+      <div className="space-y-2">
+        {videos.map((v, i) => (
+          <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-2">
+            <video src={v.urlDistante} controls playsInline preload="metadata" className="h-40 w-full rounded-lg bg-black object-contain" />
+            {!lectureSeule && (
+              <button
+                type="button"
+                onClick={() => retirer(i)}
+                className="mt-1 min-h-[40px] w-full rounded-lg border border-red-200 text-[12px] font-bold text-red-600 active:scale-[0.99]"
+              >
+                Retirer cette vidéo
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!lectureSeule && (
+        <button
+          type="button"
+          onClick={() => { setErreur(""); inputRef.current?.click(); }}
+          disabled={enCours}
+          className="mt-2 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-300 text-sm font-bold text-slate-500 active:scale-[0.99] disabled:opacity-60"
+        >
+          {enCours ? <Loader2 size={16} className="animate-spin" /> : <span className="text-base leading-none">🎥</span>}
+          {enCours ? "Envoi de la vidéo…" : "Filmer / choisir une vidéo"}
+          <input
+            ref={inputRef}
+            type="file"
+            accept="video/*"
+            capture="environment"
+            onChange={ajouter}
+            className="hidden"
+          />
+        </button>
+      )}
+      <p className="mt-1 text-[10px] leading-snug text-slate-400">
+        Courtes séquences (environ 30 secondes, {Math.round(VIDEO_MAX_OCTETS / 1024 / 1024)} Mo maximum) — une vidéo ne se
+        compresse pas comme une photo. Envoyée tout de suite : reste sur le réseau le temps de l&apos;envoi.
+      </p>
+      {erreur && (
+        <p className="mt-1 flex items-start gap-1 text-[11px] font-semibold text-red-600">
+          <AlertTriangle size={11} className="mt-0.5 shrink-0" /> {erreur}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // SIGNATURE TACTILE
 // ============================================================
 function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommencee, onSignatureEffacee, lectureSeule, libelle }) {
@@ -3426,6 +3535,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const [erreurDictee, setErreurDictee] = useState("");
   const [photosAvant, setPhotosAvant] = useState(tache.photosAvant || []);
   const [photosApres, setPhotosApres] = useState(tache.photosApres || []);
+  // 🎥 VIDÉOS du chantier (2026-08-20) : [{ urlDistante }] — un bruit
+  // anormal, une vibration, une fuite qui coule : ce qu'une photo ne
+  // peut pas montrer. Elles suivent le bon jusqu'au bureau.
+  const [videos, setVideos] = useState(tache.videos || []);
   const [nomMoule, setNomMoule] = useState(tache.nomMoule || "");
   // ÉQUIPE DE 2+ : le dernier à fermer peut déclarer que son collègue a
   // DÉJÀ recueilli la signature du client — la sienne n'est plus exigée
@@ -3871,6 +3984,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         projetId: tache.projetId || null,
         photosAvant: (photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
         photosApres: (photosApres || []).map((p) => p.urlDistante).filter(Boolean),
+        videos: (videos || []).map((v) => v.urlDistante).filter(Boolean),
         courrielsEnvoi: destinataires,
         signeParNom: clientAbsent || collegueAFaitSigner ? "" : nomMoule.trim(),
         signeParCollegue: collegueAFaitSigner,
@@ -4521,6 +4635,15 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             lectureSeule={lectureSeule}
           />
         </div>
+
+        {/* 🎥 VIDÉOS — hors de la grille avant/après : une vidéo montre
+            un comportement (bruit, vibration, fuite), pas un état. */}
+        <ZoneVideo
+          videos={videos}
+          setVideos={setVideos}
+          onVideosChange={(nouvelles) => onMajTache(tache.id, { videos: nouvelles })}
+          lectureSeule={lectureSeule}
+        />
 
         {/* NOTES */}
         <div className="space-y-3">
@@ -5496,6 +5619,7 @@ function AppTechnicien() {
           // bureau, sur le bon de travail client et dans le PDF.
           photosAvant: (t.photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
           photosApres: (t.photosApres || []).map((p) => p.urlDistante).filter(Boolean),
+          videos: (t.videos || []).map((v) => v.urlDistante).filter(Boolean),
         },
         session
       )
