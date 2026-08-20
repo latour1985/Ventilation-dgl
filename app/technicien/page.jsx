@@ -3617,8 +3617,16 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const fermee = !!tache.envoye;
   const dansDelai = fermee && tache.envoyeA && Date.now() - tache.envoyeA <= DELAI_MODIFICATION_MS;
   const modifReactivee = !!tache.modifReactivee;
-  const modifAutorisee = role === "admin" || !fermee || dansDelai || modifReactivee;
-  const necessiteDeuxiemeSignature = role !== "admin" && fermee && (dansDelai || modifReactivee);
+  // 📵 MÊME RÈGLE POUR TOUT LE MONDE SUR LE TÉLÉPHONE (décision du
+  // propriétaire, 2026-08-20) : l'ancienne exception « accès
+  // administrateur = modification illimitée » s'appliquait AUSSI aux
+  // admins qui travaillent sur le terrain (Dominic, Louise…), qui
+  // pouvaient rouvrir et renvoyer un bon des jours plus tard. Ce que la
+  // règle protège, c'est la signature du client — pas un niveau
+  // d'accès. Les corrections après le délai se font DU BUREAU (où
+  // l'admin peut réactiver la modification pour la tâche).
+  const modifAutorisee = !fermee || dansDelai || modifReactivee;
+  const necessiteDeuxiemeSignature = fermee && (dansDelai || modifReactivee);
   const lectureSeule = fermee && !modifAutorisee;
 
   const forceRevision = lignes.some((l) => l.prixNonListe);
@@ -4132,19 +4140,13 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         </span>
       </div>
 
-      {fermee && role === "admin" && (
-        <div className="flex items-center gap-2 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-700">
-          <CheckCircle2 size={14} />
-          Déjà envoyé — accès administrateur : modification illimitée.
-        </div>
-      )}
-      {fermee && role !== "admin" && dansDelai && (
+      {fermee && dansDelai && (
         <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700">
           <Lock size={14} />
           Déjà envoyé — modification encore possible pendant 10 minutes. Une 2e signature client sera demandée.
         </div>
       )}
-      {fermee && role !== "admin" && !dansDelai && modifReactivee && (
+      {fermee && !dansDelai && modifReactivee && (
         <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700">
           <Lock size={14} />
           Modification réactivée par un administrateur. Une 2e signature client sera demandée.
