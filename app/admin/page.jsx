@@ -17545,28 +17545,38 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                     // TOUTES les tâches du jour — empilées verticalement en
                     // vue Semaine, pastilles côte à côte en vue Mois : aucune
                     // tâche n'est cachée quand elles partagent la journée.
-                    const tachesJour = tachesDuJourPourEmploye(planning, dateISO(d), emp.id);
-                    // ⏱️ Ordre CHRONOLOGIQUE réel dans la pile du jour —
-                    // les tâches terminées suivent leur vrai début.
-                    const debutReelDe = (t) => {
+                    // ⏱️ ORDRE CHRONOLOGIQUE RÉEL dans la pile du jour.
+                    // ------------------------------------------------
+                    // Corrigé le 2026-08-22 (photo du propriétaire : le
+                    // « Transport — Début de journée » se retrouvait SOUS
+                    // la tâche de Dominic). Le tri se faisait sur
+                    // `tache.heure`, un champ que SEULS les blocs de
+                    // transport portent : les vraies tâches, sans heure,
+                    // remontaient toutes en tête et les deux transports
+                    // tombaient au fond, dans l'ordre début-puis-fin.
+                    // On prend maintenant l'heure de la CASE (celle de la
+                    // grille, qui existe pour tout le monde), remplacée
+                    // par l'heure RÉELLE quand la tâche a été pointée —
+                    // tout le monde sur le même axe de temps.
+                    const entreesJour = tachesDuJourAvecHeure(planning, dateISO(d), emp.id);
+                    const minutesDe = ({ tache, heure }) => {
                       const r = (travaux || []).find(
                         (x) =>
                           x.supabase &&
-                          cleTacheDesHeures(x.tacheId) === t.id &&
+                          cleTacheDesHeures(x.tacheId) === tache.id &&
                           (x.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
                           x.date === dateISO(d) &&
                           x.debutReel
                       );
-                      return r ? new Date(r.debutReel).getTime() : null;
+                      if (r) {
+                        const dte = new Date(r.debutReel);
+                        return dte.getHours() * 60 + dte.getMinutes();
+                      }
+                      const [hh, mm] = String(heure || "00:00").split(":");
+                      return (Number(hh) || 0) * 60 + (Number(mm) || 0);
                     };
-                    tachesJour.sort((a, b) => {
-                      const ra = debutReelDe(a);
-                      const rb = debutReelDe(b);
-                      if (ra != null && rb != null) return ra - rb;
-                      if (ra != null) return -1;
-                      if (rb != null) return 1;
-                      return String(a.heure || "").localeCompare(String(b.heure || ""));
-                    });
+                    entreesJour.sort((a, b) => minutesDe(a) - minutesDe(b));
+                    const tachesJour = entreesJour.map((e) => e.tache);
                     const weekend = d.getDay() === 0 || d.getDay() === 6;
                     return (
                       <div
