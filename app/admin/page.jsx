@@ -14153,6 +14153,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   // « ➕ Nouveau client » depuis la création de tâche (fenêtre partagée).
   const [modalNouveauClientTache, setModalNouveauClientTache] = useState(false);
+  // 👯 Tâche jumelle détectée à la création — { titre, client, date } :
+  // la fenêtre demande confirmation avant de créer une seconde fois.
+  const [doublonTache, setDoublonTache] = useState(null);
   // ✏️ Correction rapide de la fiche du client choisi, sans quitter la
   // création de tâche (retour de tests 2026-08-17 : « où est l'option
   // pour modifier les clients ? » — elle existait dans l'onglet Clients,
@@ -14425,9 +14428,55 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setDepotExtra("");
   };
 
-  const creerTache = () => {
+  // 👯 GARDE ANTI-DOUBLON (2026-08-21, vécu) : « Déconnexion de 2 unités
+  // au toit » a été créée DEUX fois pour le même client, la même
+  // journée, à la même adresse — six heures d'écart, aucun signal.
+  // Résultat : deux cartes strictement identiques sur le téléphone de
+  // deux techniciens le matin même. L'ADRESSE fait partie de la
+  // comparaison : le même client peut très bien avoir deux vraies jobs
+  // le même jour à deux adresses différentes (c'était le cas ici).
+  const tachesExistantesDuJour = (dateIso) => {
+    const vues = new Map();
+    (tachesAttente || []).forEach((t) => vues.set(`att-${t.id}`, { ...t, dateVue: null }));
+    Object.entries(planning || {}).forEach(([cle, cellule]) => {
+      const [dateCle] = cle.split("|");
+      if (dateIso && dateCle !== dateIso) return;
+      listeCellule(cellule).forEach((t) => {
+        if (!t || t.est_tache_systeme) return;
+        vues.set(`${t.id}|${dateCle}`, { ...t, dateVue: dateCle });
+      });
+    });
+    return [...vues.values()];
+  };
+  const normaliserTexte = (v) =>
+    String(v || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ");
+
+  const creerTache = (doublonAccepte = false) => {
     if (lectureSeule || !nouveauTitre.trim()) return;
     const client = clients.find((c) => c.id === nouveauClientId);
+    if (!doublonAccepte) {
+      const adresseVisee = normaliserTexte(
+        (adresseTravauxDifferente && (nouvelleAdresseTravaux?.label || client?.adresses?.find((a) => a.id === adresseTravauxId)?.ligne1)) ||
+          client?.adresses?.[0]?.ligne1 ||
+          ""
+      );
+      const jumelle = tachesExistantesDuJour(nouvelleDate || null).find((t) => {
+        if (normaliserTexte(t.titre) !== normaliserTexte(nouveauTitre)) return false;
+        const memeClient = nouveauClientId ? t.clientId === nouveauClientId : normaliserTexte(t.clientNom) === normaliserTexte(client?.nom);
+        if (!memeClient) return false;
+        const adresseAutre = normaliserTexte(t.adresseTravaux || t.adresseIntervention || "");
+        return adresseAutre === adresseVisee;
+      });
+      if (jumelle) {
+        setDoublonTache({ titre: nouveauTitre.trim(), client: client?.nom || "", date: nouvelleDate || "", adresse: adresseVisee });
+        return;
+      }
+    }
     const nouvelle = {
       id: `tache-manuelle-${Date.now()}`,
       clientId: nouveauClientId || null,
@@ -16178,7 +16227,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                           )}
                           <div className="flex items-center gap-2">
                             <Button
-                              onClick={creerTache}
+                              onClick={() => creerTache(false)}
                               disabled={raisons.length > 0}
                               className="min-h-0 flex-1 py-2.5 text-xs"
                             >
@@ -17222,6 +17271,38 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           }
         />
       )}
+      {/* 👯 TÂCHE JUMELLE — même titre, même client, même journée, MÊME
+          ADRESSE : on demande avant de créer une seconde fois. Deux
+          jobs le même jour à des adresses différentes ne déclenchent
+          rien (cas légitime, vécu le 21 août). */}
+      {doublonTache && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <p className="text-base font-extrabold text-amber-700">👯 Cette tâche existe déjà</p>
+            <p className="mt-2 text-[13px] leading-snug text-slate-700">
+              « <span className="font-bold">{doublonTache.titre}</span> » est déjà à l&apos;horaire pour{" "}
+              <span className="font-bold">{doublonTache.client || "ce client"}</span>
+              {doublonTache.date ? ` le ${doublonTache.date}` : ""}, à la <span className="font-bold">même adresse</span>.
+            </p>
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">
+              Si tu la crées quand même, tes techniciens verront <span className="font-bold">deux cartes identiques</span> sur
+              leur téléphone. Vérifie d&apos;abord dans l&apos;agenda.
+            </p>
+            <div className="mt-4 space-y-2">
+              <Button variant="outline" onClick={() => setDoublonTache(null)} className="w-full">
+                Annuler — je vais vérifier
+              </Button>
+              <button
+                onClick={() => { setDoublonTache(null); creerTache(true); }}
+                className="min-h-[44px] w-full rounded-xl text-[12px] font-bold text-slate-500"
+              >
+                C&apos;est une vraie deuxième job — créer quand même
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ✏️ FICHE CLIENT modifiable depuis la création de tâche (même
           fenêtre que l'onglet Clients — une seule logique). */}
       {clientEnEditionAgenda && (() => {
