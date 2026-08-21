@@ -11688,6 +11688,32 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
   const [nouvelleAdresseNom, setNouvelleAdresseNom] = useState("");
   const [nouvelleAdresseNomUnite, setNouvelleAdresseNomUnite] = useState("");
   const [lignes, setLignes] = useState([]);
+  // 🙈 COÛTS MASQUÉS (demande du propriétaire, 2026-08-22) : chez le
+  // client, l'écran du téléphone est visible par-dessus l'épaule — le
+  // prix COÛTANT et la marge ne doivent pas s'y trouver. Masqués PAR
+  // DÉFAUT ; les montants continuent d'être saisis, enregistrés et
+  // comptés exactement pareil (on cache l'AFFICHAGE, jamais la donnée).
+  // Le choix est mémorisé PAR APPAREIL : au bureau on les affiche une
+  // fois, le téléphone reste discret de son côté.
+  const [coutsVisibles, setCoutsVisibles] = useState(false);
+  useEffect(() => {
+    try {
+      setCoutsVisibles(localStorage.getItem("devis-couts-visibles") === "1");
+    } catch {
+      // stockage indisponible — on reste sur « masqués », le choix sûr
+    }
+  }, []);
+  const basculerCouts = () =>
+    setCoutsVisibles((v) => {
+      try {
+        localStorage.setItem("devis-couts-visibles", v ? "0" : "1");
+      } catch {}
+      return !v;
+    });
+  // ✏️ Description en GRAND — { uid } : sur un téléphone, la petite
+  // zone de deux lignes ne permet ni de lire ni d'écrire confortablement
+  // l'argumentaire qui partira au client.
+  const [descriptionOuverte, setDescriptionOuverte] = useState(null);
   const [pdfAperçu, setPdfAperçu] = useState(null);
   const [devisAperçu, setDevisAperçu] = useState(null);
   // Contrat d'entretien : le devis est facturé progressivement (2, 3 ou
@@ -12405,7 +12431,21 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
 
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
-              <label className="text-xs font-bold text-slate-500">Lignes du devis</label>
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                Lignes du devis
+                {/* 👁️ L'interrupteur des coûts — bien en vue : d'un tap,
+                    l'écran devient montrable au client. */}
+                <button
+                  type="button"
+                  onClick={basculerCouts}
+                  title={coutsVisibles ? "Masquer les coûts et la marge (écran montrable au client)" : "Afficher les coûts et la marge"}
+                  className={`rounded-full border px-2 py-1 text-[10px] font-bold ${
+                    coutsVisibles ? "border-amber-300 bg-amber-50 text-amber-700" : "border-slate-300 bg-white text-slate-500"
+                  }`}
+                >
+                  {coutsVisibles ? "👁️ Coûts visibles" : "🙈 Coûts masqués"}
+                </button>
+              </label>
               <div className="flex gap-1.5">
                 <SelecteurItem catalogue={catalogue} onChoisir={(p) => ajouterLigne(p)} />
                 <Button variant="outline" onClick={ajouterLignePersonnalisee} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
@@ -12456,14 +12496,20 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                         <Trash2 size={14} />
                       </button>
                     </div>
-                    <textarea
-                      rows={2}
-                      value={l.description || ""}
-                      onChange={(e) => majLigne(l.uid, { ...l, description: e.target.value })}
-                      placeholder="Description visible par le client…"
-                      className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[12px] leading-snug text-slate-600"
-                    />
-                    <div className="mt-2 grid grid-cols-3 gap-2">
+                    {/* ✏️ La description s'ouvre EN GRAND d'un tap — deux
+                        lignes ne suffisent ni pour lire ni pour écrire
+                        l'argumentaire qui partira au client. */}
+                    <button
+                      type="button"
+                      onClick={() => setDescriptionOuverte({ uid: l.uid })}
+                      className="mt-2 flex w-full items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-left"
+                    >
+                      <span className={`min-w-0 flex-1 text-[12px] leading-snug ${l.description ? "text-slate-600" : "italic text-slate-400"}`}>
+                        {l.description || "Ajouter une description visible par le client…"}
+                      </span>
+                      <span className="shrink-0 text-[10px] font-bold text-slate-400">✏️</span>
+                    </button>
+                    <div className={`mt-2 grid gap-2 ${coutsVisibles ? "grid-cols-3" : "grid-cols-2"}`}>
                       <div>
                         <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Qté</label>
                         <input
@@ -12474,17 +12520,22 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                           className="min-h-[44px] w-full rounded-lg border border-slate-300 px-2 text-center text-sm tabular-nums"
                         />
                       </div>
-                      <div>
-                        <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Coûtant</label>
-                        <InputNombreDecimal
-                          valeur={l.prix_coutant}
-                          onChange={(v) => majLigne(l.uid, { ...l, prix_coutant: v })}
-                          onBlur={() => proposerReportCatalogue(l)}
-                          className={`min-h-[44px] w-full rounded-lg border px-2 text-right text-sm tabular-nums ${
-                            coutant === 0 ? "border-amber-400 bg-amber-50" : "border-slate-300"
-                          }`}
-                        />
-                      </div>
+                      {/* 🙈 Le COÛTANT n'apparaît que si les coûts sont
+                          affichés — mais il continue d'être enregistré et
+                          compté dans la marge, masqué ou non. */}
+                      {coutsVisibles && (
+                        <div>
+                          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Coûtant</label>
+                          <InputNombreDecimal
+                            valeur={l.prix_coutant}
+                            onChange={(v) => majLigne(l.uid, { ...l, prix_coutant: v })}
+                            onBlur={() => proposerReportCatalogue(l)}
+                            className={`min-h-[44px] w-full rounded-lg border px-2 text-right text-sm tabular-nums ${
+                              coutant === 0 ? "border-amber-400 bg-amber-50" : "border-slate-300"
+                            }`}
+                          />
+                        </div>
+                      )}
                       <div>
                         <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Vendant</label>
                         <InputNombreDecimal
@@ -12497,9 +12548,13 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                       </div>
                     </div>
                     <p className="mt-1.5 flex items-center justify-between text-[11px]">
-                      <span className={coutant === 0 ? "font-semibold text-amber-600" : "text-slate-400"}>
-                        {coutant === 0 ? "⚠️ Coût inconnu — hors marge" : `Marge ${margePourcent(coutant, Number(l.prix_vendant) || 0).toFixed(0)} %`}
-                      </span>
+                      {coutsVisibles ? (
+                        <span className={coutant === 0 ? "font-semibold text-amber-600" : "text-slate-400"}>
+                          {coutant === 0 ? "⚠️ Coût inconnu — hors marge" : `Marge ${margePourcent(coutant, Number(l.prix_vendant) || 0).toFixed(0)} %`}
+                        </span>
+                      ) : (
+                        <span />
+                      )}
                       <span className="font-bold tabular-nums text-slate-700">{totalLigne.toFixed(2)} $</span>
                     </p>
                   </div>
@@ -12516,7 +12571,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                   <tr className="text-left text-slate-400">
                     <th className="pb-1.5 font-semibold">Produit</th>
                     <th className="pb-1.5 text-center font-semibold">Qté</th>
-                    <th className="pb-1.5 text-right font-semibold">Coûtant</th>
+                    {coutsVisibles && <th className="pb-1.5 text-right font-semibold">Coûtant</th>}
                     <th className="pb-1.5 text-right font-semibold">Vendant</th>
                     <th className="pb-1.5"></th>
                   </tr>
@@ -12551,8 +12606,15 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                           placeholder="Description visible par le client (modèles, garantie, ce qui est inclus…)"
                           className="mt-1 w-full resize-y rounded border border-slate-200 bg-slate-50 px-1.5 py-1 text-[11px] font-normal leading-snug text-slate-600 outline-none focus:border-slate-400"
                         />
-                        <p className="mt-0.5 text-[9px] italic text-slate-400">
-                          Modifiable — n&apos;affecte que ce devis, pas le catalogue.
+                        <p className="mt-0.5 flex items-center justify-between gap-2 text-[9px] italic text-slate-400">
+                          <span>Modifiable — n&apos;affecte que ce devis, pas le catalogue.</span>
+                          <button
+                            type="button"
+                            onClick={() => setDescriptionOuverte({ uid: l.uid })}
+                            className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[9px] font-bold not-italic text-slate-500 hover:border-slate-400 hover:text-slate-700"
+                          >
+                            ⤢ Agrandir
+                          </button>
                         </p>
                       </td>
                       <td className="py-1.5 text-center">
@@ -12571,18 +12633,20 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                           reporter le prix au catalogue (si le droit
                           l'autorise). Encadré en ambre tant qu'il est à
                           zéro : la ligne n'entre pas dans la marge. */}
-                      <td className="py-1.5 text-right tabular-nums text-slate-500">
-                        <InputNombreDecimal
-                          valeur={l.prix_coutant}
-                          onChange={(v) => majLigne(l.uid, { ...l, prix_coutant: v })}
-                          onBlur={() => proposerReportCatalogue(l)}
-                          className={`w-16 rounded border px-1 py-0.5 text-right tabular-nums ${
-                            (Number(l.prix_coutant) || 0) === 0
-                              ? "border-amber-400 bg-amber-50"
-                              : "border-slate-300"
-                          }`}
-                        />
-                      </td>
+                      {coutsVisibles && (
+                        <td className="py-1.5 text-right tabular-nums text-slate-500">
+                          <InputNombreDecimal
+                            valeur={l.prix_coutant}
+                            onChange={(v) => majLigne(l.uid, { ...l, prix_coutant: v })}
+                            onBlur={() => proposerReportCatalogue(l)}
+                            className={`w-16 rounded border px-1 py-0.5 text-right tabular-nums ${
+                              (Number(l.prix_coutant) || 0) === 0
+                                ? "border-amber-400 bg-amber-50"
+                                : "border-slate-300"
+                            }`}
+                          />
+                        </td>
+                      )}
                       {/* PRIX DE VENTE TOUJOURS MODIFIABLE — il ne
                           l'était que sur les lignes « sur mesure » :
                           sur un item du catalogue, c'était du texte
@@ -12616,7 +12680,9 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
 
           {lignes.length > 0 && (
             <div className="space-y-1 rounded-xl bg-slate-50 p-3 text-sm">
-              <div className="flex justify-between text-slate-500"><span>Total coûtant</span><span className="tabular-nums">{totaux.coutant.toFixed(2)} $</span></div>
+              {coutsVisibles && (
+                <div className="flex justify-between text-slate-500"><span>Total coûtant</span><span className="tabular-nums">{totaux.coutant.toFixed(2)} $</span></div>
+              )}
               <div className="flex justify-between font-bold text-slate-900"><span>Sous-total (HT)</span><span className="tabular-nums">{totaux.vendant.toFixed(2)} $</span></div>
 
               {/* TAXES — elles n'apparaissaient qu'au moment de l'aperçu
@@ -12643,6 +12709,21 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                   </>
                 );
               })()}
+              {/* 🙈 MARGE ET COÛTS — masqués par défaut : l'écran est
+                  souvent tourné vers le client pendant qu'on monte le
+                  devis. Les chiffres restent enregistrés et calculés,
+                  seul l'affichage disparaît. Le rappel « lignes sans
+                  coûtant » reste, lui, visible : il ne dévoile aucun
+                  montant et évite d'envoyer un devis à l'aveugle. */}
+              {!coutsVisibles && lignesNonEvaluees.length > 0 && (
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>🙈 Coûts masqués</span>
+                  <span>
+                    {lignesNonEvaluees.length} ligne{lignesNonEvaluees.length > 1 ? "s" : ""} sans coûtant
+                  </span>
+                </div>
+              )}
+              {coutsVisibles && (
               <div className={`flex justify-between ${lignesNonEvaluees.length > 0 ? "text-slate-600" : "text-emerald-600"}`}>
                 <span>
                   Marge
@@ -12658,11 +12739,12 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
                     : `${marge.toFixed(2)} $ (${margePct.toFixed(0)}%)`}
                 </span>
               </div>
+              )}
 
               {/* CE QUI N'EST PAS ÉVALUÉ — en DOLLARS, pas en nombre de
                   lignes : « 1 ligne incomplète » ne dit pas s'il s'agit
                   d'un bouchon à 10 $ ou d'un contrat à 8 100 $. */}
-              {lignesNonEvaluees.length > 0 && (
+              {coutsVisibles && lignesNonEvaluees.length > 0 && (
                 <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2">
                   <p className="text-[11px] font-extrabold tabular-nums text-amber-800">
                     ⚠️ {montantNonEvalue.toFixed(2)} $ non évalués sur {totaux.vendant.toFixed(2)} $
@@ -12684,6 +12766,58 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
               )}
             </div>
           )}
+
+          {/* ✏️ DESCRIPTION EN GRAND — deux lignes d'aperçu suffisent pour
+              repérer, jamais pour écrire ni relire l'argumentaire qui
+              partira au client. Le texte s'écrit directement dans la
+              ligne : rien à « valider », fermer suffit. */}
+          {descriptionOuverte && (() => {
+            const ligneOuverte = lignes.find((x) => x.uid === descriptionOuverte.uid);
+            if (!ligneOuverte) return null;
+            return (
+              <div
+                className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+                onClick={() => setDescriptionOuverte(null)}
+              >
+                <div
+                  className="flex h-full w-full flex-col bg-white sm:h-auto sm:max-h-[85vh] sm:max-w-2xl sm:rounded-2xl sm:shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Description visible par le client</p>
+                      <p className="truncate text-sm font-bold text-slate-800">{ligneOuverte.nom || "Ligne sans nom"}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDescriptionOuverte(null)}
+                      className="shrink-0 rounded-lg px-2 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      aria-label="Fermer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4">
+                    <textarea
+                      autoFocus
+                      value={ligneOuverte.description || ""}
+                      onChange={(e) => majLigne(ligneOuverte.uid, { ...ligneOuverte, description: e.target.value })}
+                      placeholder="Modèles, garantie, ce qui est inclus, ce qui ne l'est pas…"
+                      className="h-[55vh] w-full resize-none rounded-xl border border-slate-300 p-3 text-sm leading-relaxed text-slate-700 outline-none focus:border-slate-500 sm:h-72"
+                    />
+                    <p className="mt-2 text-[11px] italic leading-snug text-slate-400">
+                      N&apos;affecte que ce devis, pas le catalogue. Le texte s&apos;enregistre au fur et à mesure.
+                    </p>
+                  </div>
+                  <div className="border-t border-slate-200 p-3">
+                    <Button onClick={() => setDescriptionOuverte(null)} className="w-full">
+                      Terminé
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           <Button
             onClick={editionVersion ? enregistrerVersion : demarrerCreationDevis}
