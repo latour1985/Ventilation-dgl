@@ -13647,6 +13647,41 @@ function reconstruirePlanning(rows, employesRef) {
   return recalculerTransports(planning);
 }
 
+// ============================================================
+// 🔁 FUSION AVEC LE SERVEUR (2026-08-22 — « les tâches d'Éloïse
+// n'apparaissent pas chez les autres »)
+// ------------------------------------------------------------
+// La table `taches_assignees` FAIT FOI. Avant, l'agenda ne se
+// reconstruisait que si la grille locale était vide ou abîmée : dès
+// qu'un écran avait sa grille, il ne relisait plus jamais le serveur.
+// Deux répartitrices travaillant en même temps ne voyaient donc jamais
+// le travail l'une de l'autre — jusqu'à recréer les mêmes tâches en
+// double.
+//
+// Seuls blocs conservés du local : ceux des employés SANS COURRIEL.
+// Rien n'a jamais pu être écrit pour eux (l'assignation le dit déjà au
+// Journal) ; les reconstruire depuis le serveur les effacerait de
+// l'écran. Pour tous les autres, le serveur écrase — c'est ce qui fait
+// aussi disparaître, chez tout le monde, une tâche retirée ailleurs.
+// ============================================================
+function fusionnerPlanningServeur(prev, rows, employesRef) {
+  const serveur = reconstruirePlanning(rows, employesRef);
+  const sansCourriel = new Set(employesRef.filter((e) => !e.courriel).map((e) => e.id));
+  if (sansCourriel.size === 0) return serveur;
+  const fusion = { ...serveur };
+  Object.entries(prev || {}).forEach(([cle, valeur]) => {
+    const empId = cle.split("|")[1];
+    if (!sansCourriel.has(empId)) return;
+    const locales = listeCellule(valeur).filter((t) => t && !t.est_tache_systeme);
+    if (locales.length === 0) return;
+    fusion[cle] = [
+      ...listeCellule(fusion[cle]).filter((x) => !locales.some((l) => l.id === x.id)),
+      ...locales,
+    ];
+  });
+  return recalculerTransports(fusion);
+}
+
 // Techniciens actuellement assignés à une tâche (balayage du planning),
 // avec un résumé lisible de l'horaire propre de chacun — alimente la
 // section « Appliquer la modification à… » de la modale d'édition.
@@ -15284,7 +15319,33 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       return recalculerTransports(copie);
     });
     const employe = employes.find((e) => e.id === employeId);
-    ajouterJournal(`↔️ "${tache.titre || tache.clientNom}" redimensionnée à ${nbHeures} h (${employe?.nom}, ${jourCible}) — mise à jour envoyée à son app mobile`);
+    // 💾 ENREGISTRÉ POUR VRAI (2026-08-22) : le redimensionnement ne
+    // touchait QUE la grille de l'écran. Le Journal annonçait « mise à
+    // jour envoyée à son app mobile » — c'était faux : le technicien
+    // gardait l'ancienne durée, et la nouvelle disparaissait au premier
+    // rechargement. Le choix « conserver » laisse intact le 💰/🤝 déjà
+    // décidé pour cette assignation.
+    if (employe?.courriel) {
+      assignerTacheSupabase(
+        { ...tache, heures: nbHeures, jours: 0 },
+        employe,
+        { date: jourCible, heureDebut }
+      )
+        .then(() => {
+          ajouterJournal(
+            `↔️ "${tache.titre || tache.clientNom}" redimensionnée à ${nbHeures} h (${employe.nom}, ${jourCible}) — mise à jour envoyée à son app mobile`
+          );
+        })
+        .catch((e) => {
+          ajouterJournal(
+            `⚠️ "${tache.titre || tache.clientNom}" redimensionnée à l'écran mais N'A PAS été enregistrée — ${employe.nom} garde l'ancienne durée : ${e?.message || "connexion impossible"}`
+          );
+        });
+    } else {
+      ajouterJournal(
+        `⚠️ "${tache.titre || tache.clientNom}" redimensionnée à ${nbHeures} h (${employe?.nom || employeId}, ${jourCible}) — PAS envoyée à l'app mobile : aucun courriel au Répertoire`
+      );
+    }
   };
 
   // ------------------------------------------------------------
@@ -20024,10 +20085,10 @@ export default function App() {
     };
   }, [session]);
 
-  // Persistance de l'AGENDA : au démarrage (grille vide), l'horaire est
-  // reconstruit depuis les assignations Supabase. Re-tente à mesure que
-  // le répertoire d'employés se charge (les courriels servent de lien),
-  // mais ne touche JAMAIS une grille déjà remplie (pas d'écrasement).
+  // Persistance de l'AGENDA : l'horaire est reconstruit depuis les
+  // assignations Supabase — la table fait foi. Re-tente à mesure que le
+  // répertoire d'employés se charge (les courriels servent de lien), et
+  // se recharge en DIRECT quand quelqu'un d'autre planifie.
   // Signal « répertoire des employés chargé » — déclaré ICI car l'effet
   // de reconstruction de l'agenda (juste dessous) en dépend.
   const [repertoireCharge, setRepertoireCharge] = useState(false);
@@ -20037,52 +20098,56 @@ export default function App() {
     // deviendraient invisibles quand la vraie fiche arrive (course).
     if (!session || !repertoireCharge) return;
     let annule = false;
-    listerToutesAssignations()
-      .then((rows) => {
-        if (annule || rows.length === 0) return;
-        setFacturablesAssignations((prev) => {
-          const maj = { ...prev };
-          rows.forEach((r) => {
-            maj[`${r.tache_id}|${(r.employe_email || "").toLowerCase()}`] = r.facturable !== false;
+    let minuterie = null;
+    const charger = () =>
+      listerToutesAssignations()
+        .then((rows) => {
+          if (annule || rows.length === 0) return;
+          setFacturablesAssignations((prev) => {
+            const maj = { ...prev };
+            rows.forEach((r) => {
+              maj[`${r.tache_id}|${(r.employe_email || "").toLowerCase()}`] = r.facturable !== false;
+            });
+            return maj;
           });
-          return maj;
-        });
-        setStatutsAssignations((prev) => {
-          const maj = { ...prev };
-          rows.forEach((r) => {
-            maj[`${r.tache_id}|${(r.employe_email || "").toLowerCase()}`] = r.statut || "planifiee";
+          setStatutsAssignations((prev) => {
+            const maj = { ...prev };
+            rows.forEach((r) => {
+              maj[`${r.tache_id}|${(r.employe_email || "").toLowerCase()}`] = r.statut || "planifiee";
+            });
+            return maj;
           });
-          return maj;
+          const courrielSession = session.user?.email?.toLowerCase();
+          const employesRef = [
+            ...utilisateurs.map((u) => ({ id: u.id, courriel: u.courriel })),
+            ...(courrielSession && !utilisateurs.some((u) => (u.courriel || "").toLowerCase() === courrielSession)
+              ? [{ id: "compte-connecte", courriel: courrielSession }]
+              : []),
+            // 🤝 Les sous-traitants ont leur rangée aussi — sinon la
+            // reconstruction de l'agenda jetterait leurs blocs.
+            ...sousTraitants.map((st) => ({ id: `st-${st.id}`, courriel: COURRIEL_ST(st.id) })),
+          ];
+          setPlanning((prev) => fusionnerPlanningServeur(prev, rows, employesRef));
+          // Les tâches déjà planifiées ne restent pas dans « en attente ».
+          setTachesAttente((prev) => prev.filter((t) => !rows.some((r) => r.tache_id === t.id)));
+        })
+        .catch(() => {
+          // table absente — l'agenda local continue seul
         });
-        const courrielSession = session.user?.email?.toLowerCase();
-        const employesRef = [
-          ...utilisateurs.map((u) => ({ id: u.id, courriel: u.courriel })),
-          ...(courrielSession && !utilisateurs.some((u) => (u.courriel || "").toLowerCase() === courrielSession)
-            ? [{ id: "compte-connecte", courriel: courrielSession }]
-            : []),
-          // 🤝 Les sous-traitants ont leur rangée aussi — sinon la
-          // reconstruction de l'agenda jetterait leurs blocs.
-          ...sousTraitants.map((st) => ({ id: `st-${st.id}`, courriel: COURRIEL_ST(st.id) })),
-        ];
-        setPlanning((prev) => {
-          // Grille considérée valide seulement si TOUTES ses tâches
-          // réelles pointent vers une rangée existante — sinon on la
-          // reconstruit (répare aussi les cases orphelines).
-          const idsRoster = new Set(employesRef.map((e) => e.id));
-          const reelles = Object.values(prev)
-            .flatMap((v) => listeCellule(v))
-            .filter((t) => t && !t.est_tache_systeme);
-          const grilleValide = reelles.length > 0 && reelles.every((t) => idsRoster.has(t.employeId));
-          return grilleValide ? prev : reconstruirePlanning(rows, employesRef);
-        });
-        // Les tâches déjà planifiées ne restent pas dans « en attente ».
-        setTachesAttente((prev) => prev.filter((t) => !rows.some((r) => r.tache_id === t.id)));
-      })
-      .catch(() => {
-        // table absente — l'agenda local continue seul
-      });
+    charger();
+    // ⏱️ EN DIRECT — dès qu'une assignation change (créée par une
+    // collègue à l'autre poste, retirée, déplacée), l'agenda se relit.
+    // Court délai groupé : planifier une équipe écrit plusieurs lignes
+    // coup sur coup, on ne recharge qu'une fois à la fin.
+    const desabonner = sAbonnerTachesAssignees(() => {
+      if (annule) return;
+      clearTimeout(minuterie);
+      minuterie = setTimeout(charger, 800);
+    });
     return () => {
       annule = true;
+      clearTimeout(minuterie);
+      desabonner();
     };
   }, [session, repertoireCharge, utilisateurs, sousTraitants]);
 
