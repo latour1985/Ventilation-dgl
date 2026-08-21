@@ -13,7 +13,7 @@ import TermesConditions from "@/components/TermesConditions";
 import ConnexionAdmin from "@/components/ConnexionAdmin";
 import Logo from "@/components/Logo";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { supabase } from "@/lib/supabase/client";
+import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
 import { permissionsEffectives, permissionsPour, ORDRE_SECTIONS, LIBELLES_SECTIONS, aAutorisation, AUTORISATIONS, LIBELLES_AUTORISATIONS, AIDES_AUTORISATIONS, ROLES_AVEC_AUTORISATIONS } from "@/lib/permissions";
 import GestionAcces from "@/components/GestionAcces";
 import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
@@ -20397,6 +20397,23 @@ export default function App() {
           <Menu size={18} />
         </button>
         <h1 className="shrink-0 text-lg font-extrabold text-[#131B2E]">{LIBELLES_SECTIONS[vue] || "Administration"}</h1>
+        {/* 📱 MON HORAIRE (2026-08-20, demande du propriétaire) : un
+            admin travaille parfois sur un chantier comme les autres.
+            Bascule d'un tap vers SON horaire du jour — la session
+            voyage avec lui, aucun mot de passe à retaper. Visible
+            seulement si le compte a bien l'accès technicien. */}
+        {permissions.includes("technicien") && (
+          <button
+            onClick={() => {
+              transporterSessionPourBascule("technicien");
+              window.location.href = "/technicien";
+            }}
+            title="Ouvrir mon horaire du jour (app terrain)"
+            className="shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+          >
+            📱 <span className="hidden sm:inline">Mon horaire</span>
+          </button>
+        )}
         {/* 🔍 RECHERCHE GLOBALE — accessible de partout, comme demandé
             par le propriétaire : la recherche est une PORTE D'ENTRÉE,
             pas une destination. Première frappe = la page Recherche

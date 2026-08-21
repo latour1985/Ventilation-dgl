@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Logo from "@/components/Logo";
+import PortailRedirection from "@/components/PortailRedirection";
 
 export default function Home() {
   return (
@@ -11,6 +12,9 @@ export default function Home() {
           <p className="mt-2 text-zinc-600">
             Choisis l&apos;application à ouvrir
           </p>
+          {/* Déjà connecté ? On ouvre directement la bonne application
+              (l'icône du téléphone menait toujours au technicien). */}
+          <PortailRedirection />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

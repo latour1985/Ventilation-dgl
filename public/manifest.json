@@ -2,7 +2,7 @@
   "name": "Fluxya",
   "short_name": "Fluxya",
   "description": "Gestion de temps, bons de travail, devis et projets — intégrée à QuickBooks.",
-  "start_url": "/technicien",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",

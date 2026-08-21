@@ -9,7 +9,7 @@ import {
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionTechnicien from "@/components/ConnexionTechnicien";
 import Logo from "@/components/Logo";
-import { supabase } from "@/lib/supabase/client";
+import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
 import { permissionsEffectives } from "@/lib/permissions";
 import { enregistrerInspection } from "@/lib/supabase/inspections";
 import { listerAnnuaireEmployes } from "@/lib/supabase/repertoireEmployes";
@@ -1844,7 +1844,7 @@ function CarteCommandeCamion({ session }) {
   );
 }
 
-function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeVue, setModeVue, onOuvrir, onDeconnexion, role, enLigne, suggestionChantier, onConfirmerChantier, onIgnorerChantier, onReinitialiser, nbEnAttente, syncEnCours, erreurSync, nomTechnicien, onOuvrirMesHeures, onCorrigerChrono }) {
+function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeVue, setModeVue, onOuvrir, onDeconnexion, role, peutOuvrirBureau, enLigne, suggestionChantier, onConfirmerChantier, onIgnorerChantier, onReinitialiser, nbEnAttente, syncEnCours, erreurSync, nomTechnicien, onOuvrirMesHeures, onCorrigerChrono }) {
   // 🚗 COURSE — le technicien crée LUI-MÊME une petite tâche sans
   // client (porter un camion au garage, chercher une pièce en fin de
   // journée) : le répartiteur ne peut pas toujours le prévoir. Pour
@@ -2064,6 +2064,22 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 {syncEnCours ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
                 {nbEnAttente} en attente
               </span>
+            )}
+            {/* 🖥️ RETOUR AU BUREAU (2026-08-20) : l'admin qui est sur un
+                chantier revient à sa console d'un tap — la session
+                voyage avec lui (elle est déposée du côté bureau, où
+                elle meurt toujours avec la fenêtre). */}
+            {peutOuvrirBureau && (
+              <button
+                onClick={() => {
+                  transporterSessionPourBascule("bureau");
+                  window.location.href = "/admin";
+                }}
+                title="Revenir à la console du bureau"
+                className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-slate-200"
+              >
+                🖥️ Bureau
+              </button>
             )}
             {role === "admin" && (
               <>
@@ -6218,6 +6234,10 @@ function AppTechnicien() {
             onOuvrir={ouvrirTache}
             onDeconnexion={() => supabase.auth.signOut()}
             role={role}
+            // 🖥️ Le bouton « Bureau » n'apparaît que si le compte a
+            // vraiment une porte côté console (un technicien pur ne
+            // doit jamais voir un bouton qui le mènerait à un refus).
+            peutOuvrirBureau={sectionsTech.some((s) => s !== "technicien")}
             enLigne={enLigne}
             suggestionChantier={suggestionChantier}
             onConfirmerChantier={confirmerChantierSuggere}
