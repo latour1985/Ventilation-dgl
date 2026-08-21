@@ -14473,6 +14473,18 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // restent sur UNE ligne : pastille, titre, chips d'état.
   const [tacheDepliee, setTacheDepliee] = useState(null);
   const [assignationMobile, setAssignationMobile] = useState(null); // {tacheId, employeId, heure, date}
+  // 📱 AGENDA TÉLÉPHONE — cartes repliées (2026-08-22, retour terrain)
+  // ------------------------------------------------------------
+  // La liste dépliait TOUTES les tâches de TOUT le monde : la journée
+  // faisait huit écrans de haut et on ne voyait jamais l'équipe d'un
+  // coup d'œil. Chaque personne tient maintenant sur une carte-résumé
+  // (heures, compte, pastilles d'état) et ses tâches ne s'ouvrent que
+  // sur demande. Plusieurs cartes peuvent rester ouvertes en même temps.
+  const [agendaCartesOuvertes, setAgendaCartesOuvertes] = useState([]);
+  const basculerCarteAgenda = (empId) =>
+    setAgendaCartesOuvertes((liste) =>
+      liste.includes(empId) ? liste.filter((x) => x !== empId) : [...liste, empId]
+    );
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   // « ➕ Nouveau client » depuis la création de tâche (fenêtre partagée).
   const [modalNouveauClientTache, setModalNouveauClientTache] = useState(false);
@@ -16982,7 +16994,14 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
             téléphone, c'est du défilement horizontal à l'aveugle. Même
             journée, mêmes données, présentée en LISTE par personne et
             dans l'ordre réel. Un tap ouvre la même fiche de tâche que
-            sur l'ordinateur (elle est déjà pensée plein écran). */}
+            sur l'ordinateur (elle est déjà pensée plein écran).
+
+            2026-08-22 — CARTES REPLIÉES : la première version dépliait
+            tout, la journée faisait huit écrans et on ne voyait jamais
+            l'équipe d'un coup d'œil. Chaque personne tient maintenant
+            sur une carte-résumé (plage, heures, compte, état) ; les
+            tâches ne s'ouvrent que sur demande, et les personnes libres
+            se réduisent à une seule ligne. */}
         <div className="flex-1 overflow-y-auto md:hidden">
           {vue !== "jour" && (
             <p className="border-b border-slate-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-snug text-amber-800">
@@ -16990,85 +17009,198 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               <span className="font-bold">Jour</span> se lit beaucoup mieux.
             </p>
           )}
-          {rangeesAgenda.map((emp) => {
-            if (emp.enteteSection) return renderEnteteSection(emp.enteteSection);
-            const entrees = tachesDuJourAvecHeure(planning, jourKey, emp.id).filter((e) => !e.tache.est_tache_systeme);
+          {(() => {
+            // Un seul passage : on prépare toutes les fiches, puis on
+            // affiche. Ça évite de recalculer les mêmes heures deux fois
+            // (une pour le bandeau du haut, une pour chaque carte).
+            const fiches = rangeesAgenda.map((emp) => {
+              if (emp.enteteSection) return { emp, entete: true };
+              const entrees = tachesDuJourAvecHeure(planning, jourKey, emp.id)
+                .filter((e) => !e.tache.est_tache_systeme)
+                .map((e) => ({
+                  ...e,
+                  reel: (travaux || []).find(
+                    (x) =>
+                      x.supabase &&
+                      cleTacheDesHeures(x.tacheId) === e.tache.id &&
+                      (x.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
+                      x.date === jourKey &&
+                      x.debutReel &&
+                      x.finReelle
+                  ),
+                }));
+              // PLAGE ET CHARGE — comptées sur les cases occupées de la
+              // grille : deux tâches sur la même heure ne font pas deux
+              // heures de travail, elles font une heure.
+              const indexOccupes = [];
+              HEURES.forEach((h, i) => {
+                if (listeCellule(planning[`${jourKey}|${emp.id}|${h}`]).some((t) => !t.est_tache_systeme)) {
+                  indexOccupes.push(i);
+                }
+              });
+              const dernier = indexOccupes[indexOccupes.length - 1];
+              return {
+                emp,
+                entrees,
+                heuresPlanifiees: indexOccupes.length,
+                plage: indexOccupes.length
+                  ? `${HEURES[indexOccupes[0]]} → ${HEURES[Math.min(dernier + 1, HEURES.length - 1)]}`
+                  : "",
+                heuresReelles: entrees.reduce((s, e) => s + (e.reel ? Number(e.reel.heures) || 0 : 0), 0),
+                nbTerminees: entrees.filter((e) => estTerminee(e.tache, emp)).length,
+                nbEnCours: entrees.filter((e) => !estTerminee(e.tache, emp) && estEnCours(e.tache, emp)).length,
+              };
+            });
+            const occupes = fiches.filter((f) => !f.entete && f.entrees.length > 0);
+            const libres = fiches.filter((f) => !f.entete && f.entrees.length === 0);
+            const toutOuvert = occupes.length > 0 && occupes.every((f) => agendaCartesOuvertes.includes(f.emp.id));
             return (
-              <div key={emp.id} className="border-b border-slate-100">
-                <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-1.5">
-                  <span className="truncate text-xs font-extrabold text-slate-700">
-                    {emp.estSousTraitant ? "🤝 " : ""}{emp.nom}
+              <>
+                {/* BANDEAU D'ÉTAT — la réponse à « où en est mon équipe »
+                    sans ouvrir quoi que ce soit. */}
+                <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2">
+                  <span className="text-[11px] font-bold text-slate-500">
+                    👷 {occupes.length} sur le terrain
+                    {libres.length > 0 && <span className="font-semibold text-slate-400"> · {libres.length} libre{libres.length > 1 ? "s" : ""}</span>}
                   </span>
-                  <span className="shrink-0 text-[10px] font-bold text-slate-400">
-                    {entrees.length === 0 ? "libre" : `${entrees.length} tâche${entrees.length > 1 ? "s" : ""}`}
-                  </span>
+                  {occupes.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAgendaCartesOuvertes(toutOuvert ? [] : occupes.map((f) => f.emp.id))}
+                      className="shrink-0 rounded-full border border-slate-300 px-2.5 py-1 text-[10px] font-bold text-slate-600"
+                    >
+                      {toutOuvert ? "Tout replier" : "Tout ouvrir"}
+                    </button>
+                  )}
                 </div>
-                {entrees.length > 0 && (
-                  <div className="space-y-1.5 p-2">
-                    {entrees.map(({ tache, heure }) => {
-                      const reel = (travaux || []).find(
-                        (x) =>
-                          x.supabase &&
-                          cleTacheDesHeures(x.tacheId) === tache.id &&
-                          (x.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
-                          x.date === jourKey &&
-                          x.debutReel &&
-                          x.finReelle
-                      );
-                      const couleur = COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT;
-                      return (
-                        <button
-                          key={tache.id}
-                          onClick={() =>
-                            !lectureSeule &&
-                            (emp.estSousTraitant
-                              ? setModalStatutST({ tache, employe: emp, date: jourKey })
-                              : setTacheDetailOuverte({ tache, employe: emp, date: jourKey, heure }))
-                          }
-                          className={`block w-full rounded-xl border-l-4 p-2.5 text-left ${
-                            emp.estSousTraitant
-                              ? ST_COULEURS[statutBlocST(tache.id, emp.courriel)][0]
-                              : estTerminee(tache, emp)
-                                ? "border-emerald-500 bg-emerald-50"
-                                : estEnCours(tache, emp)
-                                  ? "border-fuchsia-500 bg-fuchsia-50"
-                                  : `bg-white ${couleur.bordurePastille}`
-                          }`}
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className="text-xs font-extrabold tabular-nums text-slate-500">{heure}</span>
+
+                {fiches.map((f) => {
+                  if (f.entete) return renderEnteteSection(f.emp.enteteSection);
+                  const { emp, entrees } = f;
+
+                  // PERSONNE LIBRE — une seule ligne. Avant, elle prenait
+                  // une bande complète et repoussait le vrai contenu.
+                  if (entrees.length === 0) {
+                    return (
+                      <div key={emp.id} className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+                        <span className="truncate text-xs font-semibold text-slate-400">
+                          {emp.estSousTraitant ? "🤝 " : ""}{emp.nom}
+                        </span>
+                        <span className="shrink-0 text-[10px] font-bold text-emerald-600">✅ Libre</span>
+                      </div>
+                    );
+                  }
+
+                  const ouvert = agendaCartesOuvertes.includes(emp.id);
+                  const nbAFaire = entrees.length - f.nbTerminees - f.nbEnCours;
+                  return (
+                    <div key={emp.id} className="border-b border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => basculerCarteAgenda(emp.id)}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-extrabold text-slate-800">
+                            {emp.estSousTraitant ? "🤝 " : ""}{emp.nom}
+                          </span>
+                          <span className="mt-1 flex flex-wrap items-center gap-1">
                             {emp.estSousTraitant ? (
-                              <span className="text-[10px]">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}</span>
-                            ) : estTerminee(tache, emp) ? (
-                              <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">TERMINÉ</span>
-                            ) : estEnCours(tache, emp) ? (
-                              <span className="rounded-full bg-fuchsia-100 px-1.5 py-0.5 text-[9px] font-bold text-fuchsia-700">EN COURS</span>
-                            ) : null}
-                            {reel && (
-                              <span className="ml-auto text-[10px] font-bold tabular-nums text-emerald-800">
-                                {heureLocaleHHMM(reel.debutReel)} → {heureLocaleHHMM(reel.finReelle)} · {(Number(reel.heures) || 0).toFixed(2)} h
+                              <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">
+                                {entrees.map((e) => ST_ICONES[statutBlocST(e.tache.id, emp.courriel)]).join(" ")}
                               </span>
+                            ) : (
+                              <>
+                                {f.nbTerminees > 0 && (
+                                  <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                                    {f.nbTerminees} terminée{f.nbTerminees > 1 ? "s" : ""}
+                                  </span>
+                                )}
+                                {f.nbEnCours > 0 && (
+                                  <span className="rounded-full bg-fuchsia-100 px-1.5 py-0.5 text-[10px] font-bold text-fuchsia-700">
+                                    {f.nbEnCours} en cours
+                                  </span>
+                                )}
+                                {nbAFaire > 0 && (
+                                  <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                                    {nbAFaire} à faire
+                                  </span>
+                                )}
+                              </>
                             )}
                           </span>
-                          <span className="mt-1 block text-sm font-bold leading-snug text-slate-900">
-                            {tache.titre || tache.clientNom}
+                          <span className="mt-1 block text-[10px] font-semibold tabular-nums text-slate-400">
+                            ⏱ {f.plage} · {f.heuresPlanifiees} h planifiée{f.heuresPlanifiees > 1 ? "s" : ""}
+                            {f.heuresReelles > 0 && (
+                              <span className="text-emerald-700"> · {f.heuresReelles.toFixed(2)} h pointées</span>
+                            )}
                           </span>
-                          {tache.clientNom && tache.titre && (
-                            <span className="block text-[11px] text-slate-500">{tache.clientNom}</span>
-                          )}
-                          {(tache.adresseTravaux || tache.adresseIntervention) && (
-                            <span className="mt-0.5 block truncate text-[11px] text-slate-400">
-                              📍 {tache.adresseTravaux || tache.adresseIntervention}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                        </span>
+                        <span className="shrink-0 text-xs font-bold text-slate-400">
+                          {ouvert ? "▲" : `▼ ${entrees.length}`}
+                        </span>
+                      </button>
+
+                      {ouvert && (
+                        <div className="space-y-1.5 px-2 pb-2">
+                          {entrees.map(({ tache, heure, reel }) => {
+                            const couleur = COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT;
+                            return (
+                              <button
+                                key={tache.id}
+                                onClick={() =>
+                                  !lectureSeule &&
+                                  (emp.estSousTraitant
+                                    ? setModalStatutST({ tache, employe: emp, date: jourKey })
+                                    : setTacheDetailOuverte({ tache, employe: emp, date: jourKey, heure }))
+                                }
+                                className={`block w-full rounded-xl border-l-4 p-2.5 text-left ${
+                                  emp.estSousTraitant
+                                    ? ST_COULEURS[statutBlocST(tache.id, emp.courriel)][0]
+                                    : estTerminee(tache, emp)
+                                      ? "border-emerald-500 bg-emerald-50"
+                                      : estEnCours(tache, emp)
+                                        ? "border-fuchsia-500 bg-fuchsia-50"
+                                        : `bg-white ${couleur.bordurePastille}`
+                                }`}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span className="text-xs font-extrabold tabular-nums text-slate-500">{heure}</span>
+                                  {emp.estSousTraitant ? (
+                                    <span className="text-[10px]">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}</span>
+                                  ) : estTerminee(tache, emp) ? (
+                                    <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">TERMINÉ</span>
+                                  ) : estEnCours(tache, emp) ? (
+                                    <span className="rounded-full bg-fuchsia-100 px-1.5 py-0.5 text-[9px] font-bold text-fuchsia-700">EN COURS</span>
+                                  ) : null}
+                                  {reel && (
+                                    <span className="ml-auto text-[10px] font-bold tabular-nums text-emerald-800">
+                                      {heureLocaleHHMM(reel.debutReel)} → {heureLocaleHHMM(reel.finReelle)} · {(Number(reel.heures) || 0).toFixed(2)} h
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="mt-1 block text-sm font-bold leading-snug text-slate-900">
+                                  {tache.titre || tache.clientNom}
+                                </span>
+                                {tache.clientNom && tache.titre && (
+                                  <span className="block text-[11px] text-slate-500">{tache.clientNom}</span>
+                                )}
+                                {(tache.adresseTravaux || tache.adresseIntervention) && (
+                                  <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                                    📍 {tache.adresseTravaux || tache.adresseIntervention}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
             );
-          })}
+          })()}
         </div>
 
         {/* GRILLE CALENDRIER — un technicien par rangée (ordinateur) */}
