@@ -14511,7 +14511,30 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // 📱 AGENDA TÉLÉPHONE — LISTE DÉPLIÉE (essai des cartes repliées
   // abandonné le 2026-08-22 après usage réel : ça tenait dans un écran,
   // mais ça se lisait moins bien qu'un simple défilement où tout est
-  // déjà là. Rien à ouvrir, rien à mémoriser — donc plus d'état ici.)
+  // déjà là. Rien à ouvrir, rien à mémoriser.)
+  //
+  // 📋 / ▦ DEUX MODES AU CHOIX (2026-08-22, demande du propriétaire).
+  // ------------------------------------------------------------
+  // La liste se lit vite, mais elle ne montre pas la FORME de la
+  // journée — qui est libre à 10 h, qui déborde. La grille, elle, le
+  // montre d'un coup d'œil ; elle demande juste de glisser de côté.
+  // Les deux servent, à des moments différents : c'est donc un choix,
+  // pas une devinette sur la largeur de l'écran. Mémorisé PAR
+  // APPAREIL — le téléphone garde son réglage, le bureau le sien.
+  const [modeAgendaMobile, setModeAgendaMobile] = useState("liste");
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("agenda-mobile-mode") === "grille") setModeAgendaMobile("grille");
+    } catch {
+      // stockage indisponible — on reste sur la liste, le choix sûr
+    }
+  }, []);
+  const choisirModeAgenda = (mode) => {
+    setModeAgendaMobile(mode);
+    try {
+      localStorage.setItem("agenda-mobile-mode", mode);
+    } catch {}
+  };
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   // « ➕ Nouveau client » depuis la création de tâche (fenêtre partagée).
   const [modalNouveauClientTache, setModalNouveauClientTache] = useState(false);
@@ -15673,6 +15696,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
               key={id}
               onClick={() => setVue(id)}
               className={`rounded-md px-3 py-1.5 text-xs font-bold ${vue === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* 📱 LISTE ou GRILLE — TÉLÉPHONE SEULEMENT (2026-08-22).
+            Avant, la largeur de l'écran décidait toute seule : sous
+            768 px, la grille disparaissait, point. Le choix appartient
+            maintenant à la personne. Au bureau l'interrupteur ne
+            s'affiche pas — la grille y est toujours le bon choix, et
+            c'est un bouton de moins à l'écran. */}
+        <div className="flex rounded-lg border border-slate-200 p-0.5 md:hidden">
+          {[["liste", "📋 Liste"], ["grille", "▦ Grille"]].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => choisirModeAgenda(id)}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold ${modeAgendaMobile === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
             >
               {label}
             </button>
@@ -17057,11 +17097,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
             haut est conservée de cet essai — elle ne cache rien et
             répond à « combien de monde travaille aujourd'hui » pendant
             qu'on descend dans la liste. */}
-        <div className="flex-1 overflow-y-auto md:hidden">
+        <div className={`${modeAgendaMobile === "grille" ? "hidden" : "flex-1 overflow-y-auto"} md:hidden`}>
           {vue !== "jour" && (
             <p className="border-b border-slate-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-snug text-amber-800">
-              La vue {vue === "semaine" ? "Semaine" : "Mois"} est faite pour un grand écran. Sur le téléphone, la vue{" "}
-              <span className="font-bold">Jour</span> se lit beaucoup mieux.
+              La vue {vue === "semaine" ? "Semaine" : "Mois"} ne se met pas en liste — seule la vue{" "}
+              <span className="font-bold">Jour</span> le fait. Passe à <span className="font-bold">▦ Grille</span> pour
+              la voir sur ton téléphone.
             </p>
           )}
           {(() => {
@@ -17178,8 +17219,27 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           })()}
         </div>
 
-        {/* GRILLE CALENDRIER — un technicien par rangée (ordinateur) */}
-        <div ref={grilleScrollRef} className="hidden flex-1 overflow-x-auto md:block">
+        {/* MODE GRILLE SUR TÉLÉPHONE — on dit tout de suite ce qui
+            marche et ce qui ne marche pas. Le glisser-déposer utilise
+            des événements de SOURIS que le doigt n'envoie pas : plutôt
+            que de laisser quelqu'un s'acharner sur un bloc qui ne
+            bouge pas, on nomme la limite et on donne le chemin qui
+            fonctionne. */}
+        {modeAgendaMobile === "grille" && (
+          <p className="border-y border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] leading-snug text-slate-500 md:hidden">
+            Glisse de côté pour parcourir la journée — la colonne des noms reste en place. Déplacer une tâche au doigt
+            n&apos;est pas possible : tape le bloc et change la date ou le technicien dans sa fiche.
+          </p>
+        )}
+
+        {/* GRILLE CALENDRIER — un technicien par rangée. Toujours au
+            bureau ; sur le téléphone, seulement si « ▦ Grille » est
+            choisi (elle se parcourt alors en glissant de côté, la
+            colonne des noms reste collée à gauche). */}
+        <div
+          ref={grilleScrollRef}
+          className={`${modeAgendaMobile === "grille" ? "block" : "hidden"} flex-1 overflow-x-auto md:block`}
+        >
           {vue === "jour" ? (
             <div className="min-w-[640px]">
               <div className="grid" style={{ gridTemplateColumns: `120px repeat(${HEURES.length}, minmax(52px, 1fr))` }}>
