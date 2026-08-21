@@ -13101,6 +13101,20 @@ function calculerJoursCibles(dateDepart, nbJours, sauterWeekend) {
 // employé pour une date donnée, peu importe à quelle heure précise
 // elle a été déposée (une seule source de vérité — les clés horaires
 // de `planning` — pour que toutes les vues restent synchronisées).
+// 📱 Tâches d'une journée AVEC leur heure de départ — pour la vue
+// LISTE du téléphone (2026-08-21) : une grille de 24 colonnes est
+// illisible sur un écran de 6 pouces, mais la journée se lit très bien
+// en liste, dans l'ordre.
+function tachesDuJourAvecHeure(planning, dateStr, employeId) {
+  const parId = new Map();
+  for (const h of HEURES) {
+    listeCellule(planning[`${dateStr}|${employeId}|${h}`]).forEach((t) => {
+      if (t && !parId.has(t.id)) parId.set(t.id, { tache: t, heure: h });
+    });
+  }
+  return [...parId.values()];
+}
+
 function tachesDuJourPourEmploye(planning, dateStr, employeId) {
   // TOUTES les tâches du jour (uniques, dans l'ordre de leur première
   // heure) — les vues Semaine/Mois les empilent pour n'en perdre aucune.
@@ -16653,8 +16667,103 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           </p>
         </div>
 
-        {/* GRILLE CALENDRIER — un technicien par rangée */}
-        <div ref={grilleScrollRef} className="flex-1 overflow-x-auto">
+        {/* 📱 VUE LISTE — TÉLÉPHONE (2026-08-21, séance mobile)
+            ------------------------------------------------------------
+            La grille de 24 colonnes demande 640 px de large : sur un
+            téléphone, c'est du défilement horizontal à l'aveugle. Même
+            journée, mêmes données, présentée en LISTE par personne et
+            dans l'ordre réel. Un tap ouvre la même fiche de tâche que
+            sur l'ordinateur (elle est déjà pensée plein écran). */}
+        <div className="flex-1 overflow-y-auto md:hidden">
+          {vue !== "jour" && (
+            <p className="border-b border-slate-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-snug text-amber-800">
+              La vue {vue === "semaine" ? "Semaine" : "Mois"} est faite pour un grand écran. Sur le téléphone, la vue{" "}
+              <span className="font-bold">Jour</span> se lit beaucoup mieux.
+            </p>
+          )}
+          {rangeesAgenda.map((emp) => {
+            if (emp.enteteSection) return renderEnteteSection(emp.enteteSection);
+            const entrees = tachesDuJourAvecHeure(planning, jourKey, emp.id).filter((e) => !e.tache.est_tache_systeme);
+            return (
+              <div key={emp.id} className="border-b border-slate-100">
+                <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-1.5">
+                  <span className="truncate text-xs font-extrabold text-slate-700">
+                    {emp.estSousTraitant ? "🤝 " : ""}{emp.nom}
+                  </span>
+                  <span className="shrink-0 text-[10px] font-bold text-slate-400">
+                    {entrees.length === 0 ? "libre" : `${entrees.length} tâche${entrees.length > 1 ? "s" : ""}`}
+                  </span>
+                </div>
+                {entrees.length > 0 && (
+                  <div className="space-y-1.5 p-2">
+                    {entrees.map(({ tache, heure }) => {
+                      const reel = (travaux || []).find(
+                        (x) =>
+                          x.supabase &&
+                          cleTacheDesHeures(x.tacheId) === tache.id &&
+                          (x.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
+                          x.date === jourKey &&
+                          x.debutReel &&
+                          x.finReelle
+                      );
+                      const couleur = COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT;
+                      return (
+                        <button
+                          key={tache.id}
+                          onClick={() =>
+                            !lectureSeule &&
+                            (emp.estSousTraitant
+                              ? setModalStatutST({ tache, employe: emp, date: jourKey })
+                              : setTacheDetailOuverte({ tache, employe: emp, date: jourKey, heure }))
+                          }
+                          className={`block w-full rounded-xl border-l-4 p-2.5 text-left ${
+                            emp.estSousTraitant
+                              ? ST_COULEURS[statutBlocST(tache.id, emp.courriel)][0]
+                              : estTerminee(tache, emp)
+                                ? "border-emerald-500 bg-emerald-50"
+                                : estEnCours(tache, emp)
+                                  ? "border-fuchsia-500 bg-fuchsia-50"
+                                  : `bg-white ${couleur.bordurePastille}`
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className="text-xs font-extrabold tabular-nums text-slate-500">{heure}</span>
+                            {emp.estSousTraitant ? (
+                              <span className="text-[10px]">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}</span>
+                            ) : estTerminee(tache, emp) ? (
+                              <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">TERMINÉ</span>
+                            ) : estEnCours(tache, emp) ? (
+                              <span className="rounded-full bg-fuchsia-100 px-1.5 py-0.5 text-[9px] font-bold text-fuchsia-700">EN COURS</span>
+                            ) : null}
+                            {reel && (
+                              <span className="ml-auto text-[10px] font-bold tabular-nums text-emerald-800">
+                                {heureLocaleHHMM(reel.debutReel)} → {heureLocaleHHMM(reel.finReelle)} · {(Number(reel.heures) || 0).toFixed(2)} h
+                              </span>
+                            )}
+                          </span>
+                          <span className="mt-1 block text-sm font-bold leading-snug text-slate-900">
+                            {tache.titre || tache.clientNom}
+                          </span>
+                          {tache.clientNom && tache.titre && (
+                            <span className="block text-[11px] text-slate-500">{tache.clientNom}</span>
+                          )}
+                          {(tache.adresseTravaux || tache.adresseIntervention) && (
+                            <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                              📍 {tache.adresseTravaux || tache.adresseIntervention}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* GRILLE CALENDRIER — un technicien par rangée (ordinateur) */}
+        <div ref={grilleScrollRef} className="hidden flex-1 overflow-x-auto md:block">
           {vue === "jour" ? (
             <div className="min-w-[640px]">
               <div className="grid" style={{ gridTemplateColumns: `120px repeat(${HEURES.length}, minmax(52px, 1fr))` }}>
