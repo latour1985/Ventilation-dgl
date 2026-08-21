@@ -466,6 +466,22 @@ function formatDuree(secondes) {
 // l'autre.
 const HEURES_AVANT_RAPPEL = 12;
 const HEURES_AVANT_PLAFOND = 16;
+// 🚚 SEUILS PROPRES AU TRANSPORT (2026-08-22, trouvé à la vérification).
+// ------------------------------------------------------------
+// Charles a laissé son « Transport — Fin de journée » tourner de 13 h 53
+// le 17 août jusqu'à 5 h 29 le lendemain : 15,6 h de transport, passées
+// SOUS le plafond de 16 h. Personne ne les a vues.
+//
+// 16 h est le bon plafond pour une journée de travail ; c'est absurde
+// pour un trajet. Les vrais transports de l'équipe tournent entre 15
+// minutes et 1 h 40. Les seuils ci-dessous laissent large — un aller
+// jusqu'aux Laurentides passe sans être inquiété — tout en attrapant
+// le chrono oublié le soir même plutôt que trois jours plus tard.
+const HEURES_AVANT_RAPPEL_TRANSPORT = 4;
+const HEURES_AVANT_PLAFOND_TRANSPORT = 6;
+// Seuil applicable à UNE tâche selon sa nature.
+const seuilPourTache = (tache, seuilTravail, seuilTransport) =>
+  tache?.type === "transport" ? seuilTransport : seuilTravail;
 
 function dureeEcoulee(tache) {
   const enCours = tache.etat === "en_cours" && tache.tempsDebutSegment;
@@ -492,12 +508,16 @@ const heureHHMM = (ts) => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-// Tâches EN COURS depuis plus de `seuilHeures` — sert au rappel (12 h)
-// comme au plafond (16 h). Une tâche en pause n'est jamais concernée :
-// son chrono ne court pas.
-function tachesTropLongues(taches, seuilHeures) {
+// Tâches EN COURS depuis trop longtemps — sert au rappel comme au
+// plafond. Le seuil dépend de la NATURE de la tâche : un transport n'a
+// rien à faire de rouler 15 h, une journée de travail oui. Une tâche en
+// pause n'est jamais concernée : son chrono ne court pas.
+function tachesTropLongues(taches, seuilTravail, seuilTransport = seuilTravail) {
   return (taches || []).filter(
-    (t) => t.etat === "en_cours" && t.tempsDebutSegment && dureeEcoulee(t) / 3600 >= seuilHeures
+    (t) =>
+      t.etat === "en_cours" &&
+      t.tempsDebutSegment &&
+      dureeEcoulee(t) / 3600 >= seuilPourTache(t, seuilTravail, seuilTransport)
   );
 }
 
@@ -1233,8 +1253,12 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
       setErreur(`Ton heure de fin doit être APRÈS ${heureHHMM(debut)}, l'heure de départ.`);
       return;
     }
-    if (debut && (finTs - debut) / 3600000 > HEURES_AVANT_PLAFOND) {
-      setErreur(`Plus de ${HEURES_AVANT_PLAFOND} h — vérifie l'heure. Si c'est exact, appelle l'administration.`);
+    // Même seuil que le plafond automatique, transport compris : sinon
+    // la fenêtre de correction accepterait une durée que le garde-fou,
+    // lui, refuse — deux règles différentes pour la même question.
+    const plafondSaisie = seuilPourTache(tache, HEURES_AVANT_PLAFOND, HEURES_AVANT_PLAFOND_TRANSPORT);
+    if (debut && (finTs - debut) / 3600000 > plafondSaisie) {
+      setErreur(`Plus de ${plafondSaisie} h — vérifie l'heure. Si c'est exact, appelle l'administration.`);
       return;
     }
     if (transportRetour && heureArrivee) {
@@ -1933,7 +1957,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
   // CHRONOS OUBLIÉS — cherchés sur TOUTES les tâches, pas seulement
   // celles du jour affiché : une tâche laissée en marche vendredi doit
   // sauter aux yeux le lundi, même si on regarde le lundi.
-  const chronosOublies = tachesTropLongues(taches, HEURES_AVANT_RAPPEL);
+  const chronosOublies = tachesTropLongues(taches, HEURES_AVANT_RAPPEL, HEURES_AVANT_RAPPEL_TRANSPORT);
   // Filtre les tâches selon la journée voulue (toutes les tâches sont
   // déjà en localStorage, donc la semaine reste dispo hors-ligne).
   // Les « Transport journalier » sont INVISIBLES pour le
@@ -2133,7 +2157,8 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
               </div>
             ))}
             <p className="mt-2 text-[11px] leading-snug text-red-100">
-              Après {HEURES_AVANT_PLAFOND} h, la tâche se ferme seule et sa durée est plafonnée — le bureau devra corriger tes heures.
+              Après {HEURES_AVANT_PLAFOND} h ({HEURES_AVANT_PLAFOND_TRANSPORT} h pour un transport), la tâche se ferme
+              seule et sa durée est plafonnée — le bureau devra corriger tes heures.
             </p>
           </div>
         )}
@@ -5789,7 +5814,10 @@ function AppTechnicien() {
   // d'une fin de semaine — mais elle ne sert que de repère à l'admin :
   // aucun chiffre de cette journée n'entre dans la paie avant déblocage.
   const plafonnerTacheOubliee = (t) => {
-    const heuresPlafond = HEURES_AVANT_PLAFOND;
+    // Le plafond ÉCRIT suit la nature de la tâche : plafonner un
+    // transport oublié à 16 h laisserait passer exactement ce qu'on
+    // cherche à attraper.
+    const heuresPlafond = seuilPourTache(t, HEURES_AVANT_PLAFOND, HEURES_AVANT_PLAFOND_TRANSPORT);
     const debut = t.debutReel || t.tempsDebutSegment;
     const titreOriginal = t.titre || (t.type === "transport" ? "Transport" : "Tâche");
     const dateTache = t.date || isoLocal(new Date());
@@ -6107,7 +6135,7 @@ function AppTechnicien() {
   useEffect(() => {
     if (!connecte) return;
     const verifier = () => {
-      const oubliees = tachesTropLongues(taches, HEURES_AVANT_PLAFOND);
+      const oubliees = tachesTropLongues(taches, HEURES_AVANT_PLAFOND, HEURES_AVANT_PLAFOND_TRANSPORT);
       oubliees.forEach(plafonnerTacheOubliee);
     };
     verifier();
