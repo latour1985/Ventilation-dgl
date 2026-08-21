@@ -28,3 +28,7 @@ Thumbs.db
 # ordinateur a les siens, ils ne voyagent pas.
 .claude/settings.local.json
 .env*
+
+# Sauvegardes de donnees faites avant un menage (contiennent des
+# informations client) — elles restent sur le poste, jamais dans le depot.
+sauvegardes-locales/

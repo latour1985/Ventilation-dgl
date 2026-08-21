@@ -2498,3 +2498,26 @@ create policy "sous_traitants_lecture_test" on sous_traitants_app
   for select to authenticated using (true);
 create policy "sous_traitants_ecriture_test" on sous_traitants_app
   for all to authenticated using (true) with check (true);
+
+-- ============================================================
+-- 76 - TRAVAUX NON TERMINÉS + CE QUI RESTE À FAIRE (2026-08-22)
+-- ------------------------------------------------------------
+-- Demande du propriétaire. Différent de « pièce à commander » : là,
+-- c'est une pièce qui manque ; ici, c'est le TRAVAIL qui n'est pas
+-- fini — manque de temps, accès impossible, imprévu de chantier.
+--
+-- Sans ces deux colonnes, le bureau recevait un bon comme un autre et
+-- facturait un travail inachevé ; et ce qui restait à faire vivait
+-- dans la tête du technicien jusqu'au lendemain matin.
+--
+-- Les heures faites se comptent et se facturent normalement — seule la
+-- FERMETURE du dossier attend le retour sur place. La carte de
+-- facturation affiche l'avertissement en orange, avec le texte du
+-- technicien repris mot pour mot.
+--
+-- L'application sait vivre sans ces colonnes (elle réessaie sans
+-- elles) : un bon de travail n'est jamais perdu parce qu'un snippet
+-- n'a pas encore été passé.
+-- ============================================================
+alter table bons_travail add column if not exists travaux_non_termines boolean not null default false;
+alter table bons_travail add column if not exists reste_a_faire text;

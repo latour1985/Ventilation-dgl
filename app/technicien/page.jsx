@@ -3654,6 +3654,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // "avant", qui reste facultative).
   const descriptionManquante = notesTerrain.trim().length === 0;
   const photoApresManquante = photosApres.length === 0;
+  // 🚧 « Travaux non terminés » coché SANS dire ce qui reste : le bureau
+  // recevrait une alerte vide, impossible à planifier. On exige le
+  // texte, comme on exige la description.
+  const resteAFaireManquant = !!tache.travauxNonTermines && (tache.resteAFaire || "").trim().length < 5;
   // SIGNATURE DU CLIENT : exigée UNIQUEMENT du dernier à fermer.
   // Un technicien qui part avant ses collègues enregistre ses heures et
   // s'en va — c'est celui qui finit avec le client qui fait signer.
@@ -3661,6 +3665,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const peutEnvoyerBase =
     !descriptionManquante &&
     !photoApresManquante &&
+    !resteAFaireManquant &&
     (jeSuisLeDernier
       ? clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions)
       : true);
@@ -3935,7 +3940,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     // Description et photo « après » restent exigées aussi (la question
     // d'équipe peut maintenant arriver par les portes multi-jours, qui
     // ne passaient pas par le bouton principal — audit 2026-08-18).
-    if (signatureOk && !descriptionManquante && !photoApresManquante) demarrerEnvoi();
+    if (signatureOk && !descriptionManquante && !photoApresManquante && !resteAFaireManquant) demarrerEnvoi();
     else refSignature.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -4048,6 +4053,11 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         unites: (tache.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim() || (u.emplacement || "").trim()),
         pieceACommander: !!tache.pieceACommander,
         pieceRequise: tache.pieceRequise || null,
+        // 🚧 Travaux non terminés + ce qui reste à faire — remontent au
+        // bureau avec le bon : personne ne facture un travail inachevé
+        // sans le savoir, et le retour se planifie sur du concret.
+        travauxNonTermines: !!tache.travauxNonTermines,
+        resteAFaire: tache.resteAFaire || null,
       },
       session
     ).then(async (bonRowId) => {
@@ -4661,6 +4671,62 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           </div>
         )}
 
+        {/* ============================================================
+            🚧 TRAVAUX NON TERMINÉS (2026-08-22, demande du propriétaire)
+            ------------------------------------------------------------
+            Différent de « pièce à commander » : là, c'est une pièce qui
+            manque. Ici, c'est le travail lui-même qui n'est pas fini —
+            manque de temps, accès impossible, imprévu sur le chantier.
+            Sans cette case, le bureau recevait un bon comme un autre et
+            facturait un travail inachevé ; et ce qui restait à faire
+            vivait dans la tête du technicien jusqu'au prochain matin.
+            La case est FERMÉE par défaut : le cas normal, c'est fini.
+            ============================================================ */}
+        {!lectureSeule && (
+          <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">État des travaux</p>
+            <label
+              className={`flex items-start gap-2 rounded-xl border-2 p-3 ${
+                tache.travauxNonTermines ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={!!tache.travauxNonTermines}
+                onChange={(e) => onMajTache(tache.id, { travauxNonTermines: e.target.checked })}
+                className="mt-0.5 h-5 w-5 shrink-0 accent-[#FF6A13]"
+              />
+              <span className={`text-[13px] font-bold leading-snug ${tache.travauxNonTermines ? "text-orange-900" : "text-slate-600"}`}>
+                🚧 Les travaux ne sont PAS terminés — il faut revenir
+              </span>
+            </label>
+
+            {tache.travauxNonTermines && (
+              <div>
+                <label className="mb-1 block text-[11px] font-bold text-slate-500">
+                  Ce qui reste à faire *
+                </label>
+                <textarea
+                  rows={4}
+                  value={tache.resteAFaire || ""}
+                  onChange={(e) => onMajTache(tache.id, { resteAFaire: e.target.value })}
+                  placeholder="Ex. : reste à raccorder le drain et à isoler le haut de la hotte. Prévoir 3 h et une échelle de 24 pi."
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm leading-relaxed"
+                />
+                <p className="mt-1 text-[11px] leading-snug text-orange-700">
+                  Sois précis : c&apos;est ce texte que le bureau lira pour planifier le retour. Tes heures d&apos;aujourd&apos;hui
+                  se comptent normalement — seule la facturation attend.
+                </p>
+                {(tache.resteAFaire || "").trim().length < 5 && (
+                  <p className="mt-1 text-[11px] font-bold leading-snug text-orange-800">
+                    ⚠️ Écris ce qui reste à faire avant d&apos;envoyer le bon.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* PHOTOS */}
         <div className="grid grid-cols-2 gap-3">
           <ZonePhoto
@@ -5003,6 +5069,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               <ul className="mb-2 space-y-0.5 text-center text-[11px] font-semibold text-slate-400">
                 {descriptionManquante && <li>La description (notes de terrain) est requise.</li>}
                 {photoApresManquante && <li>Au moins une photo « après travaux » est requise.</li>}
+                {resteAFaireManquant && (
+                  <li>Tu as coché « travaux non terminés » — écris ce qui reste à faire.</li>
+                )}
                 {(nomMoule.trim().length <= 2 || !aSignature) && <li>Le nom en lettres moulées et la signature sont requis.</li>}
                 {necessiteDeuxiemeSignature && (nomMoule2.trim().length <= 2 || !aSignature2) && (
                   <li>La 2e signature client est requise pour valider la modification.</li>

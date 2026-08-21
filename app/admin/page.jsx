@@ -19550,6 +19550,21 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     </p>
                   )
                 )}
+                {/* 🚧 TRAVAUX NON TERMINÉS — l'avertissement le plus fort
+                    de la carte, placé AVANT tout le reste : facturer un
+                    travail inachevé, c'est le rappel du client le
+                    lendemain. Ce que le technicien a écrit sur le
+                    terrain est repris mot pour mot — c'est là-dessus
+                    que le retour se planifie. */}
+                {b.travauxNonTermines && (
+                  <p className="mt-1 whitespace-pre-line rounded-lg border-2 border-orange-400 bg-orange-50 px-2 py-1.5 text-[11px] leading-snug text-orange-900">
+                    🚧 <span className="font-extrabold">TRAVAUX NON TERMINÉS — il faut retourner sur place.</span>
+                    {b.resteAFaire && <span className="mt-1 block font-semibold">Reste à faire : {b.resteAFaire}</span>}
+                    <span className="mt-1 block text-[10px]">
+                      Les heures faites se facturent normalement — mais planifie le retour avant de fermer le dossier.
+                    </span>
+                  </p>
+                )}
                 {/* PIÈCE À COMMANDER — visible LÀ OÙ TU REGARDES DÉJÀ.
                     La réparation n'est pas finie : une 2e visite sera
                     facturée séparément, elle attend la pièce. */}
