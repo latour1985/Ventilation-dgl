@@ -7464,15 +7464,19 @@ function SelecteurItem({ catalogue, onChoisir, libelle = "+ Ajouter un produit" 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-16" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setOuvert(false))(); }}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 rounded-lg border border-slate-300 px-2.5 py-2">
-          <Search size={15} className="shrink-0 text-slate-400" />
+    // 📱 PLEIN ÉCRAN SUR TÉLÉPHONE (2026-08-21) : choisir un item dans
+    // un catalogue de 289 produits demande de la place et de gros
+    // boutons — sur un écran de 6 pouces, la petite fenêtre obligeait à
+    // viser. Sur ordinateur, rien ne change (fenêtre centrée).
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 sm:p-4 sm:pt-16" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setOuvert(false))(); }}>
+      <div className="flex h-full w-full max-w-md flex-col bg-white p-3 sm:h-auto sm:rounded-2xl sm:p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center gap-2 rounded-xl border-2 border-slate-300 px-2.5 py-2.5">
+          <Search size={16} className="shrink-0 text-slate-400" />
           <input ref={champRef} value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="Chercher un item…" className="w-full text-sm outline-none" />
-          <button onClick={() => setOuvert(false)} aria-label="Fermer"><X size={16} className="text-slate-400" /></button>
+            placeholder="Chercher un item…" className="w-full text-base outline-none sm:text-sm" />
+          <button onClick={() => setOuvert(false)} aria-label="Fermer" className="p-1"><X size={18} className="text-slate-400" /></button>
         </div>
-        <div className="mt-2 max-h-[55vh] overflow-y-auto">
+        <div className="mt-2 flex-1 overflow-y-auto sm:max-h-[55vh] sm:flex-none">
           {(catalogue || []).length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-slate-400">
               Catalogue vide — lance le snippet SQL « 26 » pour importer ta liste de prix.
@@ -7484,13 +7488,13 @@ function SelecteurItem({ catalogue, onChoisir, libelle = "+ Ajouter un produit" 
               <button
                 key={i.id}
                 onClick={() => { onChoisir(i); setOuvert(false); setQ(""); }}
-                className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-2 py-2 text-left last:border-0 hover:bg-slate-50"
+                className="flex min-h-[56px] w-full items-center justify-between gap-3 border-b border-slate-100 px-2 py-2.5 text-left last:border-0 active:bg-orange-50 hover:bg-slate-50 sm:min-h-0 sm:py-2"
               >
                 <span className="min-w-0">
-                  <span className="block truncate text-xs font-semibold text-slate-800">{i.nom}</span>
-                  {i.categorie && <span className="block truncate text-[10px] text-slate-400">{i.categorie}</span>}
+                  <span className="block truncate text-sm font-semibold text-slate-800 sm:text-xs">{i.nom}</span>
+                  {i.categorie && <span className="block truncate text-[11px] text-slate-400 sm:text-[10px]">{i.categorie}</span>}
                 </span>
-                <span className="shrink-0 text-xs font-bold tabular-nums text-slate-700">
+                <span className="shrink-0 text-sm font-bold tabular-nums text-slate-700 sm:text-xs">
                   {i.prix_vendant != null ? `${i.prix_vendant.toFixed(2)} $` : "—"}
                 </span>
               </button>
@@ -12419,7 +12423,94 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* 📱 LIGNES EN CARTES — TÉLÉPHONE (2026-08-21)
+                ------------------------------------------------------------
+                Le tableau à 4 colonnes (produit, qté, coûtant, vendant)
+                est écrasé sur un écran de 6 pouces : on se trompe de
+                case. Même devis, une CARTE par ligne, avec de vrais
+                champs sous le pouce. Tout est modifiable comme sur
+                l'ordinateur — c'est la même donnée. */}
+            <div className="space-y-2 md:hidden">
+              {lignes.map((l) => {
+                const totalLigne = (Number(l.prix_vendant) || 0) * (Number(l.quantite) || 0);
+                const coutant = Number(l.prix_coutant) || 0;
+                return (
+                  <div key={l.uid} className="rounded-xl border border-slate-200 bg-white p-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      {l.surMesure ? (
+                        <input
+                          type="text"
+                          value={l.nom}
+                          onChange={(e) => majLigne(l.uid, { ...l, nom: e.target.value })}
+                          placeholder="Détail de l'item…"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm font-semibold"
+                        />
+                      ) : (
+                        <p className="min-w-0 flex-1 text-sm font-bold leading-snug text-slate-900">{l.nom}</p>
+                      )}
+                      <button
+                        onClick={() => supprimerLigne(l.uid)}
+                        aria-label="Retirer la ligne"
+                        className="shrink-0 rounded-lg border border-red-200 p-2 text-red-500"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={l.description || ""}
+                      onChange={(e) => majLigne(l.uid, { ...l, description: e.target.value })}
+                      placeholder="Description visible par le client…"
+                      className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-[12px] leading-snug text-slate-600"
+                    />
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Qté</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={l.quantite}
+                          onChange={(e) => majLigne(l.uid, { ...l, quantite: parseFloat(e.target.value) || 1 })}
+                          className="min-h-[44px] w-full rounded-lg border border-slate-300 px-2 text-center text-sm tabular-nums"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Coûtant</label>
+                        <InputNombreDecimal
+                          valeur={l.prix_coutant}
+                          onChange={(v) => majLigne(l.uid, { ...l, prix_coutant: v })}
+                          onBlur={() => proposerReportCatalogue(l)}
+                          className={`min-h-[44px] w-full rounded-lg border px-2 text-right text-sm tabular-nums ${
+                            coutant === 0 ? "border-amber-400 bg-amber-50" : "border-slate-300"
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Vendant</label>
+                        <InputNombreDecimal
+                          valeur={l.prix_vendant}
+                          onChange={(v) => majLigne(l.uid, { ...l, prix_vendant: v })}
+                          className={`min-h-[44px] w-full rounded-lg border px-2 text-right text-sm font-bold tabular-nums ${
+                            (Number(l.prix_vendant) || 0) < 0 ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-300"
+                          }`}
+                        />
+                      </div>
+                    </div>
+                    <p className="mt-1.5 flex items-center justify-between text-[11px]">
+                      <span className={coutant === 0 ? "font-semibold text-amber-600" : "text-slate-400"}>
+                        {coutant === 0 ? "⚠️ Coût inconnu — hors marge" : `Marge ${margePourcent(coutant, Number(l.prix_vendant) || 0).toFixed(0)} %`}
+                      </span>
+                      <span className="font-bold tabular-nums text-slate-700">{totalLigne.toFixed(2)} $</span>
+                    </p>
+                  </div>
+                );
+              })}
+              {lignes.length === 0 && (
+                <p className="py-4 text-center text-xs text-slate-400">Aucune ligne — ajoute un produit du catalogue.</p>
+              )}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left text-slate-400">
