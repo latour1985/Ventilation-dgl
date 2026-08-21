@@ -5905,6 +5905,12 @@ function AppTechnicien() {
           `⚠️ Tes heures n'ont PAS été transmises au bureau — ${e?.message || "connexion impossible"}. Rouvre l'app une fois connecté.`
         )
       );
+    // ⏱️ Le bloc du bureau quitte le « en cours » (2026-08-21, vécu :
+    // une tâche fermée PAR UN COÉQUIPIER gardait son marqueur, et le
+    // bureau croyait le technicien encore dessus).
+    if (t.supabase && t.tacheOrigineId) {
+      majStatutAssignation(t.tacheOrigineId, session?.user?.email, "planifiee").catch(() => {});
+    }
     setTaches((prev) =>
       prev.map((x) =>
         x.id === id
@@ -5944,6 +5950,11 @@ function AppTechnicien() {
           `⚠️ Ton ajustement n'a PAS été transmis au bureau — ${e?.message || "connexion impossible"}. Réessaie une fois connecté.`
         )
       );
+    // Même raison que ci-dessus : la carte est fermée, le bureau doit
+    // cesser d'afficher « en cours » pour ce technicien.
+    if (t.supabase && t.tacheOrigineId) {
+      majStatutAssignation(t.tacheOrigineId, session?.user?.email, "planifiee").catch(() => {});
+    }
     setTaches((prev) =>
       prev.map((x) =>
         x.id === id

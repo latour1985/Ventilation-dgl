@@ -5116,7 +5116,7 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
   );
 }
 
-function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions }) {
+function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations }) {
   const configTdb = useEntreprise();
   const analyse = projets.map((p) => {
     const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
@@ -5144,6 +5144,83 @@ function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, t
         <h2 className="text-lg font-extrabold text-slate-900">Tableau de bord</h2>
         <span className="text-xs text-slate-400">Vue d'ensemble</span>
       </div>
+
+      {/* 📱 AUJOURD'HUI SUR LE TERRAIN — TÉLÉPHONE (2026-08-21)
+          ------------------------------------------------------------
+          La première question d'un admin sur la route est toujours la
+          même : « qui est où, et où en est-il ? ». Sur l'ordinateur,
+          l'agenda y répond d'un coup d'œil ; sur un téléphone, il
+          fallait ouvrir l'agenda et défiler. Ce bloc donne la réponse
+          en haut de l'écran d'accueil, en direct (le rose « en cours »
+          vient du chronomètre du technicien lui-même). */}
+      {(() => {
+        const jour = todayISO();
+        const gens = (utilisateurs || []).filter((u) => !estMetierBureau(u.metier));
+        const lignes = gens
+          .map((u) => {
+            const taches = tachesDuJourPourEmploye(planning || {}, jour, u.id).filter((t) => !t.est_tache_systeme);
+            if (taches.length === 0) return null;
+            const courriel = (u.courriel || "").toLowerCase();
+            const heuresDuJour = (travaux || [])
+              .filter((t) => t.date === jour && (t.employeEmail || "").toLowerCase() === courriel)
+              .reduce((s, t) => s + (Number(t.heures) || 0), 0);
+            const aDesHeures = (t) =>
+              (travaux || []).some(
+                (x) => x.supabase && cleTacheDesHeures(x.tacheId) === t.id && (x.employeEmail || "").toLowerCase() === courriel && x.date === jour
+              );
+            // ⚠️ LES HEURES TRANCHENT, PAS LE STATUT (2026-08-21) : le
+            // marqueur « en cours » peut rester collé sur une tâche
+            // fermée par un coéquipier (la remise à zéro ne partait pas
+            // de ce chemin-là). Une tâche dont les heures sont au
+            // bureau n'est JAMAIS « en cours ».
+            const enCours = taches.find((t) => (statutsAssignations || {})[`${t.id}|${courriel}`] === "en_cours" && !aDesHeures(t));
+            const finies = taches.filter(aDesHeures).length;
+            return { u, taches, enCours, finies, heuresDuJour };
+          })
+          .filter(Boolean);
+        if (lignes.length === 0) return null;
+        return (
+          <div className="rounded-2xl border border-slate-200 bg-white md:hidden">
+            <p className="border-b border-slate-100 px-3 py-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+              👷 Aujourd&apos;hui sur le terrain
+            </p>
+            <div className="divide-y divide-slate-100">
+              {lignes.map(({ u, taches, enCours, finies, heuresDuJour }) => (
+                <button
+                  key={u.id}
+                  onClick={() => setOnglet("agenda")}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left active:bg-slate-50"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold text-slate-900">{u.nom}</span>
+                    {enCours ? (
+                      <span className="mt-0.5 flex items-center gap-1.5">
+                        <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />
+                        <span className="truncate text-[11px] font-semibold text-fuchsia-700">
+                          {enCours.titre || enCours.clientNom}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="mt-0.5 block truncate text-[11px] text-slate-400">
+                        {finies >= taches.length ? "journée terminée" : `${taches.length - finies} tâche${taches.length - finies > 1 ? "s" : ""} à faire`}
+                      </span>
+                    )}
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <span className="block text-xs font-extrabold tabular-nums text-slate-700">
+                      {finies}/{taches.length}
+                    </span>
+                    {heuresDuJour > 0 && (
+                      <span className="block text-[10px] tabular-nums text-slate-400">{heuresDuJour.toFixed(2)} h</span>
+                    )}
+                  </span>
+                  <ChevronRight size={14} className="shrink-0 text-slate-300" />
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* TUILES KPI */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
@@ -13101,6 +13178,14 @@ function calculerJoursCibles(dateDepart, nbJours, sauterWeekend) {
 // employé pour une date donnée, peu importe à quelle heure précise
 // elle a été déposée (une seule source de vérité — les clés horaires
 // de `planning` — pour que toutes les vues restent synchronisées).
+// Clé de tâche d'une ligne d'heures : un chantier de plusieurs jours
+// range ses heures sous « id::AAAA-MM-JJ » — on remonte à l'identifiant
+// de la tâche. (Au niveau MODULE depuis 2026-08-21 : le tableau de bord
+// en a besoin lui aussi, il vivait dans l'agenda seulement.)
+function cleTacheDesHeures(tacheIdBrut) {
+  return String(tacheIdBrut || "").split("::")[0];
+}
+
 // 📱 Tâches d'une journée AVEC leur heure de départ — pour la vue
 // LISTE du téléphone (2026-08-21) : une grille de 24 colonnes est
 // illisible sur un écran de 6 pouces, mais la journée se lit très bien
@@ -14050,7 +14135,6 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // Sur un chantier de PLUSIEURS JOURS, chaque journée enregistre ses
   // heures sous une clé « tacheId::date » (sinon mardi écraserait
   // lundi). On rattache donc l'heure à la tâche par le préfixe.
-  const cleTacheDesHeures = (tacheIdBrut) => String(tacheIdBrut || "").split("::")[0];
   const travauxParCle = new Map(
     (travaux || [])
       .filter((t) => t.supabase && t.tacheId && t.employeEmail)
@@ -20745,6 +20829,11 @@ export default function App() {
           entretiens={entretiens}
           bons={bons}
           devisListe={devisListe}
+          // 📱 « Aujourd'hui sur le terrain » (téléphone) : qui fait
+          // quoi en ce moment. Vient de la grille + des statuts en
+          // direct écrits par l'app technicien.
+          planning={planning}
+          statutsAssignations={statutsAssignations}
         />
       )}
 
