@@ -22,8 +22,8 @@ import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees } from "@/lib/supabase/tachesAssignees";
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
-import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
-import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau } from "@/lib/supabase/bonsTravail";
+import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA } from "@/lib/supabase/travauxEffectues";
+import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
@@ -13707,7 +13707,133 @@ function techniciensPourTache(planning, tacheId, employes) {
   });
 }
 
-function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien }) {
+// ============================================================
+// 🏗️ CRÉER UN PROJET À PARTIR D'UNE TÂCHE (2026-08-22)
+// ------------------------------------------------------------
+// Un projet n'est pas qu'un dossier : c'est un BUDGET (prévu vs réel)
+// — rien de tout ça n'existe sur une tâche, la transformation ne peut
+// donc pas être automatique. On pré-remplit ce qu'on SAIT (client,
+// adresse, secteur, nom, date) et l'humain n'entre que les montants.
+// La ventilation fine (transport, matériaux, sous-traitants) reste
+// ajustable ensuite dans l'onglet Projets — ici on garde le strict
+// minimum pour que la rentabilité soit juste dès le départ.
+// ============================================================
+function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
+  const client = (clients || []).find((c) => c.id === tache.clientId) || (clients || []).find((c) => c.nom === tache.clientNom);
+  const [nom, setNom] = useState(tache.titre || tache.clientNom || "Nouveau chantier");
+  const [debut, setDebut] = useState(todayISO());
+  const [fin, setFin] = useState("");
+  const [facture, setFacture] = useState(0);
+  const [moHeures, setMoHeures] = useState(0);
+  const [moCoutant, setMoCoutant] = useState(0);
+  const nb = (v) => Number(v) || 0;
+  const totalFacture = nb(facture);
+  const totalCoutant = nb(moCoutant);
+  const marge = totalFacture - totalCoutant;
+  const peutCreer = nom.trim().length > 0 && totalFacture > 0;
+
+  const creer = () => {
+    if (!peutCreer) return;
+    onCreer({
+      id: `projet-${Date.now()}`,
+      nom: nom.trim(),
+      clientId: client?.id || tache.clientId || null,
+      adresseTravaux: tache.adresseTravaux || tache.adresseIntervention || null,
+      dateDebut: debut,
+      dateFin: fin || debut,
+      // Le secteur CCQ vient de la tâche (commercial par défaut).
+      secteur: tache.secteur === "residentiel" ? "residentiel" : "commercial",
+      statut: "En cours", // du travail y est déjà rattaché
+      budgetTotal: totalFacture,
+      tauxHoraireCoutant: nb(moHeures) > 0 ? nb(moCoutant) / nb(moHeures) : 45,
+      bonsCommande: [],
+      budgetPrevu: {
+        mainOeuvreChantier: { heures: nb(moHeures), facture: totalFacture, coutant: nb(moCoutant) },
+        transport: { heures: 0, facture: 0, coutant: 0 },
+        materiaux: { facture: 0, coutant: 0 },
+        sousTraitants: [],
+        totalFacture,
+        totalCoutant,
+        marge,
+      },
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; onFermer(); }}>
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">🏗️ Créer un projet à partir de cette tâche</h3>
+            <p className="text-xs text-slate-500">{tache.titre || tache.clientNom}</p>
+          </div>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-snug text-slate-600">
+          Le client, l&apos;adresse et le secteur sont repris de la tâche. Entre le budget — c&apos;est ce qui permet de
+          suivre la rentabilité. Tu pourras détailler transport, matériaux et sous-traitants dans l&apos;onglet Projets.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">Nom du projet</label>
+            <input value={nom} onChange={(e) => setNom(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          {(client || tache.clientNom) && (
+            <p className="text-[11px] text-slate-500">
+              Client : <span className="font-bold text-slate-700">{client?.nom || tache.clientNom}</span>
+              {(tache.adresseTravaux || tache.adresseIntervention) && (
+                <span className="block">Travaux : {tache.adresseTravaux || tache.adresseIntervention}</span>
+              )}
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Début</label>
+              <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Fin prévue</label>
+              <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">Montant facturé au client ($)</label>
+            <InputNombreDecimal valeur={facture} onChange={setFacture} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Heures prévues</label>
+              <InputNombreDecimal valeur={moHeures} onChange={setMoHeures} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Coûtant main-d&apos;œuvre ($)</label>
+              <InputNombreDecimal valeur={moCoutant} onChange={setMoCoutant} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm tabular-nums" />
+            </div>
+          </div>
+          {totalFacture > 0 && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-bold text-emerald-800">
+              Marge prévue : {marge.toFixed(2)} $ ({totalFacture > 0 ? ((marge / totalFacture) * 100).toFixed(1) : "0"} %)
+            </p>
+          )}
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">
+            ⚠️ En créant le projet, cette tâche y est rattachée — et les <span className="font-bold">heures déjà pointées</span>{" "}
+            comptent tout de suite dans ses coûts réels.
+          </p>
+          <Button onClick={creer} disabled={!peutCreer} className="w-full">
+            Créer le projet et y rattacher la tâche
+          </Button>
+          {!peutCreer && (
+            <p className="text-center text-[11px] text-slate-400">Il manque : un nom et un montant facturé supérieur à 0 $.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -13748,6 +13874,32 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   const [autresCibles, setAutresCibles] = useState([]);
   const basculerCible = (id) =>
     setAutresCibles((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  // ============================================================
+  // 🏗️/📄 RATTACHEMENTS APRÈS COUP (demande du propriétaire, 2026-08-22)
+  // ------------------------------------------------------------
+  // Le projet et le devis ne se choisissaient qu'À LA CRÉATION : une
+  // job qui devient partie d'un chantier, ou un devis fait après la
+  // visite, n'avaient aucun moyen d'être rattachés. Ici, les deux se
+  // changent — et les HEURES déjà pointées suivent (voir
+  // rattacherProjetAuxHeures : sans ça, le coût réel du projet
+  // resterait faux en silence).
+  // ============================================================
+  const [projetLie, setProjetLie] = useState(tache.projetId || "");
+  const [devisLie, setDevisLie] = useState(tache.devisNumero || "");
+  const [devisSaisiMain, setDevisSaisiMain] = useState("");
+  // Projets proposés : ceux du client de la tâche d'abord ; les autres
+  // restent accessibles (un chantier peut être ouvert sous une société
+  // mère). Un projet terminé n'est plus proposé, mais s'il est déjà lié
+  // il reste affiché — sinon l'écran mentirait sur le rattachement réel.
+  const projetsProposes = (projets || []).filter(
+    (p) => p.id === tache.projetId || (p.statut !== "Terminé" && (!tache.clientId || !p.clientId || p.clientId === tache.clientId))
+  );
+  const devisProposes = (devisListe || []).filter(
+    (d) => d.numero === tache.devisNumero || !tache.clientId || !d.clientId || d.clientId === tache.clientId
+  );
+  const rattachementChange = (projetLie || "") !== (tache.projetId || "") ||
+    (devisSaisiMain.trim() || devisLie || "") !== (tache.devisNumero || "");
   // Formulaire « Ajouter / dupliquer vers un technicien ».
   const dejaAssignes = (techniciensSurTache || []).map((t) => t.employeId);
   const [ajoutEmployeId, setAjoutEmployeId] = useState(
@@ -13834,6 +13986,13 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
       heureDebut,
       description,
       contactSurPlace: contactChoisi,
+      // 🏗️/📄 Rattachements — transmis SEULEMENT s'ils ont changé : une
+      // clé absente laisse l'existant tranquille (les heures déjà
+      // pointées ne sont alors jamais réécrites pour rien).
+      ...((projetLie || "") !== (tache.projetId || "") ? { projetId: projetLie || null } : {}),
+      ...((devisSaisiMain.trim() || devisLie || "") !== (tache.devisNumero || "")
+        ? { devisNumero: devisSaisiMain.trim() || devisLie || null }
+        : {}),
       // Autres techniciens cochés dans « Appliquer la modification à… » —
       // ils reçoivent les mêmes date/heure/durée/description sur leurs plages.
       autresCibles,
@@ -14094,6 +14253,63 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
             </div>
           )}
 
+          {/* 🏗️/📄 RATTACHEMENTS (2026-08-22) — projet et devis, changeables
+              APRÈS la création. Les heures déjà pointées et le bon de
+              travail déjà créé suivent le nouveau rattachement. */}
+          {!estTypeSansClient(tache.typeTache) && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Rattachements</p>
+
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">🏗️ Projet lié</label>
+              <select
+                value={projetLie}
+                onChange={(e) => setProjetLie(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+              >
+                <option value="">Aucun — hors projet</option>
+                {projetsProposes.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nom}{p.statut === "Terminé" ? " (terminé)" : ""}</option>
+                ))}
+              </select>
+              {onCreerProjetDepuisTache && (
+                <button
+                  type="button"
+                  onClick={() => onCreerProjetDepuisTache(tache)}
+                  className="mt-1.5 w-full rounded-lg border border-dashed border-slate-300 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-white"
+                >
+                  🏗️ Créer un projet à partir de cette tâche…
+                </button>
+              )}
+
+              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">📄 Devis lié</label>
+              <select
+                value={devisSaisiMain.trim() ? "" : devisLie}
+                onChange={(e) => { setDevisLie(e.target.value); setDevisSaisiMain(""); }}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+              >
+                <option value="">Aucun</option>
+                {devisProposes.map((d) => (
+                  <option key={d.id || d.numero} value={d.numero}>
+                    {d.numero}{d.clientNom ? ` — ${d.clientNom}` : ""}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={devisSaisiMain}
+                onChange={(e) => setDevisSaisiMain(e.target.value)}
+                placeholder="…ou un numéro de devis fait hors de l'application"
+                className="mt-1.5 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+              />
+
+              {rattachementChange && (
+                <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800">
+                  ⚠️ En enregistrant, les <span className="font-bold">heures déjà pointées</span> sur cette tâche et le
+                  bon de travail déjà créé suivront ce rattachement — les coûts du projet se mettront à jour.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* APPLIQUER LA MODIFICATION À… — visible dès que la tâche est
               partagée entre plusieurs techniciens. */}
           {dejaPlanifiee && (techniciensSurTache || []).length > 1 && (
@@ -14335,7 +14551,7 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
   );
 }
 
-function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, role, onMajFacturable, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
+function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
   // ============================================================
   // SECTIONS DE L'AGENDA (2026-08-19, demande du propriétaire) :
   //   🔧 Équipe terrain (en haut, comme avant)
@@ -14366,6 +14582,8 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   };
   // 💰/🤝 Le choix « facturable » en attente de réponse — { tacheId, titre, employe }.
   const [choixFacturable, setChoixFacturable] = useState(null);
+  // 🏗️ « Créer un projet à partir de cette tâche » — la tâche visée.
+  const [projetDepuisTache, setProjetDepuisTache] = useState(null);
   // Un AUTRE technicien tient-il déjà cette tâche dans la grille ?
   const autreTechnicienALaTache = (tacheId, employeIdCourant) =>
     Object.entries(planning || {}).some(
@@ -15445,6 +15663,81 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // elle était multi-jours), puis la replace via assigner() avec les
   // nouvelles valeurs. Fonctionne aussi pour un simple changement de
   // détail/description sans déplacer la date ou l'heure.
+  // 🏗️/📄 LE PASSÉ SUIT LE NOUVEAU RATTACHEMENT (2026-08-22).
+  // Les heures déjà pointées et le bon de travail déjà créé gardent une
+  // COPIE du projet/devis prise à leur enregistrement. Sans cette
+  // reprise, rattacher une tâche déjà travaillée laisserait la
+  // rentabilité du projet fausse — en silence. Appelé UNE fois par
+  // modification (le rattachement appartient à la tâche, pas à la
+  // personne), et jamais bloquant : un échec réseau est dit au journal.
+  const appliquerRattachements = async (tache, champs) => {
+    const nomProjet = champs.projetId
+      ? (projets || []).find((p) => p.id === champs.projetId)?.nom || "projet"
+      : null;
+    try {
+      if (champs.projetId !== undefined) {
+        const apercu = await heuresRattachablesA(tache.id);
+        const n = await rattacherProjetAuxHeures(tache.id, champs.projetId);
+        if (n > 0) {
+          ajouterJournal(
+            champs.projetId
+              ? `🏗️ « ${tache.titre || tache.clientNom} » rattachée au projet « ${nomProjet} » — ${n} entrée${n > 1 ? "s" : ""} d'heures (${apercu.heures.toFixed(2)} h) ajoutée${n > 1 ? "s" : ""} à ses coûts réels.`
+              : `🏗️ « ${tache.titre || tache.clientNom} » détachée de son projet — ${n} entrée${n > 1 ? "s" : ""} d'heures (${apercu.heures.toFixed(2)} h) retirée${n > 1 ? "s" : ""} des coûts du projet.`
+          );
+        } else {
+          ajouterJournal(
+            champs.projetId
+              ? `🏗️ « ${tache.titre || tache.clientNom} » rattachée au projet « ${nomProjet} » (aucune heure pointée pour l'instant).`
+              : `🏗️ « ${tache.titre || tache.clientNom} » détachée de son projet.`
+          );
+        }
+      }
+      if (champs.devisNumero !== undefined) {
+        ajouterJournal(
+          champs.devisNumero
+            ? `📄 Devis #${champs.devisNumero} rattaché à « ${tache.titre || tache.clientNom} » — il suivra jusqu'à la facturation.`
+            : `📄 Devis retiré de « ${tache.titre || tache.clientNom} ».`
+        );
+      }
+      // Le bon de travail déjà créé (s'il existe) suit les deux.
+      await rattacherAuBon(tache.id, {
+        ...(champs.projetId !== undefined ? { projetId: champs.projetId } : {}),
+        ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
+      });
+      // Pas de rechargement à la main : `travaux_effectues` et
+      // `bons_travail` sont écoutés en Realtime — les coûts du projet et
+      // la facturation se rafraîchissent d'eux-mêmes, ici comme sur les
+      // autres postes ouverts.
+    } catch (e) {
+      ajouterJournal(
+        `⚠️ Rattachement de « ${tache.titre || tache.clientNom} » NON enregistré (${e?.message || "connexion impossible"}) — réessaie : les heures déjà pointées n'ont pas suivi.`
+      );
+    }
+  };
+
+  // 🏗️ Rattache une tâche à un projet SANS toucher au reste (durée,
+  // date, technicien) — utilisé par « Créer un projet à partir de cette
+  // tâche ». Passer par modifierTachePlanifiee effacerait les champs
+  // qu'on ne lui transmet pas ; ici on ne change QUE le projet.
+  const rattacherTacheAuProjet = (tache, projetId) => {
+    setPlanning((prev) => {
+      const copie = { ...prev };
+      Object.keys(copie).forEach((cle) => {
+        const liste = listeCellule(copie[cle]);
+        if (!liste.some((x) => x.id === tache.id)) return;
+        copie[cle] = liste.map((x) => (x.id === tache.id ? { ...x, projetId } : x));
+      });
+      return copie;
+    });
+    // Chaque technicien de la tâche reçoit la fiche mise à jour.
+    (techniciensPourTache(planning, tache.id, employes) || []).forEach((t) => {
+      const emp = employes.find((e) => e.id === t.employeId);
+      if (!emp?.courriel) return;
+      majDonneesAssignation(tache.id, emp.courriel, { projetId }).catch(() => {});
+    });
+    appliquerRattachements(tache, { projetId });
+  };
+
   const modifierTachePlanifiee = (tache, ancienEmployeId, champs) => {
     if (lectureSeule) return;
     // Synchro Supabase : si la tâche change de technicien (ou retourne en
@@ -15474,6 +15767,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       // Contact sur place : suit la modification (null = retiré) ; si la
       // modale ne l'a pas touché (undefined), l'existant est conservé.
       contactSurPlace: champs.contactSurPlace !== undefined ? champs.contactSurPlace : tache.contactSurPlace || null,
+      // 🏗️/📄 Rattachements après coup (2026-08-22) — clés absentes =
+      // rien à changer (voir la modale : elles ne partent que modifiées).
+      ...(champs.projetId !== undefined ? { projetId: champs.projetId } : {}),
+      ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
     };
     if (champs.employeId) {
       // « conserver » : une modification/un déplacement ne repose jamais
@@ -17804,9 +18101,25 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
             assigner({ ...base, heures, jours }, employeId, new Date(`${date}T00:00:00`), heureDebut);
             setTacheDetailOuverte(null);
           }}
+          projets={projets}
+          devisListe={devisListe}
+          onCreerProjetDepuisTache={(t) => {
+            // 🏗️ « Créer un projet à partir de cette tâche » : un projet
+            // n'est pas qu'un dossier, c'est un BUDGET — impossible à
+            // deviner depuis une tâche. On pré-remplit donc ce qu'on sait
+            // (client, adresse, secteur, nom, date) et l'humain n'a plus
+            // qu'à entrer les montants. Le rattachement de la tâche se
+            // fait ensuite au retour (voir projetDepuisTache).
+            setProjetDepuisTache(t);
+            setTacheDetailOuverte(null);
+          }}
           onFermer={() => setTacheDetailOuverte(null)}
           onEnregistrer={(champs) => {
             modifierTachePlanifiee(tacheDetailOuverte.tache, tacheDetailOuverte.employe.id, champs);
+            // Rattachements : UNE fois pour la tâche (pas par technicien).
+            if (champs.projetId !== undefined || champs.devisNumero !== undefined) {
+              appliquerRattachements(tacheDetailOuverte.tache, champs);
+            }
             // Modification groupée : chaque technicien coché reçoit les
             // mêmes date/heure/durée/description — sur SES plages (son
             // instance est déplacée/mise à jour, pas celle des autres).
@@ -18092,6 +18405,27 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           </div>
         );
       })()}
+
+      {/* 🏗️ CRÉER UN PROJET À PARTIR D'UNE TÂCHE (2026-08-22) — un projet
+          est un BUDGET, pas un simple dossier : impossible de le deviner
+          depuis une tâche. On pré-remplit ce qu'on sait, l'humain entre
+          les montants, et la tâche (heures déjà pointées comprises) est
+          rattachée au nouveau projet. La ventilation fine (transport,
+          matériaux, sous-traitants) reste ajustable dans Projets. */}
+      {projetDepuisTache && (
+        <ModalProjetDepuisTache
+          tache={projetDepuisTache}
+          clients={clients}
+          onFermer={() => setProjetDepuisTache(null)}
+          onCreer={(projet) => {
+            const t = projetDepuisTache;
+            setProjetDepuisTache(null);
+            onCreerProjet?.(projet);
+            // La tâche rejoint son nouveau projet, avec son passé.
+            rattacherTacheAuProjet(t, projet.id);
+          }}
+        />
+      )}
 
       {choixFacturable && (
         <ModalChoixFacturable
@@ -21434,6 +21768,12 @@ export default function App() {
           planning={planning}
           setPlanning={setPlanning}
           statutsAssignations={statutsAssignations}
+          onCreerProjet={(p) => {
+            setProjets((prev) => [...prev, p]);
+            sauvegarderProjet(p).catch(() =>
+              ajouterJournal(`⚠️ Projet « ${p.nom} » créé à l'écran mais NON enregistré — réessaie.`)
+            );
+          }}
           ajouterJournal={ajouterJournal}
           clients={clients}
           setClients={setClients}
