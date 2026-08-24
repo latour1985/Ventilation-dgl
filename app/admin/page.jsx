@@ -18915,9 +18915,20 @@ function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piece
   // Ajoute un item pré-rempli à partir du catalogue de produits
   // existant — l'admin peut ensuite ajuster la description ou le prix
   // au besoin, sans repartir d'une case vide.
+  // 📝 LA DESCRIPTION COMPLÈTE SUIT (2026-08-24, retour du propriétaire).
+  // Seul le NOM du produit était recopié : « Midea 28 18000 BTU » au lieu
+  // des modèles, de la garantie et de ce qui est inclus. Or ce texte-ci
+  // n'est pas une note interne — c'est ce que le CLIENT lit sur sa
+  // facture. Il fallait donc le retaper à la main, ou le client recevait
+  // une ligne muette pour 5 050 $.
   const ajouterDepuisCatalogue = (produit) => {
     if (!produit) return;
-    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: produit.nom, prix: produit.prix_vendant ?? 0 }]);
+    const detail = String(produit.description || "").trim();
+    const nom = String(produit.nom || "").trim();
+    // Nom en tête, détail en dessous — sauf si le détail répète déjà le
+    // nom (certaines fiches du catalogue commencent par leur propre nom).
+    const texte = !detail ? nom : detail.toUpperCase().startsWith(nom.toUpperCase()) ? detail : `${nom}\n${detail}`;
+    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: texte, prix: produit.prix_vendant ?? 0 }]);
   };
 
   const retirerItem = (id) => {
@@ -18966,12 +18977,17 @@ function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piece
             {items.map((it, i) => (
               <div key={it.id} className="rounded-xl border border-slate-200 p-2.5">
                 <div className="flex items-start gap-2">
+                  {/* Hauteur suivant le texte : une description de
+                      catalogue fait plusieurs lignes (modèles, garantie,
+                      ce qui est inclus) et se lisait par une fente de
+                      deux lignes. Plafonnée à 30 rangées — au-delà, la
+                      barre de défilement reprend. */}
                   <textarea
                     value={it.description}
                     onChange={(e) => majItem(it.id, { description: e.target.value })}
-                    rows={2}
+                    rows={hauteurDescription(it.description)}
                     placeholder={`Description de l'item ${i + 1}...`}
-                    className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    className="w-full resize-y rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm leading-snug"
                   />
                   {items.length > 1 && (
                     <button onClick={() => retirerItem(it.id)} className="mt-1 shrink-0 text-slate-300 hover:text-red-500">
