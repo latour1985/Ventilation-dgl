@@ -45,7 +45,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
-import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo } from "@/lib/quickbooksClient";
+import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
@@ -21237,6 +21237,14 @@ export default function App() {
   const [attributionsQb, setAttributionsQb] = useState({});
   const attributionsQbRef = useRef(attributionsQb);
   attributionsQbRef.current = attributionsQb;
+  // 🔎 Miroirs à jour de `projets` et `clients` — lus par le SONDAGE
+  // d'arrière-plan (voir plus bas). Passer par des réfs évite de
+  // relancer la minuterie chaque fois qu'un projet ou un client change :
+  // le sondage lit toujours les valeurs fraîches sans se réinstaller.
+  const projetsRef = useRef(projets);
+  projetsRef.current = projets;
+  const clientsRef = useRef(clients);
+  clientsRef.current = clients;
   useEffect(() => {
     if (!session) return;
     listerAttributionsQb()
@@ -21324,6 +21332,93 @@ export default function App() {
     [projets, travaux, transactionsQb]
   );
 
+  // ============================================================
+  // 💰 SONDAGE QUICKBOOKS EN ARRIÈRE-PLAN (option A, 2026-08-22)
+  // ------------------------------------------------------------
+  // Ferme la boucle comptable sans que personne ait à y penser :
+  //   • DÉPÔTS — un client paie sa facture de dépôt dans QuickBooks ?
+  //     La tâche se débloque toute seule (avant : elle attendait qu'un
+  //     admin la débloque à la main, sans jamais savoir que l'argent
+  //     était rentré).
+  //   • ACHATS — les transactions se rafraîchissent aussi, plus
+  //     espacées : c'était la seule limite du rattachement par numéro
+  //     de BC, qui exigeait de peser sur le bouton.
+  //
+  // ⚠️ PLACÉ AVANT LES RETOURS ANTICIPÉS du composant : un hook
+  // placé après un « return » conditionnel casse l'ordre des hooks de
+  // React. Le rôle est donc résolu dans le corps de l'effet.
+  //
+  // Silencieux par nature : le journal ne parle QUE s'il se passe
+  // quelque chose. Une panne réseau ou un QuickBooks non connecté ne
+  // produit aucun bruit — le bouton manuel reste le chemin de secours.
+  // ============================================================
+  const sondageQbRef = useRef({ derniereTransactions: 0 });
+  useEffect(() => {
+    if (!session || !accesCharge) return;
+    // Le droit est calculé ICI (et pas via `peutSynchroniserQb`) : ce
+    // hook vit AVANT les retours anticipés du composant, donc avant que
+    // le rôle soit résolu plus bas. Les hooks doivent toujours être
+    // appelés dans le même ordre — jamais après un « return ».
+    const { role: roleSonde } = permissionsEffectives(accesPerso, session);
+    if (roleSonde !== 'Admin principal' && roleSonde !== 'Admin régulier') return;
+    let annule = false;
+    const INTERVALLE_DEPOTS = 3 * 60 * 1000; // 3 min — l'argent du client
+    const INTERVALLE_TRANSACTIONS = 15 * 60 * 1000; // 15 min — les achats
+
+    const sonder = async () => {
+      if (annule || typeof document !== "undefined" && document.hidden) return;
+      // 1) Les dépôts payés — le cœur de l'option A.
+      try {
+        const r = await sonderDepotsPayes();
+        if (annule) return;
+        (r?.payes || []).forEach((p) => {
+          setDepots((prev) => ({
+            ...prev,
+            [p.tacheId]: {
+              ...(prev[p.tacheId] || {}),
+              statut: "paye",
+              modePaiement: "QuickBooks",
+              payeLe: new Date().toISOString(),
+              payePar: "QuickBooks (paiement détecté)",
+            },
+          }));
+          ajouterJournal(
+            `💰 Dépôt PAYÉ détecté dans QuickBooks${p.docNumber ? ` (facture Nº ${p.docNumber})` : ""} — ${Number(p.montant || 0).toFixed(2)} $ : la tâche est maintenant planifiable.`
+          );
+        });
+      } catch {
+        // silencieux : réseau ou QuickBooks non connecté
+      }
+      // 2) Les transactions d'achat — plus espacées, elles bougent moins.
+      const maintenant = Date.now();
+      if (maintenant - sondageQbRef.current.derniereTransactions >= INTERVALLE_TRANSACTIONS) {
+        sondageQbRef.current.derniereTransactions = maintenant;
+        try {
+          const r = await listerTransactionsQuickbooks();
+          if (annule || !Array.isArray(r?.transactions)) return;
+          const manuelles = attributionsQbRef.current || {};
+          setTransactionsQb(
+            r.transactions.map((t) => ({
+              ...t,
+              projectId: manuelles[t.quickbooksId] || attribuerTransactionQuickBooks(t, projetsRef.current || [], clientsRef.current || []),
+              syncedAt: new Date().toISOString(),
+            }))
+          );
+        } catch {
+          // silencieux — le bouton « Synchroniser » reste là
+        }
+      }
+    };
+
+    sonder();
+    const minuterie = setInterval(sonder, INTERVALLE_DEPOTS);
+    return () => {
+      annule = true;
+      clearInterval(minuterie);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, accesCharge, accesPerso]);
+
   if (!authVerifie) {
     return <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">Chargement…</div>;
   }
@@ -21361,6 +21456,7 @@ export default function App() {
   const sectionsAdmin = ORDRE_SECTIONS.filter((s) => s !== "technicien" && permissions.includes(s));
   // Onglet effectif : si l'onglet courant n'est pas permis, on retombe sur le 1er autorisé.
   const vue = permissions.includes(onglet) && onglet !== "technicien" ? onglet : sectionsAdmin[0] || "tableau-de-bord";
+
 
   if (sectionsAdmin.length === 0) {
     return (
