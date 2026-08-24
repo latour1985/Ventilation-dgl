@@ -9559,7 +9559,27 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
   const [colonneSurvolee, setColonneSurvolee] = useState(null);
 
   const projetOuvert = projets.find((p) => p.id === projetOuvertId) || null;
-  const transactionsNonAssignees = transactionsQb.filter((t) => !t.projectId);
+  // ============================================================
+  // FACTURES QUICKBOOKS NON ASSIGNÉES — REPLIÉES PAR DÉFAUT
+  // ------------------------------------------------------------
+  // Retour du propriétaire (2026-08-24) : le bloc occupait tout le haut
+  // de la page Projets, avec un triangle rouge par ligne — ça laissait
+  // croire à un problème alors qu'il n'y en a pas. Et ça va empirer, pas
+  // s'améliorer : le jour où le vrai QuickBooks remplace le Sandbox,
+  // cette liste comptera des centaines de vraies factures.
+  //
+  // Deux décisions :
+  //   • replié par défaut — rien n'est caché, une ligne suffit à dire
+  //     combien il y en a, on déplie quand on vient FAIRE du classement ;
+  //   • les factures à 0,00 $ sont écartées — un montant nul ne change
+  //     aucune marge, le classer ne sert donc à rien.
+  // ============================================================
+  const [blocQbOuvert, setBlocQbOuvert] = useState(false);
+  const transactionsSansProjet = transactionsQb.filter((t) => !t.projectId);
+  const transactionsNonAssignees = transactionsSansProjet.filter(
+    (t) => Math.abs(Number(t.amountHT) || 0) > 0
+  );
+  const nbQbMontantNul = transactionsSansProjet.length - transactionsNonAssignees.length;
 
   const ajouterBonCommandeProjet = (projetId, bc) => {
     setProjets((prev) => prev.map((p) => (p.id === projetId ? { ...p, bonsCommande: [...(p.bonsCommande || []), bc] } : p)));
@@ -9652,13 +9672,32 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
         </select>
       </div>
 
-      {/* FACTURES QUICKBOOKS NON ASSIGNÉES */}
+      {/* FACTURES QUICKBOOKS NON ASSIGNÉES — repliées par défaut */}
       {transactionsNonAssignees.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-amber-700">
-            <AlertTriangle size={13} /> Factures QuickBooks non assignées ({transactionsNonAssignees.length})
-          </p>
-          <div className="space-y-1.5">
+          <button
+            type="button"
+            onClick={() => setBlocQbOuvert((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left"
+          >
+            <span className="flex min-w-0 items-center gap-1.5 text-xs font-bold text-amber-700">
+              <AlertTriangle size={13} className="shrink-0" />
+              <span className="truncate">
+                {transactionsNonAssignees.length} facture{transactionsNonAssignees.length > 1 ? "s" : ""} QuickBooks à
+                rattacher à un projet
+              </span>
+            </span>
+            <span className="shrink-0 text-[11px] font-bold text-amber-700">{blocQbOuvert ? "▲ Replier" : "▼ Ouvrir"}</span>
+          </button>
+          {!blocQbOuvert && (
+            <p className="mt-1 text-[10px] leading-snug text-amber-600">
+              Sert à calculer la marge réelle d&apos;un projet. Rien d&apos;urgent : tant qu&apos;une facture n&apos;est
+              pas rattachée, elle ne fausse aucun chiffre — elle n&apos;est simplement comptée nulle part.
+              {nbQbMontantNul > 0 && ` (${nbQbMontantNul} facture${nbQbMontantNul > 1 ? "s" : ""} à 0,00 $ écartée${nbQbMontantNul > 1 ? "s" : ""} — un montant nul ne change aucune marge.)`}
+            </p>
+          )}
+          {blocQbOuvert && (
+          <div className="mt-2 space-y-1.5">
             {transactionsNonAssignees.map((t) => {
               const choixProjet = assignationManuelleId?.quickbooksId === t.quickbooksId ? assignationManuelleId.projetId : "";
               return (
@@ -9690,7 +9729,14 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
                 </div>
               );
             })}
+            {nbQbMontantNul > 0 && (
+              <p className="pt-1 text-[10px] leading-snug text-amber-600">
+                {nbQbMontantNul} facture{nbQbMontantNul > 1 ? "s" : ""} à 0,00 $ {nbQbMontantNul > 1 ? "sont" : "est"}{" "}
+                écartée{nbQbMontantNul > 1 ? "s" : ""} de cette liste — un montant nul ne change aucune marge.
+              </p>
+            )}
           </div>
+          )}
         </div>
       )}
 
