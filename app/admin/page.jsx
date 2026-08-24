@@ -654,12 +654,44 @@ function attribuerTransactionQuickBooks(transaction, projets, clients) {
       if (projetPertinent) return projetPertinent.id;
     }
   }
-  // Règle 2 : correspondance par numéro de bon de commande.
+  // Règle 2a : le numéro de BC est SEUL dans le champ « Nº de
+  // référence » — le cas propre, correspondance exacte.
   if (transaction.poNumber) {
     const projetParBc = projets.find((p) => (p.bonsCommande || []).some((bc) => bc.numeroBC === transaction.poNumber));
     if (projetParBc) return projetParBc.id;
   }
+  // Règle 2b : LE NUMÉRO EST NOYÉ DANS DU TEXTE (2026-08-24).
+  // ------------------------------------------------------------
+  // Sur une facture fournisseur, le champ « Nº de la facture à payer »
+  // porte le numéro DU FOURNISSEUR — notre BC, lui, finit dans le Mémo
+  // ou dans la description d'une ligne. La règle 2a ne pouvait donc
+  // presque jamais s'appliquer aux factures fournisseurs.
+  // On cherche maintenant le BC À L'INTÉRIEUR du texte libre.
+  if (transaction.referenceTexte) {
+    const texte = String(transaction.referenceTexte).toUpperCase();
+    const projetParTexte = projets.find((p) =>
+      (p.bonsCommande || []).some((bc) => texteContientBc(texte, bc.numeroBC))
+    );
+    if (projetParTexte) return projetParTexte.id;
+  }
   return null; // Fallback → attribution manuelle requise.
+}
+
+// Le numéro « BC-104 » ne doit PAS se reconnaître dans « BC-1042 » :
+// deux commandes différentes, deux projets possiblement différents. On
+// exige donc qu'aucun chiffre ne colle au numéro, de part et d'autre.
+function texteContientBc(texteMajuscules, numeroBC) {
+  const cible = String(numeroBC || "").trim().toUpperCase();
+  if (cible.length < 3) return false; // trop court pour être sûr
+  let depuis = 0;
+  for (;;) {
+    const i = texteMajuscules.indexOf(cible, depuis);
+    if (i === -1) return false;
+    const avant = i > 0 ? texteMajuscules[i - 1] : "";
+    const apres = texteMajuscules[i + cible.length] || "";
+    if (!/[0-9]/.test(avant) && !/[0-9]/.test(apres)) return true;
+    depuis = i + 1;
+  }
 }
 
 // ============================================================

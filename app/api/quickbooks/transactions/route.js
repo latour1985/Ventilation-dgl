@@ -39,6 +39,30 @@ function montantHT(entite) {
   return Math.round((ttc - taxes) * 100) / 100;
 }
 
+// ============================================================
+// OÙ CHERCHER LE NUMÉRO DE BON DE COMMANDE (2026-08-24)
+// ------------------------------------------------------------
+// Constat du propriétaire, capture à l'appui : sur une facture
+// fournisseur, le champ « Nº de la facture à payer » porte le numéro DU
+// FOURNISSEUR (3419360), pas notre BC. Chercher là ne pouvait donc
+// presque jamais marcher.
+//
+// On ratisse maintenant tout le texte libre de la transaction :
+//   • DocNumber      — « Nº de référence » (le cas d'origine)
+//   • PrivateNote    — le champ « Mémo », en bas de l'écran QuickBooks
+//   • Line[].Description — la colonne DESCRIPTION de chaque ligne
+//
+// Tronqué : une facture à 40 lignes n'a pas à voyager en entier, on
+// cherche un numéro court, pas à recopier la comptabilité.
+function texteCherchable(entite) {
+  const morceaux = [
+    entite.DocNumber || "",
+    entite.PrivateNote || "",
+    ...(Array.isArray(entite.Line) ? entite.Line.map((l) => l?.Description || "") : []),
+  ];
+  return morceaux.filter(Boolean).join(" ").slice(0, 400) || null;
+}
+
 export async function GET(request) {
   const enTete = request.headers.get("authorization") || "";
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
@@ -96,6 +120,7 @@ export async function GET(request) {
         customerRefId: null,
         qbProjectRef: null,
         poNumber: (a.DocNumber || "").trim() || null,
+        referenceTexte: texteCherchable(a),
         amountHT: montantHT(a),
         amountTTC: Number(a.TotalAmt) || 0,
         status: "PAID",
@@ -108,6 +133,7 @@ export async function GET(request) {
         customerRefId: null,
         qbProjectRef: null,
         poNumber: (b.DocNumber || "").trim() || null,
+        referenceTexte: texteCherchable(b),
         amountHT: montantHT(b),
         amountTTC: Number(b.TotalAmt) || 0,
         status: statutDepuisSolde(b, aujourdhui),
