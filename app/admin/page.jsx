@@ -42,7 +42,7 @@ import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCa
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee } from "@/lib/courriels";
+import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee, conditionsDepotAppel } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes } from "@/lib/quickbooksClient";
@@ -20952,9 +20952,16 @@ export default function App() {
     // facture QuickBooks (CustomerMemo) — le client reçoit la facture
     // officielle avec le contexte dedans, si l'envoi auto est activé.
     const adressesDepot = [...new Set(infos.courriels || [])].filter(Boolean);
+    // ⚠️ LES CONDITIONS VOYAGENT AVEC LA DEMANDE (2026-08-24) : la
+    // politique d'annulation (préavis 24 h, dépôt non remboursable)
+    // doit être VUE par le client AVANT qu'il paie — sinon le « non
+    // remboursable » ne tient pas. Elle part aux DEUX endroits : sur la
+    // facture QuickBooks (en production, c'est parfois le SEUL courriel
+    // que le client reçoit) et dans notre courriel maison.
+    const conditionsDepot = conditionsDepotAppel(configEntreprise);
     const messageClientDepot =
       `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
-      `Dès sa réception, votre rendez-vous est confirmé.`;
+      `Dès sa réception, votre rendez-vous est confirmé.\n\n${conditionsDepot}`;
     const r = await creerFactureDepot({
       tacheId,
       clientId: infos.clientId || null,
@@ -21013,6 +21020,7 @@ export default function App() {
         tvq: t.tvq,
         total: t.total,
         lienPaiement: facture?.lienPaiement || null,
+        conditions: conditionsDepot,
       }),
     });
     if (rc.envoye) {
