@@ -14927,6 +14927,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // les adresses par défaut du client sont précochées au choix du client.
   const [depotEmails, setDepotEmails] = useState([]);
   const [depotExtra, setDepotExtra] = useState("");
+  // 📌 « Autre adresse » AU DOSSIER (2026-08-24, demande du
+  // propriétaire) : un courriel tapé ici partait avec la demande de
+  // dépôt puis disparaissait — à la prochaine tâche du même client, il
+  // fallait le retaper. Même patron que l'adresse de chantier : coché
+  // d'avance, anti-doublon, trace au journal.
+  const [depotExtraAuDossier, setDepotExtraAuDossier] = useState(true);
   // Le défaut suit le type : appel de service = dépôt suggéré d'office.
   useEffect(() => {
     // Le dépôt d'appel suit la RÈGLE DE L'ENTREPRISE (Paramètres →
@@ -15368,6 +15374,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         joursLimite: 1,
         courriels: [...new Set([...depotEmails, ...(depotExtra.trim() ? [depotExtra.trim()] : [])])],
       });
+      // 📌 COURRIEL AU DOSSIER (2026-08-24) : l'« autre adresse » tapée
+      // pour la demande de dépôt s'ajoute à la fiche du client — sinon
+      // il fallait la retaper à chaque tâche. Anti-doublon, et jamais
+      // « par défaut » : les adresses déjà cochées gardent leur rang.
+      const extraCourriel = depotExtra.trim().toLowerCase();
+      if (depotExtraAuDossier && client && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extraCourriel)) {
+        const dejaAuDossier = (client.courriels || []).some(
+          (c) => String(typeof c === "string" ? c : c?.email || "").trim().toLowerCase() === extraCourriel
+        );
+        if (!dejaAuDossier) {
+          const entree = { id: `cc-${Date.now()}`, label: "", email: extraCourriel, defaut: false };
+          setClients((prev) =>
+            prev.map((x) => (x.id === client.id ? { ...x, courriels: [...(x.courriels || []), entree] } : x))
+          );
+          ajouterJournal(`📌 Courriel « ${extraCourriel} » ajouté au dossier de ${client.nom}`);
+        }
+      }
       setTachesAttente((prev) => [nouvelle, ...prev]);
       const nomPrevu = nouveauEmployeId ? employes.find((e) => e.id === nouveauEmployeId)?.nom : "";
       ajouterJournal(
@@ -16965,6 +16988,20 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                             placeholder="Autre adresse (optionnel)"
                             className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                           />
+                          {/* 📌 Même réflexe que l'adresse de chantier :
+                              une adresse tapée ici servira encore — on
+                              l'offre à la fiche plutôt que de la perdre. */}
+                          {depotExtra.trim() && nouveauClientId && (
+                            <label className="mt-1 flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+                              <input
+                                type="checkbox"
+                                checked={depotExtraAuDossier}
+                                onChange={(e) => setDepotExtraAuDossier(e.target.checked)}
+                                className="h-3.5 w-3.5 accent-[#FF6A13]"
+                              />
+                              📌 Ajouter ce courriel au dossier de {nomAffichageClient(fiche) || "ce client"}
+                            </label>
+                          )}
                         </div>
                       );
                     })()}
