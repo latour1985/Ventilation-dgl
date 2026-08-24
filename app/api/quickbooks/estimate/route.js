@@ -46,7 +46,11 @@ export async function POST(request) {
   const numero = String(corps?.numero || "").trim();
   const lignes = (Array.isArray(corps?.lignes) ? corps.lignes : [])
     .map((l) => ({
-      description: String(l?.description || "").slice(0, 300),
+      // 2000 et non 300 (2026-08-24) : la description d'une ligne de
+      // devis, c'est l'argumentaire de vente — modèles, garantie, ce qui
+      // est inclus. À 300 caractères, elle partait coupée au client, en
+      // silence. QuickBooks en accepte 4000.
+      description: String(l?.description || "").slice(0, 2000),
       quantite: Number(l?.quantite) || 1,
       prixUnitaire: Number(l?.prixUnitaire) || 0,
     }))

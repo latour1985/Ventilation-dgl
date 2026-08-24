@@ -51,9 +51,22 @@ export async function POST(request) {
   // ou la portion facturée d'un devis. Le montant peut être négatif
   // (déduction de dépôt/pièce payée d'avance) mais le TOTAL doit être
   // positif : on n'émet pas une facture à zéro ou négative.
+  //
+  // 📝 LES LIGNES À 0 $ SONT GARDÉES (2026-08-24, demande du
+  // propriétaire). Elles étaient JETÉES ICI, en silence : le bureau
+  // écrivait au client ce qui avait été fait sur le chantier — pump
+  // down, code erreur, pièce à commander — et le client recevait une
+  // facture avec le seul montant, sans un mot d'explication. Personne
+  // ne pouvait s'en rendre compte : l'écran, lui, montrait le texte.
+  // Elles partent maintenant en LIGNES DE DESCRIPTION SEULEMENT, le
+  // type prévu par QuickBooks pour du texte sans montant.
+  //
+  // 300 caractères, c'était court : les notes de chantier dépassent
+  // couramment. QuickBooks accepte 4000 — on garde 2000, largement
+  // assez, et la coupure devient improbable au lieu d'être la règle.
   const lignes = (Array.isArray(corps?.lignes) ? corps.lignes : [])
-    .map((l) => ({ description: String(l?.description || "").slice(0, 300), montant: Number(l?.montant) || 0 }))
-    .filter((l) => l.description && l.montant !== 0);
+    .map((l) => ({ description: String(l?.description || "").slice(0, 2000), montant: Number(l?.montant) || 0 }))
+    .filter((l) => l.description);
   const total = lignes.reduce((s, l) => s + l.montant, 0);
   if (!clientNom || lignes.length === 0 || total <= 0) {
     return Response.json({ erreur: "Client et lignes (total positif) requis." }, { status: 400 });
@@ -91,7 +104,19 @@ export async function POST(request) {
       .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
       .slice(0, 5);
 
-    const cree = await ecrireQbo(acces, "invoice?include=invoiceLink", {
+    // Une ligne SANS montant devient une ligne de description ; les
+    // autres restent des lignes de vente normales.
+    const ligneQbo = (l, texteSeulement) =>
+      l.montant === 0 && !texteSeulement
+        ? { DetailType: "DescriptionOnly", Description: l.description, DescriptionLineDetail: {} }
+        : {
+            DetailType: "SalesItemLineDetail",
+            Amount: l.montant,
+            Description: l.description,
+            SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: 1, UnitPrice: l.montant },
+          };
+
+    const corpsFacture = async (texteSeulement) => ({
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
       ...(envoyerA.length > 0 ? { BillEmail: { Address: envoyerA.join(", ") } } : {}),
@@ -120,13 +145,22 @@ export async function POST(request) {
       // défaut silencieux pour ces factures.
       AllowOnlineCreditCardPayment: corps?.paiementCarte === true,
       AllowOnlineACHPayment: corps?.paiementVirement === true,
-      Line: lignes.map((l) => ({
-        DetailType: "SalesItemLineDetail",
-        Amount: l.montant,
-        Description: l.description,
-        SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: 1, UnitPrice: l.montant },
-      })),
+      Line: lignes.map((l) => ligneQbo(l, texteSeulement)),
     });
+
+    // ⚠️ FILET : si QuickBooks refuse le type « description seulement »
+    // (variante de compte, réglage particulier), on RÉÉMET la facture
+    // avec ces lignes en montant 0 plutôt que de la perdre. Le client
+    // verra « 0,00 $ » à côté du texte — moins joli, mais l'explication
+    // se rend, et la facture part. Une facture bloquée coûte plus cher
+    // qu'une ligne à zéro.
+    let cree;
+    try {
+      cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(false));
+    } catch (e) {
+      if (!lignes.some((l) => l.montant === 0)) throw e;
+      cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true));
+    }
     const facture = cree?.Invoice;
 
     // ENVOI PAR QUICKBOOKS + PREUVE — jamais « envoyé » sans l'avoir

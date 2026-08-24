@@ -18899,10 +18899,30 @@ function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piece
   const [attestation, setAttestation] = useState(false);
 
   const total = items.reduce((s, it) => s + (parseFloat(it.prix) || 0), 0);
-  // Un prix NÉGATIF est permis (déduction de dépôt, rabais) — seul un
-  // prix à zéro ou une description vide bloquent la validation.
-  const tousRemplis = items.every((it) => it.description.trim().length > 0 && (parseFloat(it.prix) || 0) !== 0);
-  const peutValider = items.length > 0 && tousRemplis && attestation;
+  // ============================================================
+  // CE QUI BLOQUE VRAIMENT UNE FACTURE (revu le 2026-08-24)
+  // ------------------------------------------------------------
+  // Avant : CHAQUE ligne devait porter un prix ≠ 0. La règle visait un
+  // oubli de montant, mais elle ne faisait pas la différence entre
+  // « j'ai oublié le prix » et « cette ligne EXPLIQUE au client ce qui
+  // a été fait ». Le bureau écrit le déroulement du chantier sur une
+  // ligne à 0 $ et la ligne facturable en dessous : c'est légitime, et
+  // c'était refusé.
+  //
+  // Ce qui reste interdit, et pour de vraies raisons :
+  //   • une description vide — une ligne muette sur la facture ;
+  //   • un total à zéro ou négatif — on n'émet pas ça, jamais.
+  // Un prix négatif sur UNE ligne reste permis (déduction de dépôt).
+  const descriptionVide = items.some((it) => it.description.trim().length === 0);
+  const nbLignesExplication = items.filter((it) => (parseFloat(it.prix) || 0) === 0).length;
+  const peutValider = items.length > 0 && !descriptionVide && total > 0 && attestation;
+  // Le bouton gris DIT pourquoi il est gris (règle du projet — et c'est
+  // exactement là-dessus que le propriétaire a buté le 24 août).
+  const raisonsBlocage = [
+    descriptionVide ? "Une ligne n'a pas de description — le client verrait un montant sans explication." : null,
+    total <= 0 ? "Le total doit être positif : au moins une ligne doit porter un montant à facturer." : null,
+    !attestation ? "Coche la case de confirmation ci-dessus." : null,
+  ].filter(Boolean);
 
   const majItem = (id, champs) => {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...champs } : it)));
@@ -19013,6 +19033,17 @@ function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piece
             </div>
           </div>
 
+          {/* Une ligne à 0 $ est VOULUE la plupart du temps (elle
+              explique le travail au client) — mais si c'est un prix
+              oublié, il faut le voir. On le nomme sans bloquer. */}
+          {nbLignesExplication > 0 && (
+            <p className="rounded-lg bg-slate-50 px-2.5 py-2 text-[11px] leading-snug text-slate-500">
+              📝 {nbLignesExplication} ligne{nbLignesExplication > 1 ? "s" : ""} à 0 $ — elle
+              {nbLignesExplication > 1 ? "s apparaîtront" : " apparaîtra"} sur la facture du client comme
+              explication, sans montant. Si c&apos;est un prix oublié, c&apos;est le moment de le voir.
+            </p>
+          )}
+
           <div className="flex justify-between rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-800">
             <span>Total à facturer (HT)</span>
             <span className="tabular-nums">{total.toFixed(2)} $</span>
@@ -19025,8 +19056,13 @@ function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piece
             </span>
           </label>
 
+          {raisonsBlocage.length > 0 && (
+            <ul className="space-y-0.5 text-[11px] font-semibold leading-snug text-slate-400">
+              {raisonsBlocage.map((r) => <li key={r}>• {r}</li>)}
+            </ul>
+          )}
           <Button disabled={!peutValider} onClick={() => onConfirmer(items, total)} className="w-full">
-            Valider et débloquer pour l'envoi
+            Valider et débloquer pour l&apos;envoi
           </Button>
         </div>
       </div>
@@ -19104,12 +19140,24 @@ function ApercuFactureClient({ bon, onFermer }) {
             ) : bon.lignesNonListees?.length > 0 ? (
               <table className="mt-1 w-full text-xs">
                 <tbody>
-                  {bon.lignesNonListees.map((it) => (
-                    <tr key={it.id} className="border-b border-slate-100">
-                      <td className="py-1 pr-2 text-slate-700">{it.description}</td>
-                      <td className="py-1 text-right tabular-nums font-semibold text-slate-800">{parseFloat(it.prix).toFixed(2)} $</td>
-                    </tr>
-                  ))}
+                  {/* Ligne à 0 $ = explication, pas un montant nul : on
+                      laisse la colonne de droite VIDE. « 0.00 $ » à côté
+                      d'un texte d'explication se lit comme une erreur de
+                      facturation. Et `whitespace-pre-line` conserve les
+                      retours de ligne du technicien. */}
+                  {bon.lignesNonListees.map((it) => {
+                    const montant = parseFloat(it.prix) || 0;
+                    return (
+                      <tr key={it.id} className="border-b border-slate-100 align-top">
+                        <td className={`py-1 pr-2 whitespace-pre-line ${montant === 0 ? "text-slate-500" : "text-slate-700"}`}>
+                          {it.description}
+                        </td>
+                        <td className="py-1 text-right tabular-nums font-semibold text-slate-800">
+                          {montant === 0 ? "" : `${montant.toFixed(2)} $`}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             ) : (
