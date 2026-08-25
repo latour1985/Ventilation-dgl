@@ -86,7 +86,10 @@ export async function POST(request) {
   if (!clientNom || montantHT <= 0) {
     return Response.json({ erreur: "Client et montant requis." }, { status: 400 });
   }
-  const description = String(corps?.description || `Dépôt — appel de service${corps?.zone ? ` (${corps.zone})` : ""}`).slice(0, 300);
+  // 1000 et non 300 (2026-08-25) : la ligne porte maintenant l'objet de
+  // la visite (titre + description des travaux) — « pourquoi on vient »,
+  // pas seulement « vous payez un dépôt ». QuickBooks accepte 4000.
+  const description = String(corps?.description || `Dépôt — appel de service${corps?.zone ? ` (${corps.zone})` : ""}`).slice(0, 1000);
   const joursLimite = Math.max(1, Number(corps?.joursLimite) || 1);
 
   try {

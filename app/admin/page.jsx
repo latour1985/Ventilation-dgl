@@ -15388,6 +15388,12 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         zone: nouvelle.zoneAppel === "hors_zone" ? "hors zone" : nouvelle.zoneAppel,
         joursLimite: 1,
         courriels: [...new Set([...depotEmails, ...(depotExtra.trim() ? [depotExtra.trim()] : [])])],
+        // 📝 L'OBJET DE LA VISITE SUIT (2026-08-25, retour du
+        // propriétaire) : la facture disait « Dépôt — appel de service »
+        // sans jamais dire POURQUOI on vient. Titre + description de la
+        // tâche voyagent jusqu'à la ligne de facture et au courriel.
+        titre: nouvelle.titre || "",
+        descriptionTravaux: nouvelle.description || "",
       });
       // 📌 COURRIEL AU DOSSIER (2026-08-24) : l'« autre adresse » tapée
       // pour la demande de dépôt s'ajoute à la fiche du client — sinon
@@ -17462,6 +17468,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         zone: t.zoneAppel === "hors_zone" ? "hors zone" : t.zoneAppel,
                         joursLimite: 1,
                         courriels: defauts.length > 0 ? defauts : tous.slice(0, 1),
+                        // La relance porte aussi l'objet de la visite.
+                        titre: t.titre || "",
+                        descriptionTravaux: t.description || "",
                       });
                       ajouterJournal(`🔄 Dépôt relancé pour « ${t.titre || t.clientNom} » — nouveau délai de 24 h`);
                     }}
@@ -21040,6 +21049,12 @@ export default function App() {
     // QuickBooks — son message est trop court pour dix clauses.
     const lienConditions = typeof window !== "undefined" ? `${window.location.origin}/conditions` : null;
     const conditionsDepot = conditionsDepotAppel(configEntreprise, lienConditions);
+    // 📝 L'OBJET DE LA VISITE — « pourquoi on vient » — sur la facture
+    // ET dans le courriel. « Dépôt — appel de service » tout court
+    // disait au client qu'il paie, jamais pour quoi.
+    const objetVisite = [String(infos.titre || "").trim(), String(infos.descriptionTravaux || "").trim()]
+      .filter(Boolean)
+      .join(" — ");
     const messageClientDepot =
       `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
       `Dès sa réception, votre rendez-vous est confirmé.\n\n${conditionsDepot}`;
@@ -21050,7 +21065,11 @@ export default function App() {
       montantHT: Number(infos.montantHT) || 0,
       zone: infos.zone || null,
       joursLimite: joursDelai,
-      description: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""} — ${infos.clientNom}`,
+      // La ligne de la facture QuickBooks porte l'OBJET DE LA VISITE —
+      // le client lit ce qu'il réserve, pas seulement qu'il paie.
+      description:
+        `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""} — ${infos.clientNom}` +
+        (objetVisite ? `\nObjet de la visite : ${objetVisite}` : ""),
       envoyerA: adressesDepot,
       messageClient: messageClientDepot,
       envoyerAuto: configEntreprise?.envoiAutoFactureQb === true,
@@ -21095,8 +21114,9 @@ export default function App() {
           `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ` +
           `${libelleDelai}. ` +
           `${facture?.docNumber ? `Référence : facture Nº ${facture.docNumber}. ` : ""}` +
-          `Dès sa réception, votre rendez-vous est confirmé.`,
-        lignes: [{ etiquette: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}`, montant: t.ht }],
+          `Dès sa réception, votre rendez-vous est confirmé.` +
+          `${objetVisite ? ` Objet de la visite : ${objetVisite}.` : ""}`,
+        lignes: [{ etiquette: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}${infos.titre ? ` — ${String(infos.titre).trim()}` : ""}`, montant: t.ht }],
         tps: t.tps,
         tvq: t.tvq,
         total: t.total,
