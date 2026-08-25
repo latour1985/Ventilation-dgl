@@ -23,7 +23,7 @@ import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, 
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA } from "@/lib/supabase/travauxEffectues";
-import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon } from "@/lib/supabase/bonsTravail";
+import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
@@ -1348,7 +1348,7 @@ const STATUTS_PIECE = {
   annulee: { label: "Annulée", cls: "bg-slate-100 text-slate-500 border-slate-300" },
 };
 
-function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, projets }) {
+function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, projets, tachesPourAchat = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
@@ -1446,7 +1446,10 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
   };
   // ➕ BC libre.
   const [bcLibreOuvert, setBcLibreOuvert] = useState(false);
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "" });
+  // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
+  // sa tâche — son montant (ajustable à la baisse) compte au coût du
+  // client. `montantAttribue` vide = tout le montant.
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", montantAttribue: "" });
   const [bcLibreEnCours, setBcLibreEnCours] = useState(false);
   const [bcLibreMsg, setBcLibreMsg] = useState("");
   const [filtre, setFiltre] = useState("ouvertes");
@@ -1857,14 +1860,44 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                   $
                 </span>
                 <select
-                  value={bcLibre.projetId}
-                  onChange={(e) => setBcLibre((f) => ({ ...f, projetId: e.target.value }))}
+                  value={bcLibre.tacheId ? `t:${bcLibre.tacheId}` : bcLibre.projetId ? `p:${bcLibre.projetId}` : ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v.startsWith("t:")) setBcLibre((f) => ({ ...f, tacheId: v.slice(2), projetId: "" }));
+                    else if (v.startsWith("p:")) setBcLibre((f) => ({ ...f, projetId: v.slice(2), tacheId: "", montantAttribue: "" }));
+                    else setBcLibre((f) => ({ ...f, projetId: "", tacheId: "", montantAttribue: "" }));
+                  }}
                   className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                 >
-                  <option value="">Achat général (aucun projet)</option>
-                  {(projets || []).map((pr) => <option key={pr.id} value={pr.id}>Projet : {pr.nom}</option>)}
+                  <option value="">Achat général (stock — aucun rattachement)</option>
+                  {/* 🔗 TÂCHES d'abord : l'achat le plus courant est pour
+                      une JOB précise (le Midea de tel client) — son coût
+                      doit suivre le client, projet ou pas. */}
+                  {(tachesPourAchat || []).map((t) => (
+                    <option key={t.id} value={`t:${t.id}`}>
+                      Tâche : {t.clientNom ? `${t.clientNom} — ` : ""}{t.titre}
+                    </option>
+                  ))}
+                  {(projets || []).map((pr) => <option key={pr.id} value={`p:${pr.id}`}>Projet : {pr.nom}</option>)}
                 </select>
               </div>
+              {/* 💵 PART DE LA JOB — ajustable À LA BAISSE seulement : on
+                  profite d'une commande pour ajouter du stock (rouleaux
+                  de cuivre…), mais seule la part de la job compte dans
+                  son coût. Vide = tout le montant. */}
+              {bcLibre.tacheId && (
+                <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                  <span className="text-[10px] font-bold text-emerald-800">Part attribuée à la job (HT)</span>
+                  <InputNombreDecimal
+                    valeur={bcLibre.montantAttribue === "" ? Number(bcLibre.montantHT) || 0 : Number(bcLibre.montantAttribue) || 0}
+                    onChange={(v) => setBcLibre((f) => ({ ...f, montantAttribue: String(Math.min(Number(v) || 0, Number(f.montantHT) || 0)) }))}
+                    className="w-24 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs tabular-nums"
+                  />
+                  <span className="text-[9px] leading-snug text-emerald-700">
+                    $ — le reste ({Math.max(0, (Number(bcLibre.montantHT) || 0) - (bcLibre.montantAttribue === "" ? Number(bcLibre.montantHT) || 0 : Number(bcLibre.montantAttribue) || 0)).toFixed(2)} $) demeure un achat de stock.
+                  </span>
+                </div>
+              )}
               <div className="flex gap-1.5">
                 <Button
                   loading={bcLibreEnCours}
@@ -1873,8 +1906,8 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                     setBcLibreEnCours(true);
                     const numero = await onCreerBcLibre?.(bcLibre);
                     setBcLibreEnCours(false);
-                    setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "" });
+                    setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", montantAttribue: "" });
                     setBcLibreOuvert(false);
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"
@@ -4626,7 +4659,7 @@ function bornesPeriodeAnalyse(cle, debutFiscal = "01-01") {
   return { debut: "0000-01-01", fin: "9999-12-31" };
 }
 
-function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, onFermer }) {
+function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], onFermer }) {
   const configEnt = useEntreprise();
   const seuil = Number(configEnt?.seuilMargeAlerte) || 25;
   const camionDefaut = Number(configEnt?.coutCamionHoraire) || 0;
@@ -4753,7 +4786,13 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
         const coutMateriel = devisLie
           ? (devisLie.lignes || []).filter((l) => !l.estRabais).reduce((s, l) => s + (Number(l.prix_coutant) || 0) * (Number(l.quantite) || 1), 0)
           : 0;
-        const cout = coutMo + coutMateriel;
+        // 📦 Matériel du stock (coût standard sur le bon) + 🧾 achats
+        // rattachés à la tâche (part attribuée) — snippet 77.
+        const coutStock = (b.materielStock || []).reduce((s, it) => s + (Number(it.coutant) || 0) * (Number(it.quantite) || 1), 0);
+        const coutAchats = (achatsLibres || [])
+          .filter((a) => a.tacheId && a.tacheId === b.tacheId)
+          .reduce((s, a) => s + (a.montantAttribue != null ? a.montantAttribue : a.montantHT), 0);
+        const cout = coutMo + coutMateriel + coutStock + coutAchats;
         const marge = b.facture > 0 ? ((b.facture - cout) / b.facture) * 100 : null;
         const statutTexte =
           b.statutQb === "retire"
@@ -5149,7 +5188,7 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
   );
 }
 
-function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations }) {
+function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [] }) {
   const configTdb = useEntreprise();
   const analyse = projets.map((p) => {
     const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
@@ -5310,6 +5349,7 @@ function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, t
           bons={bons}
           devisListe={devisListe}
           inspections={inspections}
+          achatsLibres={achatsLibres}
           onFermer={() => setAnalyseOuverte(false)}
         />
       )}
@@ -9872,7 +9912,7 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
   );
 }
 
-function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, bons, inspections }) {
+function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, bons, inspections, achatsLibres = [] }) {
   // Taux camion par défaut — pour le coût réel des travaux du client.
   const configClients = useEntreprise();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
@@ -10944,6 +10984,16 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                             .filter((l) => !l.estRabais)
                             .reduce((s, l) => s + (Number(l.prix_coutant) || 0) * (Number(l.quantite) || 1), 0);
                         }
+                        // 📦 Matériel du stock (coût standard posé sur le
+                        // bon) + 🧾 achats rattachés à la tâche (part
+                        // attribuée) — les deux chemins du matériel.
+                        cumul.cout += (b.materielStock || []).reduce(
+                          (s, it) => s + (Number(it.coutant) || 0) * (Number(it.quantite) || 1),
+                          0
+                        );
+                        cumul.cout += (achatsLibres || [])
+                          .filter((a) => a.tacheId && a.tacheId === b.tacheId)
+                          .reduce((s, a) => s + (a.montantAttribue != null ? a.montantAttribue : a.montantHT), 0);
                       });
                       const profit = cumul.facture - cumul.cout;
                       const marge = cumul.facture > 0 ? (profit / cumul.facture) * 100 : null;
@@ -10973,7 +11023,8 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                             </div>
                           </div>
                           <p className="mt-1 text-[9px] leading-snug text-slate-400">
-                            Heures pointées × taux figés + camion (inspection du jour) + matériel au coûtant du devis lié.
+                            Heures pointées × taux figés + camion (inspection du jour) + matériel : coûtant du devis lié,
+                            stock au coût standard et achats rattachés (part attribuée).
                             {cumul.facture === 0 ? " Rien de facturé encore — le coût court déjà." : ""}
                           </p>
                         </div>
@@ -19522,7 +19573,10 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   );
 }
 
-function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null }) {
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [] }) {
+  // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
+  const [materielStockPour, setMaterielStockPour] = useState(null);
+  const catalogueFacturation = useCatalogue();
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
   // Sans ce raccord, la révision de prix demandait le PLEIN montant
@@ -20436,6 +20490,37 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     <span>Travaux : {b.adresseTravaux}</span>
                   </div>
                 )}
+                {/* 📦 MATÉRIEL AUX COÛTS (2026-08-25) — coût INTERNE de la
+                    job, jamais sur un document client. Deux sources :
+                    les items de STOCK au coût standard (forfait murale,
+                    prise…) posés ici par le bureau, et les ACHATS
+                    rattachés à la tâche (BC libre → tâche). */}
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMaterielStockPour({ bonId: (b.lignesSource?.[0]?.id || b.id), items: (b.lignesSource?.[0]?.materielStock || b.materielStock || []) })}
+                    className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600 hover:border-slate-500"
+                  >
+                    📦 Matériel du stock{(() => {
+                      const items = b.lignesSource?.[0]?.materielStock || b.materielStock || [];
+                      const total = items.reduce((s, it) => s + (Number(it.coutant) || 0) * (Number(it.quantite) || 1), 0);
+                      return items.length > 0 ? ` : ${total.toFixed(2)} $ (${items.length})` : " — ajouter";
+                    })()}
+                  </button>
+                  {(() => {
+                    const achats = (achatsLibres || []).filter((a) => a.tacheId && a.tacheId === b.tacheId);
+                    if (achats.length === 0) return null;
+                    const total = achats.reduce((s, a) => s + (a.montantAttribue != null ? a.montantAttribue : a.montantHT), 0);
+                    return (
+                      <span
+                        className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600"
+                        title={achats.map((a) => `${a.numeroBc} — ${a.description} (${(a.montantAttribue != null ? a.montantAttribue : a.montantHT).toFixed(2)} $)`).join("\n")}
+                      >
+                        🧾 Achats rattachés : {total.toFixed(2)} $ ({achats.length} BC)
+                      </span>
+                    );
+                  })()}
+                </div>
                 {/* DÉPÔT DÉJÀ PERÇU — écrit sur la carte, pas seulement
                     dans la fenêtre de révision : la personne qui balaie
                     la pile doit le voir AVANT d'ouvrir quoi que ce soit. */}
@@ -20574,6 +20659,92 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
         Un bon de travail « Prix non listé » doit être ouvert et révisé manuellement par un admin (prix + description), avec confirmation explicite, avant de pouvoir être envoyé au client.
         Un travail « Selon devis » exige toujours une validation manuelle de l'admin avant l'envoi, avec possibilité de facturation progressive plafonnée au montant initial du devis.
       </p>
+
+      {/* 📦 MATÉRIEL DU STOCK — items de catalogue au COÛT STANDARD
+          posés sur le bon. C'est ici que la consommation d'entrepôt
+          (forfait murale : 25' de conduit + support ; la prise de
+          l'électricien) entre au coût de la job SANS chercher un vrai
+          coût impossible à tracer. Coût interne — jamais au client. */}
+      {materielStockPour && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setMaterielStockPour(null); }}>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">📦 Matériel du stock — coût interne</h3>
+                <p className="text-xs text-slate-500">Coût standard du catalogue · n&apos;apparaît jamais sur un document client.</p>
+              </div>
+              <button onClick={() => setMaterielStockPour(null)}><X size={18} className="text-slate-400" /></button>
+            </div>
+            <div className="space-y-1.5">
+              {(materielStockPour.items || []).map((it) => (
+                <div key={it.id} className="flex items-center gap-1.5 rounded-lg border border-slate-200 p-2">
+                  <span className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-700">{it.nom}</span>
+                  <input
+                    type="number"
+                    min={0.25}
+                    step="0.25"
+                    value={it.quantite}
+                    onChange={(e) =>
+                      setMaterielStockPour((prev) => ({
+                        ...prev,
+                        items: prev.items.map((x) => (x.id === it.id ? { ...x, quantite: parseFloat(e.target.value) || 1 } : x)),
+                      }))
+                    }
+                    className="w-16 rounded border border-slate-300 px-1.5 py-1 text-right text-xs tabular-nums"
+                  />
+                  <span className="w-20 text-right text-xs tabular-nums text-slate-500">× {(Number(it.coutant) || 0).toFixed(2)} $</span>
+                  <button
+                    onClick={() => setMaterielStockPour((prev) => ({ ...prev, items: prev.items.filter((x) => x.id !== it.id) }))}
+                    className="shrink-0 text-slate-300 hover:text-red-500"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              {(materielStockPour.items || []).length === 0 && (
+                <p className="rounded-lg border border-dashed border-slate-200 p-3 text-center text-xs text-slate-400">
+                  Aucun item — ajoute du catalogue (le coûtant standard suit tout seul).
+                </p>
+              )}
+            </div>
+            <div className="mt-2">
+              <SelecteurItem
+                catalogue={(catalogueFacturation || []).filter((i) => i.prix_coutant != null)}
+                libelle="🔎 Ajouter du catalogue (coûtant standard)"
+                onChoisir={(item) =>
+                  setMaterielStockPour((prev) => ({
+                    ...prev,
+                    items: [...(prev.items || []), { id: `ms-${Date.now()}`, nom: item.nom, quantite: 1, coutant: Number(item.prix_coutant) || 0 }],
+                  }))
+                }
+              />
+            </div>
+            <div className="mt-3 flex justify-between rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-800">
+              <span>Coût matériel (interne)</span>
+              <span className="tabular-nums">
+                {(materielStockPour.items || []).reduce((s, it) => s + (Number(it.coutant) || 0) * (Number(it.quantite) || 1), 0).toFixed(2)} $
+              </span>
+            </div>
+            <Button
+              onClick={async () => {
+                const { bonId, items } = materielStockPour;
+                try {
+                  await majMaterielStock(bonId, items);
+                  setBons((prev) => prev.map((x) => (x.id === bonId ? { ...x, materielStock: items } : x)));
+                  const total = items.reduce((s, it) => s + (Number(it.coutant) || 0) * (Number(it.quantite) || 1), 0);
+                  ajouterJournal(`📦 Matériel du stock enregistré sur le bon — ${items.length} item${items.length > 1 ? "s" : ""}, ${total.toFixed(2)} $ de coût standard (interne).`);
+                  setMaterielStockPour(null);
+                } catch (e) {
+                  ajouterJournal(`⚠️ Matériel du stock NON enregistré (${e?.message || "erreur"}) — le snippet 77 est-il passé ?`);
+                }
+              }}
+              className="mt-3 w-full"
+            >
+              Enregistrer
+            </Button>
+          </div>
+        </div>
+      )}
 
       {bonFacturation && (
         <ModalFacturationDevis
@@ -21095,19 +21266,52 @@ export default function App() {
   };
   // BC LIBRE — numéro officiel ; projet choisi = coûts du projet
   // (mécanisme existant), sinon achat général (registre à part).
-  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId }) => {
+  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId, tacheId, montantAttribue }) => {
     const numero = await numeroBonCommande().catch(() => "BC-" + Date.now());
     if (projetId) {
       const bc = { id: "bc-" + Date.now(), numeroBC: numero, fournisseur: fournisseurNom || "", montantHT: Number(montantHT) || 0, statut: "En attente", date: todayISO(), description: description || "" };
       setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] } : px)));
       const proj = projets.find((px) => px.id === projetId);
       ajouterJournal("🧾 BC " + numero + " créé et attribué au projet « " + (proj?.nom || projetId) + " » — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
+    } else if (tacheId) {
+      // 🔗 ACHAT POUR UNE JOB (2026-08-25) : la tâche et son client sont
+      // recopiés sur l'achat — le coût suivra le client, projet ou pas.
+      const t = tacheParId(tacheId);
+      const attribue = Math.min(Number(montantAttribue ?? montantHT) || 0, Number(montantHT) || 0);
+      await creerAchatLibre(
+        {
+          numeroBc: numero,
+          fournisseurNom,
+          description,
+          montantHT,
+          dateAchat: todayISO(),
+          tacheId,
+          tacheTitre: t?.titre || t?.clientNom || "",
+          clientNom: t?.clientNom || "",
+          montantAttribue: attribue,
+        },
+        session
+      ).catch(() => {});
+      listerAchatsLibres().then(setAchatsLibres).catch(() => {});
+      ajouterJournal(
+        "🧾 BC " + numero + " créé et rattaché à « " + (t?.titre || tacheId) + " »" + (t?.clientNom ? ` (${t.clientNom})` : "") +
+          " — " + attribue.toFixed(2) + " $ HT attribués à la job sur " + (Number(montantHT) || 0).toFixed(2) + " $" +
+          (attribue < (Number(montantHT) || 0) ? " (le reste demeure un achat de stock)" : "")
+      );
     } else {
       await creerAchatLibre({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO() }, session).catch(() => {});
       listerAchatsLibres().then(setAchatsLibres).catch(() => {});
       ajouterJournal("🧾 BC " + numero + " créé (achat général, sans projet) — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
     }
     return numero;
+  };
+  // Retrouve une tâche par id, peu importe où elle vit (grille ou file
+  // d'attente) — pour recopier titre et client sur un achat rattaché.
+  const tacheParId = (id) => {
+    for (const valeur of Object.values(planning)) {
+      for (const t of listeCellule(valeur)) if (t?.id === id) return t;
+    }
+    return (tachesAttente || []).find((t) => t.id === id) || null;
   };
 
   // CRÉATION AUTOMATIQUE depuis les bons de travail : quand un
@@ -22201,6 +22405,7 @@ export default function App() {
         <OngletTableauDeBord
           projets={projets}
           travaux={travaux}
+          achatsLibres={achatsLibres}
           transactionsQb={transactionsQb}
           utilisateurs={utilisateurs}
           tauxMetiers={tauxMetiers}
@@ -22264,6 +22469,7 @@ export default function App() {
           travaux={travaux}
           setTravaux={setTravaux}
           inspections={inspections}
+          achatsLibres={achatsLibres}
           projets={projets}
           setProjets={setProjets}
           devisListe={devisListe}
@@ -22539,6 +22745,7 @@ export default function App() {
           prixDepots={prixDepots}
           estAdminPrincipal={role === "Admin principal"}
           facturablesAssignations={facturablesAssignations}
+          achatsLibres={achatsLibres}
           travaux={travaux}
           // 🗺️ Zone d'un appel retrouvée depuis l'agenda (les tâches y
           // portent leur fiche complète) — le bon de travail, lui, ne la
@@ -22764,6 +22971,21 @@ export default function App() {
           achatsLibres={achatsLibres}
           onCreerBcLibre={creerBcLibre}
           projets={projets}
+          // Tâches offertes au rattachement d'un achat : celles de la
+          // grille + la file d'attente, dédupliquées, sans les tâches
+          // système, les plus récentes d'abord.
+          tachesPourAchat={(() => {
+            const vues = new Map();
+            for (const valeur of Object.values(planning)) {
+              for (const t of listeCellule(valeur)) {
+                if (t && !t.est_tache_systeme && !vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "" });
+              }
+            }
+            (tachesAttente || []).forEach((t) => {
+              if (!vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "" });
+            });
+            return [...vues.values()].sort((a, b) => (a.clientNom || "").localeCompare(b.clientNom || "", "fr"));
+          })()}
           depots={depots}
           prixDepots={prixDepots}
           onCreerDepot={creerDepotPourTache}

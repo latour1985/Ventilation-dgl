@@ -2521,3 +2521,30 @@ create policy "sous_traitants_ecriture_test" on sous_traitants_app
 -- ============================================================
 alter table bons_travail add column if not exists travaux_non_termines boolean not null default false;
 alter table bons_travail add column if not exists reste_a_faire text;
+
+-- ============================================================
+-- 77 - MATÉRIEL AUX COÛTS PAR TÂCHE (2026-08-25)
+-- ------------------------------------------------------------
+-- Demande du propriétaire — fermer la boucle des coûts matériel :
+-- « chaque dollar de matériel compte UNE fois ».
+--
+-- Deux chemins, deux ajouts :
+--   • ACHAT DIRECT pour une job : l'achat libre peut se rattacher à
+--     une TÂCHE (tache_id + titre + client recopiés pour l'affichage),
+--     avec un MONTANT ATTRIBUÉ ajustable à la baisse — on profite
+--     d'une commande pour ajouter du stock, seule la part de la job
+--     compte dans son coût, le reste demeure un achat général.
+--   • CONSOMMATION D'ENTREPÔT : items de catalogue au COÛT STANDARD
+--     posés sur le bon de travail (materiel_stock jsonb :
+--     [{ nom, quantite, coutant }]) — le forfait murale, la prise de
+--     l'électricien, les consommables. Le rouleau de 164 pieds, lui,
+--     reste un achat général : son coût se récupère job après job via
+--     ces items standards.
+--
+-- L'application sait vivre sans ces colonnes (réessai sans elles).
+-- ============================================================
+alter table achats_libres add column if not exists tache_id text;
+alter table achats_libres add column if not exists tache_titre text;
+alter table achats_libres add column if not exists client_nom text;
+alter table achats_libres add column if not exists montant_attribue numeric;
+alter table bons_travail add column if not exists materiel_stock jsonb;
