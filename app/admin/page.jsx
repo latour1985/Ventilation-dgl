@@ -46,7 +46,7 @@ import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaieme
 import { termesHtmlCourriel } from "@/lib/termes";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
-import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes } from "@/lib/quickbooksClient";
+import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
@@ -15015,6 +15015,30 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // à attacher à la tâche — il suit jusqu'au bon de travail et à la
   // facturation.
   const [numeroDevisExistant, setNumeroDevisExistant] = useState("");
+  // 🔎 Vérification du numéro tapé, DANS QuickBooks, au moment de la
+  // création (2026-08-25) : une faute de frappe découverte à la
+  // facturation, trois semaines plus tard, est dix fois plus chère
+  // qu'ici. { etat: "cherche"|"trouve"|"introuvable"|"hors_ligne",
+  // total?, nbLignes?, clientNomQbo? } — null = pas encore vérifié.
+  const [verifDevisQbo, setVerifDevisQbo] = useState(null);
+  const verifierDevisQbo = async () => {
+    const numero = numeroDevisExistant.trim();
+    if (!numero) return;
+    setVerifDevisQbo({ etat: "cherche" });
+    const r = await lireEstimateQbo(numero);
+    if (r?.trouve) {
+      setVerifDevisQbo({
+        etat: "trouve",
+        total: Number(r.total) || 0,
+        nbLignes: (r.lignes || []).length,
+        clientNomQbo: r.clientNomQbo || null,
+      });
+    } else if (r?.trouve === false) {
+      setVerifDevisQbo({ etat: "introuvable" });
+    } else {
+      setVerifDevisQbo({ etat: "hors_ligne" });
+    }
+  };
   // Filtres de recherche des listes déroulantes (la liste RESTE — le
   // filtre la raccourcit seulement).
   const [filtreClientTache, setFiltreClientTache] = useState("");
@@ -15469,6 +15493,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setContactRole("");
     setContactTel("");
     setNumeroDevisExistant("");
+    setVerifDevisQbo(null);
     setFiltreClientTache("");
     setFiltreAdresseTache("");
     setNouvelleAdresseApp("");
@@ -16732,16 +16757,49 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
                     {nouveauType === "devis" ? "…ou entre un Nº de devis manuellement (devis fait hors de l'app)" : "Nº de devis existant (QuickBooks)"} <span className="font-normal normal-case text-slate-400">— optionnel</span>
                   </label>
-                  <input
-                    value={numeroDevisExistant}
-                    onChange={(e) => setNumeroDevisExistant(e.target.value)}
-                    placeholder="Ex. : 1057 ou DEV-2024-312"
-                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-64"
-                  />
+                  <div className="flex gap-1.5">
+                    <input
+                      value={numeroDevisExistant}
+                      onChange={(e) => {
+                        setNumeroDevisExistant(e.target.value);
+                        setVerifDevisQbo(null); // le numéro change — la vérification d'avant ne vaut plus
+                      }}
+                      placeholder="Ex. : 1057 ou DEV-2024-312"
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-64"
+                    />
+                    <button
+                      type="button"
+                      onClick={verifierDevisQbo}
+                      disabled={!numeroDevisExistant.trim() || verifDevisQbo?.etat === "cherche"}
+                      className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[10px] font-bold text-slate-600 disabled:opacity-40"
+                    >
+                      {verifDevisQbo?.etat === "cherche" ? "…" : "🔎 Vérifier"}
+                    </button>
+                  </div>
+                  {/* Le verdict — une faute de frappe attrapée ICI coûte
+                      dix fois moins cher qu'à la facturation. */}
+                  {verifDevisQbo?.etat === "trouve" && (
+                    <p className="mt-0.5 rounded bg-emerald-50 px-1.5 py-1 text-[9px] font-bold text-emerald-700">
+                      ✓ Trouvé dans QuickBooks — {verifDevisQbo.nbLignes} ligne{verifDevisQbo.nbLignes > 1 ? "s" : ""},
+                      total {verifDevisQbo.total.toFixed(2)} $ HT{verifDevisQbo.clientNomQbo ? ` · client : ${verifDevisQbo.clientNomQbo}` : ""}.
+                      Le solde et la facturation progressive s&apos;appuieront dessus.
+                    </p>
+                  )}
+                  {verifDevisQbo?.etat === "introuvable" && (
+                    <p className="mt-0.5 rounded bg-amber-50 px-1.5 py-1 text-[9px] font-bold text-amber-700">
+                      ⚠️ Aucun devis à ce numéro dans QuickBooks — vérifie le numéro. Tu peux créer la tâche quand même :
+                      le numéro suivra comme référence, sans montant ni lignes.
+                    </p>
+                  )}
+                  {verifDevisQbo?.etat === "hors_ligne" && (
+                    <p className="mt-0.5 rounded bg-slate-100 px-1.5 py-1 text-[9px] font-semibold text-slate-500">
+                      QuickBooks injoignable pour vérifier — la facturation réessaiera toute seule au moment venu.
+                    </p>
+                  )}
                   <p className="mt-0.5 text-[9px] text-slate-400">
                     {nouveauType === "devis"
-                      ? "Le numéro suivra la tâche jusqu'au bon de travail et à la facturation. Le contenu du devis ne sera pas copié automatiquement (l'app ne le connaît pas) — écris l'essentiel dans la description."
-                      : "Pour la transition : le numéro suivra la tâche jusqu'au bon de travail et à la facturation."}
+                      ? "Le numéro suivra la tâche jusqu'au bon de travail et à la facturation. S'il existe dans QuickBooks, son total et ses lignes seront relus à la facturation (solde anti-dépassement compris) — écris quand même l'essentiel dans la description pour le technicien."
+                      : "Pour la transition : le numéro suivra la tâche jusqu'au bon de travail et à la facturation, et son contenu sera relu depuis QuickBooks au moment de facturer."}
                   </p>
                 </div>
               )}
@@ -18754,7 +18812,18 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
 
         {!devis && (
           <div className="mb-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-700">
-            {contrat ? "Contrat" : "Devis"} #{bon.devisNumero} introuvable dans l'onglet Devis — plafond basé sur le montant du bon de travail ({bon.montant.toFixed(2)} $) à la place.
+            {contrat ? "Contrat" : "Devis"} #{bon.devisNumero} introuvable dans l&apos;onglet Devis et dans QuickBooks — plafond basé sur le montant du bon de travail ({bon.montant.toFixed(2)} $) à la place.
+          </div>
+        )}
+        {/* 🔎 Devis retrouvé DANS QUICKBOOKS (transition — devis fait
+            avant l'application) : le solde et les lignes viennent de
+            l'estimate. On le dit — l'admin doit savoir d'où sortent
+            les chiffres qu'il plafonne. */}
+        {devis?.sourceQbo && (
+          <div className="mb-3 rounded-xl bg-sky-50 p-3 text-xs font-semibold text-sky-800">
+            🔎 Devis #{devis.numero} lu depuis <span className="font-bold">QuickBooks</span> ({(devis.lignes || []).length} ligne{(devis.lignes || []).length > 1 ? "s" : ""},
+            total {devis.totalVendant.toFixed(2)} $ HT) — le solde restant et la facturation progressive se calculent sur lui.
+            Si l&apos;estimate change dans QuickBooks, rouvre cette fenêtre pour relire.
           </div>
         )}
 
@@ -19573,7 +19642,76 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       : 0;
 
   const bonFacturation = bons.find((b) => b.id === bonFacturationId) || null;
-  const devisFacturation = bonFacturation ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) : null;
+  // ============================================================
+  // 🔎 DEVIS QUICKBOOKS RECONNU (2026-08-25) — TRANSITION.
+  // ------------------------------------------------------------
+  // Un numéro tapé à la main (devis fait dans QuickBooks avant
+  // l'application) n'existait pas dans devisListe : le garde-fou
+  // anti-dépassement se rabattait sur le montant du bon, la facture ne
+  // montrait pas les lignes acceptées, et la facturation progressive
+  // était impossible. À l'ouverture de la fenêtre, si le numéro est
+  // inconnu de l'application, on va LIRE l'estimate dans QuickBooks et
+  // on le sert au même moule qu'un devis maison. Mis en cache par
+  // numéro (la fenêtre peut se rouvrir dix fois). Introuvable : la
+  // fenêtre garde son comportement d'avant, et le Journal le dit.
+  // ============================================================
+  const [devisQboCache, setDevisQboCache] = useState({});
+  const devisFacturation = bonFacturation
+    ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) ||
+      devisQboCache[bonFacturation.devisNumero] ||
+      null
+    : null;
+  useEffect(() => {
+    if (!bonFacturation?.devisNumero) return;
+    const numero = bonFacturation.devisNumero;
+    if (devisListe.some((d) => d.numero === numero)) return; // devis maison — rien à chercher
+    // Relu à CHAQUE ouverture de la fenêtre (pas de cache figé) : si le
+    // comptable ajuste l'estimate dans QuickBooks entre deux factures,
+    // le solde suit. Le cache ne sert qu'à afficher tout de suite
+    // pendant que la relecture arrive.
+    const dejaConnu = devisQboCache[numero] !== undefined;
+    let annule = false;
+    lireEstimateQbo(numero).then((r) => {
+      if (annule) return;
+      if (r?.trouve) {
+        setDevisQboCache((prev) => ({
+          ...prev,
+          [numero]: {
+            numero,
+            sourceQbo: true,
+            totalVendant: Number(r.total) || 0,
+            // Même forme que les lignes d'un devis maison — la fenêtre
+            // de facturation progressive n'y voit que du feu.
+            lignes: (r.lignes || []).map((l, i) => ({
+              uid: `qbo-${numero}-${i}`,
+              nom: l.description,
+              description: "",
+              quantite: Number(l.quantite) || 1,
+              prix_vendant: Number(l.prixUnitaire) || 0,
+            })),
+          },
+        }));
+        if (!dejaConnu) {
+          ajouterJournal(
+            `🔎 Devis ${numero} retrouvé dans QuickBooks (${(r.lignes || []).length} ligne${(r.lignes || []).length > 1 ? "s" : ""}, total ${(Number(r.total) || 0).toFixed(2)} $ HT) — solde et facturation progressive branchés dessus.`
+          );
+        }
+      } else if (r?.trouve === false) {
+        setDevisQboCache((prev) => ({ ...prev, [numero]: null }));
+        if (!dejaConnu) {
+          ajouterJournal(
+            `🔎 Devis ${numero} INTROUVABLE dans QuickBooks — la facturation se fait sur le montant du bon (vérifie le numéro si un devis existe vraiment).`
+          );
+        }
+      }
+      // nonConnecte / simule / erreur réseau : silencieux — comportement
+      // d'avant (montant du bon), rien de cassé.
+    });
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bonFacturationId]);
   const bonEnvoiCourriel = bons.find((b) => b.id === bonEnvoiCourrielId) || null;
   const bonEnvoiClient = bons.find((b) => b.id === bonEnvoiClientId) || null;
   const bonRetrait = bonsGroupes.find((b) => b.id === bonRetraitId) || null;
@@ -19826,7 +19964,10 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   // devis/contrat.
   const emettreFacture = async (bonId, { montant, type, detail }, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
-    const devisCourant = devisListe.find((d) => d.numero === bons.find((b) => b.id === bonId)?.devisNumero);
+    // Le devis maison d'abord ; sinon le devis QuickBooks retrouvé par
+    // numéro — son total sert au statut « envoyé » (cumul atteint).
+    const numeroDevisBon = bons.find((b) => b.id === bonId)?.devisNumero;
+    const devisCourant = devisListe.find((d) => d.numero === numeroDevisBon) || devisQboCache[numeroDevisBon] || null;
     // Chaque facture — complète OU partielle (par pourcentage, par item,
     // ou par échéance de contrat) — est envoyée individuellement à
     // QuickBooks et y crée sa propre facture, avec son propre numéro.

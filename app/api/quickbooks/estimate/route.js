@@ -42,6 +42,57 @@ export async function POST(request) {
     return Response.json({ erreur: "Demande illisible." }, { status: 400 });
   }
 
+  // ============================================================
+  // ACTION « LIRE » (2026-08-25) — TRANSITION QUICKBOOKS.
+  // ------------------------------------------------------------
+  // Un numéro de devis tapé À LA MAIN sur une tâche (devis fait dans
+  // QuickBooks AVANT l'application) n'était qu'une étiquette : aucun
+  // montant, aucune ligne — le garde-fou anti-dépassement se rabattait
+  // sur le montant du bon et la facturation progressive était
+  // impossible. Ici, on RETROUVE l'estimate par son numéro (DocNumber)
+  // et on rapporte total + lignes. Lecture seule, rien n'est modifié.
+  // Introuvable ≠ erreur : on répond { trouve: false } — l'appelant le
+  // dit à l'humain au lieu de faire semblant.
+  // ============================================================
+  if (corps?.action === "lire") {
+    const numeroCherche = String(corps?.numero || "").trim();
+    if (!numeroCherche) return Response.json({ erreur: "Numéro requis." }, { status: 400 });
+    let acces2;
+    try {
+      acces2 = await jetonAccesValide();
+    } catch (e) {
+      return Response.json({ erreur: `Jeton QuickBooks : ${e?.message || "erreur"}` }, { status: 502 });
+    }
+    if (!acces2) return Response.json({ nonConnecte: true });
+    try {
+      const lu = await requeteQbo(
+        acces2,
+        `select * from Estimate where DocNumber = '${echapperQbo(numeroCherche)}' maxresults 1`
+      );
+      const est = lu?.Estimate?.[0];
+      if (!est) return Response.json({ trouve: false });
+      const lignes = (est.Line || [])
+        .filter((l) => l.DetailType === "SalesItemLineDetail")
+        .map((l) => ({
+          description: String(l.Description || "").trim() || "Item du devis",
+          quantite: Number(l.SalesItemLineDetail?.Qty) || 1,
+          prixUnitaire: Number(l.SalesItemLineDetail?.UnitPrice) || Number(l.Amount) || 0,
+        }));
+      return Response.json({
+        trouve: true,
+        estimateId: est.Id,
+        docNumber: est.DocNumber || numeroCherche,
+        // Total HT : somme des lignes (TotalAmt inclurait les taxes du
+        // fichier canadien à la bascule — les lignes, elles, restent HT).
+        total: Math.round(lignes.reduce((s, l) => s + l.quantite * l.prixUnitaire, 0) * 100) / 100,
+        clientNomQbo: est.CustomerRef?.name || null,
+        lignes,
+      });
+    } catch (e) {
+      return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });
+    }
+  }
+
   const clientNom = String(corps?.clientNom || "").trim();
   const numero = String(corps?.numero || "").trim();
   const lignes = (Array.isArray(corps?.lignes) ? corps.lignes : [])
