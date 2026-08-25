@@ -14923,7 +14923,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // --- Dépôt préalable (coché d'office pour les appels de service) ---
   const [depotRequis, setDepotRequis] = useState(true);
   const [depotMontant, setDepotMontant] = useState("");
-  const [depotChoixPrix, setDepotChoixPrix] = useState(""); // "", montant de la liste, ou "hors_liste"
+  // 🗺️ ZONE DE TARIFICATION — INDÉPENDANTE DU DÉPÔT (2026-08-25,
+  // demande du propriétaire). Avant, la zone se choisissait DANS le
+  // bloc dépôt : décocher le dépôt (client régulier, payeur sur
+  // facture) créait un appel SANS zone — et la facturation ne savait
+  // plus ni le prix de base ni la règle du temps inclus (90 min chez
+  // le client en zone, 180 min TOTALES transport compris hors zone).
+  // La zone est maintenant un choix OBLIGATOIRE de l'appel de service,
+  // dépôt ou pas ; le montant du dépôt en DÉCOULE quand il est requis.
+  const [zoneAppelChoix, setZoneAppelChoix] = useState(""); // "", nom de zone, ou "hors_zone"
   // Destinataires de la DEMANDE DE DÉPÔT (courriel avec facture QBO) —
   // les adresses par défaut du client sont précochées au choix du client.
   const [depotEmails, setDepotEmails] = useState([]);
@@ -15344,6 +15352,15 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       nouvelle.equipePrevue = enPlusPrevus.map((id) => ({ employeId: id, facturable: facturablesEnPlus[id] }));
     }
 
+    // 🗺️ ZONE DE L'APPEL — enregistrée AVEC OU SANS dépôt (2026-08-25) :
+    // elle détermine le prix de base et la règle du temps inclus (zones
+    // = temps chez le client seulement ; hors zone = transport compris).
+    // Avant, elle ne s'écrivait que dans la branche dépôt : un appel
+    // sans dépôt partait sans zone et la facturation devinait.
+    if (nouveauType === "appel_service") {
+      nouvelle.zoneAppel = zoneAppelChoix === "hors_zone" ? "hors_zone" : zoneAppelChoix || null;
+    }
+
     // Dépôt préalable : la tâche porte l'info et le dépôt est créé
     // (24 h pour payer). Une tâche avec dépôt en attente NE PEUT PAS
     // être placée dans l'horaire — même si date/technicien sont saisis.
@@ -15351,9 +15368,6 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     if (depotRequis && montantDepot > 0) {
       nouvelle.depotRequis = true;
       nouvelle.depotMontant = montantDepot;
-      // Zone de l'appel : détermine la règle du temps inclus (zones =
-      // temps chez le client seulement ; hors zone = transport compris).
-      nouvelle.zoneAppel = depotChoixPrix === "hors_liste" ? "hors_zone" : depotChoixPrix || null;
       // Technicien / date souhaités par le client, MÉMORISÉS sur la tâche
       // sans la placer : dès que le dépôt est payé, un clic suffit pour
       // l'envoyer à l'horaire avec le bon technicien.
@@ -15421,7 +15435,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     }
 
     setDepotMontant("");
-    setDepotChoixPrix("");
+    setZoneAppelChoix("");
     setDepotEmails([]);
     setDepotExtra("");
     setNouveauTitre("");
@@ -16892,13 +16906,58 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 </p>
               </div>
 
+              {/* 🗺️ ZONE DE TARIFICATION — TOUJOURS, dépôt ou pas.
+                  C'est elle qui dit à la facturation le prix de base de
+                  l'appel ET la règle du temps inclus. Obligatoire pour
+                  un appel de service, comme le secteur CCQ. */}
+              {nouveauType === "appel_service" && (
+                <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+                  <label className="mb-0.5 block text-xs font-bold text-slate-700">
+                    🗺️ Zone de tarification <span className="font-normal text-slate-400">(règle de facturation de l&apos;appel)</span>
+                  </label>
+                  <select
+                    value={zoneAppelChoix}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setZoneAppelChoix(v);
+                      // Le montant du dépôt SUIT la zone (saisie libre hors zone).
+                      setDepotMontant(v === "hors_zone" || v === "" ? "" : String(Number(prixDepots?.[v]) || 0));
+                    }}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold"
+                  >
+                    <option value="">— Choisir la zone —</option>
+                    {zonesEffectives(prixDepots).filter((z) => Number(prixDepots?.[z]) > 0).map((z) => {
+                      const p = Number(prixDepots[z]);
+                      return (
+                        <option key={z} value={z}>
+                          {z} — {p.toFixed(2)} $ HT ({taxesDepot(p, configEnt).total.toFixed(2)} $ taxes incl.) — transport inclus, {Number(prixDepots?.minutes_incluses) || 90} min chez le client
+                        </option>
+                      );
+                    })}
+                    <option value="hors_zone">
+                      Hors zone — tarif sur mesure — {Number(prixDepots?.minutes_incluses_hors_zone) || 180} min totales, transport compté
+                    </option>
+                  </select>
+                  <p className="mt-1 text-[9px] leading-snug text-slate-400">
+                    La comptabilité s&apos;en sert même sans dépôt : prix de base de l&apos;appel et calcul du temps
+                    supplémentaire (temps réel sur place seulement — jamais le bloc d&apos;agenda).
+                  </p>
+                </div>
+              )}
+
               {/* DÉPÔT PRÉALABLE */}
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5">
                 <label className="flex items-center gap-2 text-xs font-bold text-amber-900">
                   <input
                     type="checkbox"
                     checked={depotRequis}
-                    onChange={(e) => setDepotRequis(e.target.checked)}
+                    onChange={(e) => {
+                      setDepotRequis(e.target.checked);
+                      // Cocher APRÈS avoir choisi la zone : le montant suit.
+                      if (e.target.checked && zoneAppelChoix && zoneAppelChoix !== "hors_zone") {
+                        setDepotMontant(String(Number(prixDepots?.[zoneAppelChoix]) || 0));
+                      }
+                    }}
                     className="h-4 w-4 accent-[#131B2E]"
                   />
                   💰 Dépôt requis avant planification
@@ -16906,34 +16965,23 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 {depotRequis && (
                   <div className="mt-2 space-y-2">
                     <div>
-                      <label className="mb-0.5 block text-[10px] font-bold text-amber-800">Montant du dépôt (HT $) — liste de prix</label>
-                      <select
-                        value={depotChoixPrix}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setDepotChoixPrix(v);
-                          // La zone choisie fixe le montant ; « hors_liste » ouvre la saisie.
-                          setDepotMontant(v === "hors_liste" || v === "" ? "" : String(Number(prixDepots?.[v]) || 0));
-                        }}
-                        className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs font-semibold"
-                      >
-                        <option value="">— Choisir dans la liste de prix —</option>
-                        {zonesEffectives(prixDepots).filter((z) => Number(prixDepots?.[z]) > 0).map((z) => {
-                          const p = Number(prixDepots[z]);
-                          return (
-                            <option key={z} value={z}>
-                              Appel de service — {z} — {p.toFixed(2)} $ HT ({taxesDepot(p, configEnt).total.toFixed(2)} $ taxes incl.) — transport inclus
-                            </option>
-                          );
-                        })}
-                        <option value="hors_liste">🗺️ Hors zone — tarif sur mesure (3 h incluses transport compris)</option>
-                      </select>
-                      {zonesEffectives(prixDepots).every((z) => !(Number(prixDepots?.[z]) > 0)) && (
-                        <p className="mt-1 text-[9px] text-amber-700">
-                          Aucun prix de zone configuré — l'Admin principal peut les définir dans Utilisateurs → « Liste de prix — dépôts ».
+                      <label className="mb-0.5 block text-[10px] font-bold text-amber-800">Montant du dépôt (HT $)</label>
+                      {!zoneAppelChoix && (
+                        <p className="rounded-lg bg-white px-2 py-1.5 text-[10px] font-semibold text-amber-800">
+                          Choisis d&apos;abord la <span className="font-bold">zone de tarification</span> ci-dessus — le montant du dépôt suivra tout seul.
                         </p>
                       )}
-                      {depotChoixPrix === "hors_liste" && (
+                      {zoneAppelChoix && zoneAppelChoix !== "hors_zone" && (
+                        <p className="rounded-lg bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                          {zoneAppelChoix} — <span className="tabular-nums">{(Number(prixDepots?.[zoneAppelChoix]) || 0).toFixed(2)} $ HT</span> (liste de prix)
+                        </p>
+                      )}
+                      {zonesEffectives(prixDepots).every((z) => !(Number(prixDepots?.[z]) > 0)) && (
+                        <p className="mt-1 text-[9px] text-amber-700">
+                          Aucun prix de zone configuré — l&apos;Admin principal peut les définir dans Utilisateurs → « Liste de prix — dépôts ».
+                        </p>
+                      )}
+                      {zoneAppelChoix === "hors_zone" && (
                         <InputNombreDecimal
                           valeur={depotMontant || 0}
                           onChange={(v) => setDepotMontant(String(v))}
@@ -17041,6 +17089,10 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       // (2026-08-17) — il fige le taux coûtant de chaque
                       // heure. Sans objet pour course/congé (masqué).
                       if (!estTypeSansClient(nouveauType) && !nouveauSecteur) raisons.push("le secteur (taux CCQ — Commercial ou Résidentiel)");
+                      // 🗺️ Zone OBLIGATOIRE pour un appel de service — avec
+                      // ou sans dépôt : c'est elle qui dit à la comptabilité
+                      // le prix de base et la règle du temps inclus.
+                      if (nouveauType === "appel_service" && !zoneAppelChoix) raisons.push("la zone de tarification de l'appel");
                       if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un devis (de la liste, ou un numéro tapé à la main)");
                       if (nouveauType === "entretien_contrat" && !nouveauDevisId) raisons.push("un contrat de la liste");
                       if (depotRequis && !(parseFloat(depotMontant) > 0)) raisons.push("un montant de dépôt");
@@ -19290,7 +19342,7 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   );
 }
 
-function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture }) {
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null }) {
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
   // Sans ce raccord, la révision de prix demandait le PLEIN montant
@@ -19330,6 +19382,29 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       facturablesAssignations[`${b.tacheId || ""}|${(s.employeEmail || "").toLowerCase()}`] === false;
     const sources = (b.lignesSource || [b]).filter((s) => (Number(s.heures) || 0) > 0 && !estNonFacturable(s));
     if (sources.length === 0) return [];
+    // 🗺️ LA RÈGLE SUIT LA ZONE (2026-08-25) — la même que l'info-bulle
+    // de l'agenda, enfin appliquée ICI aussi :
+    //   • Zones 1-2-3 : 90 min incluses CHEZ LE CLIENT (le transport est
+    //     déjà dans le prix de zone) — temps du chronomètre seulement.
+    //   • Hors zone : 180 min incluses AU TOTAL — le transport RÉEL du
+    //     technicien ce jour-là compte dans le temps inclus.
+    // Avant, la suggestion appliquait toujours la règle des zones : un
+    // appel hors zone était suggéré avec la mauvaise règle, transport
+    // jamais compté. Toujours du temps RÉEL pointé — jamais le bloc
+    // d'agenda.
+    const horsZone = (zonePourTache ? zonePourTache(b.tacheId) : null) === "hors_zone";
+    const transportReelDe = (s) =>
+      horsZone
+        ? (travaux || [])
+            .filter(
+              (t) =>
+                t.supabase &&
+                t.estTransport &&
+                (t.employeEmail || "").toLowerCase() === (s.employeEmail || "").toLowerCase() &&
+                t.date === (s.date || b.date)
+            )
+            .reduce((somme, t) => somme + (Number(t.heures) || 0), 0)
+        : 0;
     // Passager ce jour-là ? (déclaré le matin, pas déduit) → taux réduit.
     const estPassager = (nom, date) =>
       (inspections || []).some((i) => i.date === date && i.passagerDeNom && i.technicienNom === nom);
@@ -19338,11 +19413,12 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     const tries = sources
       .map((s) => ({
         nom: s.employeNom || "",
-        heures: Number(s.heures) || 0,
+        heures: (Number(s.heures) || 0) + transportReelDe(s),
         passager: estPassager(s.employeNom, s.date || b.date),
       }))
       .sort((a, x) => (a.passager ? 1 : 0) - (x.passager ? 1 : 0));
-    let inclusRestant = (Number(prixDepots?.minutes_incluses) || 90) / 60;
+    let inclusRestant =
+      (horsZone ? Number(prixDepots?.minutes_incluses_hors_zone) || 180 : Number(prixDepots?.minutes_incluses) || 90) / 60;
     const lignes = [];
     tries.forEach((s) => {
       const consomme = Math.min(inclusRestant, s.heures);
@@ -19355,7 +19431,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
       lignes.push({
         description:
-          `Temps supplémentaire${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""} : ` +
+          `Temps supplémentaire${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""}${horsZone ? " (hors zone — transport compté)" : ""} : ` +
           `${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
         prix: Math.round(factH * taux * 100) / 100,
       });
@@ -22200,6 +22276,19 @@ export default function App() {
           prixDepots={prixDepots}
           estAdminPrincipal={role === "Admin principal"}
           facturablesAssignations={facturablesAssignations}
+          travaux={travaux}
+          // 🗺️ Zone d'un appel retrouvée depuis l'agenda (les tâches y
+          // portent leur fiche complète) — le bon de travail, lui, ne la
+          // stocke pas. Repli : la file d'attente.
+          zonePourTache={(tacheId) => {
+            if (!tacheId) return null;
+            for (const valeur of Object.values(planning)) {
+              for (const t of listeCellule(valeur)) {
+                if (t?.id === tacheId) return t.zoneAppel || null;
+              }
+            }
+            return (tachesAttente || []).find((t) => t.id === tacheId)?.zoneAppel || null;
+          }}
           onAjouterCourrielClient={(clientId, email) => {
             if (!clientId || !email) return;
             setClients((prev) =>
