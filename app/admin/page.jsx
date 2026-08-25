@@ -43,6 +43,7 @@ import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "
 import { envoyerPushA } from "@/lib/notificationsPush";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee, conditionsDepotAppel } from "@/lib/courriels";
+import { termesHtmlCourriel } from "@/lib/termes";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes } from "@/lib/quickbooksClient";
@@ -20958,7 +20959,11 @@ export default function App() {
     // remboursable » ne tient pas. Elle part aux DEUX endroits : sur la
     // facture QuickBooks (en production, c'est parfois le SEUL courriel
     // que le client reçoit) et dans notre courriel maison.
-    const conditionsDepot = conditionsDepotAppel(configEntreprise);
+    // Le TEXTE COMPLET (les dix clauses) suit lui aussi : au long dans
+    // notre courriel, et par le lien /conditions sur la facture
+    // QuickBooks — son message est trop court pour dix clauses.
+    const lienConditions = typeof window !== "undefined" ? `${window.location.origin}/conditions` : null;
+    const conditionsDepot = conditionsDepotAppel(configEntreprise, lienConditions);
     const messageClientDepot =
       `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
       `Dès sa réception, votre rendez-vous est confirmé.\n\n${conditionsDepot}`;
@@ -21021,6 +21026,9 @@ export default function App() {
         total: t.total,
         lienPaiement: facture?.lienPaiement || null,
         conditions: conditionsDepot,
+        // Les DIX clauses, au complet, dans le courriel même — le
+        // client les a sous les yeux avant de payer, pas « sur demande ».
+        termesHtml: termesHtmlCourriel(),
       }),
     });
     if (rc.envoye) {
