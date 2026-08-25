@@ -11758,6 +11758,11 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
   // même mécanique que le formulaire de tâche.
   const [clientId, setClientId] = useState("");
   const [filtreClientDevis, setFiltreClientDevis] = useState("");
+  // 📋 LISTE OUVERTE AU CLIC (2026-08-25, demande du propriétaire) : la
+  // liste n'apparaissait qu'après la première lettre — quand on a
+  // OUBLIÉ le nom, il n'y a justement pas de première lettre à taper.
+  // Un clic dans le champ montre tous les clients en ordre alphabétique.
+  const [listeClientsDevisOuverte, setListeClientsDevisOuverte] = useState(false);
   // ARRIVÉE DEPUIS UNE FICHE CLIENT (bouton « + Créer un devis ») :
   // le client est déjà choisi, on ne le redemande pas. Même mécanisme
   // que la recherche rapide qui ouvre la bonne fiche.
@@ -12446,19 +12451,24 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
             <input
               value={filtreClientDevis}
               onChange={(e) => setFiltreClientDevis(e.target.value)}
-              placeholder="🔍 Tape le nom — la liste rétrécit à chaque lettre…"
+              onFocus={() => setListeClientsDevisOuverte(true)}
+              // Petit délai avant de fermer : le clic sur un nom de la
+              // liste doit avoir le temps de compter avant que le champ
+              // perde le focus.
+              onBlur={() => setTimeout(() => setListeClientsDevisOuverte(false), 200)}
+              placeholder="🔍 Clique pour la liste, ou tape le nom…"
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm"
             />
-            {filtreClientDevis.trim() !== "" && (
-              <div className="mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            {(listeClientsDevisOuverte || filtreClientDevis.trim() !== "") && (
+              <div className="mt-1 max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white">
                 {clients
                   .filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientDevis.trim().toLowerCase()))
-                  .slice(0, 8)
+                  .sort((a, b) => nomAffichageClient(a).localeCompare(nomAffichageClient(b), "fr"))
                   .map((c) => (
                     <button
                       key={c.id}
                       type="button"
-                      onClick={() => { setClientId(c.id); setFiltreClientDevis(""); }}
+                      onClick={() => { setClientId(c.id); setFiltreClientDevis(""); setListeClientsDevisOuverte(false); }}
                       className="block w-full border-b border-slate-100 px-3 py-2.5 text-left text-sm font-semibold text-slate-700 last:border-0 active:bg-orange-50"
                     >
                       <span className="block truncate">{nomAffichageClient(c)}</span>
@@ -15042,6 +15052,9 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // Filtres de recherche des listes déroulantes (la liste RESTE — le
   // filtre la raccourcit seulement).
   const [filtreClientTache, setFiltreClientTache] = useState("");
+  // 📋 Liste ouverte au clic (2026-08-25) — même raison que le devis :
+  // quand on a oublié le nom, il n'y a pas de première lettre à taper.
+  const [listeClientsTacheOuverte, setListeClientsTacheOuverte] = useState(false);
   const [filtreAdresseTache, setFiltreAdresseTache] = useState("");
   // Appartement / unité d'une nouvelle adresse de travaux.
   const [nouvelleAdresseApp, setNouvelleAdresseApp] = useState("");
@@ -16347,19 +16360,21 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 <input
                   value={filtreClientTache}
                   onChange={(e) => setFiltreClientTache(e.target.value)}
-                  placeholder="🔍 Tape le nom — la liste rétrécit à chaque lettre…"
+                  onFocus={() => setListeClientsTacheOuverte(true)}
+                  onBlur={() => setTimeout(() => setListeClientsTacheOuverte(false), 200)}
+                  placeholder="🔍 Clique pour la liste, ou tape le nom…"
                   className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
                 />
-                {filtreClientTache.trim() !== "" && (
-                  <div className="mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                {(listeClientsTacheOuverte || filtreClientTache.trim() !== "") && (
+                  <div className="mt-1 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white">
                     {clients
                       .filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(filtreClientTache.trim().toLowerCase()))
-                      .slice(0, 8)
+                      .sort((a, b) => nomAffichageClient(a).localeCompare(nomAffichageClient(b), "fr"))
                       .map((c) => (
                         <button
                           key={c.id}
                           type="button"
-                          onClick={() => { choisirClientTache(c.id); setFiltreClientTache(""); }}
+                          onClick={() => { choisirClientTache(c.id); setFiltreClientTache(""); setListeClientsTacheOuverte(false); }}
                           className="block w-full border-b border-slate-100 px-2 py-2 text-left text-xs font-semibold text-slate-700 last:border-0 active:bg-orange-50"
                         >
                           {/* truncate : un nom accidentellement TRÈS long
