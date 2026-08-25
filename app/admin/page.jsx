@@ -21026,6 +21026,7 @@ export default function App() {
         total: t.total,
         lienPaiement: facture?.lienPaiement || null,
         conditions: conditionsDepot,
+        lienConditions,
         // Les DIX clauses, au complet, dans le courriel même — le
         // client les a sous les yeux avant de payer, pas « sur demande ».
         termesHtml: termesHtmlCourriel(),
