@@ -9873,6 +9873,8 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
 }
 
 function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, bons, inspections }) {
+  // Taux camion par défaut — pour le coût réel des travaux du client.
+  const configClients = useEntreprise();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   const [entreprise, setEntreprise] = useState("");
   // Nom affiché dans les listes quand nom ET entreprise existent.
@@ -10889,6 +10891,91 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
                               </div>
                             ))}
                           </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* ============================================================
+                        💵 COÛT DES TRAVAUX DU CLIENT — SANS BESOIN DE PROJET
+                        (2026-08-25, demande du propriétaire : « où voit-on
+                        les coûts par client si on ne voit pas les projets ? »)
+                        ------------------------------------------------------------
+                        Le bloc « Rentabilité » ci-dessous n'apparaît que si le
+                        client a des PROJETS — or presque tous les clients n'en
+                        ont pas : appels de service et temps-et-matériel. Leurs
+                        chiffres existaient (bons + heures) mais restaient
+                        invisibles ici. Même calcul que l'analyse « par client »
+                        du tableau de bord : facturé (factures émises), coût
+                        réel (heures pointées × taux FIGÉ + camion selon
+                        l'inspection du matin + matériel au coûtant du devis
+                        lié). Écran ADMIN uniquement — jamais sur un document
+                        client. */}
+                    {(() => {
+                      const bonsDuClient = (bons || []).filter((b) => b.client === c.nom);
+                      if (bonsDuClient.length === 0) return null;
+                      const camionDefautClient = Number(configClients?.coutCamionHoraire) || 0;
+                      const cumul = { facture: 0, cout: 0, heures: 0, jobs: 0 };
+                      const tachesVues = new Set();
+                      bonsDuClient.forEach((b) => {
+                        cumul.facture += (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+                        const cleTache = b.tacheId || b.id;
+                        if (tachesVues.has(cleTache)) return; // heures/matériel comptés UNE fois par tâche
+                        tachesVues.add(cleTache);
+                        cumul.jobs += 1;
+                        const lignesHeures = (travaux || []).filter(
+                          (t) => String(t.tacheId || "").split("::")[0] === b.tacheId && (t.categorieHeures || "projet") === "projet"
+                        );
+                        lignesHeures.forEach((t) => {
+                          const h = Number(t.heures) || 0;
+                          cumul.heures += h;
+                          cumul.cout += h * (Number(t.tauxCoutantFige) || 0);
+                          const insp = (inspections || []).find(
+                            (i) =>
+                              i.date === t.date &&
+                              !i.sansVehicule &&
+                              !i.passagerDeNom &&
+                              (i.technicienEmail && t.employeEmail ? i.technicienEmail === t.employeEmail : i.technicienNom === t.employeNom)
+                          );
+                          if (insp) cumul.cout += h * (insp.coutCamionHoraire != null ? insp.coutCamionHoraire : camionDefautClient);
+                        });
+                        const devisLie = b.devisNumero ? (devisListe || []).find((d) => d.numero === b.devisNumero) : null;
+                        if (devisLie) {
+                          cumul.cout += (devisLie.lignes || [])
+                            .filter((l) => !l.estRabais)
+                            .reduce((s, l) => s + (Number(l.prix_coutant) || 0) * (Number(l.quantite) || 1), 0);
+                        }
+                      });
+                      const profit = cumul.facture - cumul.cout;
+                      const marge = cumul.facture > 0 ? (profit / cumul.facture) * 100 : null;
+                      return (
+                        <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                          <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+                            💵 Coût des travaux — {cumul.jobs} tâche{cumul.jobs > 1 ? "s" : ""} · {cumul.heures.toFixed(1)} h
+                          </p>
+                          <div className="grid grid-cols-4 gap-1.5 text-center">
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-slate-400">Facturé</p>
+                              <p className="text-xs font-extrabold tabular-nums text-slate-800">{cumul.facture.toFixed(0)} $</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-orange-500">Coût réel</p>
+                              <p className="text-xs font-extrabold tabular-nums text-orange-600">{cumul.cout.toFixed(0)} $</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-slate-400">Profit</p>
+                              <p className={`text-xs font-extrabold tabular-nums ${profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{profit.toFixed(0)} $</p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-bold uppercase text-slate-400">Marge</p>
+                              <p className={`text-xs font-extrabold tabular-nums ${marge != null && marge < (Number(configClients?.seuilMargeAlerte) || 25) ? "text-red-600" : "text-emerald-700"}`}>
+                                {marge != null ? `${marge.toFixed(0)} %` : "—"}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="mt-1 text-[9px] leading-snug text-slate-400">
+                            Heures pointées × taux figés + camion (inspection du jour) + matériel au coûtant du devis lié.
+                            {cumul.facture === 0 ? " Rien de facturé encore — le coût court déjà." : ""}
+                          </p>
                         </div>
                       );
                     })()}
