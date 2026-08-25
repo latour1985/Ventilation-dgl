@@ -27,7 +27,7 @@ import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetr
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
-import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis } from "@/lib/supabase/devis";
+import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis } from "@/lib/supabase/devis";
 import { listerClients, sauvegarderClient, sAbonnerClients } from "@/lib/supabase/clients";
 import { listerProjets, sauvegarderProjet, sAbonnerProjets } from "@/lib/supabase/projets";
 import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbonnerTachesAttente } from "@/lib/supabase/taches";
@@ -12228,9 +12228,12 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
 
   // Un seul enregistrement par DOSSIER dans la liste : la version active
   // (ou la plus récente à défaut). Sinon la liste triplerait.
+  // 📝 Les BROUILLONS vivent dans leur propre section — ils n'ont pas
+  // de numéro officiel et ne sont pas des dossiers.
+  const brouillonsDevis = devisListe.filter((d) => d.statut === "brouillon");
   const dossiersDevis = (() => {
     const parBase = {};
-    devisListe.forEach((d) => {
+    devisListe.filter((d) => d.statut !== "brouillon").forEach((d) => {
       const base = d.numeroBase || d.numero;
       (parBase[base] = parBase[base] || []).push(d);
     });
@@ -12325,6 +12328,67 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
     setCourrielModalOuvert(true);
   };
 
+  // ============================================================
+  // 📝 BROUILLON DE DEVIS (séance 3, plan du propriétaire) —
+  // commencer sur le téléphone chez le client, finir au bureau, SANS
+  // consommer de numéro officiel. Le brouillon n'a ni numéro de la
+  // séquence, ni courriel, ni miroir QuickBooks : c'est une feuille de
+  // travail. « Reprendre » recharge tout dans le formulaire ; créer le
+  // devis pour vrai prend alors un numéro et efface le brouillon.
+  // ============================================================
+  const [reprisBrouillonId, setReprisBrouillonId] = useState(null);
+  const [brouillonASupprimer, setBrouillonASupprimer] = useState(null); // deux temps
+  const garderBrouillon = async () => {
+    if (lignes.length === 0 || !clientId) return;
+    const brouillon = {
+      // Reprise d'un brouillon existant : on ÉCRASE le même — pas de
+      // multiplication de copies à chaque sauvegarde.
+      id: reprisBrouillonId || `BR-${Date.now()}`,
+      numero: reprisBrouillonId || `BR-${Date.now()}`,
+      numeroBase: reprisBrouillonId || `BR-${Date.now()}`,
+      version: 0,
+      versionActive: true,
+      clientId,
+      clientNom: client?.nom || "",
+      lignes,
+      totalCoutant: totaux.coutant,
+      totalVendant: totaux.vendant,
+      statut: "brouillon",
+      date: todayISO(),
+      estContrat,
+      frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
+    };
+    // id/numero/numeroBase doivent être IDENTIQUES entre eux — recalcule
+    // une seule fois si nouveau.
+    if (!reprisBrouillonId) {
+      const idB = `BR-${Date.now()}`;
+      brouillon.id = idB; brouillon.numero = idB; brouillon.numeroBase = idB;
+    }
+    setDevisListe((prev) => [brouillon, ...prev.filter((d) => d.id !== brouillon.id)]);
+    await persisterDevis?.(brouillon);
+    ajouterJournal(`📝 Brouillon de devis gardé pour ${client?.nom || "?"} (${totaux.vendant.toFixed(2)} $, ${lignes.length} ligne${lignes.length > 1 ? "s" : ""}) — aucun numéro consommé.`);
+    setLignes([]);
+    setEstContrat(false);
+    setFrequenceContrat(4);
+    setClientId("");
+    setReprisBrouillonId(null);
+  };
+  const reprendreBrouillon = (b) => {
+    setClientId(b.clientId || "");
+    setLignes(Array.isArray(b.lignes) ? b.lignes : []);
+    setEstContrat(!!b.estContrat);
+    setFrequenceContrat(b.frequenceFacturationAnnuelle || 4);
+    setReprisBrouillonId(b.id);
+    ajouterJournal(`📝 Brouillon repris dans le formulaire (${b.clientNom}) — crée le devis pour lui donner son numéro officiel.`);
+  };
+  const supprimerBrouillon = async (b) => {
+    setDevisListe((prev) => prev.filter((d) => d.id !== b.id));
+    if (reprisBrouillonId === b.id) setReprisBrouillonId(null);
+    setBrouillonASupprimer(null);
+    await supprimerDevis(b.id).catch(() => {});
+    ajouterJournal(`🗑️ Brouillon de devis supprimé (${b.clientNom}, ${Number(b.totalVendant || 0).toFixed(2)} $) — c'était une feuille de travail, aucun numéro n'y était attaché.`);
+  };
+
   const creerDevis = async (choixCourriels) => {
     // Choix MULTIPLE : le devis peut partir à plusieurs contacts du client.
     const destinataires = listeDestinataires(choixCourriels);
@@ -12381,6 +12445,16 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
       setDevisListe((prev) => prev.filter((d) => d.id !== nouveauDevis.id));
       ajouterJournal(`⛔ Devis ${numero} NON enregistré — retiré de la liste, AUCUN courriel envoyé (pas de lien mort). Vérifie la connexion et recrée le devis.`);
       return;
+    }
+    // 📝 Devis créé à partir d'un BROUILLON : le brouillon a fait son
+    // travail, il s'efface — seulement APRÈS l'enregistrement confirmé
+    // du vrai devis (jamais avant : sinon une panne effacerait les deux).
+    if (reprisBrouillonId) {
+      const idBrouillon = reprisBrouillonId;
+      setReprisBrouillonId(null);
+      setDevisListe((prev) => prev.filter((d) => d.id !== idBrouillon));
+      supprimerDevis(idBrouillon).catch(() => {});
+      ajouterJournal(`📝 Brouillon transformé en devis ${numero} — le brouillon est effacé.`);
     }
     if (destinataires.length === 0) {
       ajouterJournal(`Devis ${numero} créé pour ${client.nom} (${totaux.vendant.toFixed(2)} $) — aucun courriel disponible pour l'envoi`);
@@ -13046,6 +13120,20 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
             );
           })()}
 
+          {/* 📝 GARDER EN BROUILLON — commencer chez le client sur le
+              téléphone, finir au bureau, sans brûler de numéro. Pas
+              offert en révision de version (une révision a déjà son
+              dossier — le brouillon n'a pas de sens là). */}
+          {!editionVersion && (
+            <Button
+              variant="outline"
+              onClick={garderBrouillon}
+              disabled={lignes.length === 0 || !clientId}
+              className="w-full"
+            >
+              📝 Garder en brouillon {reprisBrouillonId ? "(mise à jour)" : "(sans numéro)"}
+            </Button>
+          )}
           <Button
             onClick={editionVersion ? enregistrerVersion : demarrerCreationDevis}
             disabled={lignes.length === 0}
@@ -13061,6 +13149,40 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
 
         {/* LISTE DES DEVIS */}
         <div className="space-y-2 md:col-span-2">
+          {/* 📝 BROUILLONS — feuilles de travail sans numéro. Reprendre
+              recharge le formulaire ; le vrai devis s'y crée ensuite. */}
+          {brouillonsDevis.length > 0 && (
+            <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-amber-700">
+                📝 Brouillons ({brouillonsDevis.length}) — sans numéro
+              </p>
+              <div className="mt-1.5 space-y-1.5">
+                {brouillonsDevis.map((b) => (
+                  <div key={b.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-white p-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-bold text-slate-800">{b.clientNom || "Client ?"}</p>
+                      <p className="text-[10px] tabular-nums text-slate-500">
+                        {(Number(b.totalVendant) || 0).toFixed(2)} $ · {(b.lignes || []).length} ligne{(b.lignes || []).length > 1 ? "s" : ""} · {b.date}
+                      </p>
+                    </div>
+                    <Button variant="outline" onClick={() => reprendreBrouillon(b)} className="min-h-[40px] px-3 py-1.5 text-[11px]">
+                      Reprendre
+                    </Button>
+                    {brouillonASupprimer === b.id ? (
+                      <button onClick={() => supprimerBrouillon(b)} className="rounded-lg bg-red-600 px-2.5 py-2 text-[10px] font-bold text-white">
+                        Confirmer ?
+                      </button>
+                    ) : (
+                      <button onClick={() => setBrouillonASupprimer(b.id)} className="px-1 text-[10px] font-semibold text-slate-400 underline underline-offset-2">
+                        Supprimer
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <h2 className="px-1 text-sm font-extrabold uppercase tracking-wide text-slate-500">Devis récents</h2>
           <p className="px-1 text-[11px] text-slate-400">
             Les 10 derniers. Tous les devis d'un client sont dans <span className="font-bold">son dossier</span> (onglet Clients), et la{" "}
@@ -15158,7 +15280,42 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setContactRole("");
     setContactTel("");
     setNouveauDevisId("");
+    setUnitesChoisies([]);
   }, [nouveauClientId]);
+  // 🔧 UNITÉS CONCERNÉES (2026-08-25, demande du propriétaire) : le
+  // carnet d'équipements du client — relevé visite après visite sur les
+  // bons signés — est offert à la création de la tâche. Cocher une
+  // unité dit au technicien LAQUELLE travailler quand il y en a trois
+  // sur le toit, et pré-remplit sa section « Unité vérifiée » (fini le
+  // numéro de série retapé de travers). Clés `modele|serie`.
+  const [unitesChoisies, setUnitesChoisies] = useState([]);
+  const unitesConnuesDuClient = (clientId) => {
+    const fiche = clients.find((x) => x.id === clientId);
+    if (!fiche) return [];
+    const unites = [];
+    (bons || [])
+      .filter((b) => b.client === fiche.nom)
+      .forEach((b) => {
+        const listeU =
+          Array.isArray(b.unites) && b.unites.length > 0
+            ? b.unites
+            : b.modeleUnite || b.serieUnite
+              ? [{ modele: b.modeleUnite, serie: b.serieUnite }]
+              : [];
+        listeU.forEach((ub) => {
+          if (!(ub.modele || ub.serie)) return;
+          const cle = `${ub.modele || ""}|${ub.serie || ""}`;
+          const existe = unites.find((u) => u.cle === cle);
+          if (existe) {
+            // La plus récente gagne l'emplacement manquant.
+            if (ub.emplacement && !existe.emplacement) existe.emplacement = ub.emplacement;
+          } else {
+            unites.push({ cle, modele: ub.modele || "", serie: ub.serie || "", emplacement: ub.emplacement || "" });
+          }
+        });
+      });
+    return unites;
+  };
   // TRANSITION QUICKBOOKS : numéro d'un devis EXISTANT (hors application)
   // à attacher à la tâche — il suit jusqu'au bon de travail et à la
   // facturation.
@@ -15536,6 +15693,16 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
       nouvelle.zoneAppel = zoneAppelChoix === "hors_zone" ? "hors_zone" : zoneAppelChoix || null;
     }
 
+    // 🔧 Unités cochées : elles voyagent avec la tâche (donnees) — la
+    // fiche du technicien les affiche et « Unité vérifiée » se
+    // pré-remplit avec le VRAI numéro de série au lieu d'une saisie.
+    if (unitesChoisies.length > 0) {
+      const connues = unitesConnuesDuClient(nouveauClientId);
+      nouvelle.unites = connues
+        .filter((u) => unitesChoisies.includes(u.cle))
+        .map((u) => ({ modele: u.modele, serie: u.serie, ...(u.emplacement ? { emplacement: u.emplacement } : {}) }));
+    }
+
     // Dépôt préalable : la tâche porte l'info et le dépôt est créé
     // (24 h pour payer). Une tâche avec dépôt en attente NE PEUT PAS
     // être placée dans l'horaire — même si date/technicien sont saisis.
@@ -15645,6 +15812,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setContactTel("");
     setNumeroDevisExistant("");
     setVerifDevisQbo(null);
+    setUnitesChoisies([]);
     setFiltreClientTache("");
     setFiltreAdresseTache("");
     setNouvelleAdresseApp("");
@@ -16700,6 +16868,49 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                         </p>
                       </div>
                     )}
+                  </div>
+                );
+              })()}
+
+              {/* 🔧 UNITÉS CONCERNÉES — le carnet d'équipements du client
+                  (relevé sur les bons passés). Cocher = le technicien
+                  saura LAQUELLE travailler, et sa section « Unité
+                  vérifiée » arrivera pré-remplie. Rien de coché = comme
+                  avant. Un client jamais visité n'a pas de carnet : la
+                  section ne s'affiche pas, le carnet se bâtit tout seul
+                  au fil des visites. */}
+              {!estTypeSansClient(nouveauType) && nouveauClientId && (() => {
+                const connues = unitesConnuesDuClient(nouveauClientId);
+                if (connues.length === 0) return null;
+                return (
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                      🔧 Unité(s) concernée(s) <span className="font-normal normal-case text-slate-400">— relevées lors de visites passées, optionnel</span>
+                    </label>
+                    <div className="max-h-36 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+                      {connues.map((u) => (
+                        <label key={u.cle} className="flex items-start gap-1.5 rounded px-1 py-0.5 text-[11px] text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={unitesChoisies.includes(u.cle)}
+                            onChange={() =>
+                              setUnitesChoisies((prev) =>
+                                prev.includes(u.cle) ? prev.filter((x) => x !== u.cle) : [...prev, u.cle]
+                              )
+                            }
+                            className="mt-0.5 shrink-0 accent-[#131B2E]"
+                          />
+                          <span className="min-w-0">
+                            {u.emplacement ? <span className="mr-1 rounded bg-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-600">📍 {u.emplacement}</span> : null}
+                            <span className="font-semibold">{u.modele || "Modèle non relevé"}</span>
+                            {u.serie ? <span className="text-slate-500"> · Nº {u.serie}</span> : null}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className="mt-0.5 text-[9px] text-slate-400">
+                      Le technicien verra l&apos;unité en évidence sur sa fiche de tâche, et sa section « Unité vérifiée » sera pré-remplie.
+                    </p>
                   </div>
                 );
               })()}
@@ -20360,10 +20571,13 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
           const montantCumule = (b.facturesEmises || []).reduce((s, f) => s + f.montant, 0);
           const devisAssocie = devisType || contrat ? devisListe.find((d) => d.numero === b.devisNumero) : null;
           const montantDevisTotal = devisAssocie ? devisAssocie.totalVendant : b.montant;
+          // 📱 flex-wrap (séance 3 mobile) : sur téléphone, la colonne
+          // des montants/boutons passe SOUS le contenu au lieu de
+          // l'écraser — même carte, deux étages.
           return (
-            <div key={b.id} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5">
+            <div key={b.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-slate-200 bg-white p-3.5">
               <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${couleurPastille}`} />
-              <div className="flex-1">
+              <div className="min-w-[230px] flex-1">
                 <p className="text-sm font-bold text-slate-900">{b.projet}</p>
                 <p className="text-xs text-slate-500">{b.client} · {b.date}</p>
                 {/* ÉQUIPE — visible seulement quand ils sont plusieurs.
@@ -20574,7 +20788,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                   </div>
                 )}
               </div>
-              <div className="text-right">
+              <div className="ml-auto text-right">
                 <p className="text-sm font-bold tabular-nums text-slate-900">{b.montant.toFixed(2)} $</p>
                 <div className="mt-0.5 space-y-0 text-[10px] text-slate-400">
                   <p className="tabular-nums">TPS ({tauxAffiche(configEnt.tauxTps)}%) : {calculerTaxes(b.montant, configEnt).tps.toFixed(2)} $</p>
@@ -20628,11 +20842,11 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     <CheckCircle2 size={12} /> Facturé
                   </span>
                 ) : b.prixNonListe ? (
-                  <Button onClick={() => setBonAReviserId(b.id)} className="mt-1 min-h-0 gap-1 px-2 py-1 text-[10px]">
+                  <Button onClick={() => setBonAReviserId(b.id)} className="mt-1 min-h-[40px] gap-1 px-3 py-1.5 text-[11px] md:min-h-0 md:px-2 md:py-1 md:text-[10px]">
                     <AlertCircle size={11} /> Réviser
                   </Button>
                 ) : enAttenteValidation ? (
-                  <Button onClick={() => setBonFacturationId(b.id)} className="mt-1 min-h-0 gap-1 px-2 py-1 text-[10px]">
+                  <Button onClick={() => setBonFacturationId(b.id)} className="mt-1 min-h-[40px] gap-1 px-3 py-1.5 text-[11px] md:min-h-0 md:px-2 md:py-1 md:text-[10px]">
                     <Check size={11} /> {montantCumule > 0 ? "Facturer le solde" : "Facturer"}
                   </Button>
                 ) : (
@@ -20640,7 +20854,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     <span className="mb-1 flex items-center justify-end gap-1 text-[10px] font-bold text-amber-600">
                       <Cloud size={12} /> En attente de synchro QB
                     </span>
-                    <Button onClick={() => setBonEnvoiCourrielId(b.id)} className="min-h-0 gap-1 px-2 py-1 text-[10px]">
+                    <Button onClick={() => setBonEnvoiCourrielId(b.id)} className="min-h-[40px] gap-1 px-3 py-1.5 text-[11px] md:min-h-0 md:px-2 md:py-1 md:text-[10px]">
                       <Send size={11} /> Envoyer à QB
                     </Button>
                   </>
@@ -22535,6 +22749,10 @@ export default function App() {
             // ne bloque JAMAIS la sauvegarde du devis lui-même — le
             // miroir part en arrière-plan et n'affecte pas le retour.
             if (!d?.clientNom || !Array.isArray(d.lignes) || d.lignes.length === 0) return true;
+            // 📝 Un BROUILLON ne va JAMAIS dans QuickBooks : pas de
+            // numéro officiel, pas d'estimate — c'est une feuille de
+            // travail. Le miroir se fera à la vraie création.
+            if (d.statut === "brouillon") return true;
             const ficheClient = clients.find((c) => (c.nom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase());
             creerEstimateQbo({
               clientId: ficheClient?.id || null,

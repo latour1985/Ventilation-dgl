@@ -4338,6 +4338,21 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                     {tache.contactSurPlace.role ? ` (${tache.contactSurPlace.role})` : ""}
                   </p>
                 )}
+                {/* 🔧 UNITÉ(S) CONCERNÉE(S) — cochées par le bureau depuis
+                    le carnet du client (2026-08-25) : trois unités sur le
+                    toit, laquelle est la tienne ? Celle-ci. Le Nº de
+                    série permet de vérifier sur la plaque. */}
+                {Array.isArray(tache.unites) && tache.unites.length > 0 && (
+                  <div className="mt-1.5 space-y-1">
+                    {tache.unites.map((u, i) => (
+                      <p key={i} className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-[12px] font-semibold leading-snug text-sky-900">
+                        🔧 {u.emplacement ? <span className="font-extrabold">{u.emplacement} — </span> : null}
+                        {u.modele || "Unité"}
+                        {u.serie ? <span className="block text-[11px] font-normal text-sky-700">Nº série : {u.serie}</span> : null}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
             <button
