@@ -17,6 +17,7 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { televerserPhotoTravail, televerserVideoTravail, VIDEO_MAX_OCTETS, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import { coffrerPhoto, lireBlobPhoto, listerPhotosCoffre, decoffrerPhoto } from "@/lib/horsLigneTechnicien";
+import { SqueletteTechnicien } from "@/components/EcranSquelette";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail, bonExistePourTache } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
@@ -6437,8 +6438,8 @@ function AppTechnicien() {
 
   if (!authVerifie) {
     return (
-      <div className="flex min-h-screen w-full flex-col sm:mx-auto items-center justify-center sm:h-[844px] sm:min-h-0 sm:max-w-sm sm:overflow-hidden sm:rounded-[2.5rem] sm:border-8 sm:border-slate-900 bg-[#131B2E] text-sm text-slate-400 shadow-2xl">
-        Chargement…
+      <div className="min-h-screen w-full sm:mx-auto sm:h-[844px] sm:min-h-0 sm:max-w-sm sm:overflow-hidden sm:rounded-[2.5rem] sm:border-8 sm:border-slate-900 shadow-2xl">
+        <SqueletteTechnicien />
       </div>
     );
   }
@@ -6451,8 +6452,8 @@ function AppTechnicien() {
   }
   if (!accesCharge) {
     return (
-      <div className="flex min-h-screen w-full flex-col sm:mx-auto items-center justify-center sm:h-[844px] sm:min-h-0 sm:max-w-sm sm:overflow-hidden sm:rounded-[2.5rem] sm:border-8 sm:border-slate-900 bg-[#131B2E] text-sm text-slate-400 shadow-2xl">
-        Chargement…
+      <div className="min-h-screen w-full sm:mx-auto sm:h-[844px] sm:min-h-0 sm:max-w-sm sm:overflow-hidden sm:rounded-[2.5rem] sm:border-8 sm:border-slate-900 shadow-2xl">
+        <SqueletteTechnicien />
       </div>
     );
   }

@@ -15,6 +15,7 @@ import Logo from "@/components/Logo";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
 import { permissionsEffectives, permissionsPour, ORDRE_SECTIONS, LIBELLES_SECTIONS, aAutorisation, AUTORISATIONS, LIBELLES_AUTORISATIONS, AIDES_AUTORISATIONS, ROLES_AVEC_AUTORISATIONS } from "@/lib/permissions";
+import { SqueletteAdmin } from "@/components/EcranSquelette";
 import GestionAcces from "@/components/GestionAcces";
 import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
 import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
@@ -23242,13 +23243,13 @@ export default function App() {
   }, [session, accesCharge, accesPerso]);
 
   if (!authVerifie) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">Chargement…</div>;
+    return <SqueletteAdmin />;
   }
   if (!session) {
     return <ConnexionAdmin />;
   }
   if (!accesCharge) {
-    return <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">Chargement…</div>;
+    return <SqueletteAdmin />;
   }
 
   // --- Rôle + permissions effectifs (accès personnalisés > défauts du rôle) ---
