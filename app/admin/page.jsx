@@ -671,7 +671,7 @@ function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLib
   // référence » — le cas propre, correspondance exacte.
   if (transaction.poNumber) {
     const projetParBc = projets.find((p) => (p.bonsCommande || []).some((bc) => bc.numeroBC === transaction.poNumber));
-    if (projetParBc) return { type: "projet", id: projetParBc.id };
+    if (projetParBc) return { type: "projet", id: projetParBc.id, bc: transaction.poNumber };
   }
   // Règle 2b : LE NUMÉRO EST NOYÉ DANS DU TEXTE (2026-08-24).
   // ------------------------------------------------------------
@@ -685,7 +685,10 @@ function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLib
     const projetParTexte = projets.find((p) =>
       (p.bonsCommande || []).some((bc) => texteContientBc(texte, bc.numeroBC))
     );
-    if (projetParTexte) return { type: "projet", id: projetParTexte.id };
+    if (projetParTexte) {
+      const bcTrouve = (projetParTexte.bonsCommande || []).find((bc) => texteContientBc(texte, bc.numeroBC));
+      return { type: "projet", id: projetParTexte.id, bc: bcTrouve?.numeroBC || null };
+    }
   }
 
   // ---- Règle 3 : LE BC D'UNE TÂCHE (2026-08-26) ----
@@ -697,12 +700,12 @@ function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLib
     const parBc = achatsAvecTache.find(
       (a) => String(a.numeroBc).trim().toUpperCase() === String(transaction.poNumber).trim().toUpperCase()
     );
-    if (parBc) return { type: "tache", id: parBc.tacheId };
+    if (parBc) return { type: "tache", id: parBc.tacheId, bc: parBc.numeroBc };
   }
   if (transaction.referenceTexte) {
     const texte = String(transaction.referenceTexte).toUpperCase();
     const parTexte = achatsAvecTache.find((a) => texteContientBc(texte, a.numeroBc));
-    if (parTexte) return { type: "tache", id: parTexte.tacheId };
+    if (parTexte) return { type: "tache", id: parTexte.tacheId, bc: parTexte.numeroBc };
   }
 
   // ---- Règle 3b : LE BC D'UN CLIENT (2026-08-26, snippet 79) ----
@@ -714,12 +717,12 @@ function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLib
     const parBcClient = achatsAvecClient.find(
       (a) => String(a.numeroBc).trim().toUpperCase() === String(transaction.poNumber).trim().toUpperCase()
     );
-    if (parBcClient) return { type: "client", id: parBcClient.clientId };
+    if (parBcClient) return { type: "client", id: parBcClient.clientId, bc: parBcClient.numeroBc };
   }
   if (transaction.referenceTexte) {
     const texte = String(transaction.referenceTexte).toUpperCase();
     const parTexteClient = achatsAvecClient.find((a) => texteContientBc(texte, a.numeroBc));
-    if (parTexteClient) return { type: "client", id: parTexteClient.clientId };
+    if (parTexteClient) return { type: "client", id: parTexteClient.clientId, bc: parTexteClient.numeroBc };
   }
 
   // ---- Règle 4 : LE CLIENT, à défaut de mieux (2026-08-26) ----
@@ -874,6 +877,10 @@ function calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs
   depensesQb.forEach((d) => {
     const num = numeroBcNormalise(d.poNumber);
     if (num) depensesParNumeroBc.set(num, d);
+    // Le numéro était NOYÉ dans le mémo (factures fournisseurs) : la
+    // règle d'attribution l'a retrouvé — même appariement.
+    const numMemo = numeroBcNormalise(d.cible?.bc);
+    if (numMemo) depensesParNumeroBc.set(numMemo, d);
   });
   const bcApparies = new Set();
   const coutMateriauxBC = (projet.bonsCommande || []).reduce((s, bc) => {
@@ -1598,7 +1605,7 @@ function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = [], pro
   );
 }
 
-function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [] }) {
+function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
@@ -1715,6 +1722,25 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
   const refListePieces = useRef(null);
   const refListeBc = useRef(null);
   const [bcEnregistrement, setBcEnregistrement] = useState(false);
+  // 🧾 La dépense QuickBooks appariée à un BC (par « No de référence »
+  // exact, ou retrouvée dans le mémo — cible.bc). Sert au badge d'écart
+  // de prix et au bouton « Adopter le montant QuickBooks ».
+  const depenseQbPourBc = (numeroBc) => {
+    const n = String(numeroBc || "").trim().toUpperCase();
+    if (!n) return null;
+    return (
+      (transactionsQb || []).find(
+        (t) => t.type === "EXPENSE" && (String(t.cible?.bc || "").trim().toUpperCase() === n || String(t.poNumber || "").trim().toUpperCase() === n)
+      ) || null
+    );
+  };
+  const ecartQbPourBc = (a2) => {
+    const dep = depenseQbPourBc(a2.numeroBc);
+    if (!dep) return null;
+    const reel = Number(dep.amountHT) || 0;
+    const ecart = reel - (Number(a2.montantHT) || 0);
+    return Math.abs(ecart) > 1 ? { reel, ecart } : null;
+  };
   const ouvrirBc = (a2) => {
     setBcOuvert(a2);
     setBcEdit({
@@ -2208,6 +2234,9 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                     ) : a2.clientId ? (
                       <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">👤 {a2.clientNom || "client"}</span>
                     ) : null}
+                    {ecartQbPourBc(a2) && (
+                      <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700" title="Le montant réel de QuickBooks diffère du montant saisi — ouvre la fiche pour valider">⚠️ écart QB {ecartQbPourBc(a2).ecart > 0 ? "+" : ""}{ecartQbPourBc(a2).ecart.toFixed(2)} $</span>
+                    )}
                   </span>
                   <span className="shrink-0 tabular-nums">{a2.montantHT.toFixed(2)} $</span>
                 </button>
@@ -2260,6 +2289,35 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                   className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm tabular-nums"
                 />
               </div>
+              {(() => {
+                const dep = depenseQbPourBc(bcOuvert.numeroBc);
+                if (!dep) return null;
+                const reel = Number(dep.amountHT) || 0;
+                const ecart = reel - (Number(bcEdit.montantHT) || 0);
+                if (Math.abs(ecart) <= 1)
+                  return (
+                    <p className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-700">
+                      ✓ Facture reçue dans QuickBooks : {reel.toFixed(2)} $ HT ({dep.status === "PAID" ? "payée" : "à payer"}) — conforme au BC.
+                    </p>
+                  );
+                return (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5">
+                    <p className="text-[11px] font-bold leading-snug text-amber-800">
+                      ⚠️ Écart de prix — BC : {(Number(bcEdit.montantHT) || 0).toFixed(2)} $ · QuickBooks : {reel.toFixed(2)} $ ({ecart > 0 ? "+" : ""}{ecart.toFixed(2)} $). Le prix est-il bon ?
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setBcEdit((f) => ({ ...f, montantHT: reel }))}
+                      className="mt-1.5 w-full rounded-lg border border-amber-400 bg-white py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100"
+                    >
+                      ✓ Adopter le montant QuickBooks ({reel.toFixed(2)} $)
+                    </button>
+                    <p className="mt-1 text-[9px] leading-snug text-amber-700">
+                      Le prix n'est PAS bon ? Laisse tel quel — le badge reste allumé comme aide-mémoire pendant que tu règles ça avec le fournisseur. (Le coût compté est de toute façon le montant réel de QuickBooks.)
+                    </p>
+                  </div>
+                );
+              })()}
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Rattachement (où va le coût ?)</label>
                 {/* 🔎 Même sélecteur avec recherche qu'à la création. La
@@ -5107,6 +5165,21 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
   // n'apparaissait donc dans AUCUN coût ici, quoi qu'on fasse.
   // Indexées par tâche et par client pour être lues sans re-balayer
   // toute la liste à chaque ligne du tableau.
+  // 🧾 NUMÉROS DE BC dont la FACTURE RÉELLE est arrivée dans QuickBooks
+  // (par « No de référence » exact, ou noyée dans le mémo — cible.bc).
+  // LA RÈGLE, la même que pour les projets : le montant QuickBooks fait
+  // foi, l'estimation du BC ne compte plus. Sans cette garde, le Midea
+  // à 4500 $ comptait 9000 $ dans le coût de la job dès que la facture
+  // Descair entrait dans QuickBooks (double compte, corrigé 2026-08-26).
+  const bcsFacturesQb = useMemo(() => {
+    const set = new Set();
+    (transactionsQb || []).forEach((t) => {
+      if (t.type !== "EXPENSE" || !t.cible) return;
+      const num = t.cible.bc || t.poNumber;
+      if (num) set.add(String(num).trim().toUpperCase());
+    });
+    return set;
+  }, [transactionsQb]);
   const depensesQbParTache = useMemo(() => {
     const m = new Map();
     (transactionsQb || []).forEach((t) => {
@@ -5131,14 +5204,9 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
     // COMPTE : si la dépense QuickBooks portant ce numéro de BC est déjà
     // rattachée (au client ou ailleurs), c'est ELLE qui fait foi — le
     // montant réel de la facture plutôt que l'estimation du BC.
-    const bcsDejaComptes = new Set(
-      (transactionsQb || [])
-        .filter((t) => t.type === "EXPENSE" && t.cible && t.poNumber)
-        .map((t) => String(t.poNumber).trim().toUpperCase())
-    );
     (achatsLibres || []).forEach((a) => {
       if (a.tacheId || !a.clientId) return;
-      if (a.numeroBc && bcsDejaComptes.has(String(a.numeroBc).trim().toUpperCase())) return;
+      if (a.numeroBc && bcsFacturesQb.has(String(a.numeroBc).trim().toUpperCase())) return;
       const nom = a.clientNom || (clients || []).find((c) => c.id === a.clientId)?.nom || null;
       if (!nom) return;
       const montant = a.montantAttribue != null ? a.montantAttribue : a.montantHT;
@@ -5299,6 +5367,9 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
         const coutStock = (b.materielStock || []).reduce((s, it) => s + (Number(it.coutant) || 0) * (Number(it.quantite) || 1), 0);
         const coutAchats = (achatsLibres || [])
           .filter((a) => a.tacheId && a.tacheId === b.tacheId)
+          // 🛡️ Facture réelle arrivée dans QuickBooks → SON montant fait
+          // foi (compté via coutQb) — l'estimation du BC s'efface.
+          .filter((a) => !(a.numeroBc && bcsFacturesQb.has(String(a.numeroBc).trim().toUpperCase())))
           .reduce((s, a) => s + (a.montantAttribue != null ? a.montantAttribue : a.montantHT), 0);
         // 🧾 Dépense QuickBooks rattachée À CETTE TÂCHE (2026-08-26).
         const coutQb = depensesQbParTache.get(b.tacheId) || 0;
@@ -9576,8 +9647,8 @@ function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, trans
   // de QuickBooks fait alors foi, jamais additionné au montant saisi).
   const depensesParBc = new Map(
     (transactionsQb || [])
-      .filter((t) => t.projectId === projet.id && t.type === "EXPENSE" && t.poNumber)
-      .map((t) => [String(t.poNumber).trim().toUpperCase(), t])
+      .filter((t) => t.projectId === projet.id && t.type === "EXPENSE" && (t.poNumber || t.cible?.bc))
+      .map((t) => [String(t.cible?.bc || t.poNumber).trim().toUpperCase(), t])
   );
   const [bcFournisseurId, setBcFournisseurId] = useState("");
   const [bcMontant, setBcMontant] = useState("");
@@ -9666,12 +9737,16 @@ function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, trans
                   <p className="mt-0.5 text-[10px] font-semibold text-blue-600">📧 Envoyé à {bc.courrielsEnvoi.join(", ")}</p>
                 )}
                 {depenseQb ? (
-                  <p className="mt-0.5 text-[10px] font-bold text-emerald-600">
-                    ✓ Montant réel de QuickBooks ({depenseQb.status === "PAID" ? "payée" : "à payer"})
-                    {Number(bc.montantHT) > 0 && Math.abs(Number(bc.montantHT) - montantAffiche) > 0.01
-                      ? ` — estimation saisie : ${Number(bc.montantHT).toFixed(2)} $`
-                      : ""}
-                  </p>
+                  <>
+                    <p className="mt-0.5 text-[10px] font-bold text-emerald-600">
+                      ✓ Montant réel de QuickBooks ({depenseQb.status === "PAID" ? "payée" : "à payer"})
+                    </p>
+                    {Number(bc.montantHT) > 0 && Math.abs(Number(bc.montantHT) - montantAffiche) > 1 && (
+                      <p className="mt-0.5 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                        ⚠️ Écart de prix — BC : {Number(bc.montantHT).toFixed(2)} $ · QuickBooks : {montantAffiche.toFixed(2)} $ ({montantAffiche > Number(bc.montantHT) ? "+" : ""}{(montantAffiche - Number(bc.montantHT)).toFixed(2)} $) — le prix est-il bon ?
+                      </p>
+                    )}
+                  </>
                 ) : Number(bc.montantHT) === 0 ? (
                   <p className="mt-0.5 text-[10px] font-bold text-amber-600">⏳ En attente de la facture QuickBooks (BC {bc.numeroBC})</p>
                 ) : (
@@ -22939,6 +23014,22 @@ export default function App() {
     const manuelles = attributionsQbRef.current || {};
     const enrichies = brutes.map((t) => enrichirTransactionQb(t, manuelles, projets, clients, achatsLibres));
     setTransactionsQb(enrichies);
+    // ⚠️ Écarts de prix BC ↔ facture réelle : UNE ligne agrégée par
+    // synchro manuelle (le sondage d'arrière-plan, lui, reste muet —
+    // les badges s'allument d'eux-mêmes dans Pièces en commande).
+    const bcsAvecDepense = new Map();
+    enrichies.forEach((t) => {
+      if (t.type !== "EXPENSE") return;
+      const num = String(t.cible?.bc || t.poNumber || "").trim().toUpperCase();
+      if (num) bcsAvecDepense.set(num, Number(t.amountHT) || 0);
+    });
+    const nbEcarts = (achatsLibres || []).filter((a) => {
+      const reel = a.numeroBc ? bcsAvecDepense.get(String(a.numeroBc).trim().toUpperCase()) : undefined;
+      return reel !== undefined && Math.abs(reel - (Number(a.montantHT) || 0)) > 1;
+    }).length;
+    if (nbEcarts > 0) {
+      ajouterJournal(`⚠️ ${nbEcarts} écart${nbEcarts > 1 ? "s" : ""} de prix BC ↔ facture QuickBooks — ouvre « Pièces en commande » (badges orange) pour valider.`);
+    }
     const nbAssignees = enrichies.filter((t) => t.cible).length;
     const nbNonAssignees = enrichies.length - nbAssignees;
     ajouterJournal(
@@ -23898,6 +23989,7 @@ export default function App() {
           commandesCamion={commandesCamion}
           onCommandePassee={commandeCamionPassee}
           achatsLibres={achatsLibres}
+          transactionsQb={transactionsQb}
           onCreerBcLibre={creerBcLibre}
           onMajBcLibre={majBcLibre}
           onSupprimerBcLibre={supprimerBcLibre}
