@@ -16,6 +16,7 @@ import { listerAnnuaireEmployes } from "@/lib/supabase/repertoireEmployes";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { televerserPhotoTravail, televerserVideoTravail, VIDEO_MAX_OCTETS, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
+import { coffrerPhoto, lireBlobPhoto, listerPhotosCoffre, decoffrerPhoto } from "@/lib/horsLigneTechnicien";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail, bonExistePourTache } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
@@ -327,8 +328,10 @@ function tachesParDefaut() {
 // garder le stockage léger ; seul le fait qu'elle ait été signée l'est.
 function allegerPhotosPourStockage(photos) {
   // L'URL DISTANTE (stockage Supabase) survit au rechargement — c'est le
-  // lien officiel de la photo au dossier. Les blobs/URLs locaux, non.
-  return (photos || []).map((p) => ({ tailleOriginale: p.tailleOriginale, tailleCompressee: p.tailleCompressee, urlDistante: p.urlDistante || null }));
+  // lien officiel de la photo au dossier. Les blobs/URLs locaux, non —
+  // mais leur ID, oui : il permet de retrouver le blob au COFFRE
+  // hors-ligne (IndexedDB) et de restaurer l'aperçu (2026-08-27).
+  return (photos || []).map((p) => ({ id: p.id || null, tailleOriginale: p.tailleOriginale, tailleCompressee: p.tailleCompressee, urlDistante: p.urlDistante || null, enAttente: !p.urlDistante }));
 }
 
 // Clé de stockage PAR COMPTE : chaque technicien connecté a son propre
@@ -2765,7 +2768,7 @@ function ModalCaptureCamera({ onCapture, onFermer }) {
   );
 }
 
-function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lectureSeule }) {
+function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lectureSeule, coffreCle }) {
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState("");
   const [cameraOuverte, setCameraOuverte] = useState(false);
@@ -2790,32 +2793,63 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photos.map((x) => x.urlDistante || "").join("|")]);
 
+  // 📦 RESTAURATION DES APERÇUS (2026-08-27) : après un rechargement de
+  // page hors-ligne, les photos coffrées (IndexedDB) n'ont plus d'URL
+  // locale — on la refabrique depuis le blob du coffre. Sans ça, le
+  // technicien voyait des vignettes vides et reprenait ses photos.
+  useEffect(() => {
+    const orphelines = (photos || []).filter((p) => p.id && !p.url && !p.urlDistante);
+    if (orphelines.length === 0) return;
+    let annule = false;
+    (async () => {
+      for (const ph of orphelines) {
+        const blob = await lireBlobPhoto(ph.id);
+        if (annule || !blob) continue;
+        const url = URL.createObjectURL(blob);
+        setPhotos((prev) => prev.map((p) => (p.id === ph.id ? { ...p, url, blob } : p)));
+      }
+    })();
+    return () => { annule = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [photos.filter((p) => p.id && !p.url && !p.urlDistante).length]);
+
   const ajouterPhoto = (nouvellePhoto) => {
+    // Identifiant STABLE : le fil qui relie l'aperçu local, le coffre
+    // hors-ligne et le rejeu au retour du réseau (2026-08-27).
+    const id = nouvellePhoto.id || `ph-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const photoAvecId = { ...nouvellePhoto, id, enAttente: true };
     // Forme FONCTIONNELLE (2026-08-19) : l'ajout en LOT (sélection
     // multiple de la galerie) appelle cette fonction plusieurs fois dans
     // le même instant — avec l'ancienne forme, chaque ajout repartait de
     // la liste périmée et seule la dernière photo survivait.
     setPhotos((prev) => {
-      const nouvellesPhotos = [...prev, nouvellePhoto];
+      const nouvellesPhotos = [...prev, photoAvecId];
       if (onPhotosChange) setTimeout(() => onPhotosChange(nouvellesPhotos), 0);
       return nouvellesPhotos;
     });
+    // 🔒 AU COFFRE D'ABORD (2026-08-27) : la photo est en sécurité dans
+    // IndexedDB AVANT même de tenter le réseau — un sous-sol sans
+    // signal ne perd rien, même si la page est rechargée.
+    if (nouvellePhoto.blob && coffreCle) {
+      coffrerPhoto({ id, blob: nouvellePhoto.blob, origine: nouvellePhoto.origine || "camera", coffreCle });
+    }
     // TÉLÉVERSEMENT EN ARRIÈRE-PLAN vers le stockage Supabase : l'URL
     // distante obtenue voyagera avec le travail complété (bureau, bon de
-    // travail client, PDF). Hors-ligne : la photo reste locale — elle
-    // apparaîtra sur le téléphone mais pas au dossier.
+    // travail client, PDF). Hors-ligne : la photo attend au coffre — le
+    // REJEU la téléversera au retour du réseau.
     if (nouvellePhoto.blob) {
       televerserPhotoTravail(nouvellePhoto.blob, nouvellePhoto.origine || "camera")
         .then((urlDistante) => {
+          decoffrerPhoto(id);
           setPhotos((prev) => {
-            const maj = prev.map((p) => (p.url === nouvellePhoto.url ? { ...p, urlDistante } : p));
+            const maj = prev.map((p) => (p.id === id ? { ...p, urlDistante, enAttente: false } : p));
             if (onPhotosChange) setTimeout(() => onPhotosChange(maj), 0);
             return maj;
           });
         })
         .catch(() => {
-          // hors-ligne ou bucket absent (snippet 15 non exécuté) — la
-          // photo reste utilisable localement, sans lien au dossier
+          // hors-ligne ou bucket absent — la photo reste au coffre ; le
+          // rejeu du retour de réseau s'en chargera
         });
     }
   };
@@ -2827,6 +2861,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
   // liste affichée.
   const retirerPhoto = (index) => {
     const photo = photos[index];
+    if (photo?.id) decoffrerPhoto(photo.id);
     if (photo?.url) URL.revokeObjectURL(photo.url);
     const nouvellesPhotos = photos.filter((_, i) => i !== index);
     setPhotos(nouvellesPhotos);
@@ -3487,7 +3522,7 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
 // ============================================================
 // FORMULAIRE BON DE TRAVAIL
 // ============================================================
-function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session }) {
+function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile }) {
   // ============================================================
   // TRAVAIL PARTAGÉ À PLUSIEURS TECHNICIENS
   // ------------------------------------------------------------
@@ -4049,8 +4084,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       // Je suis en réalité le dernier : le code ci-dessous crée le bon,
       // exactement comme si l'app l'avait su du premier coup.
     }
-    enregistrerBonTravail(
-      {
+    const chargeBon = {
         tacheId: tache.tacheOrigineId || tache.id,
         titre: tache.titre || tache.clientNom || "Travail complété",
         clientNom: tache.clientNom || null,
@@ -4083,9 +4117,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         // sans le savoir, et le retour se planifie sur du concret.
         travauxNonTermines: !!tache.travauxNonTermines,
         resteAFaire: tache.resteAFaire || null,
-      },
-      session
-    ).then(async (bonRowId) => {
+      };
+    enregistrerBonTravail(chargeBon, session).then(async (bonRowId) => {
       // 🤝 FERMETURE D'ÉQUIPE : le bon est créé — on avertit maintenant
       // les coéquipiers qui n'avaient pas fermé. Leur téléphone leur
       // demandera de confirmer (ou d'ajuster) leurs heures. Si l'appel
@@ -4122,8 +4155,21 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         // le bureau garde son bouton « Bon au client »
       }
     }).catch(() => {
-      // hors-ligne ou table absente — le bon reste complété localement,
-      // le bureau ne le voit pas encore (le technicien peut réessayer).
+      // 📦 HORS-LIGNE (2026-08-27) : le bon part en FILE DE REJEU — il
+      // sera recréé tout seul au retour du réseau. Les photos seront
+      // recomposées AU MOMENT du rejeu (le coffre les aura téléversées
+      // entre-temps) ; garde anti-doublon par bonExistePourTache.
+      onMettreEnFile?.(
+        {
+          id: `sync-bon-${Date.now()}`,
+          type: "bon",
+          tacheLocaleId: tache.id,
+          tacheId: tache.tacheOrigineId || tache.id,
+          charge: { ...chargeBon, photosAvant: undefined, photosApres: undefined },
+          horodatage: Date.now(),
+        },
+        `📦 Bon « ${tache.titre || tache.clientNom || "tâche"} » en file — il partira au bureau dès le retour du réseau.`
+      );
     });
     // Simule le temps d'envoi réseau — en prod, ce délai correspond à
     // l'appel réel vers Supabase / l'API de facturation.
@@ -4775,6 +4821,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             setPhotos={setPhotosAvant}
             onPhotosChange={(nouvelles) => commettrePhotos("photosAvant", nouvelles)}
             lectureSeule={lectureSeule}
+            coffreCle={`${tache.id}|avant`}
           />
           <ZonePhoto
             titre="Photos après"
@@ -4783,6 +4830,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             onPhotosChange={(nouvelles) => commettrePhotos("photosApres", nouvelles)}
             obligatoire
             lectureSeule={lectureSeule}
+            coffreCle={`${tache.id}|apres`}
           />
         </div>
 
@@ -5567,6 +5615,67 @@ function AppTechnicien() {
     sauvegarderFileAttente(fileAttente);
   }, [fileAttente]);
 
+  // Miroir à jour des tâches — lu par le rejeu du bon (recomposition
+  // des photos) sans relancer la synchronisation à chaque rendu.
+  const tachesRef = useRef(taches);
+  tachesRef.current = taches;
+
+  // ============================================================
+  // 📦 REJEU DU COFFRE PHOTOS (2026-08-27)
+  // ------------------------------------------------------------
+  // Au retour du réseau (et au démarrage) : chaque photo coffrée en
+  // IndexedDB est téléversée, décoffrée, et la tâche visée reçoit son
+  // URL distante — la photo prise dans le sous-sol sans signal rejoint
+  // le dossier toute seule. Traitement séquentiel, verrou anti-double.
+  // ============================================================
+  const rejeuPhotosRef = useRef(false);
+  useEffect(() => {
+    if (!enLigne || !session || rejeuPhotosRef.current) return;
+    let annule = false;
+    rejeuPhotosRef.current = true;
+    (async () => {
+      try {
+        const enAttente = await listerPhotosCoffre();
+        for (const ph of enAttente) {
+          if (annule) return;
+          if (!ph.blob) {
+            await decoffrerPhoto(ph.id);
+            continue;
+          }
+          try {
+            const urlDistante = await televerserPhotoTravail(ph.blob, ph.origine || "camera");
+            await decoffrerPhoto(ph.id);
+            const [cibleTache, type] = String(ph.coffreCle || "").split("|");
+            const champ = type === "avant" ? "photosAvant" : type === "apres" ? "photosApres" : null;
+            if (cibleTache && champ) {
+              setTaches((prev) =>
+                prev.map((tc) => {
+                  if (tc.id !== cibleTache) return tc;
+                  const liste = tc[champ] || [];
+                  const connue = liste.some((x) => x.id === ph.id);
+                  const nouvelle = connue
+                    ? liste.map((x) => (x.id === ph.id ? { ...x, urlDistante, enAttente: false } : x))
+                    : [...liste, { id: ph.id, urlDistante, enAttente: false }];
+                  return { ...tc, [champ]: nouvelle };
+                })
+              );
+            }
+          } catch {
+            // le réseau est retombé — la photo reste au coffre pour la
+            // prochaine tentative
+            return;
+          }
+        }
+      } finally {
+        rejeuPhotosRef.current = false;
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enLigne, session]);
+
   // Synchronisation de la file — traite UNE action à la fois, puis se
   // redéclenche automatiquement (la dépendance `fileAttente` change
   // après chaque retrait). Réactive à la fois au retour de connexion
@@ -5602,17 +5711,35 @@ function AppTechnicien() {
     setSyncFileEnCours(true);
     (async () => {
       try {
-        // Simule l'appel réseau réel (en prod : mettreAJourBonDeTravail
-        // ou l'action Supabase correspondante — voir INTEGRATION.md).
-        // Enveloppé dans un try/catch pour que les VRAIS échecs réseau
-        // (pas seulement "hors-ligne" détecté par le navigateur) soient
-        // gérés proprement : l'action reste en file, rien n'est perdu.
-        await new Promise((resolve, reject) => {
-          setTimeout(() => {
-            if (!navigator.onLine) reject(new Error("hors-ligne"));
-            else resolve();
-          }, 400);
-        });
+        // 📦 VRAI REJEU (2026-08-27) — la file transportait déjà les
+        // actions, mais son traitement était un délai SIMULÉ : rien
+        // n'était réellement renvoyé au serveur. Chaque type d'action a
+        // maintenant son rejeu, avec sa garde anti-doublon :
+        //   • « travail » — les heures d'une carte fermée hors-ligne ;
+        //   • « bon »     — le bon de travail, photos recomposées au
+        //     moment du rejeu (le coffre les a téléversées entre-temps) ;
+        //   • autres (majTache locales) — rien à envoyer, on retire.
+        const action = fileAttente[0];
+        if (action?.type === "travail" && action.charge) {
+          const deja = await travailDejaEnregistre(action.charge.tacheId, session?.user?.email);
+          if (!deja) await enregistrerTravailEffectue(action.charge, session);
+        } else if (action?.type === "bon" && action.charge) {
+          const existe = await bonExistePourTache(action.tacheId);
+          if (!existe) {
+            const tacheLocale = tachesRef.current.find((x) => x.id === action.tacheLocaleId);
+            await enregistrerBonTravail(
+              {
+                ...action.charge,
+                photosAvant: (tacheLocale?.photosAvant || []).map((ph) => ph.urlDistante).filter(Boolean),
+                photosApres: (tacheLocale?.photosApres || []).map((ph) => ph.urlDistante).filter(Boolean),
+              },
+              session
+            );
+          }
+        } else {
+          // action locale historique — un court délai pour ne pas tourner à vide
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
         if (annule) return;
         setFileAttente((prev) => prev.slice(1));
         setErreurSync("");
@@ -5746,8 +5873,7 @@ function AppTechnicien() {
       const ecoule = t.tempsDebutSegment ? (Date.now() - t.tempsDebutSegment) / 1000 : 0;
       const heures = (t.tempsAccumuleSec + ecoule) / 3600;
       const clientDemo = CLIENTS.find((c) => c.id === t.clientId);
-      enregistrerTravailEffectue(
-        {
+      const chargeTravail = {
           // Pour les tâches assignées par l'admin : l'identifiant D'ORIGINE
           // (côté agenda), pour que le bloc passe au vert dans l'agenda.
           tacheId: t.cleHeures || t.tacheOrigineId || t.id,
@@ -5773,16 +5899,20 @@ function AppTechnicien() {
           photosAvant: (t.photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
           photosApres: (t.photosApres || []).map((p) => p.urlDistante).filter(Boolean),
           videos: (t.videos || []).map((v) => v.urlDistante).filter(Boolean),
-        },
-        session
-      )
+      };
+      enregistrerTravailEffectue(chargeTravail, session)
         .then(() => setErreurSync(""))
-        .catch((e) => {
-          // La tâche reste complétée localement, mais le bureau ne la verra
-          // pas (pas de vert dans l'agenda) — on l'affiche clairement au
-          // lieu d'échouer en silence.
+        .catch(() => {
+          // 📦 HORS-LIGNE (2026-08-27) : les heures partent en FILE DE
+          // REJEU — elles seront transmises toutes seules au retour du
+          // réseau (garde anti-doublon par travailDejaEnregistre). Avant,
+          // un simple message demandait au technicien d'y penser.
+          setFileAttente((prev) => [
+            ...prev,
+            { id: `sync-travail-${Date.now()}`, type: "travail", charge: chargeTravail, horodatage: Date.now() },
+          ]);
           setErreurSync(
-            `⚠️ Travail terminé NON transmis au bureau (« ${t.titre || "tâche"} ») — ${e?.message || "connexion impossible"}. L'agenda admin ne passera pas au vert.`
+            `📦 Heures de « ${t.titre || "tâche"} » en file — elles partiront au bureau dès le retour du réseau.`
           );
         });
       // ⏱️ AGENDA EN DIRECT : la carte se ferme — le bloc du bureau
@@ -6416,6 +6546,10 @@ function AppTechnicien() {
             role={role}
             enLigne={enLigne}
             session={session}
+            onMettreEnFile={(action, message) => {
+              setFileAttente((prev) => [...prev, action]);
+              if (message) setErreurSync(message);
+            }}
           />
         )}
       </div>
