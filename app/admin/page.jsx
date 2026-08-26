@@ -20457,7 +20457,7 @@ function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) 
   );
 }
 
-function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [] }) {
+function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {} }) {
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
@@ -20469,6 +20469,30 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   // `depots` est un ANNUAIRE par tâche ({ tacheId: depot }), pas une
   // liste — même lecture que depotDe() dans l'agenda. Le traiter comme
   // une liste plantait tout l'onglet Facturation.
+  // 🕐 LES HEURES DE TOUTE L'ÉQUIPE (2026-08-27) — depuis la MÊME
+  // source que la paie (travaux_effectues), pas depuis le bon : seul le
+  // DERNIER technicien crée le bon, avec SES heures — la carte
+  // sous-facturait chaque job d'équipe (Dominic 3 h + Philippe 4 h →
+  // la carte montrait 4 h, et la révision proposait 4 h au client).
+  // Clé exacte + clés « id::jour » des chantiers multi-jours ; dîner,
+  // transports et heures administratives/divers exclus (le transport
+  // réel a déjà son propre calcul dans la révision).
+  const estLigneChantier = (t) =>
+    t.supabase && !t.estTransport && (Number(t.heures) || 0) > 0 &&
+    !/dîner|diner|lunch/i.test(t.titre || "") && (t.categorieHeures || "projet") === "projet";
+  const travauxDeTache = (tacheId) =>
+    tacheId ? (travaux || []).filter((t) => String(t.tacheId || "").split("::")[0] === tacheId && estLigneChantier(t)) : [];
+  // Équipe ASSIGNÉE à la tâche — dérivée des clés de
+  // facturablesAssignations (posées pour CHAQUE assignation au
+  // chargement) ; les sous-traitants (st::) ne sont pas des techniciens
+  // à attendre.
+  const equipeAssignee = (tacheId) =>
+    !tacheId
+      ? []
+      : Object.keys(facturablesAssignations)
+          .filter((k) => k.startsWith(`${tacheId}|`))
+          .map((k) => k.slice(String(tacheId).length + 1))
+          .filter((c) => c && !c.startsWith("st::"));
   const depotPayePour = (tacheId) => {
     if (!tacheId) return null;
     const d = depots?.[tacheId];
@@ -20498,7 +20522,11 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     // et comptées aux coûts, mais jamais suggérées au client.
     const estNonFacturable = (s) =>
       facturablesAssignations[`${b.tacheId || ""}|${(s.employeEmail || "").toLowerCase()}`] === false;
-    const sources = (b.lignesSource || [b]).filter((s) => (Number(s.heures) || 0) > 0 && !estNonFacturable(s));
+    // Heures RÉELLES de toute l'équipe d'abord (2026-08-27) — le bon ne
+    // porte que les heures du dernier technicien.
+    const sources = ((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || [b]).filter(
+      (s) => (Number(s.heures) || 0) > 0 && !estNonFacturable(s)
+    );
     if (sources.length === 0) return [];
     // 🗺️ LA RÈGLE SUIT LA ZONE (2026-08-25) — la même que l'info-bulle
     // de l'agenda, enfin appliquée ICI aussi :
@@ -20631,12 +20659,33 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
       if (b.statutQb !== "en_attente") existant.statutQb = b.statutQb;
     });
 
-    // Le montant d'un devis accepté est déjà connu — on le reprend.
     return [...parTache.values()].map((b) => {
-      if (!b.devisNumero || !b.prixNonListe) return b;
-      const devis = (devisListe || []).find((d) => d.numero === b.devisNumero);
-      if (!devis) return b;
-      return { ...b, montant: Number(devis.totalVendant) || 0, prixNonListe: false };
+      // 🕐 Les heures de la carte = TOUTES les heures de chantier de la
+      // tâche (source paie), détaillées par technicien — le bon, lui,
+      // ne porte que celles du dernier (2026-08-27).
+      let enrichi = b;
+      const reelles = travauxDeTache(b.tacheId);
+      if (reelles.length > 0) {
+        const parEmp = new Map();
+        reelles.forEach((t) => {
+          const cle = (t.employeEmail || t.employeNom || "?").toLowerCase();
+          const e = parEmp.get(cle) || { nom: t.employeNom || t.employeEmail || "?", courriel: t.employeEmail || "", heures: 0 };
+          e.heures += Number(t.heures) || 0;
+          parEmp.set(cle, e);
+        });
+        const equipe = [...parEmp.values()];
+        enrichi = {
+          ...b,
+          equipe,
+          heures: Math.round(equipe.reduce((somme, e) => somme + e.heures, 0) * 100) / 100,
+          lignesReelles: reelles,
+        };
+      }
+      // Le montant d'un devis accepté est déjà connu — on le reprend.
+      if (!enrichi.devisNumero || !enrichi.prixNonListe) return enrichi;
+      const devis = (devisListe || []).find((d) => d.numero === enrichi.devisNumero);
+      if (!devis) return enrichi;
+      return { ...enrichi, montant: Number(devis.totalVendant) || 0, prixNonListe: false };
     });
   }, [bons, devisListe]);
 
@@ -21379,6 +21428,25 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
                     <span className="font-bold tabular-nums text-slate-700">= {b.heures.toFixed(2)} h au total</span>
                   </p>
                 )}
+                {/* ⏳ ÉQUIPE INCOMPLÈTE (2026-08-27) : l'équipe assignée est
+                    comparée à ceux dont les heures sont RENTRÉES — sans ce
+                    badge, le bureau pouvait facturer un travail à moitié
+                    compté sans aucun avertissement. S'éteint tout seul dès
+                    que les heures du retardataire arrivent. */}
+                {(() => {
+                  const assignes = equipeAssignee(b.tacheId);
+                  if (assignes.length < 2) return null;
+                  const rentres = new Set((b.lignesReelles || []).map((t) => (t.employeEmail || "").toLowerCase()));
+                  const manquants = assignes.filter((c) => !rentres.has(c));
+                  if (manquants.length === 0) return null;
+                  const noms = manquants.map((c) => nomsEmployes[c] || c).join(", ");
+                  return (
+                    <p className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] font-bold leading-snug text-amber-800">
+                      ⏳ Équipe incomplète — {noms} n'{manquants.length > 1 ? "ont" : "a"} pas fermé sa tâche (0 h).
+                      {" "}{manquants.length > 1 ? "Leurs" : "Ses"} heures manqueront à la facture si tu factures maintenant.
+                    </p>
+                  );
+                })()}
                 {b.adresseTravaux && (
                   <div className="mt-0.5 flex items-start gap-1 text-[11px] text-slate-400">
                     <MapPin size={11} className="mt-0.5 shrink-0" />
@@ -23740,6 +23808,11 @@ export default function App() {
         <OngletFacturation
           bons={bons}
           setBons={setBons}
+          // 👥 Courriel → nom : nomme le technicien manquant sur le badge
+          // « équipe incomplète » (sinon on n'aurait que son courriel).
+          nomsEmployes={Object.fromEntries(
+            (utilisateurs || []).filter((u) => u.courriel).map((u) => [u.courriel.toLowerCase(), u.nom])
+          )}
           assignationsST={assignationsST}
           onMarquerSTFacture={async (tacheId, courrielSt) => {
             try {
