@@ -56,14 +56,15 @@ async function roleAppelant(admin, utilisateur) {
 // texte. Contient la marche à suivre d'INSTALLATION Android/iPhone en 3
 // étapes : constat terrain du 2026-08-18, une astuce d'une ligne ne
 // suffit pas à un technicien peu à l'aise avec son téléphone.
-function gabaritInvitation({ nom, lien, nouveau }) {
+function gabaritInvitation({ nom, lien, nouveau, urlApp }) {
+  const hoteAffiche = String(urlApp || "").replace(/^https?:\/\//, "");
   const etapeInstallation = `
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;background:#f0fdfa;border-radius:10px;">
           <tr><td style="padding:14px 16px;">
             <p style="margin:0 0 8px;color:#134e4a;font-size:13px;font-weight:bold;">2️⃣ Installe l'application sur ton téléphone</p>
             <p style="margin:0 0 8px;color:#334155;font-size:13px;line-height:1.6;">
               Ouvre cette adresse dans le navigateur de ton téléphone :<br/>
-              📱 <a href="https://ventilation-dgl.vercel.app/technicien" style="color:#0d9488;font-weight:bold;">ventilation-dgl.vercel.app/technicien</a>
+              📱 <a href="${urlApp}" style="color:#0d9488;font-weight:bold;">${hoteAffiche}</a>
             </p>
             <p style="margin:0 0 6px;color:#334155;font-size:12px;line-height:1.6;">
               <strong>Sur Android (Chrome)</strong> : touche les 3 petits points ⋮ en haut à droite,
@@ -235,7 +236,7 @@ export async function POST(request) {
         subject: nouveau
           ? `Ton accès à l'application Fluxya${nomEntreprise ? ` (${nomEntreprise})` : ""} — choisis ton mot de passe`
           : `Réinitialisation de ton mot de passe — Fluxya${nomEntreprise ? ` (${nomEntreprise})` : ""}`,
-        html: gabaritInvitation({ nom, lien, nouveau }),
+        html: gabaritInvitation({ nom, lien, nouveau, urlApp: `${origine}/technicien` }),
         reply_to: repondreEntreprise || process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
       }),
     });
