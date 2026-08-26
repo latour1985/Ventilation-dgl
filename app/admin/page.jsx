@@ -1419,6 +1419,81 @@ const STATUTS_PIECE = {
 };
 
 // ============================================================
+// 📄 BARRE DE PAGINATION RÉUTILISABLE (2026-08-26)
+// ------------------------------------------------------------
+// Demande du propriétaire : « 10 items max par page, puis 1 2 3 4… le
+// nombre nécessaire ». Les longues listes (64 pièces empilées…)
+// devenaient des murs à défiler. Utilisée par : Pièces en commande,
+// Facturation, Devis, Clients, BC libres — 10 par page partout.
+//   • moins de 2 pages → la barre ne s'affiche pas du tout ;
+//   • plus de 9 pages → fenêtre condensée « 1 … 4 [5] 6 … 12 » (sinon
+//     la barre serait elle-même un mur) ;
+//   • changer de page remonte l'écran au haut de la liste (refHaut).
+// L'appelant garde sa page dans SON état et BORNE lui-même la valeur
+// (Math.min) : une liste qui rétrécit ne laisse jamais une page vide.
+// ============================================================
+const ITEMS_PAR_PAGE = 10;
+function BarrePagination({ total, page, onPage, refHaut = null, libelle = "items" }) {
+  const nbPages = Math.max(1, Math.ceil(total / ITEMS_PAR_PAGE));
+  if (nbPages <= 1) return null;
+  const courante = Math.min(page, nbPages);
+  const numeros = [];
+  if (nbPages <= 9) {
+    for (let i = 1; i <= nbPages; i++) numeros.push(i);
+  } else {
+    numeros.push(1);
+    if (courante > 3) numeros.push("…g");
+    for (let i = Math.max(2, courante - 1); i <= Math.min(nbPages - 1, courante + 1); i++) numeros.push(i);
+    if (courante < nbPages - 2) numeros.push("…d");
+    numeros.push(nbPages);
+  }
+  const aller = (p) => {
+    onPage(Math.min(nbPages, Math.max(1, p)));
+    refHaut?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => aller(courante - 1)}
+          disabled={courante <= 1}
+          aria-label="Page précédente"
+          className="flex h-8 min-w-[32px] items-center justify-center rounded-lg border border-slate-200 text-xs font-bold text-slate-600 disabled:opacity-30"
+        >
+          ◀
+        </button>
+        {numeros.map((n) =>
+          typeof n === "string" ? (
+            <span key={n} className="px-1 text-xs text-slate-400">…</span>
+          ) : (
+            <button
+              key={n}
+              onClick={() => aller(n)}
+              className={`flex h-8 min-w-[32px] items-center justify-center rounded-lg px-1.5 text-xs font-bold ${
+                n === courante ? "bg-[#131B2E] text-white" : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {n}
+            </button>
+          )
+        )}
+        <button
+          onClick={() => aller(courante + 1)}
+          disabled={courante >= nbPages}
+          aria-label="Page suivante"
+          className="flex h-8 min-w-[32px] items-center justify-center rounded-lg border border-slate-200 text-xs font-bold text-slate-600 disabled:opacity-30"
+        >
+          ▶
+        </button>
+      </div>
+      <p className="text-[11px] tabular-nums text-slate-400">
+        {total} {libelle} — page {courante} de {nbPages}
+      </p>
+    </div>
+  );
+}
+
+// ============================================================
 // 🔎 SÉLECTEUR DE RATTACHEMENT AVEC RECHERCHE (2026-08-26)
 // ------------------------------------------------------------
 // Les listes de clients et de tâches s'allongent : dérouler un <select>
@@ -1632,6 +1707,13 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
   const [bcOuvert, setBcOuvert] = useState(null);
   const [bcEdit, setBcEdit] = useState(null);
   const [bcSupprEtape, setBcSupprEtape] = useState(false);
+  // 📄 Pagination (2026-08-26) — 10 pièces par page, 10 BC par page.
+  // Avant : les 64 pièces s'empilaient, et les BC au-delà du 6e étaient
+  // carrément INVISIBLES (coupés par un slice).
+  const [pagePieces, setPagePieces] = useState(1);
+  const [pageBc, setPageBc] = useState(1);
+  const refListePieces = useRef(null);
+  const refListeBc = useRef(null);
   const [bcEnregistrement, setBcEnregistrement] = useState(false);
   const ouvrirBc = (a2) => {
     setBcOuvert(a2);
@@ -2111,7 +2193,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
               {/* ✏️ Chaque ligne S'OUVRE au clic (2026-08-26) — la liste
                   était en lecture seule : impossible de corriger un
                   montant, de re-rattacher ou de supprimer un test. */}
-              {(achatsLibres || []).slice(0, 6).map((a2) => (
+              {(achatsLibres || []).slice((Math.min(pageBc, Math.max(1, Math.ceil((achatsLibres || []).length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageBc, Math.max(1, Math.ceil((achatsLibres || []).length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((a2) => (
                 <button
                   key={a2.id}
                   onClick={() => ouvrirBc(a2)}
@@ -2130,6 +2212,9 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                   <span className="shrink-0 tabular-nums">{a2.montantHT.toFixed(2)} $</span>
                 </button>
               ))}
+              <div ref={refListeBc}>
+                <BarrePagination total={(achatsLibres || []).length} page={pageBc} onPage={setPageBc} refHaut={refListeBc} libelle="bons de commande" />
+              </div>
             </div>
           )}
         </div>
@@ -2290,12 +2375,12 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1.5">
+      <div ref={refListePieces} className="flex flex-wrap gap-1.5">
         {[["ouvertes", "En attente"], ["a_commander", "À commander"], ["commandee", "Commandées"], ["recue", "Reçues"], ["toutes", "Toutes"]].map(
           ([val, label]) => (
             <button
               key={val}
-              onClick={() => setFiltre(val)}
+              onClick={() => { setFiltre(val); setPagePieces(1); }}
               className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${
                 filtre === val ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
               }`}
@@ -2312,7 +2397,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
         </p>
       ) : (
         <div className="space-y-2">
-          {affichees.map((p) => {
+          {affichees.slice((Math.min(pagePieces, Math.max(1, Math.ceil(affichees.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pagePieces, Math.max(1, Math.ceil(affichees.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((p) => {
             const st = STATUTS_PIECE[p.statut] || STATUTS_PIECE.a_commander;
             // Deux façons d'être en retard : la date promise est passée
             // (le fournisseur a manqué sa parole), ou il n'y a jamais eu
@@ -2771,6 +2856,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
           })}
         </div>
       )}
+      <BarrePagination total={affichees.length} page={pagePieces} onPage={setPagePieces} refHaut={refListePieces} libelle="pièces" />
 
       {/* FENÊTRE — DEMANDE DE PAIEMENT AU CLIENT */}
       {demandePour && (
@@ -10441,6 +10527,12 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
   // courriel, téléphone, adresse, nº QuickBooks).
   const [rechercheClients, setRechercheClients] = useState("");
   const qClients = rechercheClients.trim().toLowerCase();
+  // 📄 Pagination (2026-08-26) : 10 fiches par page — sans recherche,
+  // TOUTE la liste s'affichait (mur garanti à 200 clients). Taper une
+  // recherche ramène page 1.
+  const [pageClients, setPageClients] = useState(1);
+  const refListeClients = useRef(null);
+  useEffect(() => { setPageClients(1); }, [qClients]);
   const clientsFiltres = !qClients
     ? clients
     : clients.filter((c) =>
@@ -10957,7 +11049,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
       </div>
 
       {/* LISTE DES CLIENTS EXISTANTS */}
-      <div className="space-y-2">
+      <div ref={refListeClients} className="space-y-2">
         {qClients && clientsFiltres.length === 0 && (
           <p className="rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-400">
             Aucun client ne correspond à « {rechercheClients.trim()} ».
@@ -10977,7 +11069,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
             />
           );
         })()}
-        {clientsFiltres.map((c) => {
+        {clientsFiltres.slice((Math.min(pageClients, Math.max(1, Math.ceil(clientsFiltres.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageClients, Math.max(1, Math.ceil(clientsFiltres.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((c) => {
           const ouvert = clientOuvertId === c.id;
           return (
             <div key={c.id} className="rounded-xl border border-slate-200 bg-white">
@@ -11638,6 +11730,7 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
             </div>
           );
         })}
+        <BarrePagination total={clientsFiltres.length} page={pageClients} onPage={setPageClients} refHaut={refListeClients} libelle="clients" />
       </div>
 
       {travailOuvert && (
@@ -12750,6 +12843,10 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
   // source sont chargées dans le constructeur pour être modifiées
   // (ajout/retrait de produits, quantités, prix) avant enregistrement.
   const [editionVersion, setEditionVersion] = useState(null);
+  // 📄 Pagination (2026-08-26) : avant, la liste était COUPÉE aux 10
+  // premiers — le 11e devis était invisible. 10 par page, tout visible.
+  const [pageDevis, setPageDevis] = useState(1);
+  const refListeDevis = useRef(null);
 
   // Étape 1 : charger la version source dans le constructeur. Le devis
   // d'origine reste INTACT tant que rien n'est enregistré (règle A :
@@ -13683,15 +13780,15 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
             </div>
           )}
 
-          <h2 className="px-1 text-sm font-extrabold uppercase tracking-wide text-slate-500">Devis récents</h2>
+          <h2 ref={refListeDevis} className="px-1 text-sm font-extrabold uppercase tracking-wide text-slate-500">Devis récents</h2>
           <p className="px-1 text-[11px] text-slate-400">
-            Les 10 derniers. Tous les devis d'un client sont dans <span className="font-bold">son dossier</span> (onglet Clients), et la{" "}
+            10 par page. Tous les devis d'un client sont dans <span className="font-bold">son dossier</span> (onglet Clients), et la{" "}
             <span className="font-bold">recherche rapide</span> les trouve par numéro, client ou produit.
           </p>
           {dossiersDevis.length === 0 && <p className="px-1 text-xs text-slate-400">Aucun devis pour le moment.</p>}
           {/* UNE CARTE PAR DOSSIER — la version active est affichée ; les
               révisions précédentes s'atteignent par les onglets. */}
-          {dossiersDevis.slice(0, 10).map(({ base, versions, active }) => {
+          {dossiersDevis.slice((Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map(({ base, versions, active }) => {
             const ouvert = dossierOuvert === base;
             const affichee = ouvert ? versions.find((v) => v.numero === versionAffichee) || active : active;
             const estActive = affichee.numero === active.numero;
@@ -13926,6 +14023,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
               </div>
             );
           })}
+          <BarrePagination total={dossiersDevis.length} page={pageDevis} onPage={setPageDevis} refHaut={refListeDevis} libelle="devis" />
         </div>
       </div>
 
@@ -20496,6 +20594,14 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     setFiltresActifs((prev) => (prev.includes(categorie) ? prev.filter((c) => c !== categorie) : [...prev, categorie]));
   };
   const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes.filter((b) => categorieBon(b) !== "retire") : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
+  // 📄 Pagination (2026-08-26) : 10 cartes par page — les plus grosses
+  // cartes de l'application s'empilaient sans fin. Changer de filtre
+  // ramène page 1 ; la borne Math.min évite toute page vide.
+  const [pageFact, setPageFact] = useState(1);
+  const refListeFact = useRef(null);
+  useEffect(() => { setPageFact(1); }, [filtresActifs]);
+  const pageFactEff = Math.min(pageFact, Math.max(1, Math.ceil(bonsAffiches.length / ITEMS_PAR_PAGE)));
+  const bonsPageines = bonsAffiches.slice((pageFactEff - 1) * ITEMS_PAR_PAGE, pageFactEff * ITEMS_PAR_PAGE);
   // Factures dont l'envoi par QuickBooks n'est pas (encore) confirmé au
   // registre — l'alerte passive de l'onglet.
   // En mode MANUEL (choix de l'entreprise), « pas envoyé » n'est pas un
@@ -21054,8 +21160,8 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
         </div>
       )}
 
-      <div className="space-y-2">
-        {bonsAffiches.map((b) => {
+      <div ref={refListeFact} className="space-y-2">
+        {bonsPageines.map((b) => {
           const contrat = b.type === "entretien_contrat";
           const devisType = b.type === "devis";
           const enAttenteValidation = !b.prixNonListe && (devisType || contrat) && b.statutQb === "en_attente";
@@ -21368,6 +21474,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
             Aucun résultat pour {filtresActifs.length > 1 ? "ces catégories" : "cette catégorie"}.
           </p>
         )}
+        <BarrePagination total={bonsAffiches.length} page={pageFactEff} onPage={setPageFact} refHaut={refListeFact} libelle="bons" />
       </div>
       <p className="text-[11px] text-slate-400">
         Un bon de travail « Prix non listé » doit être ouvert et révisé manuellement par un admin (prix + description), avec confirmation explicite, avant de pouvoir être envoyé au client.
