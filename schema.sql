@@ -2588,3 +2588,44 @@ update qb_attributions_manuelles
 -- (`client_nom` existait déjà — étiquette recopiée de la tâche.)
 -- ============================================================
 alter table achats_libres add column if not exists client_id text;
+
+-- ============================================================
+-- 80 - NETTOYAGE DES PIÈCES EN DOUBLE + VERROU ANTI-DOUBLON
+--      (2026-08-27)
+-- ------------------------------------------------------------
+-- Bogue vécu : la création automatique des demandes de pièces tournait
+-- AVANT le chargement de la liste — chaque rechargement de page voyait
+-- « aucune pièce » et recréait toutes les demandes (pile de doublons
+-- « Jhgjby » constatée par le propriétaire). Le code est corrigé (double
+-- garde), ce snippet efface les doublons EXISTANTS et pose le verrou
+-- définitif en base.
+-- ============================================================
+
+-- 1. UNE pièce par tâche d'origine : la PLUS ANCIENNE survit (c'est
+--    elle que le bureau a pu commencer à traiter). Les pièces créées à
+--    la main (sans tâche d'origine) ne sont jamais touchées.
+delete from pieces_commandees p
+ using pieces_commandees d
+ where p.tache_origine_id is not null
+   and d.tache_origine_id = p.tache_origine_id
+   and (d.created_at, d.id::text) < (p.created_at, p.id::text);
+
+-- 2. Les tâches de RETOUR orphelines créées par les doublons : on
+--    n'efface une tâche « retour-... » que si (a) plus aucune pièce ne
+--    la référence ET (b) une autre tâche retour du MÊME groupe existe
+--    encore — une tâche détachée volontairement (« garder sans pièce »)
+--    reste donc intouchée.
+delete from taches_attente t
+ where t.id like 'retour-%'
+   and not exists (select 1 from pieces_commandees pc where pc.tache_retour_id = t.id)
+   and exists (
+     select 1 from taches_attente t2
+      where t2.id like 'retour-%'
+        and t2.id <> t.id
+        and regexp_replace(t2.id, '-[0-9]+$', '') = regexp_replace(t.id, '-[0-9]+$', '')
+   );
+
+-- 3. LE VERROU : plus jamais deux pièces pour la même tâche d'origine.
+create unique index if not exists idx_pieces_tache_origine_unique
+  on pieces_commandees (tache_origine_id)
+  where tache_origine_id is not null;

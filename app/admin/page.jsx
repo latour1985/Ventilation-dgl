@@ -22196,9 +22196,20 @@ export default function App() {
 
   // PIÈCES EN COMMANDE — le pont entre le diagnostic et la réparation.
   const [pieces, setPieces] = useState([]);
+  // ⚠️ CAUSE RACINE DES DOUBLONS (2026-08-27) : tant que cette liste
+  // n'a pas été chargée AU MOINS une fois du serveur, la création
+  // automatique ne doit RIEN créer — sinon chaque rechargement de page
+  // voyait « aucune pièce » et recréait toutes les demandes.
+  const piecesChargeesRef = useRef(false);
   useEffect(() => {
     if (!session) return;
-    const charger = () => listerPieces().then(setPieces).catch(() => {});
+    const charger = () =>
+      listerPieces()
+        .then((liste) => {
+          piecesChargeesRef.current = true;
+          setPieces(liste);
+        })
+        .catch(() => {});
     charger();
     return sAbonnerPieces(charger);
   }, [session]);
@@ -22374,7 +22385,9 @@ export default function App() {
   // la liste ne soit rafraîchie.
   const dejaCreees = useRef(new Set());
   useEffect(() => {
-    if (!session) return;
+    // Rien tant que la liste des pièces n'est pas VRAIMENT chargée —
+    // c'est ce trou qui multipliait les demandes à chaque rechargement.
+    if (!session || !piecesChargeesRef.current) return;
     const existantes = new Set(pieces.map((p) => p.tacheOrigineId).filter(Boolean));
     (bons || [])
       .filter((b) => b.pieceACommander && b.pieceRequise && b.tacheId)
