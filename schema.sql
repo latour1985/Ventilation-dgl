@@ -2574,3 +2574,17 @@ update qb_attributions_manuelles
        cible_id = projet_id
  where cible_type is null
    and projet_id is not null;
+
+-- ============================================================
+-- 79 - BON DE COMMANDE RATTACHABLE À UN CLIENT + MODIFIABLE
+--      (2026-08-26)
+-- ------------------------------------------------------------
+-- La liste des bons de commande libres était en LECTURE SEULE : pas de
+-- correction possible (fournisseur, montant, description), pas de
+-- suppression, et un achat ne pouvait viser qu'une tâche — pas un
+-- client directement. `client_id` permet le rattachement direct : le
+-- coût remonte dans « Coût réel & marge — par client » même sans tâche
+-- ni projet, et la dépense QuickBooks portant ce numéro de BC suit.
+-- (`client_nom` existait déjà — étiquette recopiée de la tâche.)
+-- ============================================================
+alter table achats_libres add column if not exists client_id text;

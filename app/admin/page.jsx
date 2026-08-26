@@ -38,7 +38,7 @@ import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots, zonesDepuis, sup
 import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
-import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres, listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
+import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres, majAchatLibre, supprimerAchatLibre, listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
@@ -703,6 +703,23 @@ function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLib
     const texte = String(transaction.referenceTexte).toUpperCase();
     const parTexte = achatsAvecTache.find((a) => texteContientBc(texte, a.numeroBc));
     if (parTexte) return { type: "tache", id: parTexte.tacheId };
+  }
+
+  // ---- Règle 3b : LE BC D'UN CLIENT (2026-08-26, snippet 79) ----
+  // Un BC rattaché DIRECTEMENT à un client (sans tâche ni projet — le
+  // dossier ouvert avant que la job soit à l'horaire) : la dépense
+  // QuickBooks qui porte son numéro suit le client.
+  const achatsAvecClient = (achatsLibres || []).filter((a) => !a.tacheId && a.clientId && a.numeroBc);
+  if (transaction.poNumber) {
+    const parBcClient = achatsAvecClient.find(
+      (a) => String(a.numeroBc).trim().toUpperCase() === String(transaction.poNumber).trim().toUpperCase()
+    );
+    if (parBcClient) return { type: "client", id: parBcClient.clientId };
+  }
+  if (transaction.referenceTexte) {
+    const texte = String(transaction.referenceTexte).toUpperCase();
+    const parTexteClient = achatsAvecClient.find((a) => texteContientBc(texte, a.numeroBc));
+    if (parTexteClient) return { type: "client", id: parTexteClient.clientId };
   }
 
   // ---- Règle 4 : LE CLIENT, à défaut de mieux (2026-08-26) ----
@@ -1401,7 +1418,7 @@ const STATUTS_PIECE = {
   annulee: { label: "Annulée", cls: "bg-slate-100 text-slate-500 border-slate-300" },
 };
 
-function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, projets, tachesPourAchat = [] }) {
+function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
@@ -1502,7 +1519,26 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", montantAttribue: "" });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "" });
+  // ✏️ FICHE D'UN BC (2026-08-26) — la ligne cliquée s'ouvre en fenêtre :
+  // fournisseur, description, montant et RATTACHEMENT modifiables,
+  // suppression en deux clics. `bcOuvert` = l'achat ; `bcEdit` = la
+  // copie de travail ; `bcSupprEtape` = confirmation armée ou non.
+  const [bcOuvert, setBcOuvert] = useState(null);
+  const [bcEdit, setBcEdit] = useState(null);
+  const [bcSupprEtape, setBcSupprEtape] = useState(false);
+  const [bcEnregistrement, setBcEnregistrement] = useState(false);
+  const ouvrirBc = (a2) => {
+    setBcOuvert(a2);
+    setBcEdit({
+      fournisseurNom: a2.fournisseurNom || "",
+      description: a2.description || "",
+      montantHT: Number(a2.montantHT) || 0,
+      cible: a2.tacheId ? `t:${a2.tacheId}` : a2.clientId ? `c:${a2.clientId}` : "",
+      montantAttribue: a2.montantAttribue != null ? String(a2.montantAttribue) : "",
+    });
+    setBcSupprEtape(false);
+  };
   const [bcLibreEnCours, setBcLibreEnCours] = useState(false);
   const [bcLibreMsg, setBcLibreMsg] = useState("");
   const [filtre, setFiltre] = useState("ouvertes");
@@ -1913,12 +1949,13 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                   $
                 </span>
                 <select
-                  value={bcLibre.tacheId ? `t:${bcLibre.tacheId}` : bcLibre.projetId ? `p:${bcLibre.projetId}` : ""}
+                  value={bcLibre.tacheId ? `t:${bcLibre.tacheId}` : bcLibre.clientId ? `c:${bcLibre.clientId}` : bcLibre.projetId ? `p:${bcLibre.projetId}` : ""}
                   onChange={(e) => {
                     const v = e.target.value;
-                    if (v.startsWith("t:")) setBcLibre((f) => ({ ...f, tacheId: v.slice(2), projetId: "" }));
-                    else if (v.startsWith("p:")) setBcLibre((f) => ({ ...f, projetId: v.slice(2), tacheId: "", montantAttribue: "" }));
-                    else setBcLibre((f) => ({ ...f, projetId: "", tacheId: "", montantAttribue: "" }));
+                    if (v.startsWith("t:")) setBcLibre((f) => ({ ...f, tacheId: v.slice(2), clientId: "", projetId: "" }));
+                    else if (v.startsWith("c:")) setBcLibre((f) => ({ ...f, clientId: v.slice(2), tacheId: "", projetId: "" }));
+                    else if (v.startsWith("p:")) setBcLibre((f) => ({ ...f, projetId: v.slice(2), tacheId: "", clientId: "", montantAttribue: "" }));
+                    else setBcLibre((f) => ({ ...f, projetId: "", tacheId: "", clientId: "", montantAttribue: "" }));
                   }}
                   className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                 >
@@ -1931,6 +1968,9 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                       Tâche : {t.clientNom ? `${t.clientNom} — ` : ""}{t.titre}
                     </option>
                   ))}
+                  {/* 👤 CLIENT direct (2026-08-26) : l'achat pour un client
+                      précis, avant même que la job soit à l'horaire. */}
+                  {(clients || []).map((c) => <option key={c.id} value={`c:${c.id}`}>Client : {c.nom}</option>)}
                   {(projets || []).map((pr) => <option key={pr.id} value={`p:${pr.id}`}>Projet : {pr.nom}</option>)}
                 </select>
               </div>
@@ -1938,7 +1978,7 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                   profite d'une commande pour ajouter du stock (rouleaux
                   de cuivre…), mais seule la part de la job compte dans
                   son coût. Vide = tout le montant. */}
-              {bcLibre.tacheId && (
+              {(bcLibre.tacheId || bcLibre.clientId) && (
                 <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5">
                   <span className="text-[10px] font-bold text-emerald-800">Part attribuée à la job (HT)</span>
                   <InputNombreDecimal
@@ -1959,8 +1999,8 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                     setBcLibreEnCours(true);
                     const numero = await onCreerBcLibre?.(bcLibre);
                     setBcLibreEnCours(false);
-                    setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", montantAttribue: "" });
+                    setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "" });
                     setBcLibreOuvert(false);
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"
@@ -1973,17 +2013,185 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
           )}
           {(achatsLibres || []).length > 0 && (
             <div className="mt-2 space-y-1">
+              {/* ✏️ Chaque ligne S'OUVRE au clic (2026-08-26) — la liste
+                  était en lecture seule : impossible de corriger un
+                  montant, de re-rattacher ou de supprimer un test. */}
               {(achatsLibres || []).slice(0, 6).map((a2) => (
-                <div key={a2.id} className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                <button
+                  key={a2.id}
+                  onClick={() => ouvrirBc(a2)}
+                  title="Ouvrir la fiche — modifier, rattacher, supprimer"
+                  className="flex w-full items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-[11px] text-slate-500 hover:bg-slate-50"
+                >
                   <span className="min-w-0 truncate">
                     <span className="font-bold text-slate-700">{a2.numeroBc}</span> · {a2.description}
                     {a2.fournisseurNom ? " — " + a2.fournisseurNom : ""}
+                    {a2.tacheId ? (
+                      <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">🔗 {a2.clientNom || a2.tacheTitre || "job"}</span>
+                    ) : a2.clientId ? (
+                      <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">👤 {a2.clientNom || "client"}</span>
+                    ) : null}
                   </span>
                   <span className="shrink-0 tabular-nums">{a2.montantHT.toFixed(2)} $</span>
-                </div>
+                </button>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ✏️ FICHE D'UN BON DE COMMANDE (2026-08-26) — modification,
+          re-rattachement (général / job / client / projet), suppression
+          en deux clics. Un projet choisi = DÉMÉNAGEMENT : le bon rejoint
+          la fiche du projet et quitte cette liste (tracé au journal). */}
+      {bcOuvert && bcEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; setBcOuvert(null); }}>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+            <div className="mb-3 flex items-start justify-between">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">🧾 {bcOuvert.numeroBc || "Bon de commande"}</h3>
+                <p className="text-xs text-slate-500">{bcOuvert.dateAchat || ""}</p>
+              </div>
+              <button onClick={() => setBcOuvert(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+            </div>
+            <div className="space-y-2.5">
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Fournisseur</label>
+                <input
+                  value={bcEdit.fournisseurNom}
+                  onChange={(e) => setBcEdit((f) => ({ ...f, fournisseurNom: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Description</label>
+                <textarea
+                  rows={2}
+                  value={bcEdit.description}
+                  onChange={(e) => setBcEdit((f) => ({ ...f, description: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Montant HT ($)</label>
+                <InputNombreDecimal
+                  valeur={Number(bcEdit.montantHT) || 0}
+                  onChange={(v) => setBcEdit((f) => ({ ...f, montantHT: v }))}
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm tabular-nums"
+                />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Rattachement (où va le coût ?)</label>
+                <select
+                  value={bcEdit.cible}
+                  onChange={(e) => setBcEdit((f) => ({ ...f, cible: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                >
+                  <option value="">Achat général (stock — aucun rattachement)</option>
+                  {(tachesPourAchat || []).map((t) => (
+                    <option key={t.id} value={`t:${t.id}`}>Tâche : {t.clientNom ? `${t.clientNom} — ` : ""}{t.titre}</option>
+                  ))}
+                  {/* La tâche déjà rattachée reste choisie même si elle a
+                      quitté l'horaire — sinon l'écran mentirait. */}
+                  {bcOuvert.tacheId && !(tachesPourAchat || []).some((t) => t.id === bcOuvert.tacheId) && (
+                    <option value={`t:${bcOuvert.tacheId}`}>Tâche : {bcOuvert.clientNom ? `${bcOuvert.clientNom} — ` : ""}{bcOuvert.tacheTitre || bcOuvert.tacheId}</option>
+                  )}
+                  {(clients || []).map((c) => <option key={c.id} value={`c:${c.id}`}>Client : {c.nom}</option>)}
+                  {(projets || []).map((pr) => <option key={pr.id} value={`p:${pr.id}`}>Projet : {pr.nom}</option>)}
+                </select>
+                {bcEdit.cible.startsWith("p:") && (
+                  <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-snug text-amber-800">
+                    🏗️ Un projet choisi = le bon DÉMÉNAGE dans la fiche du projet (ses coûts vivent là) et quitte cette liste.
+                  </p>
+                )}
+              </div>
+              {(bcEdit.cible.startsWith("t:") || bcEdit.cible.startsWith("c:")) && (
+                <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                  <span className="text-[10px] font-bold text-emerald-800">Part attribuée (HT)</span>
+                  <InputNombreDecimal
+                    valeur={bcEdit.montantAttribue === "" ? Number(bcEdit.montantHT) || 0 : Number(bcEdit.montantAttribue) || 0}
+                    onChange={(v) => setBcEdit((f) => ({ ...f, montantAttribue: String(Math.min(Number(v) || 0, Number(f.montantHT) || 0)) }))}
+                    className="w-24 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs tabular-nums"
+                  />
+                  <span className="text-[9px] leading-snug text-emerald-700">
+                    $ — le reste ({Math.max(0, (Number(bcEdit.montantHT) || 0) - (bcEdit.montantAttribue === "" ? Number(bcEdit.montantHT) || 0 : Number(bcEdit.montantAttribue) || 0)).toFixed(2)} $) demeure un achat de stock.
+                  </span>
+                </div>
+              )}
+              <div className="flex gap-2 pt-1">
+                <Button
+                  disabled={bcEnregistrement}
+                  onClick={async () => {
+                    setBcEnregistrement(true);
+                    const cible = bcEdit.cible;
+                    const attribue =
+                      bcEdit.montantAttribue === "" ? Number(bcEdit.montantHT) || 0 : Math.min(Number(bcEdit.montantAttribue) || 0, Number(bcEdit.montantHT) || 0);
+                    const champsBase = {
+                      fournisseurNom: bcEdit.fournisseurNom.trim(),
+                      description: bcEdit.description.trim(),
+                      montantHT: Number(bcEdit.montantHT) || 0,
+                    };
+                    if (cible.startsWith("p:")) {
+                      // Déménagement : la fiche à jour part au projet.
+                      const ok = await onMajBcLibre?.(bcOuvert, champsBase, "fiche mise à jour avant déménagement");
+                      if (ok !== false) await onDemenagerBcVersProjet?.({ ...bcOuvert, ...champsBase }, cible.slice(2));
+                    } else {
+                      const t = cible.startsWith("t:") ? (tachesPourAchat || []).find((x) => x.id === cible.slice(2)) : null;
+                      const c = cible.startsWith("c:") ? (clients || []).find((x) => x.id === cible.slice(2)) : null;
+                      const champs = {
+                        ...champsBase,
+                        tacheId: cible.startsWith("t:") ? cible.slice(2) : null,
+                        tacheTitre: t?.titre || (cible.startsWith("t:") ? bcOuvert.tacheTitre : null) || null,
+                        clientId: c?.id || null,
+                        clientNom: c?.nom || t?.clientNom || (cible.startsWith("t:") ? bcOuvert.clientNom : null) || null,
+                        montantAttribue: cible ? attribue : null,
+                      };
+                      const avant = bcOuvert.tacheId
+                        ? `Job « ${bcOuvert.tacheTitre || bcOuvert.tacheId} »`
+                        : bcOuvert.clientId ? `Client « ${bcOuvert.clientNom || bcOuvert.clientId} »` : "achat général";
+                      const apres = champs.tacheId
+                        ? `Job « ${champs.tacheTitre || champs.tacheId} »`
+                        : champs.clientId ? `Client « ${champs.clientNom} »` : "achat général";
+                      const resume =
+                        (avant !== apres ? `rattachement : ${avant} → ${apres}` : "fiche mise à jour") +
+                        ` (${champs.montantHT.toFixed(2)} $ HT${cible ? `, ${attribue.toFixed(2)} $ attribués` : ""})`;
+                      await onMajBcLibre?.(bcOuvert, champs, resume);
+                    }
+                    setBcEnregistrement(false);
+                    setBcOuvert(null);
+                  }}
+                  className="min-h-0 flex-1 py-2 text-xs"
+                >
+                  {bcEnregistrement ? "Enregistrement…" : "Enregistrer"}
+                </Button>
+                <Button variant="outline" onClick={() => setBcOuvert(null)} className="min-h-0 py-2 text-xs">Annuler</Button>
+              </div>
+              {bcSupprEtape ? (
+                <div className="rounded-xl border border-red-300 bg-red-50 p-2.5">
+                  <p className="text-[11px] font-bold text-red-700">
+                    Supprimer définitivement {bcOuvert.numeroBc} ({(Number(bcOuvert.montantHT) || 0).toFixed(2)} $ HT) ? Son coût disparaît des analyses.
+                  </p>
+                  <div className="mt-1.5 flex gap-2">
+                    <Button
+                      variant="danger"
+                      onClick={async () => { await onSupprimerBcLibre?.(bcOuvert); setBcOuvert(null); }}
+                      className="min-h-0 flex-1 py-1.5 text-[11px]"
+                    >
+                      Oui, supprimer
+                    </Button>
+                    <Button variant="outline" onClick={() => setBcSupprEtape(false)} className="min-h-0 flex-1 py-1.5 text-[11px]">Annuler</Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setBcSupprEtape(true)}
+                  className="w-full rounded-lg border border-red-200 py-1.5 text-[11px] font-bold text-red-500 hover:bg-red-50"
+                >
+                  🗑️ Supprimer ce bon de commande…
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -4736,8 +4944,27 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
       if (!nom) return;
       m.set(nom, (m.get(nom) || 0) + (Number(t.amountHT) || 0));
     });
+    // 🧾 ACHATS (BC libres) rattachés DIRECTEMENT à un client (2026-08-26,
+    // snippet 79) — même logique : le coût appartient au dossier. La part
+    // attribuée fait foi ; sans elle, tout le montant. GARDE ANTI-DOUBLE
+    // COMPTE : si la dépense QuickBooks portant ce numéro de BC est déjà
+    // rattachée (au client ou ailleurs), c'est ELLE qui fait foi — le
+    // montant réel de la facture plutôt que l'estimation du BC.
+    const bcsDejaComptes = new Set(
+      (transactionsQb || [])
+        .filter((t) => t.type === "EXPENSE" && t.cible && t.poNumber)
+        .map((t) => String(t.poNumber).trim().toUpperCase())
+    );
+    (achatsLibres || []).forEach((a) => {
+      if (a.tacheId || !a.clientId) return;
+      if (a.numeroBc && bcsDejaComptes.has(String(a.numeroBc).trim().toUpperCase())) return;
+      const nom = a.clientNom || (clients || []).find((c) => c.id === a.clientId)?.nom || null;
+      if (!nom) return;
+      const montant = a.montantAttribue != null ? a.montantAttribue : a.montantHT;
+      m.set(nom, (m.get(nom) || 0) + (Number(montant) || 0));
+    });
     return m;
-  }, [transactionsQb, clients]);
+  }, [transactionsQb, clients, achatsLibres]);
   const configEnt = useEntreprise();
   const seuil = Number(configEnt?.seuilMargeAlerte) || 25;
   const camionDefaut = Number(configEnt?.coutCamionHoraire) || 0;
@@ -4913,6 +5140,15 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
       const e = m.get(l.clientNom) || { clientNom: l.clientNom, jobs: 0, facture: 0, cout: 0 };
       e.jobs += 1; e.facture += l.facture; e.cout += l.cout;
       m.set(l.clientNom, e);
+    });
+    // 👤 Coûts rattachés au CLIENT lui-même (dépenses QuickBooks + BC
+    // libres, 2026-08-26) : ils s'ajoutent à sa ligne — et un client qui
+    // n'a AUCUNE job facturée apparaît quand même, un coût sans revenu
+    // est justement ce qu'il faut voir.
+    depensesQbParClient.forEach((montant, nom) => {
+      const e = m.get(nom) || { clientNom: nom, jobs: 0, facture: 0, cout: 0 };
+      e.cout += montant;
+      m.set(nom, e);
     });
     return [...m.values()]
       .map((e) => ({ ...e, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : null }))
@@ -21649,8 +21885,35 @@ export default function App() {
   };
   // BC LIBRE — numéro officiel ; projet choisi = coûts du projet
   // (mécanisme existant), sinon achat général (registre à part).
-  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId, tacheId, montantAttribue }) => {
+  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId, tacheId, clientId, montantAttribue }) => {
     const numero = await numeroBonCommande().catch(() => "BC-" + Date.now());
+    // 👤 ACHAT POUR UN CLIENT sans tâche ni projet (2026-08-26) : l'unité
+    // commandée avant que la job soit à l'horaire. Le coût remonte dans
+    // « par client » et QuickBooks suivra par le numéro de BC.
+    if (!projetId && !tacheId && clientId) {
+      const cl = (clients || []).find((c) => c.id === clientId);
+      const attribueClient = Math.min(Number(montantAttribue ?? montantHT) || 0, Number(montantHT) || 0);
+      await creerAchatLibre(
+        {
+          numeroBc: numero,
+          fournisseurNom,
+          description,
+          montantHT,
+          dateAchat: todayISO(),
+          clientId,
+          clientNom: cl?.nom || "",
+          montantAttribue: attribueClient,
+        },
+        session
+      ).catch(() => {});
+      listerAchatsLibres().then(setAchatsLibres).catch(() => {});
+      ajouterJournal(
+        "🧾 BC " + numero + " créé et rattaché au client « " + (cl?.nom || clientId) + " » — " +
+          attribueClient.toFixed(2) + " $ HT attribués au dossier sur " + (Number(montantHT) || 0).toFixed(2) + " $" +
+          (attribueClient < (Number(montantHT) || 0) ? " (le reste demeure un achat de stock)" : "")
+      );
+      return numero;
+    }
     if (projetId) {
       const bc = { id: "bc-" + Date.now(), numeroBC: numero, fournisseur: fournisseurNom || "", montantHT: Number(montantHT) || 0, statut: "En attente", date: todayISO(), description: description || "" };
       setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] } : px)));
@@ -21687,6 +21950,66 @@ export default function App() {
       ajouterJournal("🧾 BC " + numero + " créé (achat général, sans projet) — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
     }
     return numero;
+  };
+
+  // ============================================================
+  // ✏️ FICHE D'UN BON DE COMMANDE — modification, re-rattachement,
+  // déménagement vers un projet, suppression (2026-08-26).
+  // La liste était en lecture seule : tout changement passe désormais
+  // par ici, TOUJOURS tracé au journal — déplacer un coût d'un dossier
+  // à l'autre ne doit jamais se faire en silence.
+  // ============================================================
+  const majBcLibre = async (achat, champs, resume) => {
+    try {
+      await majAchatLibre(achat.id, champs);
+      await listerAchatsLibres().then(setAchatsLibres);
+      ajouterJournal("✏️ BC " + (achat.numeroBc || "?") + " modifié — " + (resume || "fiche mise à jour") + ".");
+      return true;
+    } catch (e) {
+      ajouterJournal("⚠️ BC " + (achat.numeroBc || "?") + " NON modifié (" + (e?.message || "connexion impossible") + ") — réessaie." + (/client_id/.test(e?.message || "") ? " Le snippet SQL 79 est-il passé ?" : ""));
+      return false;
+    }
+  };
+  const supprimerBcLibre = async (achat) => {
+    try {
+      await supprimerAchatLibre(achat.id);
+      await listerAchatsLibres().then(setAchatsLibres);
+      ajouterJournal("🗑️ BC " + (achat.numeroBc || "?") + " supprimé (" + (achat.description || "sans description") + " — " + (Number(achat.montantHT) || 0).toFixed(2) + " $ HT).");
+      return true;
+    } catch (e) {
+      ajouterJournal("⚠️ BC " + (achat.numeroBc || "?") + " NON supprimé (" + (e?.message || "connexion impossible") + ") — réessaie.");
+      return false;
+    }
+  };
+  // Rattacher à un PROJET après coup = DÉMÉNAGEMENT : les coûts de
+  // projet vivent dans projet.bonsCommande (c'est là que l'appariement
+  // QuickBooks des projets regarde), le bon quitte donc la liste libre.
+  const demenagerBcVersProjet = async (achat, projetId) => {
+    const proj = projets.find((px) => px.id === projetId);
+    if (!proj) return false;
+    const bc = {
+      id: "bc-" + Date.now(),
+      numeroBC: achat.numeroBc,
+      fournisseur: achat.fournisseurNom || "",
+      montantHT: Number(achat.montantHT) || 0,
+      statut: "En attente",
+      date: achat.dateAchat || todayISO(),
+      description: achat.description || "",
+    };
+    setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] } : px)));
+    try {
+      await supprimerAchatLibre(achat.id);
+      await listerAchatsLibres().then(setAchatsLibres);
+    } catch {
+      // le bon est au projet — un doublon dans la liste libre se
+      // supprime à la main, bien moins grave qu'un coût perdu
+    }
+    ajouterJournal(
+      "🏗️ BC " + (achat.numeroBc || "?") + " déménagé : " +
+        (achat.tacheId ? "Job « " + (achat.tacheTitre || achat.tacheId) + " »" : achat.clientId ? "Client « " + (achat.clientNom || achat.clientId) + " »" : "achat général") +
+        " → Projet « " + proj.nom + " » — " + (Number(achat.montantHT) || 0).toFixed(2) + " $ HT."
+    );
+    return true;
   };
   // Retrouve une tâche par id, peu importe où elle vit (grille ou file
   // d'attente) — pour recopier titre et client sur un achat rattaché.
@@ -23374,6 +23697,9 @@ export default function App() {
           onCommandePassee={commandeCamionPassee}
           achatsLibres={achatsLibres}
           onCreerBcLibre={creerBcLibre}
+          onMajBcLibre={majBcLibre}
+          onSupprimerBcLibre={supprimerBcLibre}
+          onDemenagerBcVersProjet={demenagerBcVersProjet}
           projets={projets}
           // Tâches offertes au rattachement d'un achat : celles de la
           // grille + la file d'attente, dédupliquées, sans les tâches
