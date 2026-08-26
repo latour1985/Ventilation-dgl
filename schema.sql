@@ -2548,3 +2548,29 @@ alter table achats_libres add column if not exists tache_titre text;
 alter table achats_libres add column if not exists client_nom text;
 alter table achats_libres add column if not exists montant_attribue numeric;
 alter table bons_travail add column if not exists materiel_stock jsonb;
+
+-- ============================================================
+-- 78 - DÉPENSES QUICKBOOKS RATTACHABLES À UNE TÂCHE OU À UN CLIENT
+--      (2026-08-26)
+-- ------------------------------------------------------------
+-- Jusqu'ici une dépense QuickBooks n'avait qu'UNE destination : un
+-- projet. Le produit acheté pour une job SANS projet (une tâche, un
+-- client) n'entrait donc dans aucun coût — il restait orphelin, et le
+-- coût réel de la job était faux en silence.
+--
+-- `cible_type` + `cible_id` remplacent `projet_id` :
+--   'projet' | 'tache' | 'client'
+-- La colonne `projet_id` est CONSERVÉE (jamais supprimée) pour que les
+-- attributions déjà enregistrées continuent de fonctionner — elles sont
+-- relues comme cible_type = 'projet'.
+-- ============================================================
+alter table qb_attributions_manuelles add column if not exists cible_type text;
+alter table qb_attributions_manuelles add column if not exists cible_id text;
+
+-- Reprise du passé : les attributions existantes deviennent des cibles
+-- de type « projet ». Idempotent — relancer ce snippet ne casse rien.
+update qb_attributions_manuelles
+   set cible_type = 'projet',
+       cible_id = projet_id
+ where cible_type is null
+   and projet_id is not null;

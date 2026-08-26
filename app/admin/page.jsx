@@ -636,14 +636,26 @@ async function fetchQuickBooksTransactions() {
   ];
 }
 
-// Logique de correspondance (mapping) — Règle 1 (client/sous-projet
-// QuickBooks) puis Règle 2 (numéro de BC), sinon aucune correspondance
+// ============================================================
+// À QUOI APPARTIENT CETTE DÉPENSE QUICKBOOKS ?
+// ------------------------------------------------------------
+// Retourne une CIBLE { type: "projet"|"tache"|"client", id } — ou null
 // (l'appelant place alors la transaction en attribution manuelle).
-function attribuerTransactionQuickBooks(transaction, projets, clients) {
+//
+// TROIS CIBLES DEPUIS LE 2026-08-26 : avant, une dépense ne pouvait
+// viser qu'un PROJET. Le produit acheté pour une job sans projet — une
+// tâche, un client — n'entrait donc dans AUCUN coût : il restait
+// orphelin et le coût réel de la job était faux en silence (constat du
+// propriétaire : « le p/o pour l'achat de l'unité est bien là »).
+//
+// L'ordre va du plus PRÉCIS au plus large : un numéro de BC désigne une
+// job exacte, un client ne désigne qu'un dossier.
+// ============================================================
+function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLibres = []) {
   // Règle 1a : correspondance directe par ProjectRef (sous-projet QB).
   if (transaction.qbProjectRef) {
     const parRef = projets.find((p) => p.id === transaction.qbProjectRef);
-    if (parRef) return parRef.id;
+    if (parRef) return { type: "projet", id: parRef.id };
   }
   // Règle 1b : correspondance par CustomerRef QuickBooks → client de
   // l'appli → projet "En cours" le plus pertinent pour ce client.
@@ -652,14 +664,14 @@ function attribuerTransactionQuickBooks(transaction, projets, clients) {
     if (client) {
       const projetsDuClient = projets.filter((p) => p.clientId === client.id);
       const projetPertinent = projetsDuClient.find((p) => p.statut === "En cours") || projetsDuClient[0];
-      if (projetPertinent) return projetPertinent.id;
+      if (projetPertinent) return { type: "projet", id: projetPertinent.id };
     }
   }
   // Règle 2a : le numéro de BC est SEUL dans le champ « Nº de
   // référence » — le cas propre, correspondance exacte.
   if (transaction.poNumber) {
     const projetParBc = projets.find((p) => (p.bonsCommande || []).some((bc) => bc.numeroBC === transaction.poNumber));
-    if (projetParBc) return projetParBc.id;
+    if (projetParBc) return { type: "projet", id: projetParBc.id };
   }
   // Règle 2b : LE NUMÉRO EST NOYÉ DANS DU TEXTE (2026-08-24).
   // ------------------------------------------------------------
@@ -673,9 +685,50 @@ function attribuerTransactionQuickBooks(transaction, projets, clients) {
     const projetParTexte = projets.find((p) =>
       (p.bonsCommande || []).some((bc) => texteContientBc(texte, bc.numeroBC))
     );
-    if (projetParTexte) return projetParTexte.id;
+    if (projetParTexte) return { type: "projet", id: projetParTexte.id };
+  }
+
+  // ---- Règle 3 : LE BC D'UNE TÂCHE (2026-08-26) ----
+  // Un BC créé pour une job sans projet vit dans `achats_libres` avec
+  // son `tacheId`. Même recherche que pour les projets — numéro exact,
+  // puis numéro noyé dans le mémo ou une description de ligne.
+  const achatsAvecTache = (achatsLibres || []).filter((a) => a.tacheId && a.numeroBc);
+  if (transaction.poNumber) {
+    const parBc = achatsAvecTache.find(
+      (a) => String(a.numeroBc).trim().toUpperCase() === String(transaction.poNumber).trim().toUpperCase()
+    );
+    if (parBc) return { type: "tache", id: parBc.tacheId };
+  }
+  if (transaction.referenceTexte) {
+    const texte = String(transaction.referenceTexte).toUpperCase();
+    const parTexte = achatsAvecTache.find((a) => texteContientBc(texte, a.numeroBc));
+    if (parTexte) return { type: "tache", id: parTexte.tacheId };
+  }
+
+  // ---- Règle 4 : LE CLIENT, à défaut de mieux (2026-08-26) ----
+  // Le fournisseur a facturé au nom du client mais aucun projet ni
+  // aucun BC ne colle : la dépense appartient quand même à ce client.
+  // Mieux vaut un coût rattaché au bon DOSSIER qu'un coût nulle part.
+  if (transaction.customerRefId) {
+    const client = clients.find((c) => c.quickbooksCustomerId === transaction.customerRefId);
+    if (client) return { type: "client", id: client.id };
   }
   return null; // Fallback → attribution manuelle requise.
+}
+
+// Pose la cible sur une transaction — attribution MANUELLE d'abord (la
+// décision humaine prime toujours et survit aux rafraîchissements),
+// automatique ensuite. `projectId` reste rempli pour une cible de type
+// « projet » : tous les écrans qui le lisent déjà continuent de
+// fonctionner sans changement.
+function enrichirTransactionQb(t, manuelles, projets, clients, achatsLibres) {
+  const cible = manuelles?.[t.quickbooksId] || attribuerTransactionQuickBooks(t, projets, clients, achatsLibres);
+  return {
+    ...t,
+    cible: cible || null,
+    projectId: cible?.type === "projet" ? cible.id : null,
+    syncedAt: new Date().toISOString(),
+  };
 }
 
 // Le numéro « BC-104 » ne doit PAS se reconnaître dans « BC-1042 » :
@@ -4659,7 +4712,32 @@ function bornesPeriodeAnalyse(cle, debutFiscal = "01-01") {
   return { debut: "0000-01-01", fin: "9999-12-31" };
 }
 
-function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], onFermer }) {
+function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], onFermer }) {
+  // 🧾 DÉPENSES QUICKBOOKS RATTACHÉES (2026-08-26) — l'écran ne les
+  // recevait même pas : un achat fait dans QuickBooks pour une job
+  // n'apparaissait donc dans AUCUN coût ici, quoi qu'on fasse.
+  // Indexées par tâche et par client pour être lues sans re-balayer
+  // toute la liste à chaque ligne du tableau.
+  const depensesQbParTache = useMemo(() => {
+    const m = new Map();
+    (transactionsQb || []).forEach((t) => {
+      if (t.type !== "EXPENSE" || t.cible?.type !== "tache") return;
+      m.set(t.cible.id, (m.get(t.cible.id) || 0) + (Number(t.amountHT) || 0));
+    });
+    return m;
+  }, [transactionsQb]);
+  // Rattachée à un CLIENT (aucune job précise) : le coût appartient au
+  // dossier, pas à une tâche — il s'ajoute au total du client.
+  const depensesQbParClient = useMemo(() => {
+    const m = new Map();
+    (transactionsQb || []).forEach((t) => {
+      if (t.type !== "EXPENSE" || t.cible?.type !== "client") return;
+      const nom = (clients || []).find((c) => c.id === t.cible.id)?.nom || null;
+      if (!nom) return;
+      m.set(nom, (m.get(nom) || 0) + (Number(t.amountHT) || 0));
+    });
+    return m;
+  }, [transactionsQb, clients]);
   const configEnt = useEntreprise();
   const seuil = Number(configEnt?.seuilMargeAlerte) || 25;
   const camionDefaut = Number(configEnt?.coutCamionHoraire) || 0;
@@ -4694,8 +4772,30 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
       (s, b) => s + (b.facturesEmises || []).filter((f) => dedans(f.date)).reduce((x, f) => x + (Number(f.montant) || 0), 0),
       0
     );
-    const margeOp = revenus > 0 ? ((revenus - coutMo) / revenus) * 100 : null;
-    return { revenus, coutMo, coutInvisible, heuresInvisibles, margeOp, travauxPeriode };
+    // 📦 MATÉRIEL ET ACHATS (2026-08-26) — ces tuiles n'en tenaient
+    // aucun compte (« avant matériaux — QuickBooks : Phase 4 »), alors
+    // que le tableau du bas les comptait déjà : le MÊME écran affichait
+    // donc deux vérités, et la marge du haut était toujours trop belle.
+    // Le stock posé sur les bons, les achats rattachés à une job et les
+    // dépenses QuickBooks rattachées entrent maintenant dans le calcul.
+    const bonsPeriode = (bons || []).filter((b) => dedans(b.date));
+    const tachesPeriode = new Set(bonsPeriode.map((b) => b.tacheId).filter(Boolean));
+    const coutStock = bonsPeriode.reduce(
+      (s, b) => s + (b.materielStock || []).reduce((x, it) => x + (Number(it.coutant) || 0) * (Number(it.quantite) || 1), 0),
+      0
+    );
+    const coutAchats = (achatsLibres || [])
+      .filter((a) => a.tacheId && tachesPeriode.has(a.tacheId))
+      .reduce((s, a) => s + (a.montantAttribue != null ? a.montantAttribue : a.montantHT), 0);
+    // Dépenses QuickBooks rattachées (tâche de la période, ou client) —
+    // datées par QuickBooks, donc filtrées sur la même période.
+    const coutQb = (transactionsQb || [])
+      .filter((t) => t.type === "EXPENSE" && dedans(t.date))
+      .filter((t) => (t.cible?.type === "tache" && tachesPeriode.has(t.cible.id)) || t.cible?.type === "client")
+      .reduce((s, t) => s + (Number(t.amountHT) || 0), 0);
+    const coutMateriaux = coutStock + coutAchats + coutQb;
+    const margeOp = revenus > 0 ? ((revenus - coutMo - coutMateriaux) / revenus) * 100 : null;
+    return { revenus, coutMo, coutMateriaux, coutInvisible, heuresInvisibles, margeOp, travauxPeriode };
   };
 
   const debutFiscal = configEnt?.debutAnneeFiscale || "01-01";
@@ -4792,7 +4892,9 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
         const coutAchats = (achatsLibres || [])
           .filter((a) => a.tacheId && a.tacheId === b.tacheId)
           .reduce((s, a) => s + (a.montantAttribue != null ? a.montantAttribue : a.montantHT), 0);
-        const cout = coutMo + coutMateriel + coutStock + coutAchats;
+        // 🧾 Dépense QuickBooks rattachée À CETTE TÂCHE (2026-08-26).
+        const coutQb = depensesQbParTache.get(b.tacheId) || 0;
+        const cout = coutMo + coutMateriel + coutStock + coutAchats + coutQb;
         const marge = b.facture > 0 ? ((b.facture - cout) / b.facture) * 100 : null;
         const statutTexte =
           b.statutQb === "retire"
@@ -4842,6 +4944,15 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
       e.cout += j.cout;
       e.jobs += 1;
       m.set(cle, e);
+    });
+    // 🧾 Dépenses QuickBooks rattachées au CLIENT lui-même (pas à une
+    // job précise) : elles s'ajoutent à son total. Un client qui n'a
+    // aucune job facturée dans la période apparaît quand même — un coût
+    // sans revenu est justement ce qu'il faut voir.
+    depensesQbParClient.forEach((montant, nom) => {
+      const e = m.get(nom) || { clientNom: nom, facture: 0, cout: 0, jobs: 0 };
+      e.cout += montant;
+      m.set(nom, e);
     });
     return [...m.values()]
       .map((e) => ({ ...e, profit: e.facture - e.cout, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : 0 }))
@@ -4915,6 +5026,9 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-[9px] font-extrabold uppercase text-slate-400">Main-d'œuvre + camion</p>
             <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-900">{fmt$(stats.coutMo)}</p>
+            {stats.coutMateriaux > 0 && (
+              <p className="text-[10px] text-slate-500">+ {fmt$(stats.coutMateriaux)} matériel et achats</p>
+            )}
           </div>
           <div className="rounded-xl border border-purple-200 bg-purple-50 p-3">
             <p className="text-[9px] font-extrabold uppercase text-purple-500">👻 Coût invisible</p>
@@ -4931,7 +5045,11 @@ function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspectio
                 {tendance > 0.5 ? "↗" : tendance < -0.5 ? "↘" : "→"} {tendance > 0 ? "+" : ""}{tendance} pts vs mois dernier
               </p>
             )}
-            <p className="text-[9px] text-slate-400">avant matériaux (QuickBooks : Phase 4)</p>
+            <p className="text-[9px] text-slate-400">
+              {stats.coutMateriaux > 0
+                ? "main-d'œuvre, camion, matériel et achats rattachés"
+                : "aucun matériel ni achat rattaché à cette période"}
+            </p>
           </div>
         </div>
 
@@ -5350,6 +5468,8 @@ function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, t
           devisListe={devisListe}
           inspections={inspections}
           achatsLibres={achatsLibres}
+          transactionsQb={transactionsQb}
+          clients={clients}
           onFermer={() => setAnalyseOuverte(false)}
         />
       )}
@@ -9622,7 +9742,7 @@ const CarteProjet = React.memo(function CarteProjet({ p, client, travaux, transa
   );
 });
 
-function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooks, onAssignerTransaction, ajouterJournal, peutSyncQb, fournisseurs, setFournisseurs, inspections }) {
+function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, transactionsQb, bonsTravail = [], utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooks, onAssignerTransaction, ajouterJournal, peutSyncQb, fournisseurs, setFournisseurs, inspections }) {
   const [recherche, setRecherche] = useState("");
   const [filtreStatut, setFiltreStatut] = useState("Tous");
   const [filtreClientId, setFiltreClientId] = useState("");
@@ -9648,7 +9768,22 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
   //     aucune marge, le classer ne sert donc à rien.
   // ============================================================
   const [blocQbOuvert, setBlocQbOuvert] = useState(false);
-  const transactionsSansProjet = transactionsQb.filter((t) => !t.projectId);
+  // 🔧 Les JOBS auxquelles on peut rattacher une dépense : les bons de
+  // travail (une job facturable = un bon), les plus récents d'abord.
+  // C'est la même clé `tacheId` que les achats saisis à la main.
+  const jobsRattachables = useMemo(() => {
+    const vues = new Set();
+    return (bonsTravail || [])
+      .filter((b) => b.tacheId && !vues.has(b.tacheId) && vues.add(b.tacheId))
+      .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
+      .slice(0, 60)
+      .map((b) => ({
+        id: b.tacheId,
+        libelle: `${b.date || ""} · ${b.projet || "Travail"}${b.client ? ` — ${b.client}` : ""}`,
+      }));
+  }, [bonsTravail]);
+
+  const transactionsSansProjet = transactionsQb.filter((t) => !t.cible);
   const transactionsNonAssignees = transactionsSansProjet.filter(
     (t) => Math.abs(Number(t.amountHT) || 0) > 0
   );
@@ -9757,22 +9892,28 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
               <AlertTriangle size={13} className="shrink-0" />
               <span className="truncate">
                 {transactionsNonAssignees.length} facture{transactionsNonAssignees.length > 1 ? "s" : ""} QuickBooks à
-                rattacher à un projet
+                rattacher à un projet, une job ou un client
               </span>
             </span>
             <span className="shrink-0 text-[11px] font-bold text-amber-700">{blocQbOuvert ? "▲ Replier" : "▼ Ouvrir"}</span>
           </button>
           {!blocQbOuvert && (
             <p className="mt-1 text-[10px] leading-snug text-amber-600">
-              Sert à calculer la marge réelle d&apos;un projet. Rien d&apos;urgent : tant qu&apos;une facture n&apos;est
-              pas rattachée, elle ne fausse aucun chiffre — elle n&apos;est simplement comptée nulle part.
+              Sert à calculer la marge réelle. Une dépense se rattache à un <span className="font-bold">projet</span>, à une{" "}
+              <span className="font-bold">job</span> (le produit acheté pour une tâche précise) ou à un{" "}
+              <span className="font-bold">client</span>. Rien d&apos;urgent : tant qu&apos;une facture n&apos;est pas
+              rattachée, elle ne fausse aucun chiffre — elle n&apos;est simplement comptée nulle part.
               {nbQbMontantNul > 0 && ` (${nbQbMontantNul} facture${nbQbMontantNul > 1 ? "s" : ""} à 0,00 $ écartée${nbQbMontantNul > 1 ? "s" : ""} — un montant nul ne change aucune marge.)`}
             </p>
           )}
           {blocQbOuvert && (
           <div className="mt-2 space-y-1.5">
             {transactionsNonAssignees.map((t) => {
-              const choixProjet = assignationManuelleId?.quickbooksId === t.quickbooksId ? assignationManuelleId.projetId : "";
+              // 🎯 TROIS CIBLES (2026-08-26) : un achat fait pour une job
+              // SANS projet n'avait aucune destination — il restait
+              // orphelin et son coût n'apparaissait nulle part. La valeur
+              // du menu est « type:id » pour tenir les trois familles.
+              const choix = assignationManuelleId?.quickbooksId === t.quickbooksId ? assignationManuelleId.valeur : "";
               return (
                 <div key={t.quickbooksId} className="rounded-lg border border-amber-200 bg-white p-2 text-xs">
                   <div className="flex items-center justify-between">
@@ -9781,19 +9922,47 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
                     </span>
                     <span className="font-bold tabular-nums text-slate-700">{t.amountHT.toFixed(2)} $ HT</span>
                   </div>
+                  {(t.poNumber || t.referenceTexte) && (
+                    <p className="mt-0.5 truncate text-[10px] text-slate-400">
+                      {t.poNumber ? `Nº ${t.poNumber}` : ""}{t.poNumber && t.referenceTexte ? " · " : ""}
+                      {t.referenceTexte ? String(t.referenceTexte).slice(0, 70) : ""}
+                    </p>
+                  )}
                   <div className="mt-1.5 flex gap-1.5">
                     <select
-                      value={choixProjet}
-                      onChange={(e) => setAssignationManuelleId({ quickbooksId: t.quickbooksId, projetId: e.target.value })}
+                      value={choix}
+                      onChange={(e) => setAssignationManuelleId({ quickbooksId: t.quickbooksId, valeur: e.target.value })}
                       className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
                     >
-                      <option value="">Choisir le projet...</option>
-                      {projets.map((p) => <option key={p.id} value={p.id}>{p.nom}</option>)}
+                      <option value="">Rattacher à…</option>
+                      {projets.length > 0 && (
+                        <optgroup label="🏗️ Projets">
+                          {projets.map((p) => <option key={p.id} value={`projet:${p.id}`}>{p.nom}</option>)}
+                        </optgroup>
+                      )}
+                      {jobsRattachables.length > 0 && (
+                        <optgroup label="🔧 Jobs (tâches)">
+                          {jobsRattachables.map((j) => (
+                            <option key={j.id} value={`tache:${j.id}`}>
+                              {j.libelle}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {(clients || []).length > 0 && (
+                        <optgroup label="👤 Clients (aucune job précise)">
+                          {(clients || []).map((c) => <option key={c.id} value={`client:${c.id}`}>{c.nom}</option>)}
+                        </optgroup>
+                      )}
                     </select>
                     <Button
                       variant="outline"
-                      disabled={!choixProjet}
-                      onClick={() => { onAssignerTransaction(t.quickbooksId, choixProjet); setAssignationManuelleId(null); }}
+                      disabled={!choix}
+                      onClick={() => {
+                        const [type, ...reste] = String(choix).split(":");
+                        onAssignerTransaction(t.quickbooksId, { type, id: reste.join(":") });
+                        setAssignationManuelleId(null);
+                      }}
                       className="min-h-0 px-2 py-1 text-[11px]"
                     >
                       Assigner
@@ -22198,6 +22367,8 @@ export default function App() {
   projetsRef.current = projets;
   const clientsRef = useRef(clients);
   clientsRef.current = clients;
+  const achatsLibresRef = useRef(achatsLibres);
+  achatsLibresRef.current = achatsLibres;
   useEffect(() => {
     if (!session) return;
     listerAttributionsQb()
@@ -22241,13 +22412,9 @@ export default function App() {
     // les attributions MANUELLES enregistrées (la décision humaine prime
     // et survit au rafraîchissement).
     const manuelles = attributionsQbRef.current || {};
-    const enrichies = brutes.map((t) => ({
-      ...t,
-      projectId: manuelles[t.quickbooksId] || attribuerTransactionQuickBooks(t, projets, clients),
-      syncedAt: new Date().toISOString(),
-    }));
+    const enrichies = brutes.map((t) => enrichirTransactionQb(t, manuelles, projets, clients, achatsLibres));
     setTransactionsQb(enrichies);
-    const nbAssignees = enrichies.filter((t) => t.projectId).length;
+    const nbAssignees = enrichies.filter((t) => t.cible).length;
     const nbNonAssignees = enrichies.length - nbAssignees;
     ajouterJournal(
       `🔄 ${enrichies.length} transactions QuickBooks${sourceReelle ? "" : " (démo)"} synchronisées — ${nbAssignees} attribuées automatiquement, ${nbNonAssignees} en attente d'attribution manuelle`
@@ -22255,20 +22422,40 @@ export default function App() {
     setSyncQbEnCours(false);
   };
 
-  const assignerTransactionManuellement = (quickbooksId, projetId) => {
-    setTransactionsQb((prev) => prev.map((t) => (t.quickbooksId === quickbooksId ? { ...t, projectId: projetId } : t)));
+  // `cible` = { type: "projet"|"tache"|"client", id } — ou null pour
+  // retirer l'attribution (retour à l'automatique). Trois familles
+  // depuis le 2026-08-26 : un achat pour une job sans projet n'avait
+  // avant AUCUNE destination possible.
+  const assignerTransactionManuellement = (quickbooksId, cible) => {
+    const valide = cible?.type && cible?.id ? cible : null;
+    setTransactionsQb((prev) =>
+      prev.map((t) =>
+        t.quickbooksId === quickbooksId
+          ? { ...t, cible: valide, projectId: valide?.type === "projet" ? valide.id : null }
+          : t
+      )
+    );
     setAttributionsQb((prev) => {
       const suivant = { ...prev };
-      if (projetId) suivant[quickbooksId] = projetId;
+      if (valide) suivant[quickbooksId] = valide;
       else delete suivant[quickbooksId];
       return suivant;
     });
     // PERSISTANCE : la décision survit au rafraîchissement (table Supabase).
-    enregistrerAttributionQb(quickbooksId, projetId, session?.user?.email).catch(() =>
-      ajouterJournal("⚠️ Attribution affichée mais NON enregistrée — vérifie la connexion (elle sera perdue au rafraîchissement).")
+    enregistrerAttributionQb(quickbooksId, valide, session?.user?.email).catch(() =>
+      ajouterJournal("⚠️ Attribution affichée mais NON enregistrée — passe le snippet SQL 78 (elle sera perdue au rafraîchissement).")
     );
-    const p = projets.find((x) => x.id === projetId);
-    ajouterJournal(`✋ Transaction QuickBooks ${quickbooksId} assignée manuellement au projet "${p?.nom}"`);
+    if (!valide) {
+      ajouterJournal(`✋ Transaction QuickBooks ${quickbooksId} détachée — elle redevient à attribuer.`);
+      return;
+    }
+    const nom =
+      valide.type === "projet"
+        ? `projet « ${projets.find((x) => x.id === valide.id)?.nom || valide.id} »`
+        : valide.type === "client"
+        ? `client « ${clients.find((x) => x.id === valide.id)?.nom || valide.id} »`
+        : `job « ${(bons || []).find((b) => b.tacheId === valide.id)?.projet || valide.id} »`;
+    ajouterJournal(`✋ Transaction QuickBooks ${quickbooksId} rattachée manuellement au ${nom} — son coût y est maintenant compté.`);
   };
 
   // Badge de la navigation : nombre de projets à risque (dépassement,
@@ -22351,11 +22538,9 @@ export default function App() {
           if (annule || !Array.isArray(r?.transactions)) return;
           const manuelles = attributionsQbRef.current || {};
           setTransactionsQb(
-            r.transactions.map((t) => ({
-              ...t,
-              projectId: manuelles[t.quickbooksId] || attribuerTransactionQuickBooks(t, projetsRef.current || [], clientsRef.current || []),
-              syncedAt: new Date().toISOString(),
-            }))
+            r.transactions.map((t) =>
+              enrichirTransactionQb(t, manuelles, projetsRef.current || [], clientsRef.current || [], achatsLibresRef.current || [])
+            )
           );
         } catch {
           // silencieux — le bouton « Synchroniser » reste là
@@ -22710,6 +22895,7 @@ export default function App() {
           travaux={travaux}
           devisListe={devisListe}
           transactionsQb={transactionsQb}
+          bonsTravail={bons}
           utilisateurs={utilisateurs}
           tauxMetiers={tauxMetiers}
           syncQbEnCours={syncQbEnCours}
