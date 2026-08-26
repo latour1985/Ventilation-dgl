@@ -1418,6 +1418,111 @@ const STATUTS_PIECE = {
   annulee: { label: "Annulée", cls: "bg-slate-100 text-slate-500 border-slate-300" },
 };
 
+// ============================================================
+// 🔎 SÉLECTEUR DE RATTACHEMENT AVEC RECHERCHE (2026-08-26)
+// ------------------------------------------------------------
+// Les listes de clients et de tâches s'allongent : dérouler un <select>
+// ne suffisait plus (demande du propriétaire). On TAPE quelques lettres
+// — ou on clique pour voir toute la liste — et les familles restent
+// groupées : Tâches (jobs) / Clients / Projets. La valeur garde le même
+// encodage qu'avant : "" | "t:id" | "c:id" | "p:id".
+// ============================================================
+function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = [], projets = [], libelleRepli = "", className = "" }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [filtre, setFiltre] = useState("");
+  const boiteRef = useRef(null);
+  // Clic hors de la boîte = fermeture (sans rien choisir).
+  useEffect(() => {
+    if (!ouvert) return;
+    const fermer = (e) => {
+      if (boiteRef.current && !boiteRef.current.contains(e.target)) setOuvert(false);
+    };
+    document.addEventListener("mousedown", fermer);
+    return () => document.removeEventListener("mousedown", fermer);
+  }, [ouvert]);
+  const f = filtre.trim().toLowerCase();
+  const garde = (texte) => !f || String(texte || "").toLowerCase().includes(f);
+  // Plafond par famille : au-delà, taper une lettre de plus est plus
+  // rapide que défiler — et la liste reste fluide.
+  const tachesVisibles = taches.filter((t) => garde(`${t.clientNom} ${t.titre}`)).slice(0, 25);
+  const clientsVisibles = clients.filter((c) => garde(c.nom)).slice(0, 25);
+  const projetsVisibles = projets.filter((p) => garde(p.nom)).slice(0, 25);
+  const libelle = (() => {
+    if (!valeur) return "";
+    if (valeur.startsWith("t:")) {
+      const t = taches.find((x) => x.id === valeur.slice(2));
+      return t ? `Tâche : ${t.clientNom ? `${t.clientNom} — ` : ""}${t.titre}` : libelleRepli || "Tâche rattachée";
+    }
+    if (valeur.startsWith("c:")) {
+      const c = clients.find((x) => x.id === valeur.slice(2));
+      return c ? `Client : ${c.nom}` : libelleRepli || "Client rattaché";
+    }
+    if (valeur.startsWith("p:")) {
+      const p = projets.find((x) => x.id === valeur.slice(2));
+      return p ? `Projet : ${p.nom}` : libelleRepli || "Projet";
+    }
+    return "";
+  })();
+  // Une cible choisie s'affiche en étiquette — le ✕ la retire (retour
+  // à « achat général ») et rouvre la recherche.
+  if (valeur) {
+    return (
+      <div className={`flex items-center gap-1.5 rounded-lg border border-slate-300 bg-slate-50 px-2 py-1.5 text-xs ${className}`}>
+        <span className="min-w-0 flex-1 truncate font-semibold text-slate-700">{libelle}</span>
+        <button
+          type="button"
+          onClick={() => { onChoisir(""); setFiltre(""); setOuvert(false); }}
+          title="Retirer — redevient un achat général (stock)"
+          aria-label="Retirer le rattachement"
+          className="shrink-0 text-slate-400 hover:text-red-500"
+        >
+          <X size={13} />
+        </button>
+      </div>
+    );
+  }
+  const groupe = (titre, items, rendu, prefixe) =>
+    items.length > 0 && (
+      <div key={titre}>
+        <p className="sticky top-0 bg-slate-50 px-2 py-1 text-[9px] font-extrabold uppercase tracking-wide text-slate-400">{titre}</p>
+        {items.map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            onClick={() => { onChoisir(`${prefixe}:${x.id}`); setOuvert(false); setFiltre(""); }}
+            className="block w-full truncate px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-orange-50"
+          >
+            {rendu(x)}
+          </button>
+        ))}
+      </div>
+    );
+  return (
+    <div ref={boiteRef} className={`relative ${className}`}>
+      <input
+        value={filtre}
+        onFocus={() => setOuvert(true)}
+        onChange={(e) => { setFiltre(e.target.value); setOuvert(true); }}
+        placeholder="Achat général — ou tape un client, une tâche, un projet…"
+        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+      />
+      {ouvert && (
+        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+          {tachesVisibles.length === 0 && clientsVisibles.length === 0 && projetsVisibles.length === 0 ? (
+            <p className="px-2 py-2 text-center text-[11px] text-slate-400">Aucun résultat — l&apos;achat restera général (stock).</p>
+          ) : (
+            <>
+              {groupe("Tâches (jobs)", tachesVisibles, (t) => `${t.clientNom ? `${t.clientNom} — ` : ""}${t.titre}`, "t")}
+              {groupe("Clients", clientsVisibles, (c) => c.nom, "c")}
+              {groupe("Projets", projetsVisibles, (p) => p.nom, "p")}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
@@ -1948,31 +2053,21 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
                   <InputNombreDecimal valeur={Number(bcLibre.montantHT) || 0} onChange={(v) => setBcLibre((f) => ({ ...f, montantHT: v }))} className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
                   $
                 </span>
-                <select
-                  value={bcLibre.tacheId ? `t:${bcLibre.tacheId}` : bcLibre.clientId ? `c:${bcLibre.clientId}` : bcLibre.projetId ? `p:${bcLibre.projetId}` : ""}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                {/* 🔎 Recherche par nom OU liste complète au clic —
+                    Tâches / Clients / Projets groupés. */}
+                <SelecteurCibleAchat
+                  valeur={bcLibre.tacheId ? `t:${bcLibre.tacheId}` : bcLibre.clientId ? `c:${bcLibre.clientId}` : bcLibre.projetId ? `p:${bcLibre.projetId}` : ""}
+                  onChoisir={(v) => {
                     if (v.startsWith("t:")) setBcLibre((f) => ({ ...f, tacheId: v.slice(2), clientId: "", projetId: "" }));
                     else if (v.startsWith("c:")) setBcLibre((f) => ({ ...f, clientId: v.slice(2), tacheId: "", projetId: "" }));
                     else if (v.startsWith("p:")) setBcLibre((f) => ({ ...f, projetId: v.slice(2), tacheId: "", clientId: "", montantAttribue: "" }));
                     else setBcLibre((f) => ({ ...f, projetId: "", tacheId: "", clientId: "", montantAttribue: "" }));
                   }}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                >
-                  <option value="">Achat général (stock — aucun rattachement)</option>
-                  {/* 🔗 TÂCHES d'abord : l'achat le plus courant est pour
-                      une JOB précise (le Midea de tel client) — son coût
-                      doit suivre le client, projet ou pas. */}
-                  {(tachesPourAchat || []).map((t) => (
-                    <option key={t.id} value={`t:${t.id}`}>
-                      Tâche : {t.clientNom ? `${t.clientNom} — ` : ""}{t.titre}
-                    </option>
-                  ))}
-                  {/* 👤 CLIENT direct (2026-08-26) : l'achat pour un client
-                      précis, avant même que la job soit à l'horaire. */}
-                  {(clients || []).map((c) => <option key={c.id} value={`c:${c.id}`}>Client : {c.nom}</option>)}
-                  {(projets || []).map((pr) => <option key={pr.id} value={`p:${pr.id}`}>Projet : {pr.nom}</option>)}
-                </select>
+                  taches={tachesPourAchat || []}
+                  clients={clients || []}
+                  projets={projets || []}
+                  className="min-w-0 flex-1"
+                />
               </div>
               {/* 💵 PART DE LA JOB — ajustable À LA BAISSE seulement : on
                   profite d'une commande pour ajouter du stock (rouleaux
@@ -2082,23 +2177,23 @@ function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fourni
               </div>
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Rattachement (où va le coût ?)</label>
-                <select
-                  value={bcEdit.cible}
-                  onChange={(e) => setBcEdit((f) => ({ ...f, cible: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
-                >
-                  <option value="">Achat général (stock — aucun rattachement)</option>
-                  {(tachesPourAchat || []).map((t) => (
-                    <option key={t.id} value={`t:${t.id}`}>Tâche : {t.clientNom ? `${t.clientNom} — ` : ""}{t.titre}</option>
-                  ))}
-                  {/* La tâche déjà rattachée reste choisie même si elle a
-                      quitté l'horaire — sinon l'écran mentirait. */}
-                  {bcOuvert.tacheId && !(tachesPourAchat || []).some((t) => t.id === bcOuvert.tacheId) && (
-                    <option value={`t:${bcOuvert.tacheId}`}>Tâche : {bcOuvert.clientNom ? `${bcOuvert.clientNom} — ` : ""}{bcOuvert.tacheTitre || bcOuvert.tacheId}</option>
-                  )}
-                  {(clients || []).map((c) => <option key={c.id} value={`c:${c.id}`}>Client : {c.nom}</option>)}
-                  {(projets || []).map((pr) => <option key={pr.id} value={`p:${pr.id}`}>Projet : {pr.nom}</option>)}
-                </select>
+                {/* 🔎 Même sélecteur avec recherche qu'à la création. La
+                    tâche déjà rattachée mais disparue de l'horaire garde
+                    son étiquette (libelleRepli) — l'écran ne ment pas. */}
+                <SelecteurCibleAchat
+                  valeur={bcEdit.cible}
+                  onChoisir={(v) => setBcEdit((f) => ({ ...f, cible: v }))}
+                  taches={tachesPourAchat || []}
+                  clients={clients || []}
+                  projets={projets || []}
+                  libelleRepli={
+                    bcOuvert.tacheId
+                      ? `Tâche : ${bcOuvert.clientNom ? `${bcOuvert.clientNom} — ` : ""}${bcOuvert.tacheTitre || bcOuvert.tacheId}`
+                      : bcOuvert.clientNom
+                        ? `Client : ${bcOuvert.clientNom}`
+                        : ""
+                  }
+                />
                 {bcEdit.cible.startsWith("p:") && (
                   <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] leading-snug text-amber-800">
                     🏗️ Un projet choisi = le bon DÉMÉNAGE dans la fiche du projet (ses coûts vivent là) et quitte cette liste.
