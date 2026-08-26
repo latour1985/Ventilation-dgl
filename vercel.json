@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/sauvegarde",
+      "schedule": "0 9 * * 1"
+    }
+  ]
+}
