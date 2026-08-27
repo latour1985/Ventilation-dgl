@@ -9,10 +9,22 @@
 // MÉCANIQUE : aucun comportement ne change, le code est déplacé tel
 // quel — seuls des `export`/`import` s'ajoutent.
 
-import { useEffect, useRef, useState } from "react";
-import { Camera, Loader2, X } from "lucide-react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Camera, Check, FileCheck2, Loader2, MapPin, Search, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import { ZONES_DEPOTS, zonesDepuis } from "@/lib/supabase/prixDepots";
 import { permissionsPour } from "@/lib/permissions";
+import { supabase } from "@/lib/supabase/client";
+import { useEntreprise } from "@/lib/contexteEntreprise";
+import { calculerTaxes } from "@/lib/supabase/entreprise";
+import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
+import { listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
+import TermesConditions from "@/components/TermesConditions";
+import VisionneusePhotos from "@/components/VisionneusePhotos";
+// ⚠️ Cycle assumé partage ↔ OngletParametres : les deux ne se lisent
+// qu'au RENDU (composants), jamais à l'initialisation du module — le
+// même patron que page.jsx ↔ modules extraits.
+import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
 
 // ============================================================
 // COMPOSANT BOUTON RÉUTILISABLE
@@ -708,3 +720,865 @@ export function correspond(client, terme) {
 // les onglets de versions. Réutilisée dans le dossier client et dans les
 // résultats de recherche : un seul comportement partout.
 // ============================================================
+
+
+// RÉPERTOIRE DES CLIENTS — même raison : les aperçus de documents ont
+// besoin de l'adresse de facturation, et ils sont trop imbriqués pour
+// la recevoir en propriété depuis l'App.
+export const ContexteClients = createContext([]);
+
+export function useClients() {
+  return useContext(ContexteClients) || [];
+}
+
+// LISTE DES DEVIS — la facture d'un devis doit pouvoir reprendre ses
+// lignes détaillées, sinon le client reçoit un montant sans explication.
+
+// LISTE DES DEVIS — la facture d'un devis doit pouvoir reprendre ses
+// lignes détaillées, sinon le client reçoit un montant sans explication.
+export const ContexteDevis = createContext([]);
+
+export function useDevis() {
+  return useContext(ContexteDevis) || [];
+}
+
+// Hauteur d'un champ de description pour qu'il montre TOUT son contenu
+// sans barre de défilement interne.
+//
+// Une description QuickBooks fait souvent 15 lignes (modèles, garantie,
+// numéros AHRI, subventions). Un champ plafonné à 6 lignes n'en montrait
+// qu'un tiers, et il fallait faire défiler dans une boîte minuscule pour
+// relire ce qu'on envoie au client — donc on ne le relisait pas.
+//
+// On compte les sauts de ligne ET les retours à la ligne automatiques
+// (une ligne longue occupe plusieurs rangées à l'écran).
+
+export const BoutonPDF = dynamic(() => import("@/components/pdf/BoutonPDF"), {
+  ssr: false,
+  loading: () => (
+    <span className="mt-3 block text-center text-[11px] text-slate-400">Chargement du PDF…</span>
+  ),
+});
+
+
+export const TERMES_FACTURATION = ["Comptant à la livraison", "Net 15", "Net 30", "Net 45", "Net 60"];
+
+
+export function nomAffichageClient(c) {
+  if (!c) return "";
+  const nom = (c.nom || "").trim();
+  const entreprise = (c.entreprise || "").trim();
+  const mode = c.nomAffichage || "nom";
+  if (mode === "entreprise") return entreprise || nom;
+  if (mode === "nom-entreprise") return [nom, entreprise].filter(Boolean).join(" — ") || nom;
+  return nom || entreprise;
+}
+
+// Heure locale « HH:MM » d'un horodatage — pour afficher les heures
+// RÉELLES chronométrées sur les blocs terminés de l'agenda (2026-08-19).
+
+// Étiquette d'une adresse de chantier — avec l'appartement s'il existe.
+export function libelleAdresse(a) {
+  if (!a) return "";
+  return `${a.ligne1}${a.appartement ? `, app. ${a.appartement}` : ""}`;
+}
+
+// Génère une tâche de transport SYSTÈME (Début/Fin de journée). Ces
+// tâches sont recalculées automatiquement (voir recalculerTransports) et
+// ne doivent pas être supprimées à la main dans la grille.
+
+// ============================================================
+// CALCUL DE RENTABILITÉ D'UN PROJET (temps réel)
+// ============================================================
+// Avancement calendrier (temps écoulé entre dateDebut et dateFin),
+// distinct de l'avancement budgétaire — utilisé pour la double barre
+// de progression du Hub Projets.
+// Jauge de santé budgétaire — code couleur à 3 paliers :
+// vert (< 75% consommé), jaune (75-100%), rouge clignotant (> 100%,
+// dépassement réel du budget).
+export function couleurSanteBudget(pourcentageDepense) {
+  if (pourcentageDepense > 100) {
+    return { barre: "bg-red-500 animate-pulse", texte: "text-red-600", pastille: "bg-red-500 animate-pulse" };
+  }
+  if (pourcentageDepense >= 75) {
+    return { barre: "bg-amber-500", texte: "text-amber-600", pastille: "bg-amber-500" };
+  }
+  return { barre: "bg-emerald-500", texte: "text-emerald-600", pastille: "bg-emerald-500" };
+}
+
+
+// "En retard" est un indicateur calculé (pas un statut choisi par
+// l'admin) : la date de fin prévue est dépassée et le projet n'est
+// pas marqué "Terminé".
+export function projetEnRetard(projet) {
+  if (!projet.dateFin || projet.statut === "Terminé") return false;
+  return new Date(projet.dateFin).getTime() < Date.now();
+}
+
+// ------------------------------------------------------------
+// SANTÉ GLOBALE D'UN PROJET — règle unifiée utilisée PARTOUT (Hub,
+// Kanban, fiche client, tableau de bord) pour que le même projet
+// affiche toujours la même couleur, peu importe l'endroit :
+//   VERT  = sous-budget ET dans les temps
+//   JAUNE = 75-100% du budget consommé OU échéance dans les 7 jours
+//   ROUGE = dépassement de budget OU en retard OU en perte
+// ------------------------------------------------------------
+
+// ------------------------------------------------------------
+// SANTÉ GLOBALE D'UN PROJET — règle unifiée utilisée PARTOUT (Hub,
+// Kanban, fiche client, tableau de bord) pour que le même projet
+// affiche toujours la même couleur, peu importe l'endroit :
+//   VERT  = sous-budget ET dans les temps
+//   JAUNE = 75-100% du budget consommé OU échéance dans les 7 jours
+//   ROUGE = dépassement de budget OU en retard OU en perte
+// ------------------------------------------------------------
+export function evaluerSanteProjet(projet, r) {
+  const enRetard = projetEnRetard(projet);
+  const enPerte = r.profitReel < 0;
+
+  if (r.depassementBudget || enRetard || enPerte) {
+    return { niveau: "rouge", pastille: "bg-red-500 animate-pulse", texte: "text-red-600", fond: "bg-red-100" };
+  }
+
+  let echeanceProche = false;
+  if (projet.dateFin && projet.statut !== "Terminé") {
+    const joursRestants = (new Date(projet.dateFin).getTime() - Date.now()) / 86400000;
+    echeanceProche = joursRestants >= 0 && joursRestants <= 7;
+  }
+
+  if (r.pourcentageDepense >= 75 || echeanceProche) {
+    return { niveau: "jaune", pastille: "bg-amber-500", texte: "text-amber-600", fond: "bg-amber-100" };
+  }
+
+  return { niveau: "vert", pastille: "bg-emerald-500", texte: "text-emerald-600", fond: "bg-emerald-100" };
+}
+
+
+export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs = [], tauxMetiers = {}, inspections = [], coutCamionDefaut = 0) {
+  // Heures du projet — les heures ADMINISTRATIVES et DIVERSES en sont
+  // exclues même si elles portent un projetId. Une visite de soumission
+  // faite avant d'avoir vendu le contrat ne doit pas gonfler le coût de
+  // ce contrat : elle est un frais de vente de l'entreprise.
+  // (Ces heures restent PAYÉES — voir « Heures de la semaine ».)
+  const travauxDuProjet = travaux.filter(
+    (t) => t.projetId === projet.id && (t.categorieHeures || "projet") === "projet"
+  );
+  // Heures Totales du Projet = Heures Tâches Projet + Heures Transport
+  // Aller/Retour imputées (voir la règle d'imputation automatique côté
+  // app technicien, basée sur la chronologie de la journée). Les deux
+  // catégories sont distinguées ici pour l'affichage, mais comptent
+  // également dans le coût de main-d'œuvre.
+  const travauxChantier = travauxDuProjet.filter((t) => !t.estTransport);
+  const travauxTransport = travauxDuProjet.filter((t) => t.estTransport);
+  const heuresChantier = travauxChantier.reduce((s, t) => s + (t.heures || 0), 0);
+  const heuresTransport = travauxTransport.reduce((s, t) => s + (t.heures || 0), 0);
+  const totalHeures = heuresChantier + heuresTransport;
+  // Kilométrage total de transport rattaché au projet — capturé par
+  // GPS au départ/arrivée de chaque trajet côté app technicien.
+  const kilometrageTransport = travauxTransport.reduce((s, t) => s + (t.distanceKm || 0), 0);
+  // Dépenses QuickBooks (achats/sous-traitance) rattachées à ce projet.
+  // Les factures de vente QuickBooks rattachées → suivies séparément
+  // comme "facturé réel" (encaissements réels vs budget), sans changer le
+  // calcul du profit (qui reste basé sur le budget initial vendu).
+  const transactionsDuProjet = (transactionsQb || []).filter((t) => t.projectId === projet.id);
+  const depensesQb = transactionsDuProjet.filter((t) => t.type === "EXPENSE");
+  const facturesQb = transactionsDuProjet.filter((t) => t.type === "INVOICE");
+  // ------------------------------------------------------------
+  // ANTI-DOUBLE-COMPTAGE : un bon de commande saisi dans l'app et la
+  // facture fournisseur correspondante dans QuickBooks (même numéro de
+  // BC) sont LA MÊME dépense. On ne les additionne jamais :
+  // - BC apparié à une dépense QB → le montant RÉEL de QuickBooks fait
+  //   foi (il remplace le montant saisi, qui n'était qu'une estimation ;
+  //   un BC laissé à 0 se remplit donc tout seul) ;
+  // - BC sans dépense QB → son montant saisi compte (estimation) ;
+  // - dépense QB sans BC correspondant → s'ajoute normalement.
+  // ------------------------------------------------------------
+  const numeroBcNormalise = (v) => String(v || "").trim().toUpperCase();
+  const depensesParNumeroBc = new Map();
+  depensesQb.forEach((d) => {
+    const num = numeroBcNormalise(d.poNumber);
+    if (num) depensesParNumeroBc.set(num, d);
+    // Le numéro était NOYÉ dans le mémo (factures fournisseurs) : la
+    // règle d'attribution l'a retrouvé — même appariement.
+    const numMemo = numeroBcNormalise(d.cible?.bc);
+    if (numMemo) depensesParNumeroBc.set(numMemo, d);
+  });
+  const bcApparies = new Set();
+  const coutMateriauxBC = (projet.bonsCommande || []).reduce((s, bc) => {
+    const correspondance = depensesParNumeroBc.get(numeroBcNormalise(bc.numeroBC));
+    if (correspondance) {
+      bcApparies.add(correspondance.quickbooksId);
+      return s + (Number(correspondance.amountHT) || 0); // montant RÉEL de QuickBooks
+    }
+    return s + (Number(bc.montantHT) || 0); // estimation saisie dans l'app
+  }, 0);
+  // Dépenses QuickBooks qui ne correspondent à AUCUN bon de commande.
+  const coutMateriauxQb = depensesQb
+    .filter((d) => !bcApparies.has(d.quickbooksId))
+    .reduce((s, t) => s + (Number(t.amountHT) || 0), 0);
+  // MATÉRIEL DU STOCK — déjà payé, pris sur la tablette du bureau et
+  // attribué à ce projet (« 4 paquets de tuyaux ») : un vrai coût du
+  // projet même sans bon de commande ni dépense QuickBooks.
+  const coutMaterielStock = (projet.materielStock || []).reduce((s, m) => s + (Number(m.coutTotal) || 0), 0);
+  const coutMateriaux = coutMateriauxBC + coutMateriauxQb + coutMaterielStock;
+  const totalFactureReel = facturesQb.reduce((s, t) => s + t.amountHT, 0);
+  // Coût de main-d'œuvre : idéalement calculé par employé (taux du métier
+  // + niveau de celui qui a pointé les heures, lu dans la table centrale).
+  // Tant qu'un « travail » ne porte pas d'employeId (avant l'app technicien
+  // + Supabase), on retombe sur le taux unique du projet.
+  const tauxDeEmploye = (t) => {
+    // Priorité 1 : le taux FIGÉ à la saisie (spec contrôle de gestion) —
+    // stocké sur la ligne quand le technicien a terminé la tâche.
+    if (Number(t.tauxCoutantFige) > 0) return Number(t.tauxCoutantFige);
+    const emp = utilisateurs.find((u) => u.id === t.employeId);
+    // Priorité 2 : taux horaire INDIVIDUEL de la fiche (métiers de bureau).
+    if (Number(emp?.tauxHoraire) > 0) return Number(emp.tauxHoraire);
+    // Priorité 3 : grille CCQ (métier × niveau) + prime individuelle.
+    const taux = emp && tauxMetiers?.[emp.metier]?.[emp.niveau];
+    if (Number(taux) > 0) return Number(taux) + (Number(emp?.primeHoraire) || 0);
+    return projet.tauxHoraireCoutant || 0;
+  };
+  // Ventilation du coût main-d'œuvre par catégorie, avec le MÊME taux par
+  // employé que ci-dessus — garantit coutMainOeuvreChantier + coutTransport === coutMainOeuvre.
+  const coutMainOeuvreChantier = travauxChantier.reduce((s, t) => s + (t.heures || 0) * tauxDeEmploye(t), 0);
+  const coutTransport = travauxTransport.reduce((s, t) => s + (t.heures || 0) * tauxDeEmploye(t), 0);
+  const coutMainOeuvre = coutMainOeuvreChantier + coutTransport;
+  // ------------------------------------------------------------
+  // COÛT DU CAMION (bloc 5) : chaque heure d'un technicien qui AVAIT un
+  // camion ce jour-là (son inspection du matin le dit) coûte le taux
+  // camion en plus — chantier ET transports, le camion roule toute la
+  // journée. Passager ou sans véhicule : zéro (le camion du conducteur
+  // coûte déjà, on ne compte jamais deux fois le même véhicule).
+  // Taux FIGÉ sur l'inspection du matin ; à défaut (vieille inspection
+  // d'avant ce champ, ou inspection introuvable), le taux courant des
+  // Paramètres — on COMPTE le camion en cas de doute : un coûtant
+  // légèrement surestimé est moins dangereux qu'une job qui a l'air
+  // plus payante qu'elle l'est.
+  const coutCamionDe = (t) => {
+    const email = (t.employeEmail || "").toLowerCase();
+    if (!email || !t.date) return coutCamionDefaut;
+    const insp = inspections.find((i) => i.date === t.date && (i.technicienEmail || "").toLowerCase() === email);
+    if (!insp) return coutCamionDefaut;
+    if (insp.sansVehicule || insp.passagerDeNom) return 0;
+    return insp.coutCamionHoraire != null ? insp.coutCamionHoraire : coutCamionDefaut;
+  };
+  const coutCamion = travauxDuProjet.reduce((s, t) => s + (t.heures || 0) * coutCamionDe(t), 0);
+  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion;
+  const profitReel = projet.budgetTotal - coutTotalReel;
+  const pourcentageMarge = projet.budgetTotal > 0 ? (profitReel / projet.budgetTotal) * 100 : 0;
+  const pourcentageDepense = projet.budgetTotal > 0 ? (coutTotalReel / projet.budgetTotal) * 100 : 0;
+  return {
+    travauxDuProjet,
+    travauxChantier,
+    travauxTransport,
+    heuresChantier,
+    heuresTransport,
+    kilometrageTransport,
+    totalHeures,
+    coutMateriauxBC,
+    coutMateriauxQb,
+    coutMaterielStock,
+    coutMateriaux,
+    transactionsDuProjet,
+    totalFactureReel,
+    coutMainOeuvre,
+    coutMainOeuvreChantier,
+    coutTransport,
+    coutCamion,
+    coutTotalReel,
+    profitReel,
+    pourcentageMarge,
+    pourcentageDepense,
+    depassementBudget: coutTotalReel > projet.budgetTotal,
+  };
+}
+
+
+export function adresseFacturationClient(client) {
+  if (client?.adresseFacturation) return client.adresseFacturation;
+  const principale = client?.adresses?.[0];
+  if (!principale) return "";
+  return [libelleAdresse(principale), principale.codePostal].filter(Boolean).join(", ");
+}
+
+// Nom normalisé pour la détection de DOUBLONS : minuscules, accents
+// retirés, espaces réduits — « Raphaël  Gélinas » = « raphael gelinas ».
+
+// Nom normalisé pour la détection de DOUBLONS : minuscules, accents
+// retirés, espaces réduits — « Raphaël  Gélinas » = « raphael gelinas ».
+export function nomClientNormalise(nom) {
+  return String(nom || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+}
+
+// ============================================================
+// NAVIGATION
+// ============================================================
+// ============================================================
+// MENU LATÉRAL — navigation groupée (bureau : fixe à gauche ;
+// mobile : tiroir ☰ par-dessus le contenu). Filtré par permissions.
+// ============================================================
+
+// ============================================================
+// SAISIE D'ADRESSE — GOOGLE PLACES
+// ------------------------------------------------------------
+// Les suggestions viennent de la vraie API Google Places (restreinte
+// au Canada). Avant, c'était une liste de 5 adresses fictives : aucune
+// adresse réelle n'apparaissait, donc rien ne pouvait être sélectionné
+// et la création d'un client restait bloquée sur « adresse incomplète ».
+//
+// Google renvoie la ville et le code postal DÉJÀ DÉCOUPÉS. C'est le
+// vrai gain : ces champs partent sur les factures des clients, et les
+// deviner dans une chaîne de texte finit toujours par produire une
+// adresse fautive.
+//
+// SAISIE MANUELLE CONSERVÉE : si la clé manque, si le quota est
+// dépassé, ou hors ligne, on retombe sur la saisie libre avec ville
+// obligatoire. Créer un client ne doit jamais dépendre d'un tiers.
+// ============================================================
+export function AutocompleteAdresse({ onSelection }) {
+  const [texte, setTexte] = useState("");
+  const [ouvert, setOuvert] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [chargement, setChargement] = useState(false);
+  const [googleEnPanne, setGoogleEnPanne] = useState(!googlePlacesDisponible());
+  // Champs de repli, utilisés seulement en saisie manuelle.
+  const [ville, setVille] = useState("");
+  const [codePostal, setCodePostal] = useState("");
+  // Jeton de session Google : une seule unité de facturation pour toute
+  // la recherche + la sélection (voir lib/googlePlaces.js).
+  const jetonRef = useRef(null);
+
+  // Recherche différée de 300 ms : on n'interroge pas Google à chaque
+  // lettre, on attend que le doigt s'arrête.
+  useEffect(() => {
+    if (googleEnPanne || texte.trim().length < 3) {
+      setSuggestions([]);
+      return;
+    }
+    let annule = false;
+    setChargement(true);
+    const minuterie = setTimeout(async () => {
+      try {
+        if (!jetonRef.current) jetonRef.current = await nouveauJeton();
+        const res = await chercherAdresses(texte, jetonRef.current);
+        if (!annule) setSuggestions(res);
+      } catch {
+        // Clé refusée, quota dépassé, hors ligne — on bascule en saisie
+        // manuelle sans message technique incompréhensible.
+        if (!annule) {
+          setGoogleEnPanne(true);
+          setSuggestions([]);
+        }
+      } finally {
+        if (!annule) setChargement(false);
+      }
+    }, 300);
+    return () => {
+      annule = true;
+      clearTimeout(minuterie);
+    };
+  }, [texte, googleEnPanne]);
+
+  const choisir = async (s) => {
+    try {
+      const details = await detailsAdresse(s, jetonRef.current);
+      onSelection(details);
+      setTexte(details.label);
+    } catch {
+      // Détails indisponibles : on garde au moins le texte de la
+      // suggestion plutôt que de perdre le choix du client.
+      onSelection({ label: s.texte, ligne1: s.texte, ville: "", codePostal: "" });
+      setTexte(s.texte);
+    }
+    jetonRef.current = null; // le jeton meurt avec la sélection
+    setSuggestions([]);
+    setOuvert(false);
+  };
+
+  // Saisie manuelle : proposée quand Google est indisponible, ou quand
+  // aucune suggestion ne correspond (adresse neuve, chantier sans
+  // numéro civique…).
+  const saisieLibre = texte.trim().length >= 5 && !chargement && suggestions.length === 0;
+
+  const confirmerSaisieLibre = () => {
+    if (!texte.trim() || !ville.trim()) return;
+    onSelection({
+      label: texte.trim(),
+      ligne1: texte.trim(),
+      ville: ville.trim(),
+      codePostal: codePostal.trim(),
+    });
+    setOuvert(false);
+  };
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+        <input
+          value={texte}
+          onChange={(e) => {
+            setTexte(e.target.value);
+            setOuvert(true);
+          }}
+          placeholder="Commence à taper l'adresse…"
+          className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-9 text-sm"
+        />
+        {chargement && (
+          <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
+        )}
+      </div>
+
+      {ouvert && suggestions.length > 0 && (
+        <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+          {suggestions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => choisir(s)}
+              className="flex w-full items-start gap-2 border-b border-slate-100 px-3 py-2.5 text-left text-sm last:border-0 hover:bg-slate-50"
+            >
+              <MapPin size={14} className="mt-0.5 shrink-0 text-[#FF6A13]" />
+              {s.texte}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {saisieLibre && (
+        <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+          <p className="mb-1.5 text-[10px] leading-snug text-slate-500">
+            {googleEnPanne
+              ? "Suggestions Google indisponibles — entre l'adresse à la main."
+              : "Aucune suggestion ne correspond. Tu peux utiliser l'adresse telle quelle."}
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Ville *</label>
+              <input
+                value={ville}
+                onChange={(e) => setVille(e.target.value)}
+                placeholder="Mirabel"
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none"
+              />
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Code postal</label>
+              <input
+                value={codePostal}
+                onChange={(e) => setCodePostal(e.target.value.toUpperCase())}
+                placeholder="J7N 3V4"
+                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none"
+              />
+            </div>
+          </div>
+          <Button onClick={confirmerSaisieLibre} disabled={!ville.trim()} className="mt-2 w-full min-h-0 py-2 text-xs">
+            <Check size={13} /> Utiliser cette adresse
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+export function GalerieAvantApres({ travail, enMarge = false }) {
+  const [indexOuvert, setIndexOuvert] = useState(null);
+  const [legendes, setLegendes] = useState({});
+  const [zipEnCours, setZipEnCours] = useState("");
+
+  const avant = travail.photosAvantUrls || [];
+  const apres = travail.photosApresUrls || [];
+  const photos = [
+    ...avant.map((u, i) => ({ url: u, etiquette: `Avant ${i + 1}/${avant.length}`, section: "avant" })),
+    ...apres.map((u, i) => ({ url: u, etiquette: `Après ${i + 1}/${apres.length}`, section: "apres" })),
+  ];
+
+  useEffect(() => {
+    const urls = photos.map((p) => p.url);
+    if (urls.length) listerLegendes(urls).then(setLegendes).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [travail.id]);
+
+  const nomBase = `${String(travail.client || "photos").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase()}-${travail.date || ""}`;
+
+  const telechargerZip = async (section) => {
+    setZipEnCours(section);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const liste = photos.filter((p) => p.section === section);
+      for (let i = 0; i < liste.length; i++) {
+        const reponse = await fetch(liste[i].url);
+        zip.file(`${nomBase}-${section}-${String(i + 1).padStart(2, "0")}.jpg`, await reponse.blob());
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      const lien = document.createElement("a");
+      lien.href = URL.createObjectURL(blob);
+      lien.download = `${nomBase}-${section}.zip`;
+      lien.click();
+      URL.revokeObjectURL(lien.href);
+    } catch {
+      // réseau — l'utilisateur peut télécharger photo par photo
+    } finally {
+      setZipEnCours("");
+    }
+  };
+
+  const vignette = (p, indexGlobal) => (
+    <button
+      key={p.url + indexGlobal}
+      onClick={() => setIndexOuvert(indexGlobal)}
+      className="relative block aspect-square w-full overflow-hidden rounded-lg border border-slate-200"
+      title="Ouvrir la visionneuse (flèches pour naviguer)"
+    >
+      <img src={p.url} alt={p.etiquette} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+      {p.url.includes("-galerie") && (
+        <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 py-0.5 text-[8px] font-bold text-white">📁 importée</span>
+      )}
+      {legendes[p.url] && (
+        <span className="absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-0.5 text-left text-[8px] text-white">📝 {legendes[p.url]}</span>
+      )}
+    </button>
+  );
+
+  const section = (titre, cle, decalage, liste) => (
+    liste.length > 0 && (
+      <div>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">{titre}</p>
+          <button
+            onClick={() => telechargerZip(cle)}
+            disabled={zipEnCours !== ""}
+            className="text-[10px] font-bold text-slate-400 underline underline-offset-2 hover:text-slate-700 disabled:opacity-50"
+          >
+            {zipEnCours === cle ? "Préparation…" : "⬇️ Tout (.zip)"}
+          </button>
+        </div>
+        <div className="mt-1 grid grid-cols-3 gap-2">
+          {liste.map((p, i) => vignette(p, decalage + i))}
+        </div>
+      </div>
+    )
+  );
+
+  return (
+    <div className={`space-y-2 ${enMarge ? "mt-3" : ""}`}>
+      {section("Photos avant travaux", "avant", 0, photos.filter((p) => p.section === "avant"))}
+      {section("Photos après travaux", "apres", avant.length, photos.filter((p) => p.section === "apres"))}
+      {indexOuvert != null && (
+        <VisionneusePhotos
+          photos={photos}
+          indexDepart={indexOuvert}
+          legendes={legendes}
+          onFermer={() => setIndexOuvert(null)}
+          onLegende={async (url, texte) => {
+            setLegendes((prev) => ({ ...prev, [url]: texte }));
+            const { data } = await supabase.auth.getSession();
+            sauvegarderLegende(url, texte, data?.session).catch(() => {});
+          }}
+          nomFichier={(p, i) => `${nomBase}-${p.section}-${String(i + 1).padStart(2, "0")}.jpg`}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 📜 ACCEPTATION DE L'ENTENTE — première connexion d'une entreprise
+// cliente. L'admin principal coche « j'ai lu et j'accepte » au nom de
+// son entreprise ; qui, quand et quelle version sont consignés. Le
+// texte suit le STATUT : fondateur (1 an gratuit + 25 % à vie — les 3
+// premiers seulement) ou régulier (la clause n'y apparaît JAMAIS).
+// Le Propriétaire (DGL) est exempt. Les employés ne la voient pas —
+// l'admin accepte pour l'entreprise, comme une signature de contrat.
+// ============================================================
+
+// ============================================================
+// DÉTAIL D'UN TRAVAIL (passé ou à venir) — notes + photos
+// ============================================================
+// ============================================================
+// APERÇU DU BON DE TRAVAIL — VERSION CLIENT
+// ------------------------------------------------------------
+// Ce que le client reçoit réellement : coordonnées d'entreprise,
+// notes de terrain (jamais les notes internes), photos, montant s'il
+// y a lieu, et confirmation de signature. Aucune information de coût
+// interne ni note réservée à l'équipe n'apparaît ici.
+// ============================================================
+export function ApercuBonTravailClient({ travail, clients, onFermer }) {
+  const client = (clients || []).find((c) => c.id === travail.clientId);
+  const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${libelleAdresse(client.adresses[0])}` : null);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-5 text-sm">
+          <EnTeteEntreprise />
+          <p className="mt-3 text-lg font-extrabold text-[#131B2E]">BON DE TRAVAIL</p>
+          <p className="text-xs text-slate-500">Date : {travail.date}</p>
+          <AdressesDocument
+            clientNom={client?.nom || travail.clientNom}
+            adresseFacturation={adresseFacturationClient(client)}
+            adresseTravaux={adresse}
+          />
+
+          <div className="mt-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Description des travaux</p>
+            <p className="mt-1 whitespace-pre-line rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+              {travail.noteTerrain || travail.titre || "Détails à venir."}
+            </p>
+          </div>
+
+          {/* PHOTOS RÉELLES du chantier (stockage Supabase) — avant/après. */}
+          {(travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0) && (
+            <GalerieAvantApres travail={travail} enMarge />
+          )}
+          {/* Repli — anciennes lignes de démonstration (libellés seulement). */}
+          {!(travail.photosAvantUrls?.length > 0 || travail.photosApresUrls?.length > 0) && travail.photos?.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Photos</p>
+              <div className="mt-1 grid grid-cols-3 gap-2">
+                {travail.photos.map((label, i) => (
+                  <div key={i} className="flex aspect-square flex-col items-center justify-center gap-1 rounded-lg bg-slate-100 p-1.5 text-center">
+                    <Camera size={16} className="text-slate-400" />
+                    <span className="text-[9px] leading-tight text-slate-500">{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {travail.montant != null && (
+            <div className="mt-4 flex justify-between border-t border-slate-200 pt-2 text-sm font-extrabold text-slate-900">
+              <span>Montant</span><span className="tabular-nums">{travail.montant.toFixed(2)} $</span>
+            </div>
+          )}
+
+          <TermesConditions />
+
+          <div className="mt-4 flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[11px] font-semibold text-emerald-700">
+            <FileCheck2 size={14} className="shrink-0" /> Signé électroniquement par le client à la fin de l'intervention
+          </div>
+
+          <PiedDocument />
+        </div>
+
+        <BoutonPDF type="bon-travail" travail={travail} clients={clients} />
+
+        <p className="mt-2 text-[11px] text-slate-400">
+          Aperçu de démonstration — les notes internes et informations de coût ne sont jamais incluses dans le document réellement envoyé.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+export function AdressesDocument({ clientNom, adresseFacturation, adresseTravaux }) {
+  const differente =
+    adresseTravaux && adresseTravaux.trim() && adresseTravaux.trim() !== (adresseFacturation || "").trim();
+  return (
+    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Facturé à</p>
+        <p className="text-sm font-bold text-slate-800">{clientNom || "—"}</p>
+        {adresseFacturation ? (
+          <p className="whitespace-pre-line text-[11px] leading-snug text-slate-600">{adresseFacturation}</p>
+        ) : (
+          <p className="text-[11px] italic text-amber-600">Adresse de facturation manquante</p>
+        )}
+      </div>
+      {differente && (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Adresse des travaux</p>
+          <p className="whitespace-pre-line text-[11px] leading-snug text-slate-600">{adresseTravaux}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+export function ApercuDevisClient({ devis, onFermer }) {
+  // Adresses lues dans la fiche du client au moment de l'affichage —
+  // elles ne sont pas figées sur le devis. Une correction d'adresse se
+  // reflète donc sur une réimpression, ce qui est souhaitable pour un
+  // renvoi. Le devis reste inchangé pour tout le reste.
+  const fiche = (useClients() || []).find((c) => c.id === devis.clientId || c.nom === devis.clientNom);
+  // Taux de taxes lus dans les Paramètres de l'entreprise (plus codés
+  // en dur : si Québec change la TVQ, on l'ajuste dans l'écran).
+  const configEnt = useEntreprise();
+  const sousTotal = devis.totalVendant;
+  const { tps, tvq, total } = calculerTaxes(sousTotal, configEnt);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 p-5 text-sm">
+          <EnTeteEntreprise />
+          <p className="mt-3 text-lg font-extrabold text-[#131B2E]">DEVIS {devis.numero}</p>
+          <p className="text-xs text-slate-500">Date : {devis.date}</p>
+          {/* Exactement la même source que le PDF (AdressesPDF) : cet écran
+              s'annonce comme « la version envoyée au client », il ne doit
+              rien afficher que le PDF n'aurait pas. */}
+          <AdressesDocument
+            clientNom={devis.clientNom}
+            adresseFacturation={adresseFacturationClient(fiche)}
+            adresseTravaux={devis.adresseTravaux}
+          />
+
+          <table className="mt-4 w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-400">
+                <th className="pb-1.5 font-semibold">Description</th>
+                <th className="pb-1.5 text-center font-semibold">Qté</th>
+                <th className="pb-1.5 text-right font-semibold">Prix</th>
+                <th className="pb-1.5 text-right font-semibold">Montant</th>
+              </tr>
+            </thead>
+            <tbody>
+              {devis.lignes.map((l) => (
+                <tr key={l.uid} className="border-b border-slate-100">
+                  <td className="py-1.5 pr-2 text-slate-700">
+                    <span className="font-semibold">{l.nom || "—"}</span>
+                    {/* La description part chez le client : modèles,
+                        garantie, ce qui est inclus. `whitespace-pre-line`
+                        respecte les sauts de ligne de QuickBooks. */}
+                    {l.description ? (
+                      <span className="mt-0.5 block whitespace-pre-line text-[10px] leading-snug text-slate-500">
+                        {l.description}
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="py-1.5 text-center tabular-nums text-slate-500">{l.quantite}</td>
+                  <td className="py-1.5 text-right tabular-nums text-slate-500">{(Number(l.prix_vendant) || 0).toFixed(2)} $</td>
+                  <td className="py-1.5 text-right tabular-nums font-semibold text-slate-800">
+                    {((Number(l.prix_vendant) || 0) * l.quantite).toFixed(2)} $
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="mt-3 space-y-1 text-xs">
+            <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">{sousTotal.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TPS ({tauxAffiche(configEnt.tauxTps)}%)</span><span className="tabular-nums">{tps.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TVQ ({tauxAffiche(configEnt.tauxTvq)}%)</span><span className="tabular-nums">{tvq.toFixed(2)} $</span></div>
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 text-sm font-extrabold text-slate-900">
+              <span>Total</span><span className="tabular-nums">{total.toFixed(2)} $</span>
+            </div>
+          </div>
+
+          <TermesConditions signature />
+
+          <p className="mt-4 text-[10px] italic text-slate-400">
+            Devis valide 30 jours. Aucune information de coût interne n'apparaît sur ce document.
+          </p>
+          <PiedDocument />
+        </div>
+
+        <BoutonPDF type="devis" devis={{ ...devis, adresseFacturation: devis?.adresseFacturation || adresseFacturationClient(fiche) }} />
+
+        <p className="mt-2 text-[11px] text-slate-400">
+          Aperçu de démonstration — le PDF réel envoyé par courriel au client se génère et s'expédie via une fonction backend, avec ce même contenu.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+
+
+// CATALOGUE D'ITEMS — comme la configuration d'entreprise, il circule
+// par un contexte : il sert dans l'éditeur de devis ET dans la fenêtre
+// de facturation, deux endroits profondément imbriqués.
+export const ContexteCatalogue = createContext([]);
+
+export function useCatalogue() {
+  return useContext(ContexteCatalogue) || [];
+}
+
+
+export function SelecteurItem({ catalogue, onChoisir, libelle = "+ Ajouter un produit" }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [q, setQ] = useState("");
+  const champRef = useRef(null);
+
+  useEffect(() => {
+    if (ouvert && champRef.current) champRef.current.focus();
+  }, [ouvert]);
+
+  const resultats = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    const base = catalogue || [];
+    if (!t) return base.slice(0, 40);
+    return base.filter((i) => `${i.nom} ${i.categorie}`.toLowerCase().includes(t)).slice(0, 40);
+  }, [catalogue, q]);
+
+  if (!ouvert) {
+    return (
+      <Button variant="outline" onClick={() => setOuvert(true)} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
+        <Search size={12} /> {libelle}
+      </Button>
+    );
+  }
+
+  return (
+    // 📱 PLEIN ÉCRAN SUR TÉLÉPHONE (2026-08-21) : choisir un item dans
+    // un catalogue de 289 produits demande de la place et de gros
+    // boutons — sur un écran de 6 pouces, la petite fenêtre obligeait à
+    // viser. Sur ordinateur, rien ne change (fenêtre centrée).
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 sm:p-4 sm:pt-16" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setOuvert(false))(); }}>
+      <div className="flex h-full w-full max-w-md flex-col bg-white p-3 sm:h-auto sm:rounded-2xl sm:p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center gap-2 rounded-xl border-2 border-slate-300 px-2.5 py-2.5">
+          <Search size={16} className="shrink-0 text-slate-400" />
+          <input ref={champRef} value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="Chercher un item…" className="w-full text-base outline-none sm:text-sm" />
+          <button onClick={() => setOuvert(false)} aria-label="Fermer" className="p-1"><X size={18} className="text-slate-400" /></button>
+        </div>
+        <div className="mt-2 flex-1 overflow-y-auto sm:max-h-[55vh] sm:flex-none">
+          {(catalogue || []).length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-slate-400">
+              Catalogue vide — lance le snippet SQL « 26 » pour importer ta liste de prix.
+            </p>
+          ) : resultats.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-slate-400">Aucun item ne correspond à « {q} ».</p>
+          ) : (
+            resultats.map((i) => (
+              <button
+                key={i.id}
+                onClick={() => { onChoisir(i); setOuvert(false); setQ(""); }}
+                className="flex min-h-[56px] w-full items-center justify-between gap-3 border-b border-slate-100 px-2 py-2.5 text-left last:border-0 active:bg-orange-50 hover:bg-slate-50 sm:min-h-0 sm:py-2"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-slate-800 sm:text-xs">{i.nom}</span>
+                  {i.categorie && <span className="block truncate text-[11px] text-slate-400 sm:text-[10px]">{i.categorie}</span>}
+                </span>
+                <span className="shrink-0 text-sm font-bold tabular-nums text-slate-700 sm:text-xs">
+                  {i.prix_vendant != null ? `${i.prix_vendant.toFixed(2)} $` : "—"}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+        {!q && (catalogue || []).length > 40 && (
+          <p className="mt-1 text-[10px] text-slate-400">40 premiers sur {catalogue.length} — tape pour chercher.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
