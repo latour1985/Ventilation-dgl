@@ -2983,3 +2983,73 @@ create view annuaire_employes as
   where statut = 'actif'
     and entreprise_id = public.entreprise_du_jeton();
 grant select on annuaire_employes to authenticated;
+
+-- ============================================================
+-- 88 - COLMATAGE APRES SONDE : repertoire_employes + entreprises
+--      (2026-09-05)
+-- ============================================================
+-- La sonde d'etancheite a confirme 27 tables etanches sur 29 mais
+-- attrape 2 fuites : repertoire_employes et entreprises restaient
+-- lisibles par un compte etranger (une policy permissive du mode test
+-- a survecu ou est revenue sur ces deux tables). Ce snippet :
+-- (1) re-etiquette le compte-sonde — le snippet 86 avait ete passe
+--     AVANT la creation du compte, donc il n'avait rien etiquete ;
+-- (2) refait a neuf les cloisons de CES deux tables ;
+-- (3) AFFICHE l'etat final en resultat (rls_active doit etre true,
+--     et seules les policies nommees ici doivent apparaitre).
+
+-- ---- 1. Le compte-sonde recoit (vraiment) son etiquette etrangere ----
+update auth.users
+  set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+    || '{"entreprise_id": "sonde-entreprise-test", "plateforme": false}'::jsonb
+  where email = 'sonde@etancheite.test';
+
+-- ---- 2. repertoire_employes : RLS + policies refaites a neuf ----
+alter table repertoire_employes enable row level security;
+do $$
+declare p record;
+begin
+  for p in select policyname from pg_policies where schemaname = 'public' and tablename = 'repertoire_employes'
+  loop
+    execute format('drop policy %I on public.repertoire_employes', p.policyname);
+  end loop;
+end $$;
+create policy "iso_repertoire_employes" on repertoire_employes
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton())
+  with check (entreprise_id = public.entreprise_du_jeton());
+drop trigger if exists trg_entreprise_repertoire_employes on repertoire_employes;
+create trigger trg_entreprise_repertoire_employes before insert on repertoire_employes
+  for each row execute function public.poser_entreprise_id();
+
+-- ---- 3. entreprises : RLS + les 3 policies refaites a neuf ----
+alter table entreprises enable row level security;
+do $$
+declare p record;
+begin
+  for p in select policyname from pg_policies where schemaname = 'public' and tablename = 'entreprises'
+  loop
+    execute format('drop policy %I on public.entreprises', p.policyname);
+  end loop;
+end $$;
+create policy "entreprises_sa_fiche" on entreprises
+  for select to authenticated
+  using (id = public.entreprise_du_jeton() or public.est_plateforme());
+create policy "entreprises_maj_sa_fiche" on entreprises
+  for update to authenticated
+  using (id = public.entreprise_du_jeton() or public.est_plateforme())
+  with check (id = public.entreprise_du_jeton() or public.est_plateforme());
+create policy "entreprises_creation_plateforme" on entreprises
+  for insert to authenticated
+  with check (public.est_plateforme());
+
+-- ---- 4. ETAT FINAL (s'affiche dans Results) ----
+select c.relname as table_nom,
+       c.relrowsecurity as rls_active,
+       coalesce(string_agg(p.policyname, ' | '), '(aucune)') as policies
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
+left join pg_policies p on p.schemaname = 'public' and p.tablename = c.relname
+where c.relname in ('repertoire_employes', 'entreprises')
+group by c.relname, c.relrowsecurity
+order by c.relname;
