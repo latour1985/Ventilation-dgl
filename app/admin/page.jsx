@@ -332,6 +332,13 @@ function sauvegarderJournal(journal) {
 }
 
 function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDeconnexion, ouvert, onFermer, reduit, onBasculerReduit }) {
+  // 🏢 SENTIMENT D'APPARTENANCE (retour du propriétaire, 2026-09-06) :
+  // l'en-tête du menu porte le NOM et le LOGO de L'ENTREPRISE connectée
+  // — « propulsé par Fluxya » en plus discret dessous. Le client se
+  // sent chez lui, la marque produit reste présente.
+  const configMenu = useEntreprise();
+  const nomEntrepriseMenu = configMenu?.nomCommercial || configMenu?.nomLegal || "";
+  const logoEntrepriseMenu = configMenu?.logoDonnees || "";
   const groupes = [
     { titre: "Vue d'ensemble", items: [
       { id: "tableau-de-bord", label: "Tableau de bord", icone: LayoutGrid },
@@ -370,13 +377,34 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
   const contenu = (estReduit, avecBascule) => (
     <>
       <div className={`flex items-center border-b border-white/10 py-4 ${estReduit ? "justify-center px-2" : "gap-2.5 px-4"}`}>
-        {/* FLUXYA — la marque produit dans l'en-tête (brief 2026-08-18). */}
+        {/* 🏢 L'ENTREPRISE d'abord (son logo + son nom), Fluxya en
+            marque produit discrète dessous (retour 2026-09-06). */}
         {estReduit ? (
-          <Logo variant="icon" taille={32} className="shrink-0" />
+          logoEntrepriseMenu ? (
+            <img src={logoEntrepriseMenu} alt={nomEntrepriseMenu} className="h-8 w-8 shrink-0 rounded-lg bg-white object-contain p-0.5" />
+          ) : (
+            <Logo variant="icon" taille={32} className="shrink-0" />
+          )
         ) : (
-          <div className="min-w-0">
-            <Logo variant="compact" sombre />
-            <p className="text-[10px] text-slate-500">Administration</p>
+          <div className="flex min-w-0 items-center gap-2.5">
+            {logoEntrepriseMenu ? (
+              <img src={logoEntrepriseMenu} alt="" className="h-9 w-9 shrink-0 rounded-lg bg-white object-contain p-0.5" />
+            ) : (
+              <Logo variant="icon" taille={34} className="shrink-0" />
+            )}
+            <div className="min-w-0">
+              {nomEntrepriseMenu ? (
+                <>
+                  <p className="truncate text-sm font-extrabold leading-tight text-white">{nomEntrepriseMenu}</p>
+                  <p className="text-[9px] text-slate-500">propulsé par <span className="font-bold">Fluxya</span></p>
+                </>
+              ) : (
+                <>
+                  <Logo variant="compact" sombre />
+                  <p className="text-[10px] text-slate-500">Administration</p>
+                </>
+              )}
+            </div>
           </div>
         )}
       </div>

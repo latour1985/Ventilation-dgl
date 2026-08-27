@@ -254,6 +254,70 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
             <div className="grid gap-2.5 sm:grid-cols-2">
               <ChampParametre {...propsChamp} cle="nomLegal" libelle="Raison sociale" placeholder="Ventilation DGL inc." />
               <ChampParametre {...propsChamp} cle="nomCommercial" libelle="Nom commercial (si différent)" placeholder="— facultatif —" />
+              {/* 🖼️ LOGO DE L'ENTREPRISE (2026-09-06 — retour du
+                  propriétaire : chaque client met LE SIEN). L'image est
+                  réduite et compressée ici même, puis vit dans la fiche
+                  de l'entreprise — elle s'imprime en haut des documents
+                  et s'affiche dans le menu. */}
+              <div className="sm:col-span-2">
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Logo de l&apos;entreprise (documents et menu)</label>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {brouillon.logoDonnees ? (
+                    <img src={brouillon.logoDonnees} alt="Logo" className="h-12 w-auto max-w-[160px] rounded-lg border border-slate-200 bg-white object-contain p-1" />
+                  ) : (
+                    <span className="flex h-12 w-24 items-center justify-center rounded-lg border border-dashed border-slate-300 text-[10px] text-slate-400">aucun logo</span>
+                  )}
+                  {estAdminPrincipal && (
+                    <>
+                      <label className="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50">
+                        {brouillon.logoDonnees ? "Changer…" : "Téléverser…"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={async (ev) => {
+                            const fichier = ev.target.files?.[0];
+                            ev.target.value = "";
+                            if (!fichier) return;
+                            try {
+                              const lu = await new Promise((res, rej) => {
+                                const l = new FileReader();
+                                l.onload = () => res(l.result);
+                                l.onerror = rej;
+                                l.readAsDataURL(fichier);
+                              });
+                              const img = await new Promise((res, rej) => {
+                                const i = new Image();
+                                i.onload = () => res(i);
+                                i.onerror = rej;
+                                i.src = lu;
+                              });
+                              // Réduction : 320 px max de large / 160 de
+                              // haut — bien assez pour l'impression des
+                              // en-têtes, minuscule en base.
+                              const echelle = Math.min(1, 320 / img.width, 160 / img.height);
+                              const canevas = document.createElement("canvas");
+                              canevas.width = Math.round(img.width * echelle);
+                              canevas.height = Math.round(img.height * echelle);
+                              canevas.getContext("2d").drawImage(img, 0, 0, canevas.width, canevas.height);
+                              // PNG pour garder la transparence des logos.
+                              champ("logoDonnees", canevas.toDataURL("image/png"));
+                            } catch {
+                              window.alert("Image illisible — essaie un PNG ou un JPG.");
+                            }
+                          }}
+                        />
+                      </label>
+                      {brouillon.logoDonnees && (
+                        <button onClick={() => champ("logoDonnees", "")} className="text-[11px] font-bold text-red-500 underline underline-offset-2">
+                          Retirer
+                        </button>
+                      )}
+                    </>
+                  )}
+                  <p className="w-full text-[9px] text-slate-400 sm:w-auto sm:flex-1">PNG (fond transparent idéal) ou JPG — réduit automatiquement. N&apos;oublie pas « Enregistrer les paramètres ».</p>
+                </div>
+              </div>
               <div className="sm:col-span-2">
                 <ChampParametre {...propsChamp} cle="adresse" libelle="Adresse complète" placeholder="771 Boul Industriel, Blainville QC J7C 3V3" />
               </div>
@@ -305,16 +369,9 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Logo</p>
-            <div className="mt-2 flex items-center gap-3">
-              <img src="/logo-dgl.png" alt="" className="h-12 w-auto" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-              <p className="text-[11px] leading-snug text-slate-500">
-                Le logo est le fichier <span className="font-mono font-bold">/public/logo-dgl.png</span>. Pour le changer,
-                remplace ce fichier — aucun code à modifier. (Un téléversement depuis cet écran viendra plus tard.)
-              </p>
-            </div>
-          </div>
+          {/* (L'ancienne carte « Logo » — fichier /public/logo-dgl.png — a
+              été remplacée par le téléversement dans « Identité et
+              coordonnées » : chaque entreprise met LE SIEN, 2026-09-06.) */}
         </div>
       )}
 
@@ -718,16 +775,22 @@ export function EnTeteEntreprise({ compact, config }) {
   const e = config || ctx;
   return (
     <div className={`border-b border-slate-200 ${compact ? "pb-2" : "pb-3"}`}>
-      {/* LOGO DE L'ENTREPRISE + raison sociale. Fichier fourni par
-          l'entreprise dans /public/logo-dgl.png — pour le changer, il
-          suffit de remplacer le fichier, aucun code à modifier. */}
+      {/* LOGO DE L'ENTREPRISE + raison sociale. Chaque entreprise
+          téléverse LE SIEN (Paramètres → Entreprise) ; le fichier
+          /public/logo-dgl.png ne sert plus qu'à DGL, en repli — un
+          nouveau client sans logo n'affiche rien (2026-09-06). */}
       <div className="flex items-center gap-2.5">
-        <img
-          src="/logo-dgl.png"
-          alt={e.nomLegal}
-          className={`${compact ? "h-8" : "h-11"} w-auto shrink-0`}
-          onError={(ev) => { ev.currentTarget.style.display = "none"; }}
-        />
+        {(() => {
+          const logo = e.logoDonnees || (e.statutPlateforme === "proprietaire" || !e.statutPlateforme ? "/logo-dgl.png" : null);
+          return logo ? (
+            <img
+              src={logo}
+              alt={e.nomLegal}
+              className={`${compact ? "h-8" : "h-11"} w-auto shrink-0`}
+              onError={(ev) => { ev.currentTarget.style.display = "none"; }}
+            />
+          ) : null;
+        })()}
         <p className="text-sm font-extrabold text-[#131B2E]">{e.nomLegal}</p>
       </div>
       <div className={`mt-1.5 grid ${compact ? "grid-cols-1" : "grid-cols-2"} gap-x-4 gap-y-0.5 text-[10px] text-slate-500`}>

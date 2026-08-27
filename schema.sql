@@ -3180,3 +3180,16 @@ select email,
        coalesce(raw_app_meta_data->>'plateforme', '') as sceau_console
 from auth.users
 order by 2, 1;
+
+-- ============================================================
+-- 91 - LOGO PAR ENTREPRISE + ASSOCIATIONS NON PRE-COCHEES
+--      (2026-09-06 — retours du test a blanc : le logo etait le
+--      fichier DGL code en dur, et la CMMTQ arrivait cochee pour
+--      un nouveau client.) ----
+alter table entreprises add column if not exists logo_donnees text;
+-- Les entreprises deja creees (test Miroir) : aucune association
+-- d'office — chacune coche les siennes dans ses Parametres.
+update entreprises
+  set membre_cmmtq = false, associations = '[]'::jsonb
+  where id <> 'dgl';
+select id, nom_legal, membre_cmmtq, associations, (logo_donnees is not null) as logo_present from entreprises order by id;

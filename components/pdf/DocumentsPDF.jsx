@@ -109,10 +109,13 @@ function EnTetePDF({ config }) {
     .join(" · ");
   return (
     <View style={s.header}>
-      {/* LOGO + coordonnées côte à côte. Le logo est servi depuis
-          /public/logo-dgl.png (fichier fourni par l'entreprise). */}
+      {/* LOGO + coordonnées côte à côte. Chaque entreprise téléverse LE
+          SIEN (Paramètres → data URL dans sa fiche) ; /logo-dgl.png ne
+          sert plus qu'à DGL, en repli (2026-09-06). */}
       <View style={sLogo.rangee}>
-        <Image src="/logo-dgl.png" style={sLogo.logo} />
+        {(e.logoDonnees || e.statutPlateforme === "proprietaire" || !e.statutPlateforme) ? (
+          <Image src={e.logoDonnees || "/logo-dgl.png"} style={sLogo.logo} />
+        ) : null}
         <View style={sLogo.infos}>
           <Text style={s.company}>{e.nomLegal}</Text>
           {e.adresse ? <Text style={s.small}>{e.adresse}</Text> : null}
@@ -206,7 +209,9 @@ function PiedPage({ config }) {
   ].filter(Boolean).join(" · ");
   return (
     <View style={sLogo.rangeePied}>
-      <Image src="/logo-dgl.png" style={sLogo.logoPied} />
+      {(e.logoDonnees || e.statutPlateforme === "proprietaire" || !e.statutPlateforme) ? (
+        <Image src={e.logoDonnees || "/logo-dgl.png"} style={sLogo.logoPied} />
+      ) : null}
       <Text style={[s.footer, { marginTop: 0 }]}>{ligne}</Text>
     </View>
   );

@@ -143,6 +143,11 @@ export async function POST(request) {
     courriel: courrielEntreprise,
     telephone,
     adresse,
+    // 🏷️ AUCUNE association cochée d'office (retour 2026-09-06 : la
+    // CMMTQ arrivait pré-cochée — c'est une réalité DGL, pas un défaut
+    // universel). Le client coche les siennes dans ses Paramètres.
+    membre_cmmtq: false,
+    associations: [],
     statut_plateforme: statut,
     gratuit_jusqua: statut === "fondateur" ? gratuitJusqua || dansUnAn : gratuitJusqua,
     rabais_pourcent: statut === "fondateur" ? 25 : 0,
