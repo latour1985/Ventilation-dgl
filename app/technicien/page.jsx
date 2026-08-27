@@ -2950,10 +2950,17 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
                   }}
                 />
               ) : (
+                p.id && p.enAttente ? (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-sky-50 px-1 text-center" title="La photo est en sécurité sur le téléphone — elle partira toute seule au retour du réseau.">
+                    <span className="text-sm">📦</span>
+                    <span className="text-[8px] font-bold leading-tight text-sky-700">En file — partira avec le réseau</span>
+                  </div>
+                ) : (
                 <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-amber-50 px-1 text-center">
                   <AlertTriangle size={14} className="text-amber-500" />
                   <span className="text-[8px] font-bold leading-tight text-amber-700">Perdue — jamais téléversée</span>
                 </div>
+                )
               )}
               {p.origine === "galerie" && (
                 <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[9px] text-white" title="Importée de la galerie">📁</span>
@@ -5631,10 +5638,20 @@ function AppTechnicien() {
   // ============================================================
   const rejeuPhotosRef = useRef(false);
   useEffect(() => {
-    if (!enLigne || !session || rejeuPhotosRef.current) return;
+    if (!session) return;
     let annule = false;
-    rejeuPhotosRef.current = true;
-    (async () => {
+    // ⚠️ CONSTAT TERRAIN (2026-08-27, badge « Perdue — jamais
+    // téléversée » sur iPhone) : l'ancien rejeu n'écoutait que le
+    // passage hors-ligne → en-ligne. Or sur un réseau 5G INSTABLE, le
+    // téléversement échoue SANS que le téléphone se déclare hors-ligne
+    // — le rejeu ne se déclenchait donc jamais de la session. Il tourne
+    // maintenant aussi : toutes les 90 secondes tant que le coffre
+    // n'est pas vide, au retour dans l'application (visibilitychange)
+    // et à l'événement online.
+    const tenter = async () => {
+      if (annule || rejeuPhotosRef.current) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      rejeuPhotosRef.current = true;
       try {
         const enAttente = await listerPhotosCoffre();
         for (const ph of enAttente) {
@@ -5670,12 +5687,22 @@ function AppTechnicien() {
       } finally {
         rejeuPhotosRef.current = false;
       }
-    })();
+    };
+    tenter();
+    const minuterie = setInterval(tenter, 90000);
+    const surVisible = () => {
+      if (typeof document !== "undefined" && !document.hidden) tenter();
+    };
+    document.addEventListener("visibilitychange", surVisible);
+    window.addEventListener("online", tenter);
     return () => {
       annule = true;
+      clearInterval(minuterie);
+      document.removeEventListener("visibilitychange", surVisible);
+      window.removeEventListener("online", tenter);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enLigne, session]);
+  }, [session]);
 
   // Synchronisation de la file — traite UNE action à la fois, puis se
   // redéclenche automatiquement (la dépendance `fileAttente` change

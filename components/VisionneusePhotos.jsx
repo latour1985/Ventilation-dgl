@@ -30,6 +30,7 @@ export default function VisionneusePhotos({
   const [brouillonLegende, setBrouillonLegende] = useState("");
   const [editionLegende, setEditionLegende] = useState(false);
   const toucheDepartX = useRef(null);
+  const toucheDepartY = useRef(null);
 
   const photo = photos[index] || null;
   const precedente = () => setIndex((i) => (i > 0 ? i - 1 : photos.length - 1));
@@ -59,12 +60,24 @@ export default function VisionneusePhotos({
   // GLISSEMENT DE DOIGT — seuil de 50 px pour ignorer les tremblements.
   const surToucheDebut = (e) => {
     toucheDepartX.current = e.touches?.[0]?.clientX ?? null;
+    toucheDepartY.current = e.touches?.[0]?.clientY ?? null;
   };
   const surToucheFin = (e) => {
     const depart = toucheDepartX.current;
+    const departY = toucheDepartY.current;
     toucheDepartX.current = null;
+    toucheDepartY.current = null;
     if (depart == null) return;
     const delta = (e.changedTouches?.[0]?.clientX ?? depart) - depart;
+    const deltaY = departY == null ? 0 : (e.changedTouches?.[0]?.clientY ?? departY) - departY;
+    // ⬇️ GLISSER VERS LE BAS FERME (2026-08-27) : sur iPhone, le X du
+    // haut vivait SOUS la barre d'état (encoche) — intouchable en PWA
+    // plein écran. Le geste standard « tirer vers le bas » donne une
+    // porte de sortie qui marche partout, gants compris.
+    if (deltaY > 80 && Math.abs(deltaY) > Math.abs(delta)) {
+      onFermer();
+      return;
+    }
     if (delta > 50) precedente();
     else if (delta < -50) suivante();
   };
@@ -91,8 +104,11 @@ export default function VisionneusePhotos({
       onTouchStart={surToucheDebut}
       onTouchEnd={surToucheFin}
     >
-      {/* Barre du haut : compteur, badges, actions */}
-      <div className="flex items-center justify-between gap-2 p-3">
+      {/* Barre du haut : compteur, badges, actions — décalée SOUS la
+          barre d'état iPhone (safe-area) : le X vivait dessous et les
+          taps n'atteignaient jamais le bouton (constat terrain
+          2026-08-27, « obligé de fermer l'application »). */}
+      <div className="flex items-center justify-between gap-2 p-3" style={{ paddingTop: "calc(env(safe-area-inset-top, 0px) + 12px)" }}>
         <div className="flex items-center gap-2 text-xs font-bold text-white/80">
           <span className="tabular-nums">{index + 1} / {photos.length}</span>
           {photo.etiquette && <span className="rounded-full bg-white/15 px-2 py-0.5">{photo.etiquette}</span>}
@@ -103,10 +119,10 @@ export default function VisionneusePhotos({
           )}
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={telecharger} aria-label="Télécharger la photo" className="rounded-full bg-white/10 p-2.5 text-white active:scale-95">
+          <button onClick={telecharger} aria-label="Télécharger la photo" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white active:scale-95">
             <Download size={18} />
           </button>
-          <button onClick={onFermer} aria-label="Fermer" className="rounded-full bg-white/10 p-2.5 text-white active:scale-95">
+          <button onClick={onFermer} aria-label="Fermer" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:scale-95">
             <X size={18} />
           </button>
         </div>
@@ -136,7 +152,7 @@ export default function VisionneusePhotos({
       </div>
 
       {/* La LÉGENDE — affichée toujours, modifiable si permis */}
-      <div className="p-3 pb-4">
+      <div className="p-3 pb-4" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)" }}>
         {editionLegende && onLegende ? (
           <div className="flex gap-2">
             <input
