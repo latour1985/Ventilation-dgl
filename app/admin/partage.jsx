@@ -25,6 +25,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 // qu'au RENDU (composants), jamais à l'initialisation du module — le
 // même patron que page.jsx ↔ modules extraits.
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
+import { SEUIL_ENTRETIEN_KM, SEUIL_ENTRETIEN_MOIS } from "./OngletInspectionsVehicules";
 
 // ============================================================
 // COMPOSANT BOUTON RÉUTILISABLE
@@ -1748,3 +1749,119 @@ export const FREQUENCES_CONTRAT = [1, 2, 3, 4];
 // Couleurs distinctes par type de tâche, utilisées dans les cartes en
 // attente et les cases du calendrier, pour les différencier d'un
 // coup d'œil.
+
+
+export const HEURES_QUART = HEURES.flatMap((h) => ["00", "15", "30", "45"].map((m) => `${h.slice(0, 2)}:${m}`));
+
+// 📝 LE TEXTE D'UN DEVIS pour une description de tâche (2026-08-30,
+// retour du propriétaire : « toute l'information de la description,
+// pas seulement le titre »). Quantité × nom PUIS la description
+// complète de chaque item — JAMAIS de prix (seule chose interdite).
+// Une seule définition : l'injection à la sélection et le filet à la
+// création doivent produire EXACTEMENT le même texte (l'anti-doublon
+// compare les deux).
+
+// Recalcule les transports système pour TOUT le planning : pour chaque
+// (journée, technicien) ayant au moins une VRAIE tâche, place un Transport
+// Début juste avant la première et un Transport Fin juste après la
+// dernière ; retire les transports d'une journée qui n'a plus de vraie
+// tâche. Idempotent — à rappeler après chaque changement du planning.
+// Contenu d'une case du planning, TOUJOURS sous forme de liste : depuis
+// que plusieurs tâches peuvent partager la même plage horaire (elles
+// s'empilent à l'écran au lieu de s'écraser), chaque case contient un
+// tableau de tâches. Ce petit assistant tolère aussi l'ancien format
+// (une tâche seule) par prudence.
+export function listeCellule(v) {
+  return Array.isArray(v) ? v : v ? [v] : [];
+}
+
+
+// Heure de départ par défaut lors de la création/assignation d'une
+// tâche — on ne veut pas qu'une nouvelle tâche démarre par défaut à
+// minuit (HEURES[0]) : elle démarre à 7h du matin.
+export const HEURE_PAR_DEFAUT = "07:00";
+
+
+export function camionsEntretienDu(inspections, entretiens) {
+  const camions = [...new Set((inspections || []).filter((i) => !i.sansVehicule && i.camion).map((i) => i.camion))];
+  return camions.filter((camion) => {
+    const kmList = (inspections || []).filter((i) => i.camion === camion && i.km != null).map((i) => i.km);
+    const kmActuel = kmList.length ? Math.max(...kmList) : 0;
+    const dernier = (entretiens || []).filter((e) => e.camion === camion).sort((a, b) => b.date.localeCompare(a.date))[0];
+    const ecartKm = kmActuel - (dernier ? dernier.km : 0);
+    const mois = dernier ? moisDepuis(dernier.date) : Infinity;
+    return ecartKm >= SEUIL_ENTRETIEN_KM || mois >= SEUIL_ENTRETIEN_MOIS;
+  });
+}
+
+
+// Utilisée par les vues Semaine/Mois : retrouve la tâche assignée à un
+// employé pour une date donnée, peu importe à quelle heure précise
+// elle a été déposée (une seule source de vérité — les clés horaires
+// de `planning` — pour que toutes les vues restent synchronisées).
+// Clé de tâche d'une ligne d'heures : un chantier de plusieurs jours
+// range ses heures sous « id::AAAA-MM-JJ » — on remonte à l'identifiant
+// de la tâche. (Au niveau MODULE depuis 2026-08-21 : le tableau de bord
+// en a besoin lui aussi, il vivait dans l'agenda seulement.)
+export function cleTacheDesHeures(tacheIdBrut) {
+  return String(tacheIdBrut || "").split("::")[0];
+}
+
+// 📱 Tâches d'une journée AVEC leur heure de départ — pour la vue
+// LISTE du téléphone (2026-08-21) : une grille de 24 colonnes est
+// illisible sur un écran de 6 pouces, mais la journée se lit très bien
+// en liste, dans l'ordre.
+
+export function tachesDuJourPourEmploye(planning, dateStr, employeId) {
+  // TOUTES les tâches du jour (uniques, dans l'ordre de leur première
+  // heure) — les vues Semaine/Mois les empilent pour n'en perdre aucune.
+  const vues = new Set();
+  const liste = [];
+  for (const h of HEURES) {
+    listeCellule(planning[`${dateStr}|${employeId}|${h}`]).forEach((t) => {
+      if (t && !vues.has(t.id)) {
+        vues.add(t.id);
+        liste.push(t);
+      }
+    });
+  }
+  return liste;
+}
+
+
+export const TYPES_TACHE = [
+  { id: "appel_service", label: "Appel de service", description: "Facturation automatique depuis le bon de commande" },
+  { id: "devis", label: "Travaux avec devis", description: "Facturation uniquement à partir d'un devis — validation admin requise" },
+  { id: "temps_materiel", label: "Travaux en temps et matériel", description: "Facturation automatique depuis le bon de commande" },
+  { id: "entretien_contrat", label: "Entretien selon contrat", description: "Facturation selon contrat — 1 à 4 factures par an" },
+  // ---- TYPES NON FACTURABLES ----
+  // Rien ne part en facturation : ces tâches n'apparaissent jamais dans
+  // l'onglet Facturation, il n'y a donc rien à refuser ni à oublier.
+  // Les heures restent PAYÉES — c'est la facturation qui change, pas la paie.
+  { id: "visite_chantier", label: "Visite de chantier", description: "Non facturable — heures aux frais administratifs (ou au projet, au choix)", nonFacturable: true, admin: true },
+  { id: "visite_soumission", label: "Visite pour soumission", description: "Non facturable — reste en attente tant qu'aucun devis n'y est rattaché", nonFacturable: true, admin: true, suiviDevis: true },
+  { id: "divers", label: "Divers", description: "Non facturable — heures payées, hors projet et hors administratif", nonFacturable: true },
+  // 🚗 COURSE / INTERNE — la même mécanique que la course créée par le
+  // technicien (2026-08-17) : AUCUN client, juste une adresse. Porter
+  // un camion au garage, aller chercher une pièce. Heures payées en
+  // « divers », jamais facturable.
+  { id: "course", label: "🚗 Course / interne (sans client)", description: "Aucun client — porter un camion au garage, chercher une pièce. Heures payées (divers), jamais facturable.", nonFacturable: true, sansClient: true },
+  // 🏭 TRAVAIL AU SHOP (demande du propriétaire, 2026-08-19) — heures
+  // payées à l'atelier : fabrication, préparation, ménage. Aucun client.
+  // « Divers » par défaut ; LIÉ À UN PROJET, les heures comptent dans
+  // SES coûts réels (fabriquer les conduits d'un chantier, c'est du
+  // temps de chantier fait au shop).
+  { id: "shop", label: "🏭 Travail au shop", description: "Aucun client — travail à l'atelier. Heures payées (divers — ou comptées au projet si un projet est lié). Jamais facturable.", nonFacturable: true, sansClient: true },
+  // CONGÉ : ce n'est pas du travail. Aucun chronomètre, aucune heure —
+  // seulement un marqueur qui bloque la journée dans l'agenda pour
+  // qu'on n'y place pas de travail par erreur.
+  { id: "conge", label: "Congé / absence", description: "Bloque l'agenda — aucune heure, aucun chronomètre", nonFacturable: true, sansHeures: true },
+];
+
+// Raccourcis lisibles, utilisés partout plutôt que de répéter les listes.
+
+// Raccourcis lisibles, utilisés partout plutôt que de répéter les listes.
+export const TYPE_INFO = (id) => TYPES_TACHE.find((t) => t.id === id) || null;
+
+export const estTypeSansClient = (id) => !!TYPE_INFO(id)?.sansClient || id === "conge";
+
