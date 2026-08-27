@@ -13607,16 +13607,34 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
   // modifier le % recalcule le montant, modifier le montant recalcule
   // le %. Chacun est plafonné à la valeur totale HT de SA PROPRE ligne
   // (totalHT = quantite × prix_vendant), jamais au-delà.
+  // 🧢 PLAFOND VIVANT PAR LIGNE (2026-08-30, demande du propriétaire :
+  // « ajuster le 100 % au montant restant plutôt que de laisser dépasser
+  // et simplement aviser »). Le curseur s'ARRÊTE tout seul au solde
+  // restant du devis au lieu de monter à 100 % puis d'afficher un refus.
+  // Le plafond est GLOBAL : ce que les AUTRES lignes réclament déjà
+  // réduit ce qui reste disponible pour celle-ci — monter la ligne A
+  // abaisse le maximum de la ligne B, jamais l'inverse d'un total juste.
+  const plafondPourLigne = (l) => {
+    const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
+    const autresLignes = devis
+      ? devis.lignes.reduce((s, x) => (x.uid === l.uid ? s : s + progressionLigne(x).billedAmount), 0)
+      : 0;
+    return Math.max(0, Math.min(totalHT, Math.round((montantRestant - autresLignes) * 100) / 100));
+  };
+
   const majPourcentageLigne = (l, pctBrut) => {
     const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
-    const progressPercent = Math.max(0, Math.min(100, pctBrut));
-    const billedAmount = Math.round(totalHT * (progressPercent / 100) * 100) / 100;
+    const demande = Math.round(totalHT * (Math.max(0, Math.min(100, pctBrut)) / 100) * 100) / 100;
+    const billedAmount = Math.min(demande, plafondPourLigne(l));
+    // Le % affiché reflète le montant RÉEL (plafonné) — jamais un chiffre
+    // que la facture ne respecterait pas.
+    const progressPercent = totalHT > 0 ? Math.round((billedAmount / totalHT) * 10000) / 100 : 0;
     setLignesProgression((prev) => ({ ...prev, [l.uid]: { progressType: "percent", progressPercent, billedAmount } }));
   };
 
   const majMontantLigne = (l, montantBrut) => {
     const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
-    const billedAmount = Math.max(0, Math.min(totalHT, montantBrut));
+    const billedAmount = Math.max(0, Math.min(plafondPourLigne(l), montantBrut));
     const progressPercent = totalHT > 0 ? Math.round((billedAmount / totalHT) * 10000) / 100 : 0;
     setLignesProgression((prev) => ({ ...prev, [l.uid]: { progressType: "amount", progressPercent, billedAmount } }));
   };
@@ -13797,12 +13815,23 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
                 max={100}
                 step="1"
                 value={pourcentage}
-                onChange={(e) => setPourcentage(Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)))}
+                // 🧢 Plafonné au solde restant (2026-08-30) : le champ
+                // s'arrête de lui-même au % encore facturable au lieu de
+                // monter à 100 puis d'être rabattu en silence.
+                onChange={(e) => {
+                  const pctMaxDevis = montantDevis > 0 ? Math.floor((montantRestant / montantDevis) * 10000) / 100 : 100;
+                  setPourcentage(Math.max(0, Math.min(100, Math.min(pctMaxDevis, parseFloat(e.target.value) || 0))));
+                }}
                 className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm font-bold tabular-nums"
               />
               <span className="text-sm text-slate-500">% du devis</span>
               <span className="ml-auto text-sm font-bold tabular-nums text-slate-800">{montantCalcule.toFixed(2)} $</span>
             </div>
+            {montantDevis > 0 && montantRestant < montantDevis - 0.005 && (
+              <p className="mt-1 text-[10px] font-semibold text-amber-700">
+                Maximum : {(Math.floor((montantRestant / montantDevis) * 10000) / 100).toFixed(0)} % — le solde restant du devis ({montantRestant.toFixed(2)} $) plafonne cette facture.
+              </p>
+            )}
           </div>
         )}
 
@@ -13815,6 +13844,8 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
                 {devis.lignes.map((l) => {
                   const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
                   const prog = progressionLigne(l);
+                  const plafond = plafondPourLigne(l);
+                  const pctMax = totalHT > 0 ? Math.round((plafond / totalHT) * 10000) / 100 : 0;
                   return (
                     <div key={l.uid} className="rounded-lg border border-slate-200 p-2.5 text-xs">
                       <div className="flex items-start justify-between gap-2">
@@ -13823,6 +13854,14 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
                           <p className="text-[10px] text-slate-400">
                             {(Number(l.prix_vendant) || 0).toFixed(2)} $ × {l.quantite} — Total ligne : <span className="font-semibold text-slate-600">{totalHT.toFixed(2)} $</span>
                           </p>
+                          {/* 🧢 Le curseur s'arrête ici : ce qui reste
+                              facturable sur le devis, moins ce que les
+                              autres lignes réclament déjà. */}
+                          {plafond < totalHT - 0.005 && (
+                            <p className="mt-0.5 text-[10px] font-semibold text-amber-700">
+                              Maximum : {plafond.toFixed(2)} $ ({pctMax.toFixed(0)} %) — le solde restant du devis plafonne cette ligne.
+                            </p>
+                          )}
                         </div>
                         {/* Bascule du mode d'ajustement de CETTE ligne */}
                         <div className="flex shrink-0 rounded-lg border border-slate-200 p-0.5">
