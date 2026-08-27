@@ -90,35 +90,7 @@ import { COULEUR_TYPE_TACHE, COULEUR_TYPE_DEFAUT, estTypeAdministratif, estTypeN
 
 const CATALOGUE_REPLI = [];
 
-const CLIENTS_INIT = [
-  {
-    id: "c1",
-    nom: "Toitures Lavallée inc.",
-    entreprise: "Toitures Lavallée inc.",
-    // Plusieurs courriels possibles pour un même client — utile pour
-    // une entreprise où la facturation, un chargé de projet et
-    // l'administration générale ont des adresses différentes.
-    courriels: [
-      { id: "cc1", label: "Administration générale", email: "info@toitureslavallee.com", defaut: true },
-      { id: "cc2", label: "Facturation / comptabilité", email: "facturation@toitureslavallee.com", defaut: false },
-    ],
-    telephone: "514-555-0142",
-    termeFacturation: "Net 30",
-    quickbooksCustomerId: "QBO-1001",
-    adresses: [
-      { id: "a1", nom: "Entrepôt principal", ligne1: "1450 rue Bélanger, Montréal, QC", codePostal: "H2G 1B4" },
-    ],
-  },
-  {
-    id: "c2",
-    nom: "Résidence Tremblay",
-    courriels: [{ id: "cc3", label: "Principal", email: "j.tremblay@courriel.com", defaut: true }],
-    telephone: "450-555-0198",
-    termeFacturation: "Comptant à la livraison",
-    quickbooksCustomerId: "QBO-1002",
-    adresses: [{ id: "a3", nom: "Domicile", ligne1: "22 rue des Érables, Longueuil, QC", codePostal: "J4K 3S1" }],
-  },
-];
+const CLIENTS_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
 const TAUX_METIERS_INIT = {
   Frigoriste: { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
@@ -129,144 +101,18 @@ const TAUX_METIERS_INIT = {
   "Plâtrier": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
 };
 
-const UTILISATEURS_INIT = [
-  { id: "u1", nom: "Marc Gagnon", telephone: "514-555-0111", courriel: "marc.gagnon@ventilationdgl.com", nomUtilisateur: "mgagnon", typeAcces: "Employé", motDePasseCree: true, poste: "Technicien senior", dateEmbauche: "", adresse: "", notesRH: "" },
-  { id: "u2", nom: "Sophie Roy", telephone: "514-555-0122", courriel: "sophie.roy@ventilationdgl.com", nomUtilisateur: "sroy", typeAcces: "Chargé de projet", motDePasseCree: true, poste: "", dateEmbauche: "", adresse: "", notesRH: "" },
-];
+const UTILISATEURS_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
 // Historique des travaux par client — en prod, ceci vient d'une table
 // Supabase `travaux` (liée aux bons de travail complétés par les
 // techniciens et aux tâches planifiées dans l'agenda).
-const TRAVAUX_INIT = [
-  {
-    id: "tr1",
-    clientId: "c1",
-    projetId: "proj1",
-    heures: 32,
-    estTransport: false,
-    titre: "Réfection toiture — Entrepôt principal",
-    date: "2026-06-10",
-    statut: "complete",
-    montant: 4250.0,
-    envoyeA: new Date("2026-06-10T14:32:00").getTime(),
-    modifReactivee: false,
-    noteTerrain: "Remplacement complet de la membrane élastomère sur la section ouest. Drains nettoyés et solins remplacés. Aucun problème structural détecté.",
-    noteInterne: "Accès entrepôt par la porte arrière seulement — code de la barrière : demander au contremaître Marc.",
-    photos: ["Avant — vue générale", "Après — membrane installée", "Détail des solins"],
-  },
-  {
-    id: "tr1-transport-aller",
-    clientId: "c1",
-    projetId: "proj1",
-    heures: 0.75,
-    distanceKm: 16.1,
-    estTransport: true,
-    titre: "Transport — Début de journée (imputé automatiquement)",
-    date: "2026-06-10",
-    statut: "complete",
-    montant: null,
-    envoyeA: new Date("2026-06-10T08:15:00").getTime(),
-    modifReactivee: false,
-    noteTerrain: "",
-    noteInterne: "",
-    photos: [],
-  },
-  {
-    id: "tr1-transport-retour",
-    clientId: "c1",
-    projetId: "proj1",
-    heures: 0.75,
-    distanceKm: 15.8,
-    estTransport: true,
-    titre: "Transport — Fin de journée (imputé automatiquement)",
-    date: "2026-06-10",
-    statut: "complete",
-    montant: null,
-    envoyeA: new Date("2026-06-10T16:45:00").getTime(),
-    modifReactivee: false,
-    noteTerrain: "",
-    noteInterne: "",
-    photos: [],
-  },
-  {
-    id: "tr2",
-    clientId: "c1",
-    projetId: "proj1",
-    heures: 12,
-    estTransport: false,
-    titre: "Réparation toiture — Chantier Nord",
-    date: "2026-08-05",
-    statut: "a_venir",
-    montant: null,
-    modifReactivee: false,
-    noteTerrain: "",
-    noteInterne: "",
-    photos: [],
-  },
-  {
-    id: "tr3",
-    clientId: "c2",
-    projetId: null,
-    heures: 2,
-    estTransport: false,
-    titre: "Remplacement thermostat",
-    date: "2026-07-19",
-    statut: "complete",
-    montant: 284.5,
-    envoyeA: new Date("2026-07-19T10:20:00").getTime(),
-    modifReactivee: false,
-    noteTerrain: "Ancien thermostat non programmable remplacé par un modèle programmable. Client formé sur l'utilisation de base.",
-    noteInterne: "Client un peu pressé lors de la visite — prévoir un peu plus de temps la prochaine fois pour l'explication.",
-    photos: ["Avant", "Après installation"],
-  },
-  {
-    id: "tr4",
-    clientId: "c2",
-    projetId: null,
-    heures: 1,
-    estTransport: false,
-    titre: "Entretien filtre CVAC",
-    date: "2026-09-02",
-    statut: "a_venir",
-    montant: null,
-    modifReactivee: false,
-    noteTerrain: "",
-    noteInterne: "",
-    photos: [],
-  },
-];
+const TRAVAUX_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
-const PROJETS_INIT = [
-  {
-    id: "proj1",
-    nom: "Réfection toiture — Entrepôt & Chantier Nord",
-    clientId: "c1",
-    adresseTravaux: "Entrepôt principal — 1450 rue Bélanger, Montréal, QC",
-    dateDebut: "2026-06-01",
-    dateFin: "2026-09-30",
-    statut: "En cours",
-    budgetTotal: 18500.0,
-    tauxHoraireCoutant: 45.0,
-    bonsCommande: [
-      { id: "bc1", numeroBC: "BC-1001", fournisseur: "Toitures Bélanger (matériaux)", montantHT: 6200.0, statut: "Reçu", date: "2026-06-05" },
-      { id: "bc2", numeroBC: "BC-1002", fournisseur: "Location d'équipement Laval", montantHT: 850.0, statut: "En attente", date: "2026-06-08" },
-    ],
-  },
-];
+const PROJETS_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
-const EMPLOYES = [
-  { id: "e1", nom: "Marc Gagnon" },
-  { id: "e2", nom: "Sophie Roy" },
-  { id: "e3", nom: "Éric Bouchard" },
-];
+const EMPLOYES = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
-const BONS_TRAVAIL_COMPLETES_INIT = [
-  { id: "bt1", client: "Toitures Lavallée inc.", projet: "Réfection toiture - Entrepôt", montant: 4250.0, description: "", date: "2026-07-18", prixNonListe: true, statutQb: "en_attente", type: "temps_materiel", adresseTravaux: null },
-  { id: "bt2", client: "Résidence Tremblay", projet: "Remplacement thermostat", montant: 284.5, date: "2026-07-19", prixNonListe: false, statutQb: "en_attente", type: "appel_service", adresseTravaux: null },
-  { id: "bt3", client: "Résidence Tremblay", projet: "Entretien filtre CVAC", montant: 34.5, date: "2026-07-20", prixNonListe: false, statutQb: "en_attente", type: "appel_service", adresseTravaux: null },
-  { id: "bt4", client: "Toitures Lavallée inc.", projet: "Réfection toiture — Chantier Sud", montant: 3100.0, date: "2026-07-21", prixNonListe: false, statutQb: "en_attente", type: "devis", devisNumero: "DEV-4821", adresseTravaux: "Chantier Sud — 88 boulevard des Laurentides, Laval, QC", facturesEmises: [] },
-  { id: "bt5", client: "Résidence Tremblay", projet: "Entretien annuel système CVAC", montant: 1200.0, date: "2026-07-22", prixNonListe: false, statutQb: "en_attente", type: "entretien_contrat", devisNumero: "DEV-3390", frequenceFacturationAnnuelle: 4, adresseTravaux: null, facturesEmises: [] },
-];
+const BONS_TRAVAIL_COMPLETES_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
 // ============================================================
 // INTÉGRATION QUICKBOOKS ONLINE — FACTURES & DÉPENSES PAR PROJET
@@ -665,20 +511,9 @@ function dateIlYaMois(n) {
   d.setMonth(d.getMonth() - n);
   return dateISO(d);
 }
-const INSPECTIONS_INIT = [
-  { id: "insp1", date: dateISO(new Date()), technicienNom: "Marc Gagnon", sansVehicule: false, camion: "Camion 02", km: 142380, anomalie: true, remarque: "Feu arrière gauche grillé", controleProblemes: ["Lumières"], statutAnomalie: "nouvelle", noteCharge: "", prisParNom: "" },
-  { id: "insp2", date: dateISO(new Date()), technicienNom: "Sophie Roy", sansVehicule: false, camion: "Camion 01", km: 98120, anomalie: false, remarque: "", controleProblemes: [], statutAnomalie: "aucune", noteCharge: "", prisParNom: "" },
-  { id: "insp3", date: dateISO(new Date()), technicienNom: "Éric Bouchard", sansVehicule: true, camion: "", km: null, anomalie: false, remarque: "", controleProblemes: [], statutAnomalie: "aucune", noteCharge: "", prisParNom: "" },
-  { id: "insp4", date: dateISO(new Date()), technicienNom: "Sophie Roy", sansVehicule: false, camion: "Camion 05", km: 54900, anomalie: true, remarque: "Frein arrière mou", controleProblemes: ["Freins"], statutAnomalie: "prise_en_charge", noteCharge: "Pièce reçue, réparation faite le jour même.", prisParNom: "l'administrateur" },
-  { id: "insp5", date: dateISO(ajouterJours(new Date(), -1)), technicienNom: "Marc Gagnon", sansVehicule: false, camion: "Camion 03", km: 76540, anomalie: false, remarque: "", controleProblemes: [], statutAnomalie: "aucune", noteCharge: "", prisParNom: "" },
-];
+const INSPECTIONS_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
-const ENTRETIENS_INIT = [
-  { id: "ent1", camion: "Camion 01", km: 88000, date: dateIlYaMois(3) },
-  { id: "ent2", camion: "Camion 02", km: 135000, date: dateIlYaMois(4) },
-  { id: "ent3", camion: "Camion 03", km: 70000, date: dateIlYaMois(8) },
-  { id: "ent4", camion: "Camion 05", km: 50000, date: dateIlYaMois(2) },
-];
+const ENTRETIENS_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
 function EcranEntente({ config, session, onAcceptee }) {
   const [coche, setCoche] = useState(false);
