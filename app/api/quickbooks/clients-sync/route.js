@@ -5,11 +5,19 @@
 // QuickBooks (c'était déjà sa pratique quand ses devis se faisaient
 // dans QuickBooks — on préserve l'existant, on ne le change pas).
 //
-// Deux modes :
+// Trois modes :
 //   { clientId }  — UN client (appelé automatiquement à la création
 //                   d'une fiche dans l'application) ;
 //   { tous: true } — TOUS les clients pas encore reliés (le bouton
-//                   « Synchroniser les clients » — rattrapage initial).
+//                   « Synchroniser les clients » — rattrapage initial) ;
+//   { descendre: true } — LE SENS INVERSE (2026-08-29, demande du
+//                   propriétaire : « si le client appelle, qu'il soit
+//                   facile à retrouver ») : lit TOUS les clients de
+//                   QuickBooks, relie ceux qui existent déjà (par
+//                   quickbooks_customer_id, sinon par NOM normalisé) et
+//                   crée une fiche pour les autres. Idempotent : les
+//                   fiches créées portent l'id déterministe
+//                   « qbc-<idQuickBooks> » — repasser ne duplique rien.
 //
 // Idempotent : un client déjà relié (quickbooks_customer_id) est sauté ;
 // un client portant le même nom chez QuickBooks est RELIÉ, pas dupliqué.
@@ -21,9 +29,105 @@ import {
   utilisateurDepuisJeton,
   clientQboPour,
   mettreAJourClientQbo,
+  requeteQbo,
 } from "@/lib/quickbooksServeur";
 
 const MAX_PAR_PASSE = 100;
+
+// Même normalisation que côté admin : minuscules, accents retirés,
+// espaces réduits — « Raphaël  Gélinas » = « raphael gelinas ».
+function nomNormalise(n) {
+  return String(n || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// ------------------------------------------------------------
+// LA DESCENTE : QuickBooks → Fluxya. Toute la liste (pagination
+// STARTPOSITION — rien n'est tronqué même à 2 000 clients), puis trois
+// familles : déjà reliés (rien à faire), homonymes (raccord du lien sur
+// la fiche existante), inconnus (fiche créée avec courriel/téléphone/
+// adresse de facturation). Les fiches naissent en UN upsert groupé.
+// ------------------------------------------------------------
+async function descendreClientsQbo(acces, admin) {
+  const { data: fiches, error: erreurLecture } = await admin
+    .from("clients_app")
+    .select("id, nom, entreprise, quickbooks_customer_id");
+  if (erreurLecture) throw new Error(`Lecture des fiches : ${erreurLecture.message}`);
+
+  const dejaRelies = new Set((fiches || []).map((f) => f.quickbooks_customer_id).filter(Boolean));
+  const parNom = new Map();
+  (fiches || []).forEach((f) => {
+    [f.nom, f.entreprise].forEach((n) => {
+      const cle = nomNormalise(n);
+      if (cle && !parNom.has(cle)) parNom.set(cle, f);
+    });
+  });
+
+  const clientsQb = [];
+  const PAGE = 500;
+  for (let depart = 1; ; depart += PAGE) {
+    const lu = await requeteQbo(
+      acces,
+      `select Id, DisplayName, CompanyName, PrimaryEmailAddr, PrimaryPhone, BillAddr from Customer startposition ${depart} maxresults ${PAGE}`
+    );
+    const page = lu?.Customer || [];
+    clientsQb.push(...page);
+    if (page.length < PAGE) break;
+  }
+
+  let relies = 0;
+  const aCreer = [];
+  for (const q of clientsQb) {
+    const qbId = String(q.Id);
+    const nomQb = (q.DisplayName || "").trim();
+    if (!nomQb || dejaRelies.has(qbId)) continue;
+    // Homonyme d'une fiche SANS lien → raccord (jamais de doublon).
+    const fiche = parNom.get(nomNormalise(nomQb)) || parNom.get(nomNormalise(q.CompanyName));
+    if (fiche) {
+      if (!fiche.quickbooks_customer_id) {
+        const { error } = await admin
+          .from("clients_app")
+          .update({ quickbooks_customer_id: qbId, sync_qb: "synchronise" })
+          .eq("id", fiche.id)
+          .is("quickbooks_customer_id", null);
+        if (!error) {
+          fiche.quickbooks_customer_id = qbId;
+          relies++;
+        }
+      }
+      continue;
+    }
+    // Inconnu de Fluxya → fiche neuve. Adresse de facturation en une
+    // ligne lisible ; le courriel QuickBooks devient le contact défaut.
+    const adresse = [q.BillAddr?.Line1, q.BillAddr?.City, q.BillAddr?.PostalCode].filter(Boolean).join(", ");
+    const courriel = (q.PrimaryEmailAddr?.Address || "").trim();
+    aCreer.push({
+      id: `qbc-${qbId}`,
+      nom: nomQb,
+      entreprise: q.CompanyName && nomNormalise(q.CompanyName) !== nomNormalise(nomQb) ? q.CompanyName : null,
+      courriels: courriel ? [{ id: `cc-qb-${qbId}`, label: "QuickBooks", email: courriel, defaut: true }] : [],
+      telephone: q.PrimaryPhone?.FreeFormNumber || null,
+      adresse_facturation: adresse || null,
+      quickbooks_customer_id: qbId,
+      sync_qb: "synchronise",
+    });
+  }
+
+  let crees = 0;
+  // Lots de 200 : un upsert géant passe, mais des lots restent plus
+  // digestes pour Supabase et pour le Realtime qui va suivre.
+  for (let i = 0; i < aCreer.length; i += 200) {
+    const lot = aCreer.slice(i, i + 200);
+    const { error } = await admin.from("clients_app").upsert(lot, { onConflict: "id" });
+    if (error) throw new Error(`Création des fiches : ${error.message}`);
+    crees += lot.length;
+  }
+  return { totalQb: clientsQb.length, relies, crees };
+}
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -51,6 +155,16 @@ export async function POST(request) {
   if (!acces) return Response.json({ nonConnecte: true });
 
   const admin = clientSupabaseService();
+
+  // 🡇 LE SENS INVERSE — QuickBooks → Fluxya (voir descendreClientsQbo).
+  if (corps?.descendre === true) {
+    try {
+      const r = await descendreClientsQbo(acces, admin);
+      return Response.json(r);
+    } catch (e) {
+      return Response.json({ erreur: String(e?.message || "QuickBooks injoignable — réessaie.") }, { status: 502 });
+    }
+  }
 
   // La liste à traiter : un seul client, ou tous ceux pas encore reliés.
   let aTraiter = [];

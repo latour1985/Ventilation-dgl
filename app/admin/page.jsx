@@ -329,21 +329,6 @@ const PROJETS_INIT = [
   },
 ];
 
-// Simule un ou des clients créés directement dans QuickBooks (pas via
-// notre appli) et récupérés au moment de la synchronisation.
-const NOUVEAUX_CLIENTS_QUICKBOOKS = [
-  {
-    id: "qb-import-1",
-    nom: "Construction Bouchard & Fils",
-    courriels: [{ id: "cc4", label: "Administration", email: "administration@constructionbouchard.com", defaut: true }],
-    telephone: "819-555-0177",
-    termeFacturation: "Net 30",
-    quickbooksCustomerId: "QBO-1003",
-    adresses: [],
-  },
-];
-
-
 const EMPLOYES = [
   { id: "e1", nom: "Marc Gagnon" },
   { id: "e2", nom: "Sophie Roy" },
@@ -4752,34 +4737,31 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
       .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement mais transfert QuickBooks à reprendre`));
   };
 
-  const synchroniserDepuisQuickbooks = () => {
-    if (dejaSyncQb) return;
+  // ⬇️ VRAIE DESCENTE QuickBooks → Fluxya (2026-08-29 — remplace la
+  // simulation de démonstration qui vivait ici depuis les débuts et
+  // inventait un faux client). Décision du propriétaire : TOUS les
+  // clients de QuickBooks — « si le client appelle, qu'il soit facile à
+  // retrouver ». La route relie les homonymes (jamais de doublon) et
+  // crée les fiches manquantes ; le Realtime rafraîchit la liste seul.
+  const synchroniserDepuisQuickbooks = async () => {
+    if (syncEnCours) return;
     setSyncEnCours(true);
-    // ------------------------------------------------------------
-    // AUTOMATISATION : télécharge les clients créés directement dans
-    // QuickBooks (pas via notre appli) pour garder les deux bases
-    // alignées. En prod : requête périodique (ou webhook QuickBooks)
-    // sur l'endpoint Customer, filtrée sur les enregistrements créés
-    // depuis la dernière synchronisation.
-    // ------------------------------------------------------------
-    setTimeout(() => {
-      setClients((prev) => {
-        // Déduplication par id ET par quickbooksCustomerId — même si
-        // cette fonction venait à être appelée plusieurs fois (sync
-        // périodique en prod), un même client ne doit jamais être
-        // ajouté deux fois. Ne dépend pas du drapeau `dejaSyncQb` seul.
-        const idsExistants = new Set(prev.map((c) => c.id));
-        const qbIdsExistants = new Set(prev.map((c) => c.quickbooksCustomerId).filter(Boolean));
-        const nouveaux = NOUVEAUX_CLIENTS_QUICKBOOKS.filter(
-          (c) => !idsExistants.has(c.id) && !(c.quickbooksCustomerId && qbIdsExistants.has(c.quickbooksCustomerId))
-        );
-        nouveaux.forEach((c) => ajouterJournal(`⬇️ Client "${c.nom}" téléchargé depuis QuickBooks (${c.quickbooksCustomerId})`));
-        if (nouveaux.length === 0) return prev;
-        return [...prev, ...nouveaux];
-      });
-      setDejaSyncQb(true);
-      setSyncEnCours(false);
-    }, 900);
+    const r = await synchroniserClientsQbo({ descendre: true });
+    setSyncEnCours(false);
+    if (r?.erreur || r?.nonConnecte || r?.simule) {
+      ajouterJournal(
+        `⚠️ Descente des clients QuickBooks impossible : ${r?.erreur || (r?.nonConnecte ? "QuickBooks non connecté (Paramètres → Connexions)" : "mode simulé — clés absentes")}`
+      );
+      return;
+    }
+    setDejaSyncQb(true);
+    if ((r?.crees || 0) === 0 && (r?.relies || 0) === 0) {
+      ajouterJournal(`✅ Clients à jour avec QuickBooks — ${r?.totalQb ?? 0} clients vérifiés, rien de nouveau.`);
+      return;
+    }
+    ajouterJournal(
+      `⬇️ Clients QuickBooks descendus : ${r?.crees || 0} fiche${(r?.crees || 0) > 1 ? "s" : ""} créée${(r?.crees || 0) > 1 ? "s" : ""}, ${r?.relies || 0} reliée${(r?.relies || 0) > 1 ? "s" : ""} par nom (sur ${r?.totalQb ?? 0} clients QuickBooks).`
+    );
   };
 
   return (
@@ -4790,11 +4772,10 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
           variant="outline"
           onClick={synchroniserDepuisQuickbooks}
           loading={syncEnCours}
-          disabled={dejaSyncQb}
           className="min-h-0 px-3 py-1.5 text-xs"
         >
           {!syncEnCours && <RefreshCw size={13} />}
-          {dejaSyncQb ? "À jour avec QuickBooks" : "Synchroniser depuis QuickBooks"}
+          {dejaSyncQb ? "✓ Synchroniser depuis QuickBooks" : "Synchroniser depuis QuickBooks"}
         </Button>
       </div>
 
@@ -17040,6 +17021,22 @@ export default function App() {
           );
         } catch {
           // silencieux — le bouton « Synchroniser » reste là
+        }
+        // ⬇️ DESCENTE SILENCIEUSE DES CLIENTS (2026-08-29, même cadence) :
+        // un client créé directement dans QuickBooks (par la comptable)
+        // apparaît tout seul dans Fluxya en ~15 minutes — « si le client
+        // appelle, qu'il soit facile à retrouver ». Idempotent côté
+        // serveur ; le Realtime rafraîchit la liste ; on ne parle au
+        // journal que s'il y a du NOUVEAU.
+        try {
+          const rc = await synchroniserClientsQbo({ descendre: true });
+          if (!annule && (rc?.crees || 0) > 0) {
+            ajouterJournal(
+              `⬇️ ${rc.crees} nouveau${rc.crees > 1 ? "x" : ""} client${rc.crees > 1 ? "s" : ""} QuickBooks descendu${rc.crees > 1 ? "s" : ""} dans Fluxya — trouvable${rc.crees > 1 ? "s" : ""} dès maintenant à la création d'une tâche.`
+            );
+          }
+        } catch {
+          // silencieux — le bouton de l'onglet Clients reste là
         }
       }
     };
