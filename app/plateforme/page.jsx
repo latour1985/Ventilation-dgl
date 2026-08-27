@@ -383,14 +383,19 @@ function SectionRetoursPlateforme({ retours, session, onMaj }) {
 // ============================================================
 function SectionEquipe({ session }) {
   const [operateurs, setOperateurs] = useState(null);
+  // 🤝 Demandes de révocation de clés principales en attente d'une 2e
+  // clé — { idCible: { parId, parCourriel, le } }.
+  const [demandesRevocation, setDemandesRevocation] = useState({});
   const [messageEq, setMessageEq] = useState("");
   const [invite, setInvite] = useState({ courriel: "", nom: "", niveau: "technicien" });
   const [enCours, setEnCours] = useState(false);
   const [revoquePour, setRevoquePour] = useState(null);
   const charger = () => {
     listerOperateurs().then((r) => {
-      if (Array.isArray(r?.operateurs)) setOperateurs(r.operateurs);
-      else setMessageEq(r?.erreur || "Liste indisponible.");
+      if (Array.isArray(r?.operateurs)) {
+        setOperateurs(r.operateurs);
+        setDemandesRevocation(r.demandesRevocation || {});
+      } else setMessageEq(r?.erreur || "Liste indisponible.");
     });
   };
   useEffect(charger, []);
@@ -420,10 +425,20 @@ function SectionEquipe({ session }) {
   const revoquer = async (o) => {
     setRevoquePour(null);
     const r = await gererOperateur({ action: "revoquer", id: o.id });
-    if (r?.fait) {
-      setMessageEq(`✓ Accès de ${o.courriel} révoqué — la porte est refermée.`);
+    if (r?.demandeEnregistree) {
+      setMessageEq(`🤝 Demande enregistrée — la révocation de ${o.courriel} attend la confirmation d'une AUTRE clé principale (règle des 2 clés).`);
+      charger();
+    } else if (r?.fait) {
+      setMessageEq(`✓ Accès de ${o.courriel} révoqué${r.confirmeeParDeuxCles ? " (confirmé par 2 clés principales)" : ""} — la porte est refermée.`);
       charger();
     } else setMessageEq(`⚠️ ${r?.erreur || "Révocation refusée."}`);
+  };
+  const annulerDemande = async (o) => {
+    const r = await gererOperateur({ action: "annuler-revocation", id: o.id });
+    if (r?.fait) {
+      setMessageEq(`✓ Demande de révocation de ${o.courriel} annulée.`);
+      charger();
+    } else setMessageEq(`⚠️ ${r?.erreur || "Annulation refusée."}`);
   };
   return (
     <div className="space-y-3">
@@ -471,28 +486,45 @@ function SectionEquipe({ session }) {
                 >
                   {NIVEAUX_PLATEFORME.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                 </select>
-                {o.id !== session?.user?.id && (
+                {/* 🤝 Une CLÉ PRINCIPALE se révoque à DEUX clés : la
+                    demande s'affiche ici jusqu'à la confirmation d'une
+                    autre clé (la cible peut consentir elle-même). */}
+                {demandesRevocation[o.id] ? (
+                  <span className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-amber-700">
+                    ⏳ Révocation demandée par {demandesRevocation[o.id].parCourriel}
+                    {demandesRevocation[o.id].parId !== session?.user?.id && (
+                      <button onClick={() => revoquer(o)} className="rounded-lg bg-red-600 px-2 py-1 text-[10px] font-extrabold text-white">
+                        Confirmer (2e clé)
+                      </button>
+                    )}
+                    <button onClick={() => annulerDemande(o)} className="text-[10px] text-slate-500 underline">Annuler</button>
+                  </span>
+                ) : o.id !== session?.user?.id ? (
                   revoquePour === o.id ? (
                     <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-                      Révoquer ?
+                      {o.niveau === "cle-principale" ? "Demander la révocation ? (2 clés requises)" : "Révoquer ?"}
                       <button onClick={() => revoquer(o)} className="rounded-lg bg-red-600 px-2 py-1 text-[10px] font-extrabold text-white">Oui</button>
                       <button onClick={() => setRevoquePour(null)} className="text-[10px] underline">Non</button>
                     </span>
                   ) : (
                     <button onClick={() => setRevoquePour(o.id)} className="text-[10px] font-semibold text-slate-400 underline hover:text-red-600">
-                      Révoquer l&apos;accès
+                      {o.niveau === "cle-principale" ? "Demander la révocation…" : "Révoquer l'accès"}
                     </button>
                   )
-                )}
+                ) : null}
               </div>
             </div>
           ))
         )}
       </div>
       <p className="text-[10px] leading-relaxed text-slate-400">
-        Maximum 3 clés principales. La révocation retire le sceau côté serveur : la porte se referme instantanément,
-        même si la personne connaît encore son mot de passe. Un opérateur n&apos;a AUCUN accès au contenu des
-        entreprises — seulement à cette console, selon son niveau.
+        Maximum 3 clés principales — et la révocation d&apos;une clé principale exige <span className="font-bold">DEUX clés</span> :
+        une qui demande, une autre qui confirme (la personne visée peut consentir elle-même). Les accès sont
+        <span className="font-bold"> SÉPARÉS</span> : un courriel d&apos;employé d&apos;entreprise ne peut pas devenir opérateur
+        (courriel dédié à la console) — seules les clés principales portent les deux accès sur un même compte.
+        La révocation retire le sceau côté serveur : la porte se referme instantanément, même si la personne connaît
+        encore son mot de passe. Un opérateur n&apos;a AUCUN accès au contenu des entreprises — seulement à cette
+        console, selon son niveau.
       </p>
     </div>
   );
