@@ -20,7 +20,7 @@ import GestionAcces from "@/components/GestionAcces";
 import { listerInspections, listerEntretiens, prendreEnChargeInspection, marquerAnomalieReparee, creerEntretien, sAbonnerInspections } from "@/lib/supabase/inspections";
 import { listerCarnetVehicules, ajouterEntreeCarnet, sAbonnerCarnetVehicules } from "@/lib/supabase/carnetVehicules";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
-import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees } from "@/lib/supabase/tachesAssignees";
+import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA } from "@/lib/supabase/travauxEffectues";
@@ -8643,7 +8643,7 @@ function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
   );
 }
 
-function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache }) {
+function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -9060,6 +9060,39 @@ function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitia
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+
+          {/* 🏗️ PROJET PROPOSÉ PAR LE TECHNICIEN (2026-08-31) — sur un
+              travail au shop, le technicien peut dire pour quel projet
+              il travaille. Décision du propriétaire : « ça demande une
+              vérification » — RIEN ne compte tant que le bureau n'a pas
+              confirmé ici. Confirmer pose le projet ET fait suivre les
+              heures déjà pointées ; refuser efface la proposition. */}
+          {tache.projetProposeId && onTraiterPropositionProjet && (
+            <div className="rounded-xl border-2 border-lime-300 bg-lime-50 p-3">
+              <p className="text-xs font-bold leading-snug text-lime-900">
+                🏗️ {tache.projetProposePar || "Le technicien"} propose de lier ce travail au projet{" "}
+                <span className="font-extrabold">« {tache.projetProposeNom || tache.projetProposeId} »</span>
+              </p>
+              <p className="mt-0.5 text-[11px] leading-snug text-lime-800">
+                Vérifie que c&apos;est le bon projet : en confirmant, ses heures (déjà pointées et à venir) comptent
+                dans les coûts de ce projet.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => onTraiterPropositionProjet(tache, true)}
+                  className="rounded-lg bg-lime-700 py-2 text-xs font-extrabold text-white active:scale-[0.99]"
+                >
+                  ✓ Confirmer le projet
+                </button>
+                <button
+                  onClick={() => onTraiterPropositionProjet(tache, false)}
+                  className="rounded-lg border border-slate-300 bg-white py-2 text-xs font-bold text-slate-600"
+                >
+                  ✗ Refuser
+                </button>
+              </div>
             </div>
           )}
 
@@ -13208,6 +13241,28 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
           }}
           projets={projets}
           devisListe={devisListe}
+          onTraiterPropositionProjet={
+            lectureSeule
+              ? undefined
+              : async (t, accepter) => {
+                  const projetId = t.projetProposeId;
+                  const nomProjet = t.projetProposeNom || (projets || []).find((p) => p.id === projetId)?.nom || projetId;
+                  setTacheDetailOuverte(null);
+                  try {
+                    await traiterPropositionProjetShop(t.id, accepter ? projetId : null);
+                    if (accepter) {
+                      const n = await rattacherProjetAuxHeures(t.id, projetId, { toutesCategories: true });
+                      ajouterJournal(
+                        `🏗️ Projet « ${nomProjet} » CONFIRMÉ sur « ${t.titre} » (proposé par ${t.projetProposePar || "le technicien"})${n > 0 ? ` — ${n} entrée${n > 1 ? "s" : ""} d'heures rejoint${n > 1 ? "" : ""} ses coûts réels` : ""}.`
+                      );
+                    } else {
+                      ajouterJournal(`✗ Proposition de projet « ${nomProjet} » REFUSÉE sur « ${t.titre} » — le travail au shop reste hors projet.`);
+                    }
+                  } catch (e) {
+                    ajouterJournal(`⚠️ Traitement de la proposition de projet impossible (${e?.message || "connexion"}) — réessaie.`);
+                  }
+                }
+          }
           onCreerProjetDepuisTache={(t) => {
             // 🏗️ « Créer un projet à partir de cette tâche » : un projet
             // n'est pas qu'un dossier, c'est un BUDGET — impossible à

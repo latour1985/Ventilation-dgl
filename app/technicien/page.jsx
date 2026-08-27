@@ -25,7 +25,7 @@ import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAu
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { pushSupporte, activerNotificationsPush, resouscrireSiPermis } from "@/lib/notificationsPush";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
-import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, creerTravailShopTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
+import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, creerTravailShopTechnicien, listerProjetsPourTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue, travailDejaEnregistre, infoTravailEnregistre } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
@@ -1918,15 +1918,26 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
   const [shopNote, setShopNote] = useState("");
   const [shopEnCours, setShopEnCours] = useState(false);
   const [shopMsg, setShopMsg] = useState("");
+  // 🏗️ PROJET PROPOSÉ (2026-08-31) — le technicien peut dire POUR QUEL
+  // projet il travaille au shop (fabrication de conduits pour un
+  // chantier…). C'est une PROPOSITION : le bureau confirme avant que
+  // les heures comptent au projet. Liste chargée à l'ouverture.
+  const [shopProjets, setShopProjets] = useState(null); // null = pas chargés
+  const [shopProjetId, setShopProjetId] = useState("");
+  useEffect(() => {
+    if (!shopOuvert || shopProjets !== null) return;
+    listerProjetsPourTechnicien(session).then(setShopProjets);
+  }, [shopOuvert, shopProjets, session]);
   const creerShop = async () => {
     if (!shopTitre.trim()) return;
     setShopEnCours(true);
     setShopMsg("");
     try {
-      await creerTravailShopTechnicien({ titre: shopTitre.trim(), note: shopNote.trim() }, session);
+      await creerTravailShopTechnicien({ titre: shopTitre.trim(), note: shopNote.trim(), projetProposeId: shopProjetId || null }, session);
       setShopMsg("ok");
       setShopTitre("");
       setShopNote("");
+      setShopProjetId("");
       setTimeout(() => {
         setShopOuvert(false);
         setShopMsg("");
@@ -2327,6 +2338,28 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 placeholder="Détails utiles…"
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
+              {/* 🏗️ Le projet concerné — une PROPOSITION que le bureau
+                  confirme (jamais de lien direct depuis le terrain). */}
+              {(shopProjets || []).length > 0 && (
+                <>
+                  <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">C&apos;est pour un projet ? (facultatif)</label>
+                  <select
+                    value={shopProjetId}
+                    onChange={(e) => setShopProjetId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+                  >
+                    <option value="">Non — travail général au shop</option>
+                    {(shopProjets || []).map((p) => (
+                      <option key={p.id} value={p.id}>🏗️ {p.nom}</option>
+                    ))}
+                  </select>
+                  {shopProjetId && (
+                    <p className="mt-1 text-[11px] leading-snug text-slate-400">
+                      Le bureau confirmera le projet — tes heures y seront comptées après sa vérification.
+                    </p>
+                  )}
+                </>
+              )}
               {shopMsg === "ok" && (
                 <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">✅ Tâche créée — elle apparaît dans ton horaire, pèse Débuter en arrivant.</p>
               )}

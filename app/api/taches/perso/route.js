@@ -19,6 +19,31 @@
 
 import { clientSupabaseService, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
 
+// 🏗️ LISTE DES PROJETS pour le sélecteur « C'est pour un projet ? » du
+// travail au shop (2026-08-31, décision du propriétaire : le technicien
+// peut PROPOSER le projet — le bureau CONFIRME avant que ça compte).
+// Noms seulement, jamais rien de financier ; projets ni terminés ni
+// annulés. La RLS bloque la table aux techniciens — la clé service lit
+// pour eux ce strict minimum.
+export async function GET(request) {
+  const enTete = request.headers.get("authorization") || "";
+  const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
+  const utilisateur = await utilisateurDepuisJeton(jeton);
+  if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return Response.json({ simule: true });
+  const admin = clientSupabaseService();
+  const { data, error } = await admin
+    .from("projets_app")
+    .select("id, nom, statut")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) return Response.json({ erreur: error.message }, { status: 502 });
+  const projets = (data || [])
+    .filter((p) => p.statut !== "Terminé" && p.statut !== "Annulé")
+    .map((p) => ({ id: p.id, nom: p.nom }));
+  return Response.json({ projets });
+}
+
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
@@ -57,6 +82,21 @@ export async function POST(request) {
   const id = `${type}-${Date.now()}`;
 
   const admin = clientSupabaseService();
+
+  // 🏗️ PROJET PROPOSÉ (shop seulement) — une PROPOSITION, jamais un
+  // lien : projet_id reste null tant que le bureau n'a pas confirmé
+  // (décision du propriétaire : « ça demande une vérification pour être
+  // sûr que ce soit le bon projet »). L'id est vérifié contre la table —
+  // un id inventé est simplement ignoré.
+  let projetPropose = null;
+  if (type === "shop" && corps?.projetProposeId) {
+    const { data: p } = await admin
+      .from("projets_app")
+      .select("id, nom")
+      .eq("id", String(corps.projetProposeId))
+      .maybeSingle();
+    if (p) projetPropose = { id: p.id, nom: p.nom };
+  }
   const { error } = await admin.from("taches_assignees").upsert(
     {
       tache_id: id,
@@ -88,6 +128,9 @@ export async function POST(request) {
         jours: 1,
         creeParTechnicien: nom,
         heure: heureLocale,
+        ...(projetPropose
+          ? { projetProposeId: projetPropose.id, projetProposeNom: projetPropose.nom, projetProposePar: nom }
+          : {}),
       },
     },
     { onConflict: "tache_id,employe_email" }
