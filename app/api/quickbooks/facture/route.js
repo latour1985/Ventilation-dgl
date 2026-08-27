@@ -134,7 +134,19 @@ export async function POST(request) {
         } catch {
           // note indisponible — la facture part sans, jamais bloquée
         }
-        const memo = [String(corps?.customerMemo || "").trim(), note.trim()].filter(Boolean).join("\n\n");
+        // 📜 TERMES ET CONDITIONS (2026-09-02, retour du propriétaire :
+        // « les termes et conditions ne sont pas là ») — le texte complet
+        // ne tient pas dans le mémo QuickBooks (900 caractères), alors
+        // c'est le LIEN vers la page officielle qui part sur CHAQUE
+        // facture, même patron que les courriels de dépôt. L'origine est
+        // lue de la demande : fluxya.app en production, localhost en dev.
+        let lienConditions = "";
+        try {
+          lienConditions = `Termes et conditions : ${new URL(request.url).origin}/conditions`;
+        } catch {
+          lienConditions = "Termes et conditions disponibles sur demande.";
+        }
+        const memo = [String(corps?.customerMemo || "").trim(), note.trim(), lienConditions].filter(Boolean).join("\n\n");
         return memo ? { CustomerMemo: { value: memo.slice(0, 900) } } : {};
       })()),
       // L'ADRESSE DES TRAVAUX — elle change à chaque job, donc elle vit

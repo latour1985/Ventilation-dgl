@@ -1180,12 +1180,19 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const gris = enAttente.filter((b) => !b.prixNonListe && b.type === "appel_service").length;
   const retires = bonsGroupes.filter((b) => b.statutQb === "retire").length;
   const jaunes = enAttente.filter((b) => !b.prixNonListe && b.type !== "devis" && b.type !== "entretien_contrat" && b.type !== "appel_service").length;
+  // ✅ DÉJÀ FACTURÉS (2026-09-02, demande du propriétaire : « celles qui
+  // sont traitées ne polluent pas le visuel du menu global ») — les bons
+  // complètement facturés sortent de la liste par défaut et vivent dans
+  // leur propre encadré, comme les retirés. Rien ne disparaît : un clic
+  // sur l'encadré les montre.
+  const dejaFactures = bonsGroupes.filter((b) => b.statutQb === "envoye").length;
 
-  // Catégorie d'un bon — reprend exactement la même logique que les 5
+  // Catégorie d'un bon — reprend exactement la même logique que les
   // encadrés ci-dessus, pour que le filtrage par clic reste toujours
   // cohérent avec les compteurs affichés.
   const categorieBon = (b) => {
     if (b.statutQb === "retire") return "retire";
+    if (b.statutQb === "envoye") return "facture";
     if (b.prixNonListe) return "rouge";
     if (b.type === "entretien_contrat") return "violet";
     if (b.type === "devis") return "bleu";
@@ -1201,7 +1208,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const basculerFiltre = (categorie) => {
     setFiltresActifs((prev) => (prev.includes(categorie) ? prev.filter((c) => c !== categorie) : [...prev, categorie]));
   };
-  const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes.filter((b) => categorieBon(b) !== "retire") : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
+  // Vue par défaut : ni les retirés, ni les DÉJÀ FACTURÉS — le travail
+  // à faire seulement. Les deux encadrés les ramènent d'un clic.
+  const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes.filter((b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture") : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
   // 📄 Pagination (2026-08-26) : 10 cartes par page — les plus grosses
   // cartes de l'application s'empilaient sans fin. Changer de filtre
   // ramène page 1 ; la borne Math.min évite toute page vide.
@@ -1696,7 +1705,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           </div>
         );
       })()}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-7">
         <button
           onClick={() => basculerFiltre("rouge")}
           className={`rounded-xl border p-3 text-left transition-shadow ${
@@ -1750,6 +1759,16 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         >
           <p className="text-2xl font-extrabold text-slate-500 tabular-nums">{retires}</p>
           <p className="text-xs font-semibold text-slate-500">Retirés — garantie / maison</p>
+        </button>
+        <button
+          onClick={() => basculerFiltre("facture")}
+          title="Bons complètement facturés — hors de la liste par défaut, un clic les montre"
+          className={`rounded-xl border p-3 text-left transition-shadow ${
+            filtresActifs.includes("facture") ? "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-300" : "border-emerald-100 bg-emerald-50"
+          }`}
+        >
+          <p className="text-2xl font-extrabold text-emerald-600 tabular-nums">{dejaFactures}</p>
+          <p className="text-xs font-semibold text-emerald-700">✅ Déjà facturés</p>
         </button>
       </div>
 
