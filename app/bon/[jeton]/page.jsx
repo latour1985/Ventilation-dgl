@@ -123,7 +123,17 @@ export default function PageBonPublic({ params }) {
         {/* EN-TÊTE ENTREPRISE */}
         <div className="rounded-2xl bg-white p-5">
           <div className="flex items-center gap-3">
-            <img src="/logo-dgl.png" alt="" className="h-11 w-auto" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            {/* Logo : celui de l'entreprise (snippet 92) ; le logo DGL du
+                dossier public ne sert qu'à DGL (ou en filet quand l'id
+                n'a pas voyagé) — un client sans logo n'affiche RIEN. */}
+            {(bon.entreprise.logo || !bon.entreprise.id || bon.entreprise.id === "dgl") && (
+              <img
+                src={bon.entreprise.logo || "/logo-dgl.png"}
+                alt=""
+                className="h-11 w-auto"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            )}
             <div>
               <p className="text-sm font-extrabold text-[#131B2E]">{bon.entreprise.nomLegal}</p>
               <p className="text-[11px] text-slate-500">

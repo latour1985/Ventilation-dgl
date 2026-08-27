@@ -3193,3 +3193,149 @@ update entreprises
   set membre_cmmtq = false, associations = '[]'::jsonb
   where id <> 'dgl';
 select id, nom_legal, membre_cmmtq, associations, (logo_donnees is not null) as logo_present from entreprises order by id;
+
+-- ============================================================
+-- 92 - IDENTITE DU CLIENT SUR LES PAGES PUBLIQUES devis/[jeton] et bon/[jeton]
+--      (2026-09-06 — suite du test a blanc : ces pages chargeaient
+--      l'identite en anonyme, les cloisons RLS la bloquaient et la page
+--      retombait sur l'identite DGL. L'identite voyage desormais AVEC
+--      la charge utile des fonctions publiques — nom, telephone,
+--      courriel, taux de taxes et LOGO de la bonne entreprise.)
+-- ============================================================
+
+-- Le logo (pose par le snippet 91 — filet si jamais il n'est pas passe)
+alter table entreprises add column if not exists logo_donnees text;
+
+-- ---- 1. devis_public : + identite de l'entreprise emettrice ----
+-- (drop obligatoire : la liste des colonnes retournees change)
+drop function if exists devis_public(text);
+create function devis_public(p_jeton text)
+returns table (
+  numero text, client_nom text, date_emission date,
+  lignes jsonb, total_vendant numeric,
+  statut text, reponse_client text, repondu_le timestamptz, expire boolean,
+  entreprise_id text,
+  entreprise_nom text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_taux_tps numeric,
+  entreprise_taux_tvq numeric,
+  entreprise_logo text
+)
+language sql security definer set search_path = public as $$
+  select
+    d.numero, d.client_nom, d.date_emission,
+    -- Les lignes sont RECONSTRUITES sans prix_coutant : le coûtant ne
+    -- peut pas fuir, même par erreur de programmation côté page.
+    (select coalesce(jsonb_agg(jsonb_build_object(
+        'uid', l->>'uid', 'nom', l->>'nom', 'description', l->>'description',
+        'quantite', l->'quantite', 'prix_vendant', l->'prix_vendant')), '[]'::jsonb)
+     from jsonb_array_elements(d.lignes) l),
+    d.total_vendant, d.statut, d.reponse_client, d.repondu_le,
+    (d.jeton_expire_le is not null and d.jeton_expire_le < now()),
+    d.entreprise_id,
+    coalesce(e.nom_commercial, e.nom_legal),
+    e.telephone,
+    e.courriel,
+    e.taux_tps,
+    e.taux_tvq,
+    e.logo_donnees
+  from devis_app d
+  left join entreprises e on e.id = d.entreprise_id
+  where d.jeton_public = p_jeton and d.version_active;
+$$;
+revoke all on function devis_public(text) from public;
+grant execute on function devis_public(text) to anon, authenticated;
+
+-- ---- 2. bon_travail_public : + entreprise_id et LOGO ----
+drop function if exists bon_travail_public(text);
+create function bon_travail_public(p_jeton text)
+returns table (
+  entreprise_nom text,
+  entreprise_adresse text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_rbq text,
+  titre text,
+  client_nom text,
+  client_adresse_facturation text,
+  description text,
+  date_travail date,
+  adresse_travaux text,
+  photos jsonb,
+  legendes jsonb,
+  signe_par_nom text,
+  signe_par_collegue boolean,
+  client_absent boolean,
+  unites jsonb,
+  expire boolean,
+  entreprise_id text,
+  entreprise_logo text
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    coalesce(e.nom_commercial, e.nom_legal, 'Ventilation DGL inc.'),
+    e.adresse,
+    e.telephone,
+    e.courriel,
+    e.numero_rbq,
+    b.titre,
+    b.client_nom,
+    c.adresse_facturation,
+    b.description,
+    b.date_travail,
+    b.adresse_travaux,
+    ph.photos,
+    coalesce((
+      select jsonb_object_agg(pl.url, pl.legende)
+      from photos_legendes pl
+      where pl.legende is not null and pl.legende <> ''
+        and pl.url in (
+          select jsonb_array_elements_text(coalesce(ph.photos->'avant', '[]'::jsonb))
+          union
+          select jsonb_array_elements_text(coalesce(ph.photos->'apres', '[]'::jsonb))
+        )
+    ), '{}'::jsonb),
+    b.signe_par_nom,
+    coalesce(b.signe_par_collegue, false),
+    b.client_absent,
+    coalesce(b.unites, '[]'::jsonb),
+    (b.jeton_expire_le is not null and b.jeton_expire_le < now()),
+    b.entreprise_id,
+    e.logo_donnees
+  from bons_travail b
+  left join entreprises e on e.id = b.entreprise_id
+  left join clients_app c
+    on c.nom = b.client_nom and c.entreprise_id = b.entreprise_id
+  cross join lateral (
+    select jsonb_build_object(
+      'avant', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'avant', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'avant', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb),
+      'apres', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'apres', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'apres', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb)
+    ) as photos
+  ) ph
+  where b.jeton_public = p_jeton;
+$$;
+grant execute on function bon_travail_public(text) to anon, authenticated;

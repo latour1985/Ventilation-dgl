@@ -24,14 +24,13 @@ import { use } from "react";
 import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
 import { chargerDevisPublic, repondreDevis, JOURS_VALIDITE_PRIX_DEVIS } from "@/lib/supabase/devisPublic";
 import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
-import { CONFIG_DEFAUT, chargerEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
+import { CONFIG_DEFAUT, calculerTaxes } from "@/lib/supabase/entreprise";
 
 const argent = (n) => `${(Number(n) || 0).toFixed(2)} $`;
 
 export default function PageDevisPublic({ params }) {
   const { jeton } = use(params);
   const [devis, setDevis] = useState(null);
-  const [config, setConfig] = useState(CONFIG_DEFAUT);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState("");
 
@@ -43,15 +42,35 @@ export default function PageDevisPublic({ params }) {
   const [fait, setFait] = useState(null);
 
   useEffect(() => {
-    Promise.all([chargerDevisPublic(jeton), chargerEntreprise().catch(() => CONFIG_DEFAUT)])
-      .then(([d, c]) => {
-        setConfig(c || CONFIG_DEFAUT);
+    // 🏢 L'IDENTITÉ DE L'ENTREPRISE VOYAGE AVEC LE DEVIS (snippet 92) :
+    // la page est anonyme et les cloisons RLS lui interdisent de lire la
+    // fiche entreprise — l'ancien chargerEntreprise() retombait donc sur
+    // l'identité DGL pour TOUTES les compagnies.
+    chargerDevisPublic(jeton)
+      .then((d) => {
         if (!d) setErreur("Ce lien n'est pas valide. Vérifie l'adresse ou communique avec nous.");
         else setDevis(d);
       })
       .catch(() => setErreur("Impossible de charger ce devis. Réessaie dans quelques minutes."))
       .finally(() => setChargement(false));
   }, [jeton]);
+
+  // Identité affichée : celle portée par le devis, sinon les défauts
+  // (filet tant que le snippet 92 n'est pas passé).
+  const config = devis?.entrepriseNom
+    ? {
+        nomLegal: devis.entrepriseNom,
+        telephone: devis.entrepriseTelephone || "",
+        courriel: devis.entrepriseCourriel || "",
+        tauxTps: devis.entrepriseTauxTps ?? CONFIG_DEFAUT.tauxTps,
+        tauxTvq: devis.entrepriseTauxTvq ?? CONFIG_DEFAUT.tauxTvq,
+      }
+    : CONFIG_DEFAUT;
+  // Logo : celui de l'entreprise ; le logo DGL du dossier public ne sert
+  // qu'à DGL (ou en filet quand l'identité n'a pas voyagé) — un client
+  // sans logo n'affiche RIEN plutôt que le logo d'une autre compagnie.
+  const logoSrc = devis?.entrepriseLogo
+    || (!devis?.entrepriseId || devis.entrepriseId === "dgl" ? "/logo-dgl.png" : null);
 
   const repondre = async (reponse) => {
     if (reponse === "accepte" && (!accepte || nom.trim().length < 3)) return;
@@ -93,7 +112,8 @@ export default function PageDevisPublic({ params }) {
         <div className="max-w-sm rounded-2xl bg-white p-6 text-center">
           <AlertTriangle size={28} className="mx-auto text-amber-500" />
           <p className="mt-3 text-sm font-bold text-slate-800">{erreur}</p>
-          {config.telephone && <p className="mt-2 text-sm text-slate-500">{config.telephone}</p>}
+          {/* Lien invalide = on ne sait pas de QUELLE entreprise il
+              s'agit — aucun téléphone plutôt que celui d'une autre. */}
         </div>
       </div>
     );
@@ -114,7 +134,9 @@ export default function PageDevisPublic({ params }) {
         {/* EN-TÊTE ENTREPRISE */}
         <div className="rounded-2xl bg-white p-5">
           <div className="flex items-center gap-3">
-            <img src="/logo-dgl.png" alt="" className="h-11 w-auto" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            {logoSrc && (
+              <img src={logoSrc} alt="" className="h-11 w-auto" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            )}
             <div>
               <p className="text-sm font-extrabold text-[#131B2E]">{config.nomLegal}</p>
               <p className="text-[11px] text-slate-500">
