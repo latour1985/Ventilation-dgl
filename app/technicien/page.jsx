@@ -19,7 +19,7 @@ import { televerserPhotoTravail, televerserVideoTravail, VIDEO_MAX_OCTETS, liste
 import { coffrerPhoto, lireBlobPhoto, listerPhotosCoffre, decoffrerPhoto } from "@/lib/horsLigneTechnicien";
 import { SqueletteTechnicien } from "@/components/EcranSquelette";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { enregistrerBonTravail, bonExistePourTache } from "@/lib/supabase/bonsTravail";
+import { enregistrerBonTravail, bonExistePourTache, apportEquipePourBon } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
@@ -2659,11 +2659,17 @@ function LigneProduit({ ligne, onChange, onSupprimer, lectureSeule }) {
 // silencieusement. En capturant directement via <video>, ce problème
 // ne se pose pas.
 // ============================================================
-function ModalCaptureCamera({ onCapture, onFermer }) {
+function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [erreur, setErreur] = useState("");
   const [pret, setPret] = useState(false);
+  // 🔍 ZOOM (2026-08-27, demande des techniciens) : exposé par la
+  // caméra web sur la plupart des ANDROID (bornes min/max lues du
+  // matériel). L'iPhone ne l'expose pas — son chemin vers le grand
+  // angle 0.5× est le bouton « Caméra du téléphone » (appareil natif).
+  const [zoomBornes, setZoomBornes] = useState(null); // { min, max, pas }
+  const [zoomValeur, setZoomValeur] = useState(1);
 
   useEffect(() => {
     let annule = false;
@@ -2700,6 +2706,20 @@ function ModalCaptureCamera({ onCapture, onFermer }) {
           videoRef.current.srcObject = flux;
           await videoRef.current.play().catch(() => {});
         }
+        // Le matériel offre-t-il un zoom réglable ? (Android surtout.)
+        try {
+          const piste = flux.getVideoTracks()[0];
+          const cap = piste.getCapabilities?.();
+          if (cap && typeof cap.zoom === "object" && cap.zoom && cap.zoom.max > cap.zoom.min) {
+            if (!annule) {
+              setZoomBornes({ min: cap.zoom.min, max: cap.zoom.max, pas: cap.zoom.step || 0.1 });
+              const reglage = piste.getSettings?.();
+              if (reglage?.zoom) setZoomValeur(reglage.zoom);
+            }
+          }
+        } catch {
+          // pas de zoom exposé — le curseur ne s'affiche simplement pas
+        }
         if (!annule) setPret(true);
       } catch {
         if (!annule) setErreur("Accès à la caméra refusé — active la permission dans les réglages de ton téléphone pour ajouter une photo.");
@@ -2710,6 +2730,12 @@ function ModalCaptureCamera({ onCapture, onFermer }) {
       streamRef.current?.getTracks().forEach((piste) => piste.stop());
     };
   }, []);
+
+  const appliquerZoom = (v) => {
+    setZoomValeur(v);
+    const piste = streamRef.current?.getVideoTracks?.()[0];
+    piste?.applyConstraints?.({ advanced: [{ zoom: v }] }).catch(() => {});
+  };
 
   const capturer = () => {
     const video = videoRef.current;
@@ -2755,13 +2781,47 @@ function ModalCaptureCamera({ onCapture, onFermer }) {
             {!pret && <Loader2 size={28} className="animate-spin text-white/60" />}
             <video ref={videoRef} playsInline muted className={`max-h-full max-w-full ${pret ? "" : "hidden"}`} />
           </div>
-          <div className="flex items-center justify-center p-6">
+          {/* 🔍 Curseur de zoom — seulement quand le matériel l'offre
+              (Android surtout). Dézoomer vers le minimum élargit le
+              champ autant que la caméra web le permet. */}
+          {zoomBornes && pret && (
+            <div className="flex items-center gap-2 px-6 pb-1">
+              <span className="text-[11px] font-bold text-white/70">−</span>
+              <input
+                type="range"
+                min={zoomBornes.min}
+                max={zoomBornes.max}
+                step={zoomBornes.pas}
+                value={zoomValeur}
+                onChange={(e) => appliquerZoom(Number(e.target.value))}
+                className="h-8 min-w-0 flex-1 accent-white"
+                aria-label="Zoom"
+              />
+              <span className="text-[11px] font-bold text-white/70">＋</span>
+              <span className="w-10 text-right text-[11px] font-bold tabular-nums text-white/80">{Number(zoomValeur).toFixed(1)}×</span>
+            </div>
+          )}
+          <div className="relative flex items-center justify-center gap-6 p-6" style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 24px)" }}>
             <button
               onClick={capturer}
               disabled={!pret}
               aria-label="Capturer la photo"
               className="h-16 w-16 rounded-full border-4 border-white bg-white/20 active:scale-95 disabled:opacity-40"
             />
+            {/* 📷 L'appareil NATIF du téléphone : le seul chemin vers le
+                grand angle 0.5× (et le 3×) sur iPhone — la photo revient
+                dans l'application, compressée et coffrée comme les
+                autres (demande des techniciens : « prendre des photos
+                plus éloignées »). */}
+            {onCameraNative && (
+              <button
+                onClick={onCameraNative}
+                className="absolute right-4 flex flex-col items-center gap-0.5 rounded-xl bg-white/10 px-3 py-2 text-white active:scale-95"
+              >
+                <span className="text-lg">📷</span>
+                <span className="text-[9px] font-bold leading-tight">Caméra du tél.<br/>(0.5× · 3×)</span>
+              </button>
+            )}
           </div>
         </>
       )}
@@ -3077,6 +3137,13 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
           onFermer={() => setCameraOuverte(false)}
           onCapture={(nouvellePhoto) => {
             ajouterPhoto(nouvellePhoto);
+            setCameraOuverte(false);
+          }}
+          onCameraNative={() => {
+            // ⚠️ Le clic sur l'input DOIT rester dans la foulée du tap
+            // (iOS refuse un clic programmatique différé) : on déclenche
+            // l'appareil natif AVANT de fermer la fenêtre caméra.
+            inputRef.current?.click();
             setCameraOuverte(false);
           }}
         />
@@ -4126,6 +4193,22 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         travauxNonTermines: !!tache.travauxNonTermines,
         resteAFaire: tache.resteAFaire || null,
       };
+    // 👥 LE BON PORTE TOUTE L'ÉQUIPE (2026-08-27) : photos et notes des
+    // coéquipiers qui ont déjà fermé rejoignent le bon du dernier —
+    // avant, le client ne recevait que la contribution du dernier à
+    // fermer. Best effort : hors-ligne, le bon part comme avant.
+    if (!jeSuisSeul) {
+      const apport = await apportEquipePourBon(tache.tacheOrigineId || tache.id, monCourriel);
+      chargeBon.photosAvant = [...new Set([...(chargeBon.photosAvant || []), ...apport.photosAvant])];
+      chargeBon.photosApres = [...new Set([...(chargeBon.photosApres || []), ...apport.photosApres])];
+      if (apport.notes.length > 0) {
+        const nomMoi = session?.user?.user_metadata?.nom || "Moi";
+        const mienne = String(chargeBon.description || "").trim();
+        chargeBon.description = [mienne ? `${nomMoi} : ${mienne}` : null, ...apport.notes.map((n) => `${n.nom} : ${n.note}`)]
+          .filter(Boolean)
+          .join("\n");
+      }
+    }
     enregistrerBonTravail(chargeBon, session).then(async (bonRowId) => {
       // 🤝 FERMETURE D'ÉQUIPE : le bon est créé — on avertit maintenant
       // les coéquipiers qui n'avaient pas fermé. Leur téléphone leur
@@ -5755,11 +5838,14 @@ function AppTechnicien() {
           const existe = await bonExistePourTache(action.tacheId);
           if (!existe) {
             const tacheLocale = tachesRef.current.find((x) => x.id === action.tacheLocaleId);
+            // 👥 Même fusion d'équipe qu'à l'envoi direct — le rejeu
+            // tourne EN LIGNE, l'apport des coéquipiers est lisible.
+            const apport = await apportEquipePourBon(action.tacheId, session?.user?.email);
             await enregistrerBonTravail(
               {
                 ...action.charge,
-                photosAvant: (tacheLocale?.photosAvant || []).map((ph) => ph.urlDistante).filter(Boolean),
-                photosApres: (tacheLocale?.photosApres || []).map((ph) => ph.urlDistante).filter(Boolean),
+                photosAvant: [...new Set([...(tacheLocale?.photosAvant || []).map((ph) => ph.urlDistante).filter(Boolean), ...apport.photosAvant])],
+                photosApres: [...new Set([...(tacheLocale?.photosApres || []).map((ph) => ph.urlDistante).filter(Boolean), ...apport.photosApres])],
               },
               session
             );

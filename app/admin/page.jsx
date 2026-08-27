@@ -20680,6 +20680,13 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
           equipe,
           heures: Math.round(equipe.reduce((somme, e) => somme + e.heures, 0) * 100) / 100,
           lignesReelles: reelles,
+          // 👥 Les PHOTOS de toute l'équipe (2026-08-27) : le bon ne
+          // porte que celles du dernier à fermer — la galerie de la
+          // carte compose l'union avec celles enregistrées par chaque
+          // technicien (y compris celles arrivées APRÈS l'envoi du bon,
+          // par le rattrapage réseau).
+          photosAvantUrls: [...new Set([...(b.photosAvantUrls || []), ...reelles.flatMap((t) => t.photosAvantUrls || [])])],
+          photosApresUrls: [...new Set([...(b.photosApresUrls || []), ...reelles.flatMap((t) => t.photosApresUrls || [])])],
         };
       }
       // Le montant d'un devis accepté est déjà connu — on le reprend.
