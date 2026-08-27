@@ -2985,44 +2985,114 @@ create view annuaire_employes as
 grant select on annuaire_employes to authenticated;
 
 -- ============================================================
--- 88 - COLMATAGE APRES SONDE : repertoire_employes + entreprises
+-- 88 - COLMATAGE COMPLET APRES SONDE (grand soir, version garantie)
 --      (2026-09-05)
 -- ============================================================
--- La sonde d'etancheite a confirme 27 tables etanches sur 29 mais
--- attrape 2 fuites : repertoire_employes et entreprises restaient
--- lisibles par un compte etranger (une policy permissive du mode test
--- a survecu ou est revenue sur ces deux tables). Ce snippet :
--- (1) re-etiquette le compte-sonde — le snippet 86 avait ete passe
---     AVANT la creation du compte, donc il n'avait rien etiquete ;
--- (2) refait a neuf les cloisons de CES deux tables ;
--- (3) AFFICHE l'etat final en resultat (rls_active doit etre true,
---     et seules les policies nommees ici doivent apparaitre).
+-- La sonde a revele que le snippet 85 n'avait ete applique QU'EN
+-- PARTIE sur la vraie base (entreprise_du_jeton existait, mais pas
+-- poser_entreprise_id ; 27 tables etanches, 2 fuites). Plutot que de
+-- deviner ce qui manque, CE snippet refait TOUT le grand soir de
+-- facon autosuffisante et idempotente : fonctions, etiquettes des
+-- comptes, cloisons + triggers sur les 29 tables, exceptions,
+-- verrouillages — puis AFFICHE l'etat complet de la base en resultat.
+-- Il peut etre relance autant de fois que necessaire.
 
--- ---- 1. Le compte-sonde recoit (vraiment) son etiquette etrangere ----
+-- ---- 0. La colonne entreprise_id partout (idempotent) ----
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'clients_app','projets_app','devis_app','taches_attente','taches_assignees',
+    'travaux_effectues','bons_travail','depots','pieces_commandees','achats_libres',
+    'qb_attributions_manuelles','journal_activite','retours_logiciel','commandes_camion',
+    'photos_legendes','articles_fournisseurs','fournisseurs','sous_traitants_app',
+    'camions','inspections_vehicules','entretiens_vehicules','carnet_vehicules',
+    'catalogue_items','taux_metiers','prix_depots','repertoire_employes',
+    'permissions_utilisateurs','compteurs','push_abonnements'
+  ]
+  loop
+    if exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      execute format('alter table public.%I add column if not exists entreprise_id text not null default ''dgl''', t);
+    end if;
+  end loop;
+end $$;
+
+-- ---- 1. Les 3 fonctions de garde ----
+create or replace function public.entreprise_du_jeton() returns text
+language sql stable as
+$fn$ select nullif((auth.jwt() -> 'app_metadata') ->> 'entreprise_id', '') $fn$;
+
+create or replace function public.est_plateforme() returns boolean
+language sql stable as
+$fn$ select coalesce(((auth.jwt() -> 'app_metadata') ->> 'plateforme')::boolean, false) $fn$;
+
+create or replace function public.poser_entreprise_id() returns trigger
+language plpgsql as
+$fn$
+begin
+  new.entreprise_id := coalesce(public.entreprise_du_jeton(), new.entreprise_id, 'dgl');
+  return new;
+end
+$fn$;
+
+-- ---- 2. Etiquettes des comptes : tout le monde DGL... ----
+update auth.users
+  set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"entreprise_id": "dgl"}'::jsonb
+  where email is distinct from 'sonde@etancheite.test';
+
+-- ...sauf la sonde, etiquetee entreprise ETRANGERE ----
 update auth.users
   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
     || '{"entreprise_id": "sonde-entreprise-test", "plateforme": false}'::jsonb
   where email = 'sonde@etancheite.test';
 
--- ---- 2. repertoire_employes : RLS + policies refaites a neuf ----
-alter table repertoire_employes enable row level security;
+-- ---- 3. CLOISONS : policy d'isolation + trigger sur les 29 tables ----
 do $$
-declare p record;
+declare
+  t text;
+  p record;
 begin
-  for p in select policyname from pg_policies where schemaname = 'public' and tablename = 'repertoire_employes'
+  foreach t in array array[
+    'clients_app','projets_app','devis_app','taches_attente','taches_assignees',
+    'travaux_effectues','bons_travail','depots','pieces_commandees','achats_libres',
+    'qb_attributions_manuelles','journal_activite','retours_logiciel','commandes_camion',
+    'photos_legendes','articles_fournisseurs','fournisseurs','sous_traitants_app',
+    'camions','inspections_vehicules','entretiens_vehicules','carnet_vehicules',
+    'catalogue_items','taux_metiers','prix_depots','repertoire_employes',
+    'permissions_utilisateurs','compteurs','push_abonnements'
+  ]
   loop
-    execute format('drop policy %I on public.repertoire_employes', p.policyname);
+    if not exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      continue;
+    end if;
+    execute format('alter table public.%I enable row level security', t);
+    for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
+    loop
+      execute format('drop policy %I on public.%I', p.policyname, t);
+    end loop;
+    execute format(
+      'create policy %I on public.%I for all to authenticated
+         using (entreprise_id = public.entreprise_du_jeton())
+         with check (entreprise_id = public.entreprise_du_jeton())',
+      'iso_' || t, t
+    );
+    execute format('drop trigger if exists trg_entreprise_%I on public.%I', t, t);
+    execute format(
+      'create trigger trg_entreprise_%I before insert on public.%I
+         for each row execute function public.poser_entreprise_id()',
+      t, t
+    );
   end loop;
 end $$;
-create policy "iso_repertoire_employes" on repertoire_employes
-  for all to authenticated
-  using (entreprise_id = public.entreprise_du_jeton())
-  with check (entreprise_id = public.entreprise_du_jeton());
-drop trigger if exists trg_entreprise_repertoire_employes on repertoire_employes;
-create trigger trg_entreprise_repertoire_employes before insert on repertoire_employes
-  for each row execute function public.poser_entreprise_id();
 
--- ---- 3. entreprises : RLS + les 3 policies refaites a neuf ----
+-- ---- 4. EXCEPTION : retours_logiciel — la plateforme lit/traite AUSSI ----
+drop policy if exists "iso_retours_logiciel" on retours_logiciel;
+create policy "iso_retours_logiciel" on retours_logiciel
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton() or public.est_plateforme())
+  with check (entreprise_id = public.entreprise_du_jeton() or public.est_plateforme());
+
+-- ---- 5. EXCEPTION : entreprises — sa propre fiche, ou la plateforme ----
 alter table entreprises enable row level security;
 do $$
 declare p record;
@@ -3043,13 +3113,44 @@ create policy "entreprises_creation_plateforme" on entreprises
   for insert to authenticated
   with check (public.est_plateforme());
 
--- ---- 4. ETAT FINAL (s'affiche dans Results) ----
+-- ---- 6. plateforme_config : lecture plateforme seulement ----
+alter table plateforme_config enable row level security;
+do $$
+declare p record;
+begin
+  for p in select policyname from pg_policies where schemaname = 'public' and tablename = 'plateforme_config'
+  loop
+    execute format('drop policy %I on public.plateforme_config', p.policyname);
+  end loop;
+end $$;
+create policy "config_lecture_plateforme" on plateforme_config
+  for select to authenticated using (public.est_plateforme());
+
+-- ---- 7. VERROUILLAGE des tables service et heritees ----
+do $$
+declare
+  t text;
+  p record;
+begin
+  foreach t in array array['quickbooks_connexion','connexion_echecs','travaux','travaux_photos','travaux_signatures','signatures','bons_travail_facturation']
+  loop
+    if exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      execute format('alter table public.%I enable row level security', t);
+      for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
+      loop
+        execute format('drop policy %I on public.%I', p.policyname, t);
+      end loop;
+    end if;
+  end loop;
+end $$;
+
+-- ---- 8. ETAT COMPLET DE LA BASE (s'affiche dans Results) ----
 select c.relname as table_nom,
        c.relrowsecurity as rls_active,
-       coalesce(string_agg(p.policyname, ' | '), '(aucune)') as policies
+       coalesce(string_agg(p.policyname, ' | ' order by p.policyname), '(aucune)') as policies
 from pg_class c
 join pg_namespace n on n.oid = c.relnamespace and n.nspname = 'public'
 left join pg_policies p on p.schemaname = 'public' and p.tablename = c.relname
-where c.relname in ('repertoire_employes', 'entreprises')
+where c.relkind = 'r'
 group by c.relname, c.relrowsecurity
 order by c.relname;
