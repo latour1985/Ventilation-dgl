@@ -604,7 +604,24 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                 className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <select value={creation.statut} onChange={poserChamp("statut")} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+              <select
+                value={creation.statut}
+                onChange={(ev) => {
+                  const statut = ev.target.value;
+                  setCreation((prev) => {
+                    // 🏆 Pionnier : la date « gratuit jusqu'au » se
+                    // pré-remplit à AUJOURD'HUI + 1 AN (ajustable).
+                    let gratuitJusqua = prev.gratuitJusqua;
+                    if (statut === "fondateur" && !gratuitJusqua) {
+                      const d = new Date();
+                      d.setFullYear(d.getFullYear() + 1);
+                      gratuitJusqua = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                    }
+                    return { ...prev, statut, gratuitJusqua };
+                  });
+                }}
+                className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+              >
                 <option value="essai">Essai</option>
                 <option value="fondateur">Pionnier (max 3)</option>
                 <option value="payant">Payant</option>
@@ -617,6 +634,12 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                 </span>
               )}
             </div>
+            {creation.statut === "fondateur" && (
+              <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-800">
+                🏆 Clause pionnier posée d&apos;office : 1 AN GRATUIT (la date ci-dessus) puis 25 % DE RABAIS À VIE
+                (le rabais permanent est inscrit sur la fiche dès la création).
+              </p>
+            )}
             <p className="pt-1 text-[10px] font-extrabold uppercase text-slate-400">👤 Son admin principal (reçoit le courriel d&apos;invitation)</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <input value={creation.adminNom} onChange={poserChamp("adminNom")} placeholder="Nom de l'admin"
@@ -1014,6 +1037,27 @@ function SectionFacturation({ entreprises }) {
       {!sieges && !erreur && <p className="rounded-xl bg-white px-3 py-2 text-xs text-slate-400">Lecture des comptes…</p>}
 
       {sieges && entreprises.map((e) => {
+        // 🏠 PROPRIÉTAIRE (Ventilation DGL) — ta propre entreprise :
+        // AUCUNE règle de facturation ne s'applique, jamais. Sans ce
+        // garde, elle tombait dans « 1er mois gratuit (nouveau
+        // client) » puis « prix manquants » le mois suivant.
+        if (e.statut === "proprietaire") {
+          const actifs = (sieges[e.id] || []).filter((c) => c.actif && c.activeLe).length;
+          return (
+            <div key={e.id} className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-extrabold text-slate-900">{e.nom}</p>
+                  <p className="text-[11px] text-slate-400">👥 {actifs} siège{actifs > 1 ? "s" : ""} actif{actifs > 1 ? "s" : ""} · illimités</p>
+                </div>
+                <p className="text-lg font-extrabold text-slate-900">0,00 $</p>
+              </div>
+              <p className="mt-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">
+                🏠 Propriétaire — ta propre entreprise : jamais facturée, sièges illimités, à vie.
+              </p>
+            </div>
+          );
+        }
         // ------------------------------------------------------------
         // LA PHASE DU MOIS AFFICHÉ (règles du propriétaire) :
         //   1. entente gratuite explicite (fondateurs an 1) → GRATUIT ;

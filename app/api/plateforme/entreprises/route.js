@@ -127,6 +127,14 @@ export async function POST(request) {
     id = `${id}-${n}`;
   }
 
+  // 🏆 CLAUSE PIONNIER (les 3 premiers) : 1 AN GRATUIT (date par
+  // défaut = aujourd'hui + 365 jours, ajustable dans la console) et
+  // 25 % DE RABAIS À VIE — posés d'office à la création.
+  const dansUnAn = (() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
   const { error: erreurCreation } = await admin.from("entreprises").insert({
     id,
     nom_legal: nomLegal,
@@ -134,7 +142,8 @@ export async function POST(request) {
     courriel: courrielEntreprise,
     telephone,
     statut_plateforme: statut,
-    gratuit_jusqua: gratuitJusqua,
+    gratuit_jusqua: statut === "fondateur" ? gratuitJusqua || dansUnAn : gratuitJusqua,
+    rabais_pourcent: statut === "fondateur" ? 25 : 0,
     suspendue: false,
   });
   if (erreurCreation) return Response.json({ erreur: `Création de la fiche refusée : ${erreurCreation.message}` }, { status: 502 });
