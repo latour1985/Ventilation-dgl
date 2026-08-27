@@ -13571,12 +13571,6 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
 // ============================================================
 function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons }) {
   const contrat = bon.type === "entretien_contrat";
-  const [type, setType] = useState(contrat ? "echeance" : "complete");
-  const [pourcentage, setPourcentage] = useState(100);
-  // Progression par ligne du devis — clé = ligne.uid, valeur =
-  // { progressType: 'percent' | 'amount', progressPercent, billedAmount }.
-  // Chaque ligne a son propre mode d'ajustement, indépendant des autres.
-  const [lignesProgression, setLignesProgression] = useState({});
 
   // ============================================================
   // LE SOLDE SUIT LE DEVIS, PAS LE BON DE TRAVAIL
@@ -13589,6 +13583,7 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
   //
   // On additionne donc TOUT ce qui a été facturé contre ce devis, quelle
   // que soit la tâche, le technicien ou la date.
+  // (Calculé AVANT les états : le champ « % » démarre au % restant.)
   const montantCumule = devis?.numero
     ? (tousLesBons || [])
         .filter((b) => b.devisNumero === devis.numero)
@@ -13598,6 +13593,18 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
   const montantRestant = Math.max(0, montantDevis - montantCumule);
   const frequence = bon.frequenceFacturationAnnuelle || 4;
   const montantEcheance = Math.min(montantRestant, montantDevis / frequence);
+  // Le % encore facturable — plafond ET valeur de DÉPART du champ
+  // (2026-08-30, retour du propriétaire : « pourquoi il n'applique pas
+  // le % restant par défaut ? ») : à la 3e facture d'un devis facturé à
+  // 82 %, le champ ouvre à 18 %, pas à un 100 % impossible.
+  const pctMaxDevis = montantDevis > 0 ? Math.floor((montantRestant / montantDevis) * 10000) / 100 : 100;
+
+  const [type, setType] = useState(contrat ? "echeance" : "complete");
+  const [pourcentage, setPourcentage] = useState(() => Math.max(0, Math.min(100, pctMaxDevis)));
+  // Progression par ligne du devis — clé = ligne.uid, valeur =
+  // { progressType: 'percent' | 'amount', progressPercent, billedAmount }.
+  // Chaque ligne a son propre mode d'ajustement, indépendant des autres.
+  const [lignesProgression, setLignesProgression] = useState({});
 
   // Récupère (ou initialise) l'état de progression d'une ligne.
   const progressionLigne = (l) =>
@@ -13816,12 +13823,9 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
                 step="1"
                 value={pourcentage}
                 // 🧢 Plafonné au solde restant (2026-08-30) : le champ
-                // s'arrête de lui-même au % encore facturable au lieu de
-                // monter à 100 puis d'être rabattu en silence.
-                onChange={(e) => {
-                  const pctMaxDevis = montantDevis > 0 ? Math.floor((montantRestant / montantDevis) * 10000) / 100 : 100;
-                  setPourcentage(Math.max(0, Math.min(100, Math.min(pctMaxDevis, parseFloat(e.target.value) || 0))));
-                }}
+                // DÉMARRE au % restant et s'arrête de lui-même là — pas
+                // de 100 % impossible rabattu en silence.
+                onChange={(e) => setPourcentage(Math.max(0, Math.min(100, Math.min(pctMaxDevis, parseFloat(e.target.value) || 0))))}
                 className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm font-bold tabular-nums"
               />
               <span className="text-sm text-slate-500">% du devis</span>
@@ -13829,7 +13833,7 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
             </div>
             {montantDevis > 0 && montantRestant < montantDevis - 0.005 && (
               <p className="mt-1 text-[10px] font-semibold text-amber-700">
-                Maximum : {(Math.floor((montantRestant / montantDevis) * 10000) / 100).toFixed(0)} % — le solde restant du devis ({montantRestant.toFixed(2)} $) plafonne cette facture.
+                Maximum : {pctMaxDevis.toFixed(0)} % — le solde restant du devis ({montantRestant.toFixed(2)} $) plafonne cette facture. Le champ démarre à ce maximum.
               </p>
             )}
           </div>
