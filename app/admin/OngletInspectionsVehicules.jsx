@@ -195,12 +195,25 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
     };
   };
   const statutEntretien = (camion) => {
-    const kmList = inspections.filter((i) => i.camion === camion && i.km != null).map((i) => i.km);
-    const kmActuel = kmList.length ? Math.max(...kmList) : 0;
+    const lectures = inspections.filter((i) => i.camion === camion && i.km != null);
+    const kmActuel = lectures.length ? Math.max(...lectures.map((i) => i.km)) : 0;
     const dernier = entretiens.filter((e) => e.camion === camion).sort((a, b) => b.date.localeCompare(a.date))[0];
-    const kmDernier = dernier ? dernier.km : 0;
-    const ecartKm = kmActuel - kmDernier;
-    const mois = dernier ? moisDepuis(dernier.date) : Infinity;
+    // 🚚 PREMIER CONTACT (2026-09-04) : sans entretien au carnet, la
+    // PREMIÈRE lecture de kilométrage sert de point de départ — un camion
+    // récent qui entre à 41 600 km n'est PAS « entretien dû » d'office ;
+    // son prochain entretien vient 10 000 km ou 6 mois plus tard. Même
+    // règle que camionsEntretienDu (partage.jsx).
+    let kmBase;
+    let mois;
+    if (dernier) {
+      kmBase = dernier.km;
+      mois = moisDepuis(dernier.date);
+    } else {
+      const premiere = lectures.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+      kmBase = premiere ? premiere.km : kmActuel;
+      mois = premiere ? moisDepuis(premiere.date) : 0;
+    }
+    const ecartKm = kmActuel - kmBase;
     const duKm = ecartKm >= SEUIL_ENTRETIEN_KM;
     const duMois = mois >= SEUIL_ENTRETIEN_MOIS;
     return { camion, kmActuel, ecartKm, mois, du: duKm || duMois, raison: duKm ? "km" : duMois ? "temps" : null };

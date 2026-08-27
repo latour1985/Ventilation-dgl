@@ -1698,12 +1698,28 @@ export const HEURE_PAR_DEFAUT = "07:00";
 export function camionsEntretienDu(inspections, entretiens) {
   const camions = [...new Set((inspections || []).filter((i) => !i.sansVehicule && i.camion).map((i) => i.camion))];
   return camions.filter((camion) => {
-    const kmList = (inspections || []).filter((i) => i.camion === camion && i.km != null).map((i) => i.km);
-    const kmActuel = kmList.length ? Math.max(...kmList) : 0;
+    const lectures = (inspections || []).filter((i) => i.camion === camion && i.km != null);
+    const kmActuel = lectures.length ? Math.max(...lectures.map((i) => i.km)) : 0;
     const dernier = (entretiens || []).filter((e) => e.camion === camion).sort((a, b) => b.date.localeCompare(a.date))[0];
-    const ecartKm = kmActuel - (dernier ? dernier.km : 0);
-    const mois = dernier ? moisDepuis(dernier.date) : Infinity;
-    return ecartKm >= SEUIL_ENTRETIEN_KM || mois >= SEUIL_ENTRETIEN_MOIS;
+    // 🚚 PREMIER CONTACT (2026-09-04, demande du propriétaire) : un camion
+    // récent entre p. ex. à 41 600 km — sans entretien au carnet, l'ancien
+    // calcul comparait à 0 km et à « jamais » : entretien dû instantanément.
+    // SANS entretien enregistré, la PREMIÈRE lecture (km + date de la 1re
+    // inspection) devient le point de départ : le prochain entretien vient
+    // 10 000 km ou 6 mois PLUS TARD. Une seule fois — dès qu'un entretien
+    // est au carnet, c'est lui qui fait foi, comme avant.
+    let kmBase;
+    let moisBase;
+    if (dernier) {
+      kmBase = dernier.km;
+      moisBase = moisDepuis(dernier.date);
+    } else {
+      const premiere = lectures.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+      if (!premiere) return false;
+      kmBase = premiere.km;
+      moisBase = moisDepuis(premiere.date);
+    }
+    return kmActuel - kmBase >= SEUIL_ENTRETIEN_KM || moisBase >= SEUIL_ENTRETIEN_MOIS;
   });
 }
 

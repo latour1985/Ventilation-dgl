@@ -2695,3 +2695,66 @@ update auth.users
   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
     || '{"plateforme": true, "plateforme_role": "cle-principale"}'::jsonb
   where email = 'jeanfrancois@ventilationdgl.com';
+
+-- ============================================================
+-- 84 - GRAND RESET DE LANCEMENT (a passer LE JOUR DE LA BASCULE
+--      QuickBooks, JAMAIS avant — decisions du proprietaire 2026-09-04)
+-- ============================================================
+-- Les vraies heures/taches/facturation des dernieres semaines vivent
+-- sur l'ancienne plateforme : tout ce qui est dans Fluxya est du RODAGE.
+-- On repart a zero PROPRE, en gardant la configuration.
+--
+-- ⚠️ AVANT DE PASSER CE SNIPPET : declencher une SAUVEGARDE complete
+-- (bouton admin ou attendre le cron du lundi) — c'est le parachute.
+--
+-- ON GARDE (ne touche pas) : entreprises (Parametres + date-plancher),
+-- taux_metiers (grille CCQ), prix_depots (zones), repertoire_employes
+-- (fiches employes), permissions_utilisateurs (acces), compteurs
+-- (numeros sequentiels — continuite avec l'historique), push_abonnements
+-- (notifications deja activees sur les telephones), plateforme_config,
+-- incidents_confidentialite, comptes auth.users, console plateforme.
+--
+-- ON EFFACE (decisions une a une du proprietaire) :
+
+-- Operationnel — clients, jobs, heures, facturation (rodage)
+delete from taches_assignees;
+delete from taches_attente;
+delete from travaux_effectues;
+delete from bons_travail;
+delete from devis_app;
+delete from depots;
+delete from pieces_commandees;
+delete from achats_libres;
+delete from projets_app;
+delete from clients_app;
+delete from qb_attributions_manuelles;
+delete from journal_activite;
+delete from retours_logiciel;
+delete from commandes_camion;
+delete from photos_legendes;
+
+-- Camions & inspections — « on recommence » (les camions se recreent a
+-- la premiere inspection ; le correctif « premier contact » fait que le
+-- kilometrage d'entree devient le point de depart de l'entretien)
+delete from entretiens_vehicules;
+delete from carnet_vehicules;
+delete from inspections_vehicules;
+delete from camions;
+
+-- Fournisseurs & sous-traitants — « on recommence »
+delete from articles_fournisseurs;
+delete from fournisseurs;
+delete from sous_traitants_app;
+
+-- Catalogue — sera RETELECHARGE du vrai QuickBooks apres la bascule
+-- (bouton « Mettre a jour depuis QuickBooks », onglet Tarifs)
+delete from catalogue_items;
+
+-- Liens Sandbox residuels sur ce qui RESTE : aucun (les fiches et le
+-- catalogue qui portaient qb_item_id / quickbooks_customer_id viennent
+-- d'etre effaces). La connexion QuickBooks elle-meme sera remplacee par
+-- la reconnexion OAuth du jour J.
+
+-- Photos et signatures de chantier du rodage (stockage)
+delete from storage.objects where bucket_id = 'photos-travaux';
+delete from storage.objects where bucket_id = 'signatures';
