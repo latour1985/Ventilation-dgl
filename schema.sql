@@ -2755,6 +2755,9 @@ delete from catalogue_items;
 -- d'etre effaces). La connexion QuickBooks elle-meme sera remplacee par
 -- la reconnexion OAuth du jour J.
 
--- Photos et signatures de chantier du rodage (stockage)
-delete from storage.objects where bucket_id = 'photos-travaux';
-delete from storage.objects where bucket_id = 'signatures';
+-- Photos et signatures de chantier du rodage : Supabase INTERDIT de
+-- les effacer par SQL (protection storage.protect_delete). Etape
+-- MANUELLE apres ce snippet : tableau de bord Supabase → Storage →
+-- bucket « photos-travaux » → tout selectionner → Delete ; idem pour
+-- le bucket « signatures ». (Le bucket « sauvegardes » ne se touche
+-- JAMAIS — c est le parachute.)
