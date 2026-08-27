@@ -11,6 +11,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Camera, Loader2, X } from "lucide-react";
+import { ZONES_DEPOTS, zonesDepuis } from "@/lib/supabase/prixDepots";
+import { permissionsPour } from "@/lib/permissions";
 
 // ============================================================
 // COMPOSANT BOUTON RÉUTILISABLE
@@ -545,4 +547,164 @@ export function DefilementHorizontal({ children }) {
 // par section : sauvegarde externe ou envoi à un assureur, fichiers
 // nommés intelligiblement. Remplace les deux anciennes galeries
 // dupliquées (facturation + aperçu du bon) — un seul exemplaire.
+// ============================================================
+
+// Affichage d'un taux : 9.975 → "9,975" (virgule décimale française).
+export function tauxAffiche(t) {
+  return String(t ?? 0).replace(".", ",");
+}
+
+
+// Types d'accès des fiches — alignés sur les 4 rôles du système de
+// permissions (lib/permissions.js). « Administration bureau » regroupe le
+// personnel de bureau : son MÉTIER (adjointe, chargé de projet,
+// estimateur, répartiteur, directeur) sert de sous-catégorie et fixe ses
+// accès par défaut. Étiquette informative sur la fiche ; les VRAIS accès
+// se gèrent dans « Gestion des accès » (couche 3).
+export const TYPES_ACCES = ["Admin principal", "Admin régulier", "Administration bureau", "Technicien"];
+
+// Zones d'appels EFFECTIVES : celles des données ; à défaut (première
+// ouverture, table vide) les quatre historiques de DGL.
+
+// Zones d'appels EFFECTIVES : celles des données ; à défaut (première
+// ouverture, table vide) les quatre historiques de DGL.
+export const zonesEffectives = (prixDepots) => {
+  const z = zonesDepuis(prixDepots);
+  return z.length > 0 ? z : ZONES_DEPOTS;
+};
+
+// Métiers et niveaux (les frigoristes ont un Apprenti 4, pas les ferblantiers).
+// MÉTIERS DE TERRAIN (taux = grille CCQ selon niveau + prime horaire
+// individuelle éventuelle) et MÉTIERS DE BUREAU (taux horaire individuel
+// complet, saisi sur la fiche de chaque employé).
+// Périodes d'apprentissage CCQ vérifiées (ccq.org, 2026-08) :
+// Électricien 4 · Plombier (tuyauteur) 4 · Peintre 3 · Plâtrier 3 —
+// périodes de 2 000 h chacune, puis Compagnon.
+
+// Métiers et niveaux (les frigoristes ont un Apprenti 4, pas les ferblantiers).
+// MÉTIERS DE TERRAIN (taux = grille CCQ selon niveau + prime horaire
+// individuelle éventuelle) et MÉTIERS DE BUREAU (taux horaire individuel
+// complet, saisi sur la fiche de chaque employé).
+// Périodes d'apprentissage CCQ vérifiées (ccq.org, 2026-08) :
+// Électricien 4 · Plombier (tuyauteur) 4 · Peintre 3 · Plâtrier 3 —
+// périodes de 2 000 h chacune, puis Compagnon.
+export const METIERS_TERRAIN = ["Frigoriste", "Ferblantier", "Électricien", "Plombier", "Peintre", "Plâtrier"];
+
+export const METIERS_BUREAU = ["Adjointe administrative", "Chargé de projet", "Estimateur", "Répartiteur", "Directeur"];
+
+export const METIERS = [...METIERS_TERRAIN, ...METIERS_BUREAU];
+
+export const estMetierBureau = (m) => METIERS_BUREAU.includes(m);
+// Métiers permis selon le type d'accès : « Administration bureau » choisit
+// un métier de bureau (sa sous-catégorie d'accès), « Technicien » un métier
+// de terrain ; les administrateurs peuvent porter n'importe quel métier.
+// `tauxMetiers` (facultatif) apporte les métiers AJOUTÉS par l'admin —
+// sans lui, seuls les métiers fondateurs apparaissent.
+
+// Métiers permis selon le type d'accès : « Administration bureau » choisit
+// un métier de bureau (sa sous-catégorie d'accès), « Technicien » un métier
+// de terrain ; les administrateurs peuvent porter n'importe quel métier.
+// `tauxMetiers` (facultatif) apporte les métiers AJOUTÉS par l'admin —
+// sans lui, seuls les métiers fondateurs apparaissent.
+export const metiersPourTypeAcces = (typeAcces, tauxMetiers) =>
+  typeAcces === "Administration bureau"
+    ? METIERS_BUREAU
+    : typeAcces === "Technicien"
+      ? metiersTerrainDe(tauxMetiers)
+      : [...metiersTerrainDe(tauxMetiers), ...METIERS_BUREAU];
+
+// Accès par défaut selon le type d'accès + métier (la sous-catégorie
+// d'« Administration bureau » est le métier de bureau).
+
+// Accès par défaut selon le type d'accès + métier (la sous-catégorie
+// d'« Administration bureau » est le métier de bureau).
+export const accesParDefautPour = (typeAcces, metier) =>
+  permissionsPour(typeAcces, typeAcces === "Administration bureau" ? metier : undefined);
+
+// Grille des accès (cases à cocher) — intégrée aux fiches employés :
+// visible et modifiable directement à la création et dans « Modifier ».
+
+export const NIVEAUX_PAR_METIER = {
+  Frigoriste: ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"],
+  Ferblantier: ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Compagnon"],
+  "Électricien": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"],
+  "Plombier": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"],
+  "Peintre": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Compagnon"],
+  "Plâtrier": ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Compagnon"],
+  // Métiers de bureau : pas de niveaux CCQ — un seul « niveau » neutre.
+  "Adjointe administrative": ["—"],
+  "Chargé de projet": ["—"],
+  "Estimateur": ["—"],
+  "Répartiteur": ["—"],
+  "Directeur": ["—"],
+};
+// MÉTIERS AJOUTÉS PAR L'ADMIN (électricien, plombier…) — la grille des
+// taux est leur registre : tout métier qui y figure existe. Un métier
+// absent de la table ci-dessus reçoit la structure CCQ standard — jamais
+// de plantage sur un métier inconnu.
+
+// MÉTIERS AJOUTÉS PAR L'ADMIN (électricien, plombier…) — la grille des
+// taux est leur registre : tout métier qui y figure existe. Un métier
+// absent de la table ci-dessus reçoit la structure CCQ standard — jamais
+// de plantage sur un métier inconnu.
+export const NIVEAUX_CCQ_DEFAUT = ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"];
+
+export const niveauxPourMetier = (m) => NIVEAUX_PAR_METIER[m] || NIVEAUX_CCQ_DEFAUT;
+// Métiers de terrain effectifs = les deux fondateurs + ceux ajoutés dans
+// la grille des taux (Tarifs). Les métiers de bureau n'y sont jamais.
+
+// Métiers de terrain effectifs = les deux fondateurs + ceux ajoutés dans
+// la grille des taux (Tarifs). Les métiers de bureau n'y sont jamais.
+export const metiersTerrainDe = (tauxMetiers, masques = []) =>
+  [...new Set([...METIERS_TERRAIN, ...Object.keys(tauxMetiers || {})])].filter(
+    (m) => !estMetierBureau(m) && !(masques || []).includes(m)
+  );
+// Table centrale des taux horaires coûtants. Modifiée à un seul endroit
+// (onglet Utilisateurs) — appliquée automatiquement à chaque technicien
+// selon son métier + niveau, y compris lors des augmentations annuelles.
+// Taux laissés à 0 : à saisir par l'administrateur.
+
+export const COULEUR_TYPE_ACCES = {
+  "Admin principal": "bg-red-100 text-red-700",
+  "Admin régulier": "bg-orange-100 text-orange-700",
+  "Administration bureau": "bg-blue-100 text-blue-700",
+  "Technicien": "bg-slate-100 text-slate-600",
+  // Anciennes valeurs (fiches créées avant l'alignement sur les rôles) :
+  "Administrateur": "bg-red-100 text-red-700",
+  "Employé": "bg-slate-100 text-slate-600",
+  "Chargé de projet": "bg-blue-100 text-blue-700",
+  "Répartiteur": "bg-blue-100 text-blue-700",
+};
+
+// Comptes utilisateurs internes — en prod, ceci vit dans Supabase Auth
+// (jamais de mot de passe stocké en clair côté client ni dans cette
+// table ; ici c'est un booléen de démonstration seulement).
+
+// ============================================================
+// ONGLET DEVIS
+// ============================================================
+// ============================================================
+// ONGLET CLIENTS
+// ============================================================
+// ============================================================
+// ONGLET RECHERCHE RAPIDE
+// ============================================================
+export function correspond(client, terme) {
+  const t = terme.trim().toLowerCase();
+  if (!t) return false;
+  const champs = [
+    client.nom,
+    client.entreprise,
+    ...(client.courriels || []).map((c) => c.email),
+    client.telephone,
+    client.adresseFacturation,
+    ...(client.adresses || []).map((a) => `${a.nom} ${a.ligne1} ${a.codePostal || ""}`),
+  ];
+  return champs.some((c) => c && c.toLowerCase().includes(t));
+}
+
+// ============================================================
+// LISTE DES DEVIS D'UN CLIENT — regroupée par DOSSIER (numeroBase) avec
+// les onglets de versions. Réutilisée dans le dossier client et dans les
+// résultats de recherche : un seul comportement partout.
 // ============================================================
