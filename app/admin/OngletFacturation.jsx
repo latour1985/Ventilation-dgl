@@ -1236,15 +1236,39 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const basculerFiltre = (categorie) => {
     setFiltresActifs((prev) => (prev.includes(categorie) ? prev.filter((c) => c !== categorie) : [...prev, categorie]));
   };
+  // 🔎 RECHERCHE RAPIDE (2026-09-03, demande du propriétaire : « disons
+  // qu'il y en a 500 dans Déjà facturés et qu'on veut aller revoir ») —
+  // cherche dans le titre de la job, le client, le numéro de devis ET
+  // les numéros de facture QuickBooks. Accents et casse ignorés.
+  const [rechercheFact, setRechercheFact] = useState("");
+  const normaliserRecherche = (s) =>
+    String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const bonCorrespond = (b, terme) => {
+    const t = normaliserRecherche(terme).trim();
+    if (!t) return true;
+    const texte = normaliserRecherche(
+      [b.projet, b.client, b.devisNumero, b.description, ...(b.facturesEmises || []).map((f) => f.numeroFactureQb)].filter(Boolean).join(" ")
+    );
+    return t.split(/\s+/).every((mot) => texte.includes(mot));
+  };
   // Vue par défaut : ni les retirés, ni les DÉJÀ FACTURÉS — le travail
   // à faire seulement. Les deux encadrés les ramènent d'un clic.
-  const bonsAffiches = filtresActifs.length === 0 ? bonsGroupes.filter((b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture") : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)));
+  // ⚠️ Une RECHERCHE tapée sans filtre actif fouille TOUT (facturés et
+  // retirés compris) : quand on cherche « 1055 », on veut la trouver
+  // même si sa carte est classée « Déjà facturés ».
+  const bonsAffiches = (
+    filtresActifs.length === 0
+      ? rechercheFact.trim()
+        ? bonsGroupes
+        : bonsGroupes.filter((b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture")
+      : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)))
+  ).filter((b) => bonCorrespond(b, rechercheFact));
   // 📄 Pagination (2026-08-26) : 10 cartes par page — les plus grosses
   // cartes de l'application s'empilaient sans fin. Changer de filtre
   // ramène page 1 ; la borne Math.min évite toute page vide.
   const [pageFact, setPageFact] = useState(1);
   const refListeFact = useRef(null);
-  useEffect(() => { setPageFact(1); }, [filtresActifs]);
+  useEffect(() => { setPageFact(1); }, [filtresActifs, rechercheFact]);
   const pageFactEff = Math.min(pageFact, Math.max(1, Math.ceil(bonsAffiches.length / ITEMS_PAR_PAGE)));
   const bonsPageines = bonsAffiches.slice((pageFactEff - 1) * ITEMS_PAR_PAGE, pageFactEff * ITEMS_PAR_PAGE);
   // Factures dont l'envoi par QuickBooks n'est pas (encore) confirmé au
@@ -1820,11 +1844,32 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         </button>
       </div>
 
-      {filtresActifs.length > 0 && (
+      {/* 🔎 Recherche rapide — job, client, nº de devis, nº de facture
+          QuickBooks. Sans filtre actif, elle fouille TOUT (les « Déjà
+          facturés » et les retirés compris). */}
+      <div className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2">
+        <span className="shrink-0 text-slate-400">🔎</span>
+        <input
+          value={rechercheFact}
+          onChange={(e) => setRechercheFact(e.target.value)}
+          placeholder="Rechercher — job, client, nº de devis, nº de facture QuickBooks…"
+          className="w-full text-sm outline-none"
+        />
+        {rechercheFact && (
+          <button onClick={() => setRechercheFact("")} className="shrink-0 text-xs font-bold text-slate-400 underline">
+            Effacer
+          </button>
+        )}
+      </div>
+
+      {(filtresActifs.length > 0 || rechercheFact.trim()) && (
         <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-1.5 text-xs text-slate-500">
-          <span>{bonsAffiches.length} résultat{bonsAffiches.length > 1 ? "s" : ""} filtré{bonsAffiches.length > 1 ? "s" : ""}</span>
-          <button onClick={() => setFiltresActifs([])} className="font-semibold text-slate-700 underline underline-offset-2">
-            Effacer les filtres
+          <span>
+            {bonsAffiches.length} résultat{bonsAffiches.length > 1 ? "s" : ""}
+            {rechercheFact.trim() ? ` pour « ${rechercheFact.trim()} »` : " filtrés"}
+          </span>
+          <button onClick={() => { setFiltresActifs([]); setRechercheFact(""); }} className="font-semibold text-slate-700 underline underline-offset-2">
+            Tout effacer
           </button>
         </div>
       )}
