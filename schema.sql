@@ -3339,3 +3339,14 @@ as $$
   where b.jeton_public = p_jeton;
 $$;
 grant execute on function bon_travail_public(text) to anon, authenticated;
+
+-- ============================================================
+-- 93 - MENAGE DES METIERS DES ENTREPRISES DE TEST (2026-09-06)
+--      La grille de Ventilation Miroir affichait encore TOUS les
+--      metiers CCQ : sa table taux_metiers portait les lignes (a 0 $)
+--      sauvegardees a l'epoque de la grille pre-remplie. On efface les
+--      taux des entreprises AUTRES que DGL — leur grille repart vide
+--      et elles choisissent LEURS metiers par les pastilles de Tarifs.
+--      (DGL intouchee : sa grille reelle reste.)
+delete from taux_metiers where entreprise_id <> 'dgl';
+select entreprise_id, count(*) as lignes_restantes from taux_metiers group by 1;
