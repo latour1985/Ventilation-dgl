@@ -5,10 +5,10 @@
 // INSPECTIONS + ENTRETIEN DES VÉHICULES — tranche T3 du découpage de
 // page.jsx (2026-08-28). Extraction MÉCANIQUE : rien ne change.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
-import { Button, PhotosInspection, todayISO, joursDepuis, moisDepuis, dateISO } from "./partage";
+import { Button, PhotosInspection, todayISO, joursDepuis, moisDepuis, dateISO, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
 
 // ============================================================
 // INSPECTIONS VÉHICULES — données de démo + entretien périodique
@@ -24,6 +24,12 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
   const [filtreDate, setFiltreDate] = useState("");
   const [filtreCamion, setFiltreCamion] = useState("");
   const [filtreStatut, setFiltreStatut] = useState("tous");
+  // 📄 Pagination (2026-08-28, demande du propriétaire) : 10 inspections
+  // par page, même recette que les autres grandes listes. Changer un
+  // filtre ramène page 1 ; la borne Math.min évite toute page vide.
+  const [pageInsp, setPageInsp] = useState(1);
+  const refListeInsp = useRef(null);
+  useEffect(() => { setPageInsp(1); }, [filtreDate, filtreCamion, filtreStatut]);
   const [chargeId, setChargeId] = useState(null);
   const [noteCharge, setNoteCharge] = useState("");
   // Gestion du parc de véhicules (ajout/retrait) — le technicien
@@ -622,7 +628,7 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
       {/* INSPECTIONS */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Inspections</h3>
-        <div className="mb-3 flex flex-wrap gap-2">
+        <div ref={refListeInsp} className="mb-3 flex flex-wrap gap-2">
           <input type="date" value={filtreDate} onChange={(e) => setFiltreDate(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
           <input value={filtreCamion} onChange={(e) => setFiltreCamion(e.target.value)} placeholder="Rechercher un camion" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
           <select value={filtreStatut} onChange={(e) => setFiltreStatut(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold">
@@ -635,7 +641,7 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
           <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Aucune inspection.</p>
         ) : (
           <div className="space-y-2">
-            {liste.map((i) => (
+            {liste.slice((Math.min(pageInsp, Math.max(1, Math.ceil(liste.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageInsp, Math.max(1, Math.ceil(liste.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((i) => (
               <div key={i.id} className={`rounded-lg p-3 ${i.anomalie && i.statutAnomalie === "nouvelle" ? "border-l-4 border-red-500 bg-red-50" : i.anomalie ? "border border-amber-200 bg-amber-50" : "border border-slate-200"}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -669,6 +675,7 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
             ))}
           </div>
         )}
+        <BarrePagination total={liste.length} page={pageInsp} onPage={setPageInsp} refHaut={refListeInsp} libelle="inspections" />
       </div>
 
       {/* CARNET D'ENTRETIEN DU PARC — tout ce qui a été fait sur TOUS les
