@@ -3360,10 +3360,12 @@ select entreprise_id, count(*) as lignes_restantes from taux_metiers group by 1;
 --      jeton ~1 h) — ses ecritures de journal (et celles passees par
 --      sa session) ont ete estampillees MIROIR. On les rapatrie chez
 --      DGL par leur contenu, puis on AFFICHE la repartition.
+-- (correctif : la vraie table n'a PAS de colonne par_nom — l'auteur est
+--  inscrit DANS le texte, « — par X » ; tout se filtre donc sur texte)
 update journal_activite set entreprise_id = 'dgl'
  where entreprise_id <> 'dgl'
    and (texte like '%ventilationdgl.com%'
-     or par_nom = 'Dominic Gariepy'
+     or texte like '%Dominic Gariepy%'
      or texte like '%Sophie Roy%'
      or texte like '%Marc Gagnon%'
      or texte like '%Descente des clients QuickBooks%');
