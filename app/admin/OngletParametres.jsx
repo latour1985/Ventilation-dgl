@@ -420,6 +420,26 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
           <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
             Ces règles pilotent l'onglet « Heures de la semaine » et l'app technicien.
           </p>
+          {/* 🚗 TRANSPORT DEBUT/FIN DE JOURNEE (2026-09-05) — certaines
+              compagnies vont directement au chantier : pas de transport
+              paye. Derogation possible par employe (sa fiche). */}
+          <label className="mb-3 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={brouillon.transportQuotidienPaye !== false}
+              onChange={(e) => champ("transportQuotidienPaye", e.target.checked)}
+              disabled={!estAdminPrincipal}
+              className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+            />
+            <span>
+              🚗 Transport payé en début et fin de journée
+              <span className="block text-[10px] font-normal leading-snug text-slate-400">
+                Coché : l'agenda et le téléphone fabriquent les blocs « Transport — Début/Fin de journée » (payés). Décoché : les
+                équipes partent de chez elles vers le chantier — aucun bloc, aucune heure de transport. Dérogation possible employé
+                par employé (sa fiche, section terrain). Le transport journalier entre deux clients reste toujours payé.
+              </span>
+            </span>
+          </label>
           <div className="grid gap-2.5 sm:grid-cols-2">
             <ChampParametre
               {...propsChamp}

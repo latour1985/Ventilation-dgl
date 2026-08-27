@@ -86,7 +86,7 @@ export function ApercuCourrielConnexion({ utilisateur, onFermer }) {
 // FICHE PROFIL UTILISATEUR — ajout/modification des informations
 // personnelles et du profil de l'employé
 // ============================================================
-export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSupprimer, estAdminPrincipal, tauxMetiers }) {
+export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSupprimer, onDesactiver, onReactiver, estAdminPrincipal, tauxMetiers }) {
   // Confirmation explicite avant suppression (2 clics).
   const [confirmeSuppression, setConfirmeSuppression] = useState(false);
   // ENCADRÉ DE CHOIX (demande du propriétaire, 2026-08-18) : tout le
@@ -134,6 +134,13 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
   const [primeHoraire, setPrimeHoraire] = useState(utilisateur.primeHoraire ?? 0);
   // 💼 Droit acquis : payé au taux COMMERCIAL peu importe le secteur.
   const [toujoursCommercial, setToujoursCommercial] = useState(!!utilisateur.toujoursCommercial);
+  // 🚗 Transport debut/fin de journee : suit l'entreprise, ou derogation.
+  const [transportQuotidien, setTransportQuotidien] = useState(utilisateur.transportQuotidien || "defaut");
+  // 🗄️ DESACTIVATION (2026-09-05) — la fiche reste, l'acces tombe.
+  const [desactivationOuverte, setDesactivationOuverte] = useState(false);
+  const [departRaison, setDepartRaison] = useState("Démission");
+  const [departDate, setDepartDate] = useState("");
+  const [departNote, setDepartNote] = useState("");
   const [poste, setPoste] = useState(utilisateur.poste || "");
   const [dateEmbauche, setDateEmbauche] = useState(utilisateur.dateEmbauche || "");
   const [adresse, setAdresse] = useState(utilisateur.adresse || "");
@@ -284,6 +291,22 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
                   </span>
                 </span>
               </label>
+              {/* 🚗 TRANSPORT DEBUT/FIN DE JOURNEE (2026-09-05) : suit le
+                  reglage de l'entreprise (Parametres → Paie & heures),
+                  avec derogation individuelle. Le transport CCQ entre deux
+                  clients n'est PAS touche — toujours paye. */}
+              <label className="mt-2 block text-[11px] font-semibold text-slate-700">
+                🚗 Transport début/fin de journée
+                <select
+                  value={transportQuotidien}
+                  onChange={(e) => setTransportQuotidien(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                >
+                  <option value="defaut">Suit le réglage de l'entreprise</option>
+                  <option value="oui">Toujours payé (dérogation)</option>
+                  <option value="non">Jamais payé (part de chez lui vers le chantier)</option>
+                </select>
+              </label>
             </div>
           )}
 
@@ -394,6 +417,7 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
                 dateEmbauche,
                 adresse,
                 notesRH,
+                transportQuotidien,
               })
             }
             className="w-full"
@@ -406,6 +430,50 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
             <p className="flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-500">
               <Lock size={12} className="shrink-0" /> Fiche d'un administrateur — modifiable par un Admin principal seulement.
             </p>
+          )}
+
+          {/* 🗄️ DÉSACTIVATION (2026-09-05, demande du propriétaire) — la
+              BONNE façon de gérer un départ : la fiche RESTE (historique
+              RH, heures passées intactes dans les paies et les coûts),
+              mais l'employé disparaît de l'agenda et des sélecteurs, et
+              son compte est banni côté serveur. Réactivable en un clic —
+              les gars reviennent souvent dans la construction. */}
+          {onDesactiver && !verrouillePourRegulier && (utilisateur.statut || "actif") === "actif" && (
+            desactivationOuverte ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                <p className="text-xs font-bold text-amber-800">🗄️ Désactiver {utilisateur.nom} — sa fiche et son historique restent, ses accès tombent.</p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <select value={departRaison} onChange={(e) => setDepartRaison(e.target.value)}
+                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold">
+                    {["Démission", "Renvoi", "Mise à pied", "Retraite", "Fin de contrat", "Autre"].map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <span className="text-[10px] font-bold text-slate-500">Départ le</span>
+                  <input type="date" value={departDate} onChange={(e) => setDepartDate(e.target.value)}
+                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  <input value={departNote} onChange={(e) => setDepartNote(e.target.value)} placeholder="Note (facultatif)"
+                    className="min-w-[140px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <Button onClick={() => onDesactiver({ raison: departRaison, date: departDate, note: departNote.trim() })} className="min-h-0 flex-1 py-2 text-xs">
+                    Désactiver et révoquer l&apos;accès
+                  </Button>
+                  <Button variant="outline" onClick={() => setDesactivationOuverte(false)} className="min-h-0 py-2 text-xs">Annuler</Button>
+                </div>
+              </div>
+            ) : (
+              <Button variant="outline" onClick={() => setDesactivationOuverte(true)} className="w-full min-h-0 border-amber-300 py-2 text-xs text-amber-700">
+                🗄️ Désactiver cet employé (départ, renvoi…) — la fiche reste
+              </Button>
+            )
+          )}
+          {onReactiver && (utilisateur.statut || "actif") === "inactif" && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-bold text-slate-700">
+                🗄️ Employé désactivé — {utilisateur.departRaison || "raison non précisée"}{utilisateur.departDate ? ` · départ le ${utilisateur.departDate}` : ""}
+                {utilisateur.departNote ? ` · ${utilisateur.departNote}` : ""}
+              </p>
+              <Button onClick={onReactiver} className="mt-2 w-full min-h-0 py-2 text-xs">↩️ Réactiver cet employé (l&apos;accès revient)</Button>
+            </div>
           )}
 
           {/* SUPPRESSION DE LA FICHE — retire l'employé du répertoire (et
@@ -461,9 +529,18 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
   const [rechercheU, setRechercheU] = useState("");
   const [filtreAcces, setFiltreAcces] = useState("tous");
   const [uDeplie, setUDeplie] = useState(null);
+  // 🗄️ Les employés DÉSACTIVÉS sortent de la liste principale — ils
+  // vivent dans leur tiroir « Anciens employés » plus bas (fiche
+  // consultable, réactivable), sans polluer le quotidien.
+  const [anciensOuverts, setAnciensOuverts] = useState(false);
+  const anciens = useMemo(
+    () => utilisateurs.filter((u) => (u.statut || "actif") === "inactif").sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr")),
+    [utilisateurs]
+  );
   const utilisateursAffiches = useMemo(() => {
     const q = rechercheU.trim().toLowerCase();
     return utilisateurs
+      .filter((u) => (u.statut || "actif") !== "inactif")
       .filter((u) => filtreAcces === "tous" || u.typeAcces === filtreAcces)
       .filter(
         (u) =>
@@ -838,6 +915,35 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
         })}
       </div>
 
+      {/* 🗄️ ANCIENS EMPLOYÉS — désactivés, jamais supprimés : l'historique
+          RH et les heures passées restent, et un clic les réactive. */}
+      {anciens.length > 0 && (
+        <div className="mt-3 border-t border-slate-100 pt-2">
+          <button onClick={() => setAnciensOuverts(!anciensOuverts)} className="flex items-center gap-1 text-[11px] font-bold text-slate-400 hover:text-slate-600">
+            {anciensOuverts ? "▲" : "▼"} 🗄️ Anciens employés ({anciens.length})
+          </button>
+          {anciensOuverts && (
+            <div className="mt-2 space-y-1">
+              {anciens.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => setUtilisateurOuvertId(u.id)}
+                  className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left hover:bg-slate-100"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-bold text-slate-500 line-through">{u.nom}</span>
+                    <span className="block text-[10px] text-slate-400">
+                      {u.departRaison || "raison non précisée"}{u.departDate ? ` · départ le ${u.departDate}` : ""}{u.departNote ? ` · ${u.departNote}` : ""}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[10px] font-semibold text-slate-400 underline">Ouvrir la fiche</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {courrielAperçu && <ApercuCourrielConnexion utilisateur={courrielAperçu} onFermer={() => setCourrielAperçu(null)} />}
       {utilisateurOuvertId && (
         <ModalProfilUtilisateur
@@ -855,6 +961,56 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
           onSupprimer={() => {
             const existant = utilisateurs.find((u) => u.id === utilisateurOuvertId);
             if (existant) supprimerUtilisateur?.(existant);
+            setUtilisateurOuvertId(null);
+          }}
+          onDesactiver={async ({ raison, date, note }) => {
+            const existant = utilisateurs.find((u) => u.id === utilisateurOuvertId);
+            if (!existant) return;
+            const maj = { ...existant, statut: "inactif", departRaison: raison, departDate: date || null, departNote: note || "" };
+            setUtilisateurs((prev) => prev.map((u) => (u.id === existant.id ? maj : u)));
+            persisterUtilisateur?.(maj);
+            // 🔐 La PORTE se ferme côté serveur — même avec son mot de
+            // passe, l'ex-employé ne rentre plus.
+            try {
+              const { data } = await supabase.auth.getSession();
+              const jeton = data?.session?.access_token;
+              const r = await fetch("/api/utilisateurs/acces", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${jeton}` },
+                body: JSON.stringify({ action: "desactiver", courriel: existant.courriel }),
+              }).then((x) => x.json());
+              ajouterJournal(
+                r?.fait
+                  ? `🗄️ ${existant.nom} DÉSACTIVÉ (${raison}${date ? `, départ le ${date}` : ""}) — accès révoqué${r.sansCompte ? " (aucun compte à bannir)" : " côté serveur"}, fiche et historique conservés.`
+                  : `⚠️ ${existant.nom} désactivé sur la fiche, mais la révocation du COMPTE a échoué (${r?.erreur || "réessaie"}) — retente depuis sa fiche.`
+              );
+            } catch {
+              ajouterJournal(`⚠️ ${existant.nom} désactivé sur la fiche, mais la révocation du COMPTE n'a pas pu partir — vérifie la connexion.`);
+            }
+            setUtilisateurOuvertId(null);
+          }}
+          onReactiver={async () => {
+            const existant = utilisateurs.find((u) => u.id === utilisateurOuvertId);
+            if (!existant) return;
+            const maj = { ...existant, statut: "actif", departRaison: "", departDate: null, departNote: "" };
+            setUtilisateurs((prev) => prev.map((u) => (u.id === existant.id ? maj : u)));
+            persisterUtilisateur?.(maj);
+            try {
+              const { data } = await supabase.auth.getSession();
+              const jeton = data?.session?.access_token;
+              const r = await fetch("/api/utilisateurs/acces", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${jeton}` },
+                body: JSON.stringify({ action: "reactiver", courriel: existant.courriel }),
+              }).then((x) => x.json());
+              ajouterJournal(
+                r?.fait
+                  ? `↩️ ${existant.nom} RÉACTIVÉ — son accès fonctionne de nouveau.`
+                  : `⚠️ ${existant.nom} réactivé sur la fiche, mais le compte reste banni (${r?.erreur || "réessaie"}).`
+              );
+            } catch {
+              ajouterJournal(`⚠️ ${existant.nom} réactivé sur la fiche, mais la levée du ban n'a pas pu partir — vérifie la connexion.`);
+            }
             setUtilisateurOuvertId(null);
           }}
         />

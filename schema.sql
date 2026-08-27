@@ -2924,3 +2924,40 @@ update auth.users
   set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
     || '{"entreprise_id": "sonde-entreprise-test", "plateforme": false}'::jsonb
   where email = 'sonde@etancheite.test';
+
+-- ============================================================
+-- 87 - DESACTIVATION D'EMPLOYES + OPTION TRANSPORT QUOTIDIEN
+--      (2026-09-05 — deux GO du proprietaire)
+-- ============================================================
+-- (1) DESACTIVER un employe : la fiche RESTE (historique RH, heures
+-- passees intactes dans les paies et les couts), mais il disparait de
+-- l'agenda, des paies courantes et des selecteurs ; son compte est
+-- banni cote serveur (route /api/utilisateurs/acces). Raison + date +
+-- note consignees. Reactivable en un clic.
+-- (2) TRANSPORT DEBUT/FIN DE JOURNEE optionnel : par ENTREPRISE
+-- (certaines compagnies vont direct au chantier — pas de transport
+-- paye) avec DEROGATION par employe (suit l'entreprise / toujours /
+-- jamais). Le transport journalier CCQ entre deux clients, lui, reste
+-- toujours paye (c'est du temps de travail).
+
+alter table repertoire_employes add column if not exists statut text not null default 'actif';
+alter table repertoire_employes add column if not exists depart_raison text;
+alter table repertoire_employes add column if not exists depart_date date;
+alter table repertoire_employes add column if not exists depart_note text;
+alter table repertoire_employes add column if not exists transport_quotidien text not null default 'defaut';
+
+alter table entreprises add column if not exists transport_quotidien_paye boolean not null default true;
+
+-- L'ANNUAIRE (vue lisible par les techniciens — jamais les salaires)
+-- refait : (a) seulement les employes ACTIFS ; (b) CLOISONNE par
+-- entreprise (la vue s'execute avec les droits de son proprietaire et
+-- contournait les cloisons du snippet 85 — auth.jwt() lit quand meme le
+-- jeton de l'APPELANT, donc le filtre tient) ; (c) expose l'option
+-- transport pour que le telephone sache quoi fabriquer.
+drop view if exists annuaire_employes;
+create view annuaire_employes as
+  select id, nom, courriel, nom_utilisateur, transport_quotidien
+  from repertoire_employes
+  where statut = 'actif'
+    and entreprise_id = public.entreprise_du_jeton();
+grant select on annuaire_employes to authenticated;

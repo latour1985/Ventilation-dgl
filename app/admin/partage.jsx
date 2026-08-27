@@ -1792,3 +1792,15 @@ export const TYPE_INFO = (id) => TYPES_TACHE.find((t) => t.id === id) || null;
 
 export const estTypeSansClient = (id) => !!TYPE_INFO(id)?.sansClient || id === "conge";
 
+
+// 🚗 TRANSPORT DÉBUT/FIN DE JOURNÉE payé ? (2026-09-05) — UN seul juge
+// pour l'agenda, le téléphone et les paies : la dérogation de la FICHE
+// d'abord (toujours/jamais), le réglage de l'ENTREPRISE sinon. Le
+// transport journalier CCQ entre deux clients n'est PAS touché — c'est
+// du temps de travail, toujours payé.
+export function transportQuotidienPayePour(employe, config) {
+  const v = employe?.transportQuotidien;
+  if (v === "oui") return true;
+  if (v === "non") return false;
+  return config?.transportQuotidienPaye !== false;
+}

@@ -212,7 +212,13 @@ function decalerHeure(heure, minutes) {
 // au moins une vraie tâche, garantir un « Transport — Début de journée »
 // (avant la première tâche) et un « Transport — Fin de journée » (après
 // la dernière). Idempotent — ne crée rien si les transports existent déjà.
-function completerTransportsJournee(tachesEntree) {
+// 🚗 transportDebutFin = false (2026-09-05) : l'entreprise (ou la fiche
+// de CE technicien) ne paie pas le transport debut/fin de journee — on
+// ne fabrique pas ces deux blocs, et ceux qui existent SANS temps couru
+// sont retires. Le transport journalier CCQ entre deux clients reste :
+// c'est du temps de travail, toujours paye. Meme juge que l'admin
+// (transportQuotidienPayePour — regle entreprise + derogation fiche).
+function completerTransportsJournee(tachesEntree, transportDebutFin = true) {
   // MIGRATION de nom : ce transport a porté deux noms avant « Transport
   // journalier » — « Transport CCQ », puis « Transport durant la
   // journée ». Le titre est figé à la création de la carte : sans ce
@@ -228,11 +234,20 @@ function completerTransportsJournee(tachesEntree) {
   taches.forEach((t) => {
     if (t.type === "travail" && t.date) (parDate[t.date] = parDate[t.date] || []).push(t);
   });
+  // Option transport ETEINTE : les blocs Debut/Fin jamais commences
+  // disparaissent (ceux avec du temps couru restent — on ne jette
+  // jamais des minutes travaillees).
+  const tachesFiltrees = transportDebutFin
+    ? taches
+    : taches.filter(
+        (t) =>
+          !(t.type === "transport" && (t.momentTransport === "debut" || t.momentTransport === "fin") && t.etat === "a_faire" && (t.tempsAccumuleSec || 0) === 0)
+      );
   // 1) REPOSITIONNE les transports existants : si une tâche est ajoutée
   // plus tard dans la journée, le « Transport — Fin de journée » se
   // replace automatiquement APRÈS elle (et le Début avant la première).
   // On ne déplace jamais un transport déjà commencé ou terminé.
-  const resultat = taches.map((t) => {
+  const resultat = tachesFiltrees.map((t) => {
     if (t.type !== "transport" || !t.date || !parDate[t.date] || t.etat !== "a_faire") return t;
     const heures = parDate[t.date].map((x) => x.heure || "08:00").sort();
     if (t.momentTransport === "debut") return { ...t, heure: decalerHeure(heures[0], -30) };
@@ -261,10 +276,10 @@ function completerTransportsJournee(tachesEntree) {
     const secteurPremiere = trieesPourSecteur[0]?.secteur || "commercial";
     const secteurDerniere = trieesPourSecteur[trieesPourSecteur.length - 1]?.secteur || "commercial";
     const gabarit = { type: "transport", date, etat: "a_faire", tempsAccumuleSec: 0, tempsDebutSegment: null, kilometres: 0 };
-    if (!resultat.some((t) => t.type === "transport" && t.momentTransport === "debut" && t.date === date)) {
+    if (transportDebutFin && !resultat.some((t) => t.type === "transport" && t.momentTransport === "debut" && t.date === date)) {
       resultat.push({ ...gabarit, secteur: secteurPremiere, id: `transport-debut-${date}`, momentTransport: "debut", heure: decalerHeure(heures[0], -30), titre: "Transport — Début de journée" });
     }
-    if (!resultat.some((t) => t.type === "transport" && t.momentTransport === "fin" && t.date === date)) {
+    if (transportDebutFin && !resultat.some((t) => t.type === "transport" && t.momentTransport === "fin" && t.date === date)) {
       resultat.push({ ...gabarit, secteur: secteurDerniere, id: `transport-fin-${date}`, momentTransport: "fin", heure: decalerHeure(heures[heures.length - 1], 150), titre: "Transport — Fin de journée" });
     }
     // 3) TRANSPORT CCQ entre chaque paire de tâches consécutives (2 tâches
@@ -5621,6 +5636,14 @@ function AppTechnicien() {
   // Config entreprise (contexte) — lue EN TÊTE : les hooks doivent
   // précéder tout retour conditionnel (règle des hooks React).
   const configTech = useEntreprise();
+  // 🚗 CE technicien a-t-il le transport debut/fin paye ? Meme regle
+  // que l'admin (entreprise + derogation de SA fiche, lue de
+  // l'annuaire — jamais les salaires). Copie locale volontaire du
+  // juge : importer partage.jsx tirerait tout le paquet admin dans le
+  // telephone.
+  const [transportDebutFin, setTransportDebutFin] = useState(true);
+  const transportDebutFinRef = useRef(true);
+  transportDebutFinRef.current = transportDebutFin;
   // Durée de la pause dîner non payée (Paramètres de l'entreprise).
   const minutesDiner = Number(useEntreprise().minutesDiner) || 30;
   const [connecte, setConnecte] = useState(false);
@@ -5694,7 +5717,7 @@ function AppTechnicien() {
               : d;
           });
           const locales = prev.filter((t) => !t.supabase);
-          return completerTransportsJournee([...locales, ...enrichies]);
+          return completerTransportsJournee([...locales, ...enrichies], transportDebutFinRef.current);
         });
       } catch {
         // table absente ou hors-ligne — l'app locale continue sans blocage
@@ -5740,6 +5763,24 @@ function AppTechnicien() {
   // sinon le nom de la FICHE DU RÉPERTOIRE des employés (matché par
   // courriel), sinon le début du courriel en dernier recours.
   const [nomTechnicien, setNomTechnicien] = useState("");
+  useEffect(() => {
+    const courriel = session?.user?.email?.toLowerCase();
+    if (!courriel) return;
+    let annule = false;
+    listerAnnuaireEmployes()
+      .then((liste) => {
+        if (annule) return;
+        const mienne = liste.find((e) => (e.courriel || "").toLowerCase() === courriel);
+        const v = mienne?.transportQuotidien;
+        const paye = v === "oui" ? true : v === "non" ? false : configTech?.transportQuotidienPaye !== false;
+        setTransportDebutFin(paye);
+        // Le moteur repasse tout de suite : blocs retires ou recrees.
+        setTaches((prev) => completerTransportsJournee(prev, paye));
+      })
+      .catch(() => {});
+    return () => { annule = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, configTech?.transportQuotidienPaye]);
   useEffect(() => {
     const courriel = session?.user?.email?.toLowerCase();
     if (!courriel) return;

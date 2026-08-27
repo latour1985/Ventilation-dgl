@@ -63,6 +63,7 @@ import { correspond, METIERS_TERRAIN, METIERS_BUREAU, METIERS, NIVEAUX_PAR_METIE
 import { ModalItemCatalogue, SectionCatalogue, OngletTarifs } from "./OngletTarifs";
 import { ChampParametre, EnTeteEntreprise, PiedDocument, CarteConnexionQuickbooks, OngletParametres } from "./OngletParametres";
 import { OngletUtilisateurs, ModalProfilUtilisateur, GrilleAcces, ApercuCourrielConnexion } from "./OngletUtilisateurs";
+import { transportQuotidienPayePour } from "./partage";
 import { ContexteClients, useClients, ContexteDevis, useDevis, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, AdressesDocument, BoutonPDF, GalerieAvantApres, projetEnRetard, evaluerSanteProjet, couleurSanteBudget, calculerRentabiliteProjet, ApercuDevisClient, ApercuBonTravailClient } from "./partage";
 import { OngletClients, ModalEditionClient, ModalNouveauClient, DetailTravail, DevisDuClient, LigneProjetClient } from "./OngletClients";
 import { ContexteCatalogue, useCatalogue, SelecteurItem } from "./partage";
@@ -789,7 +790,13 @@ function ModalDetailTache({ info, onFermer }) {
 // Supabase (taches_assignees) — l'horaire survit ainsi aux rechargements.
 // Même logique de placement que assigner() : jours >= 1 bloque la journée
 // complète, sinon N cases horaires à partir de l'heure de début.
-function reconstruirePlanning(rows, employesRef) {
+function reconstruirePlanning(rows, employesRef, config) {
+  // 🚗 Employes SANS transport debut/fin (2026-09-05) : l'agenda ne
+  // fabrique pas leurs blocs systeme — regle d'entreprise + derogation
+  // par fiche (transportQuotidienPayePour, un seul juge partout).
+  const sansTransport = new Set(
+    (employesRef || []).filter((e) => !transportQuotidienPayePour(e, config)).map((e) => String(e.id))
+  );
   const planning = {};
   rows.forEach((r) => {
     const courriel = (r.employe_email || "").toLowerCase();
@@ -833,7 +840,7 @@ function reconstruirePlanning(rows, employesRef) {
       });
     });
   });
-  return recalculerTransports(planning);
+  return recalculerTransports(planning, sansTransport);
 }
 
 // ============================================================
@@ -853,8 +860,8 @@ function reconstruirePlanning(rows, employesRef) {
 // l'écran. Pour tous les autres, le serveur écrase — c'est ce qui fait
 // aussi disparaître, chez tout le monde, une tâche retirée ailleurs.
 // ============================================================
-function fusionnerPlanningServeur(prev, rows, employesRef) {
-  const serveur = reconstruirePlanning(rows, employesRef);
+function fusionnerPlanningServeur(prev, rows, employesRef, config) {
+  const serveur = reconstruirePlanning(rows, employesRef, config);
   const sansCourriel = new Set(employesRef.filter((e) => !e.courriel).map((e) => e.id));
   if (sansCourriel.size === 0) return serveur;
   const fusion = { ...serveur };
@@ -868,7 +875,10 @@ function fusionnerPlanningServeur(prev, rows, employesRef) {
       ...locales,
     ];
   });
-  return recalculerTransports(fusion);
+  const sansTransportFusion = new Set(
+    (employesRef || []).filter((e) => !transportQuotidienPayePour(e, config)).map((e) => String(e.id))
+  );
+  return recalculerTransports(fusion, sansTransportFusion);
 }
 
 function JournalAutomatisation({ entrees }) {
@@ -1022,6 +1032,14 @@ export default function App() {
   const [travaux, setTravaux] = useState(TRAVAUX_INIT);
   const [projets, setProjets] = useState(PROJETS_INIT);
   const [utilisateurs, setUtilisateurs] = useState(UTILISATEURS_INIT);
+  // 🗄️ ACTIFS SEULEMENT pour l'agenda, les paies, les selecteurs — les
+  // employes desactives (2026-09-05) vivent dans le tiroir « Anciens
+  // employes » d'Utilisateurs ; leurs heures PASSEES restent dans les
+  // paies via les lignes de travaux elles-memes.
+  const utilisateursActifs = useMemo(
+    () => utilisateurs.filter((u) => (u.statut || "actif") !== "inactif"),
+    [utilisateurs]
+  );
   const [tauxMetiers, setTauxMetiers] = useState(TAUX_METIERS_INIT);
   // Inspections & entretiens — VRAIES données Supabase (Phase 2). Le
   // chargement se fait plus bas, une fois la session déclarée.
@@ -1165,7 +1183,7 @@ export default function App() {
             // reconstruction de l'agenda jetterait leurs blocs.
             ...sousTraitants.map((st) => ({ id: `st-${st.id}`, courriel: COURRIEL_ST(st.id) })),
           ];
-          setPlanning((prev) => fusionnerPlanningServeur(prev, rows, employesRef));
+          setPlanning((prev) => fusionnerPlanningServeur(prev, rows, employesRef, configEntreprise));
           // Les tâches déjà planifiées ne restent pas dans « en attente ».
           setTachesAttente((prev) => prev.filter((t) => !rows.some((r) => r.tache_id === t.id)));
         })
@@ -2614,7 +2632,7 @@ export default function App() {
           travaux={travaux}
           achatsLibres={achatsLibres}
           transactionsQb={transactionsQb}
-          utilisateurs={utilisateurs}
+          utilisateurs={utilisateursActifs}
           tauxMetiers={tauxMetiers}
           parcCamions={parcCamions}
           clients={clients}
@@ -2681,7 +2699,7 @@ export default function App() {
           setProjets={setProjets}
           devisListe={devisListe}
           transactionsQb={transactionsQb}
-          utilisateurs={utilisateurs}
+          utilisateurs={utilisateursActifs}
           tauxMetiers={tauxMetiers}
           syncQbEnCours={syncQbEnCours}
           onSyncQuickBooksProjets={synchroniserQuickBooksProjets}
@@ -2704,7 +2722,7 @@ export default function App() {
           devisListe={devisListe}
           transactionsQb={transactionsQb}
           bonsTravail={bons}
-          utilisateurs={utilisateurs}
+          utilisateurs={utilisateursActifs}
           tauxMetiers={tauxMetiers}
           syncQbEnCours={syncQbEnCours}
           onSyncQuickBooks={synchroniserQuickBooksProjets}
@@ -2855,10 +2873,11 @@ export default function App() {
             // pratique pour qu'un admin principal s'assigne des tâches).
             // `estBureau` (métier de bureau) range la personne dans la
             // section repliable « Personnel de bureau » (2026-08-19).
-            const liste = utilisateurs.map((u) => ({
+            const liste = utilisateursActifs.map((u) => ({
               id: u.id,
               nom: u.nom,
               courriel: u.courriel,
+              transportQuotidien: u.transportQuotidien,
               estBureau: estMetierBureau(u.metier),
             }));
             const courrielSession = session.user?.email?.toLowerCase();
@@ -2992,7 +3011,7 @@ export default function App() {
       {vue === "paies" && (
         <OngletPaies
           travaux={travaux}
-          utilisateurs={utilisateurs}
+          utilisateurs={utilisateursActifs}
           ajouterJournal={ajouterJournal}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
           // Droit sur les heures : admins = ajustement DIRECT ; répartiteur

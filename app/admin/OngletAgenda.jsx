@@ -23,7 +23,7 @@ import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxH
 import { annulerFactureDepot, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { AutocompleteAdresse, Button, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives } from "./partage";
+import { AutocompleteAdresse, Button, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -56,7 +56,11 @@ export function tacheTransportSysteme(moment, employeId, dateISO, heure) {
 }
 
 
-export function recalculerTransports(planning) {
+// sansTransport (2026-09-05) : identifiants d'employes SANS transport
+// debut/fin paye (reglage d'entreprise + derogation par fiche) — leurs
+// blocs systeme ne sont pas fabriques. Le transport CCQ entre deux
+// clients n'est pas concerne (toujours paye).
+export function recalculerTransports(planning, sansTransport = new Set()) {
   const resultat = {};
   const groupes = {}; // `${date}|${employeId}` -> { date, employeId, indices: [] }
   Object.entries(planning).forEach(([cle, valeur]) => {
@@ -76,6 +80,8 @@ export function recalculerTransports(planning) {
     // 2026-08-19) — on ne paie ni ne suit leur déplacement, leur rangée
     // ne montre que leurs blocs de présence.
     if (String(employeId).startsWith("st-")) return;
+    // 🚗 Employe sans transport paye : pas de blocs Debut/Fin.
+    if (sansTransport.has(String(employeId))) return;
     const idxDebut = Math.min(...indices) - 1; // la case juste avant la 1re tâche
     const idxFin = Math.max(...indices) + 1; // la case juste après la dernière
     if (idxDebut >= 0) {
@@ -368,6 +374,13 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 
 
 export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
+  // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
+  // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
+  const configTransports = useEntreprise();
+  const sansTransportAgendaRef = useRef(new Set());
+  sansTransportAgendaRef.current = new Set(
+    (employes || []).filter((e) => !transportQuotidienPayePour(e, configTransports)).map((e) => String(e.id))
+  );
   // ============================================================
   // SECTIONS DE L'AGENDA (2026-08-19, demande du propriétaire) :
   //   🔧 Équipe terrain (en haut, comme avant)
@@ -1394,7 +1407,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           ];
         });
       });
-      return recalculerTransports(copie);
+      return recalculerTransports(copie, sansTransportAgendaRef.current);
     });
     setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
     const derniereDate = joursCibles[joursCibles.length - 1];
@@ -1507,7 +1520,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           { ...tache, employeId, heures: nbHeures, jours: 0, statut: "planifiee" },
         ];
       });
-      return recalculerTransports(copie);
+      return recalculerTransports(copie, sansTransportAgendaRef.current);
     });
     const employe = employes.find((e) => e.id === employeId);
     // 💾 ENREGISTRÉ POUR VRAI (2026-08-22) : le redimensionnement ne
@@ -1600,7 +1613,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         if (restants.length) copie[cle] = restants;
         else delete copie[cle];
       });
-      return recalculerTransports(copie);
+      return recalculerTransports(copie, sansTransportAgendaRef.current);
     });
     // 3. Retirer de la file d'attente — la persistance Supabase supprime
     //    la ligne automatiquement (voir l'effet de synchronisation).
@@ -1714,7 +1727,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         if (restants.length) copie[cle] = restants;
         else delete copie[cle];
       });
-      return recalculerTransports(copie);
+      return recalculerTransports(copie, sansTransportAgendaRef.current);
     });
     const tacheMiseAJour = {
       ...tache,
