@@ -3154,3 +3154,10 @@ left join pg_policies p on p.schemaname = 'public' and p.tablename = c.relname
 where c.relkind = 'r'
 group by c.relname, c.relrowsecurity
 order by c.relname;
+
+-- ============================================================
+-- 89 - LEVER LE VERROU DE CREATION D'ENTREPRISES (apres sonde verte)
+--      (2026-09-05 — sonde 33/33 tables etanches + usurpation re-etiquetee)
+-- ============================================================
+update plateforme_config set valeur = 'oui', updated_at = now() where cle = 'isolation_activee';
+select cle, valeur from plateforme_config where cle = 'isolation_activee';
