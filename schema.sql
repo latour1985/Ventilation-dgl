@@ -2641,3 +2641,57 @@ create unique index if not exists idx_pieces_tache_origine_unique
 -- vide = comportement d'origine (les 12 derniers mois).
 
 alter table entreprises add column if not exists qb_lecture_depuis date;
+
+-- ============================================================
+-- 82 - RETOURS SUR LE LOGICIEL (communication en 2 etages)
+-- ============================================================
+-- Le circuit valide par le proprietaire (2026-09-02) : le TECHNICIEN
+-- signale un bug ou propose une idee → l'ADMIN de SON entreprise trie
+-- (regle a l'interne, refuse, ou TRANSMET a Fluxya) → la console
+-- plateforme ne recoit que les retours transmis. Statuts :
+--   nouveau → regle-interne | refuse-interne | transmis
+--   transmis → en-cours → regle | refuse   (cote Fluxya)
+
+create table if not exists retours_logiciel (
+  id uuid primary key default gen_random_uuid(),
+  entreprise_id text not null default 'dgl',
+  type text not null default 'bug' check (type in ('bug','idee')),
+  message text not null,
+  photo_url text,
+  contexte jsonb,
+  auteur_email text,
+  auteur_nom text,
+  statut text not null default 'nouveau'
+    check (statut in ('nouveau','regle-interne','refuse-interne','transmis','en-cours','regle','refuse')),
+  reponse_admin text,
+  transmis_le timestamptz,
+  transmis_par text,
+  commentaire_transmission text,
+  reponse_fluxya text,
+  traite_par text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table retours_logiciel enable row level security;
+drop policy if exists "retours_logiciel_test" on retours_logiciel;
+create policy "retours_logiciel_test" on retours_logiciel
+  for all to authenticated using (true) with check (true);
+
+alter publication supabase_realtime add table retours_logiciel;
+
+-- ============================================================
+-- 83 - NIVEAUX DE L'EQUIPE FLUXYA (console plateforme)
+-- ============================================================
+-- Hierarchie validee par le proprietaire (2026-09-02) : jusqu'a 3
+-- « cle-principale » (lui + associes eventuels — tout pouvoir, seuls a
+-- gerer l'equipe), puis admin-regulier (abonnements + retours +
+-- incidents), gestionnaire (retours + incidents, abonnements en
+-- lecture), technicien (retours seulement). Le niveau vit dans
+-- app_metadata (scelle serveur, comme le sceau du snippet 51) ; un
+-- sceau SANS niveau est traite comme cle-principale (compatibilite).
+
+update auth.users
+  set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+    || '{"plateforme": true, "plateforme_role": "cle-principale"}'::jsonb
+  where email = 'jeanfrancois@ventilationdgl.com';

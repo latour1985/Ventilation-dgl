@@ -30,6 +30,7 @@ import { enregistrerTravailEffectue, travailDejaEnregistre, infoTravailEnregistr
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
+import { creerRetour, listerMesRetours, LIBELLES_STATUT_RETOUR } from "@/lib/supabase/retours";
 
 // ============================================================
 // COMPOSANT BOUTON RÉUTILISABLE
@@ -1886,6 +1887,42 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
   const [courseMsg, setCourseMsg] = useState("");
   // 🔔 État du bouton d'activation des notifications push.
   const [etatPush, setEtatPush] = useState(null);
+  // 💬 SIGNALER / SUGGÉRER (2026-09-02) — le 1er étage du circuit de
+  // retours : le technicien écrit à SON bureau (« ça bugge » / « j'ai
+  // une idée ») ; l'admin trie et transmet à Fluxya seulement si c'est
+  // fondé. La fenêtre montre aussi SES signalements et leur statut —
+  // il voit que ça aboutit, donc il continue d'en envoyer.
+  const [retourOuvert, setRetourOuvert] = useState(false);
+  const [retourType, setRetourType] = useState("bug");
+  const [retourMessage, setRetourMessage] = useState("");
+  const [retourEnvoi, setRetourEnvoi] = useState(false);
+  const [retourFait, setRetourFait] = useState("");
+  const [mesRetours, setMesRetours] = useState(null);
+  const ouvrirRetour = () => {
+    setRetourOuvert(true);
+    setRetourFait("");
+    listerMesRetours(session?.user?.email).then(setMesRetours).catch(() => setMesRetours([]));
+  };
+  const envoyerRetour = async () => {
+    if (!retourMessage.trim()) return;
+    setRetourEnvoi(true);
+    try {
+      await creerRetour(
+        {
+          type: retourType,
+          message: retourMessage.trim(),
+          contexte: { page: "technicien", date: new Date().toISOString().slice(0, 10) },
+        },
+        session
+      );
+      setRetourFait("✅ Reçu ! Le bureau va regarder ça — tu verras le statut ici.");
+      setRetourMessage("");
+      listerMesRetours(session?.user?.email).then(setMesRetours).catch(() => {});
+    } catch {
+      setRetourFait("⚠️ Envoi impossible — vérifie ta connexion et réessaie.");
+    }
+    setRetourEnvoi(false);
+  };
   // 📍 Autocomplétion Google sur l'adresse de la course — comme
   // partout ailleurs. Recherche différée de 300 ms, jeton de session
   // (une seule unité de facturation Google par saisie).
@@ -2214,6 +2251,14 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         >
           🏭 Travail au shop (atelier)
         </button>
+        {/* 💬 SIGNALER / SUGGÉRER — écrit au BUREAU (pas à Fluxya
+            directement) : l'admin trie, puis transmet si c'est fondé. */}
+        <button
+          onClick={ouvrirRetour}
+          className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:bg-slate-100"
+        >
+          💬 Signaler un problème / proposer une idée
+        </button>
         {/* 🔔 NOTIFICATIONS PUSH (2026-08-18) : « nouvelle tâche »,
             « matériel commandé » — reçues même application fermée.
             Le bouton disparaît une fois la permission accordée.
@@ -2240,6 +2285,76 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-center text-[11px] font-bold text-red-700">
             Notifications refusées — réactive-les dans les réglages du navigateur si tu changes d'idée.
           </p>
+        )}
+        {/* 💬 FENÊTRE SIGNALER / SUGGÉRER — 15 secondes, faisable avec
+            des gants : type, texte, envoyer. Ses signalements passés
+            s'affichent dessous avec leur statut. */}
+        {retourOuvert && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => !retourEnvoi && setRetourOuvert(false))(); }}>
+            <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-base font-extrabold text-slate-900">💬 Signaler / suggérer</h3>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Ton message va au <span className="font-bold">bureau</span> — il vérifie, règle ou transmet au fabricant du logiciel.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+                <button
+                  onClick={() => setRetourType("bug")}
+                  className={`min-h-[40px] rounded-lg text-xs font-extrabold ${retourType === "bug" ? "bg-white text-slate-900 shadow" : "text-slate-500"}`}
+                >
+                  🐛 Quelque chose bugge
+                </button>
+                <button
+                  onClick={() => setRetourType("idee")}
+                  className={`min-h-[40px] rounded-lg text-xs font-extrabold ${retourType === "idee" ? "bg-white text-slate-900 shadow" : "text-slate-500"}`}
+                >
+                  💡 J&apos;ai une idée
+                </button>
+              </div>
+              <textarea
+                rows={3}
+                value={retourMessage}
+                onChange={(e) => setRetourMessage(e.target.value)}
+                placeholder={retourType === "bug" ? "Qu'est-ce qui bugge ? Où étais-tu dans l'app ?" : "Ton idée pour améliorer l'application…"}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
+              />
+              {retourFait && <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-700">{retourFait}</p>}
+              <button
+                onClick={envoyerRetour}
+                disabled={retourEnvoi || !retourMessage.trim()}
+                className="mt-2 min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white disabled:opacity-40"
+              >
+                {retourEnvoi ? "Envoi…" : "Envoyer au bureau"}
+              </button>
+              {mesRetours !== null && mesRetours.length > 0 && (
+                <div className="mt-3 border-t border-slate-100 pt-2">
+                  <p className="mb-1 text-[10px] font-extrabold uppercase text-slate-400">Mes signalements</p>
+                  <div className="space-y-1">
+                    {mesRetours.slice(0, 8).map((r) => (
+                      <div key={r.id} className="rounded-lg border border-slate-200 px-2.5 py-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="min-w-0 flex-1 truncate text-[11px] text-slate-600">{r.type === "idee" ? "💡" : "🐛"} {r.message}</p>
+                          <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold ${
+                            r.statut === "regle" || r.statut === "regle-interne" ? "bg-emerald-100 text-emerald-700"
+                            : r.statut.startsWith("refuse") ? "bg-red-100 text-red-600"
+                            : r.statut === "nouveau" ? "bg-slate-100 text-slate-500" : "bg-blue-100 text-blue-700"
+                          }`}>
+                            {LIBELLES_STATUT_RETOUR[r.statut] || r.statut}
+                          </span>
+                        </div>
+                        {r.reponseAdmin && <p className="mt-0.5 text-[10px] text-slate-500">↩️ {r.reponseAdmin}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={() => !retourEnvoi && setRetourOuvert(false)}
+                className="mt-2 min-h-[44px] w-full rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
         )}
         {courseOuverte && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => !courseEnCours && setCourseOuverte(false))(); }}>

@@ -2773,6 +2773,8 @@ export default function App() {
 
       {vue === "tableau-de-bord" && (
         <OngletTableauDeBord
+          nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
+          ajouterJournal={ajouterJournal}
           projets={projets}
           travaux={travaux}
           achatsLibres={achatsLibres}

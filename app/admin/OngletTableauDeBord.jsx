@@ -6,14 +6,16 @@
 // decoupage de page.jsx (2026-09-01). Extraction MECANIQUE : aucun
 // comportement ne change — seuls des export/import s'ajoutent.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronRight, FileText } from "lucide-react";
+import { listerRetoursEntreprise, majRetour, sAbonnerRetours, LIBELLES_STATUT_RETOUR, COURRIEL_PLATEFORME } from "@/lib/supabase/retours";
+import { envoyerCourriel } from "@/lib/courriels";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { camionIndisponible } from "@/lib/supabase/camions";
 import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], nomAdmin, ajouterJournal }) {
   const configTdb = useEntreprise();
   const analyse = projets.map((p) => {
     const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
@@ -41,6 +43,11 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         <h2 className="text-lg font-extrabold text-slate-900">Tableau de bord</h2>
         <span className="text-xs text-slate-400">Vue d'ensemble</span>
       </div>
+
+      {/* 💬 RETOURS DE L'ÉQUIPE — 2e étage du circuit (2026-09-02) : les
+          signalements des techniciens arrivent ICI ; l'admin trie —
+          réglé à l'interne, refusé, ou TRANSMIS à Fluxya. */}
+      <SectionRetoursEquipe nomAdmin={nomAdmin} ajouterJournal={ajouterJournal} />
 
       {/* 📱 AUJOURD'HUI SUR LE TERRAIN — TÉLÉPHONE (2026-08-21)
           ------------------------------------------------------------
@@ -272,3 +279,117 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
   );
 }
 
+
+// ============================================================
+// 💬 RETOURS DE L'ÉQUIPE (2026-09-02) — le TRIAGE de l'admin.
+// ------------------------------------------------------------
+// Circuit en 2 étages validé par le propriétaire : le technicien
+// signale à SON bureau ; l'admin trie ici — « Réglé à l'interne »
+// (formation, malentendu — mort là), « Refuser » (avec un mot), ou
+// « ➡️ Transmettre à Fluxya » (vrai bug / bonne idée, avec son
+// commentaire par-dessus). La console plateforme ne reçoit QUE le
+// transmis — Fluxya n'a jamais à filtrer l'insignifiant. Le statut
+// revient au technicien sur son bouton 💬.
+// ============================================================
+function SectionRetoursEquipe({ nomAdmin, ajouterJournal }) {
+  const [retours, setRetours] = useState([]);
+  const [ouvert, setOuvert] = useState(false);
+  const [reponses, setReponses] = useState({});
+  useEffect(() => {
+    const charger = () => listerRetoursEntreprise().then(setRetours).catch(() => {});
+    charger();
+    return sAbonnerRetours(charger);
+  }, []);
+  const nouveaux = retours.filter((r) => r.statut === "nouveau");
+  const enSuivi = retours.filter((r) => ["transmis", "en-cours", "regle", "refuse"].includes(r.statut));
+  if (retours.length === 0) return null;
+
+  const agir = async (r, statut) => {
+    const mot = (reponses[r.id] || "").trim();
+    try {
+      if (statut === "transmis") {
+        await majRetour(r.id, { statut: "transmis", transmisPar: nomAdmin || null, commentaireTransmission: mot });
+        ajouterJournal?.(`➡️ Retour de ${r.auteurNom || r.auteurEmail} (${r.type === "idee" ? "idée" : "bug"}) TRANSMIS à Fluxya${mot ? ` — « ${mot} »` : ""}.`);
+        // Avis au fabricant — fire-and-forget : l'échec du courriel ne
+        // bloque jamais la transmission (la console la voit de toute façon).
+        envoyerCourriel({
+          a: [COURRIEL_PLATEFORME],
+          sujet: `Fluxya — retour transmis (${r.type === "idee" ? "idée" : "bug"})`,
+          html: `<p><strong>${r.auteurNom || r.auteurEmail}</strong> (${r.entrepriseId}) :</p><p style="white-space:pre-line;">${r.message}</p>${mot ? `<p>💼 Mot de l'admin : ${mot}</p>` : ""}<p>À traiter dans la console : onglet 💬 Retours.</p>`,
+        }).catch(() => {});
+      } else {
+        await majRetour(r.id, { statut, reponseAdmin: mot });
+        ajouterJournal?.(
+          statut === "regle-interne"
+            ? `✅ Retour de ${r.auteurNom || r.auteurEmail} réglé à l'interne${mot ? ` — « ${mot} »` : ""}.`
+            : `❌ Retour de ${r.auteurNom || r.auteurEmail} refusé${mot ? ` — « ${mot} »` : ""}.`
+        );
+      }
+    } catch {
+      ajouterJournal?.("⚠️ Retour NON enregistré — le snippet SQL 82 est-il passé ?");
+    }
+  };
+
+  return (
+    <div className={`rounded-2xl border p-3 ${nouveaux.length > 0 ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-white"}`}>
+      <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
+        <p className={`text-xs font-extrabold uppercase tracking-wide ${nouveaux.length > 0 ? "text-blue-700" : "text-slate-500"}`}>
+          💬 Retours de l&apos;équipe{nouveaux.length > 0 ? ` — ${nouveaux.length} à trier` : ""}
+        </p>
+        <span className="text-[11px] font-bold text-slate-400">{ouvert ? "▲ Replier" : "▼ Ouvrir"}</span>
+      </button>
+      {!ouvert && nouveaux.length === 0 && (
+        <p className="mt-0.5 text-[10px] text-slate-400">Signalements et idées des techniciens — tout est trié.</p>
+      )}
+      {(ouvert || nouveaux.length > 0) && (
+        <div className="mt-2 space-y-1.5">
+          {(ouvert ? retours : nouveaux).slice(0, ouvert ? 30 : 5).map((r) => (
+            <div key={r.id} className="rounded-xl border border-slate-200 bg-white p-2.5">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-extrabold text-slate-800">
+                    {r.type === "idee" ? "💡" : "🐛"} {r.auteurNom || r.auteurEmail}
+                    <span className="ml-1.5 font-normal text-slate-400">{r.creeLe ? new Date(r.creeLe).toLocaleDateString("fr-CA") : ""}</span>
+                  </p>
+                  <p className="mt-0.5 whitespace-pre-line text-xs text-slate-700">{r.message}</p>
+                  {r.reponseFluxya && (
+                    <p className="mt-1 rounded-lg bg-slate-50 px-2 py-1 text-[10px] text-slate-600">↩️ Réponse de Fluxya : {r.reponseFluxya}</p>
+                  )}
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
+                  r.statut === "nouveau" ? "bg-blue-100 text-blue-700"
+                  : r.statut === "regle" || r.statut === "regle-interne" ? "bg-emerald-100 text-emerald-700"
+                  : r.statut.startsWith("refuse") ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-700"
+                }`}>
+                  {LIBELLES_STATUT_RETOUR[r.statut] || r.statut}
+                </span>
+              </div>
+              {r.statut === "nouveau" && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">
+                  <input
+                    value={reponses[r.id] || ""}
+                    onChange={(ev) => setReponses((p) => ({ ...p, [r.id]: ev.target.value }))}
+                    placeholder="Mot au technicien / commentaire pour Fluxya (facultatif)"
+                    className="min-w-[180px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-[11px]"
+                  />
+                  <button onClick={() => agir(r, "regle-interne")} className="rounded-md bg-emerald-600 px-2.5 py-1.5 text-[10px] font-bold text-white">
+                    ✅ Réglé à l&apos;interne
+                  </button>
+                  <button onClick={() => agir(r, "transmis")} className="rounded-md bg-[#131B2E] px-2.5 py-1.5 text-[10px] font-bold text-white">
+                    ➡️ Transmettre à Fluxya
+                  </button>
+                  <button onClick={() => agir(r, "refuse-interne")} className="rounded-md border border-red-300 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
+                    ❌ Refuser
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          {!ouvert && enSuivi.length > 0 && (
+            <p className="text-[10px] text-slate-400">+ {enSuivi.length} en suivi chez Fluxya — clique « Ouvrir » pour tout voir.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

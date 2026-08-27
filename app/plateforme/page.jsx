@@ -30,7 +30,12 @@ import {
   creerIncident,
   exporterEntreprise,
   listerSiegesPlateforme,
+  NIVEAUX_PLATEFORME,
+  niveauPlateformeDe,
+  listerOperateurs,
+  gererOperateur,
 } from "@/lib/supabase/plateforme";
+import { listerRetoursTransmis, majRetour, sAbonnerRetours, LIBELLES_STATUT_RETOUR } from "@/lib/supabase/retours";
 
 // 🧩 MODULES À LA CARTE — ce qu'une entreprise reçoit dans son forfait.
 // Décision du propriétaire (2026-08-15) : les besoins diffèrent selon le
@@ -164,18 +169,35 @@ export default function Plateforme() {
 }
 
 function TableauPlateforme({ session }) {
-  const [onglet, setOnglet] = useState("entreprises");
+  // 👥 NIVEAU DE L'OPÉRATEUR (2026-09-02) — décide ce que la console
+  // montre : clé principale = tout ; admin régulier = abonnements +
+  // retours + incidents ; gestionnaire = retours + incidents (abonnements
+  // en lecture) ; technicien de support = retours seulement.
+  const niveau = niveauPlateformeDe(session) || "technicien";
+  const clePrincipale = niveau === "cle-principale";
+  const peutModifierAbonnements = clePrincipale || niveau === "admin-regulier";
+  const voitEntreprises = niveau !== "technicien";
+  const [onglet, setOnglet] = useState(voitEntreprises ? "entreprises" : "retours");
   const [entreprises, setEntreprises] = useState([]);
   const [isolationOk, setIsolationOk] = useState(false);
   const [incidents, setIncidents] = useState([]);
+  const [retours, setRetours] = useState([]);
   const [message, setMessage] = useState("");
 
   const charger = () => {
-    listerEntreprisesPlateforme().then(setEntreprises).catch(() => setMessage("Registre illisible — le snippet 51 est-il passé ?"));
-    verrouIsolation().then(setIsolationOk).catch(() => {});
-    listerIncidents().then(setIncidents).catch(() => {});
+    if (voitEntreprises) {
+      listerEntreprisesPlateforme().then(setEntreprises).catch(() => setMessage("Registre illisible — le snippet 51 est-il passé ?"));
+      verrouIsolation().then(setIsolationOk).catch(() => {});
+      listerIncidents().then(setIncidents).catch(() => {});
+    }
+    listerRetoursTransmis().then(setRetours).catch(() => {});
   };
-  useEffect(charger, []);
+  useEffect(() => {
+    charger();
+    const off = sAbonnerRetours(() => listerRetoursTransmis().then(setRetours).catch(() => {}));
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const exporter = async (e) => {
     setMessage(`Export de ${e.nom} en cours…`);
@@ -208,7 +230,9 @@ function TableauPlateforme({ session }) {
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10"><Building2 size={18} className="text-orange-400" /></span>
           <div>
             <h1 className="text-sm font-extrabold text-white">Plateforme — entreprises clientes</h1>
-            <p className="text-[10px] text-white/50">{session.user.email} · sceau plateforme ✓</p>
+            <p className="text-[10px] text-white/50">
+              {session.user.email} · {(NIVEAUX_PLATEFORME.find(([id]) => id === niveau) || [])[1] || "sceau plateforme ✓"}
+            </p>
           </div>
         </div>
         <button onClick={() => supabase.auth.signOut()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold text-white/70 hover:bg-white/10">
@@ -217,8 +241,14 @@ function TableauPlateforme({ session }) {
       </header>
 
       <div className="mx-auto max-w-3xl p-4 md:p-6">
-        <div className="mb-4 flex gap-1.5 rounded-xl border border-slate-200 bg-white p-1">
-          {[["entreprises", "🏢 Entreprises"], ["facturation", "💰 Facturation"], ["incidents", "🔐 Incidents (Loi 25)"]].map(([id, label]) => (
+        <div className="mb-4 flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-white p-1">
+          {[
+            ...(voitEntreprises ? [["entreprises", "🏢 Entreprises"]] : []),
+            ...(peutModifierAbonnements ? [["facturation", "💰 Facturation"]] : []),
+            ["retours", `💬 Retours${retours.filter((r) => r.statut === "transmis").length > 0 ? ` (${retours.filter((r) => r.statut === "transmis").length})` : ""}`],
+            ...(voitEntreprises ? [["incidents", "🔐 Incidents (Loi 25)"]] : []),
+            ...(clePrincipale ? [["equipe", "👥 Équipe"]] : []),
+          ].map(([id, label]) => (
             <button key={id} onClick={() => setOnglet(id)}
               className={`flex-1 rounded-lg px-3 py-2 text-xs font-extrabold ${onglet === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}>
               {label}
@@ -228,10 +258,12 @@ function TableauPlateforme({ session }) {
 
         {message && <p className="mb-3 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-600">{message}</p>}
 
-        {onglet === "entreprises" && (
+        {onglet === "entreprises" && voitEntreprises && (
           <SectionEntreprises
             entreprises={entreprises}
             isolationOk={isolationOk}
+            peutModifier={peutModifierAbonnements}
+            gestesLourds={clePrincipale}
             onExporter={exporter}
             onBasculerSuspension={basculerSuspension}
             onMaj={async (id, champs) => {
@@ -251,16 +283,222 @@ function TableauPlateforme({ session }) {
             }}
           />
         )}
-        {onglet === "facturation" && <SectionFacturation entreprises={entreprises} />}
-        {onglet === "incidents" && (
+        {onglet === "facturation" && peutModifierAbonnements && <SectionFacturation entreprises={entreprises} />}
+        {onglet === "retours" && (
+          <SectionRetoursPlateforme retours={retours} session={session} onMaj={() => listerRetoursTransmis().then(setRetours).catch(() => {})} />
+        )}
+        {onglet === "incidents" && voitEntreprises && (
           <SectionIncidents incidents={incidents} session={session} onCree={charger} />
         )}
+        {onglet === "equipe" && clePrincipale && <SectionEquipe session={session} />}
       </div>
     </div>
   );
 }
 
-function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSuspension, onMaj }) {
+// ============================================================
+// 💬 RETOURS TRANSMIS PAR LES ENTREPRISES (2026-09-02)
+// ------------------------------------------------------------
+// Ne reçoit QUE ce qui a passé le triage des admins d'entreprise —
+// le circuit en 2 étages validé par le propriétaire. Chaque retour se
+// traite ici : En cours → Réglé / Refusé, avec une réponse que l'admin
+// de l'entreprise verra dans sa section « Retours de l'équipe ».
+// ============================================================
+function SectionRetoursPlateforme({ retours, session, onMaj }) {
+  const [reponses, setReponses] = useState({});
+  const agir = async (r, statut) => {
+    try {
+      await majRetour(r.id, {
+        statut,
+        reponseFluxya: (reponses[r.id] ?? r.reponseFluxya) || "",
+        traitePar: session?.user?.email || null,
+      });
+      onMaj();
+    } catch {
+      window.alert("Enregistrement impossible — le snippet 82 est-il passé ?");
+    }
+  };
+  if (retours.length === 0) {
+    return <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-xs text-slate-400">Aucun retour transmis — les signalements des techniciens passent d&apos;abord par l&apos;admin de leur entreprise.</p>;
+  }
+  return (
+    <div className="space-y-2.5">
+      {retours.map((r) => (
+        <div key={r.id} className={`rounded-2xl border bg-white p-4 ${r.statut === "transmis" ? "border-amber-300" : "border-slate-200"}`}>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-extrabold text-slate-800">
+                {r.type === "idee" ? "💡 Idée" : "🐛 Bug"} · <span className="text-slate-400">{r.entrepriseId}</span> · {r.auteurNom || r.auteurEmail}
+              </p>
+              <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{r.message}</p>
+              {r.photoUrl && (
+                <a href={r.photoUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[11px] font-bold text-blue-600 underline">📷 Voir la photo</a>
+              )}
+              {r.commentaireTransmission && (
+                <p className="mt-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">
+                  💼 Mot de l&apos;admin ({r.transmisPar}) : {r.commentaireTransmission}
+                </p>
+              )}
+              <p className="mt-1 text-[10px] text-slate-400">
+                {r.contexte?.page ? `Écran : ${r.contexte.page} · ` : ""}{r.creeLe ? new Date(r.creeLe).toLocaleDateString("fr-CA") : ""}
+              </p>
+            </div>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+              r.statut === "regle" ? "bg-emerald-100 text-emerald-700" : r.statut === "refuse" ? "bg-red-100 text-red-600" : r.statut === "en-cours" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
+            }`}>
+              {LIBELLES_STATUT_RETOUR[r.statut] || r.statut}
+            </span>
+          </div>
+          {r.statut !== "regle" && r.statut !== "refuse" && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2.5">
+              <input
+                value={reponses[r.id] ?? r.reponseFluxya ?? ""}
+                onChange={(ev) => setReponses((p) => ({ ...p, [r.id]: ev.target.value }))}
+                placeholder="Réponse à l'entreprise (facultatif — visible par son admin)"
+                className="min-w-[200px] flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+              />
+              {r.statut === "transmis" && (
+                <Bouton variant="outline" onClick={() => agir(r, "en-cours")} className="min-h-0 px-3 py-1.5 text-xs">🔧 En cours</Bouton>
+              )}
+              <Bouton onClick={() => agir(r, "regle")} className="min-h-0 px-3 py-1.5 text-xs">✅ Réglé</Bouton>
+              <Bouton variant="danger" onClick={() => agir(r, "refuse")} className="min-h-0 px-3 py-1.5 text-xs">❌ Refuser</Bouton>
+            </div>
+          )}
+          {(r.statut === "regle" || r.statut === "refuse") && r.reponseFluxya && (
+            <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">↩️ Réponse : {r.reponseFluxya}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============================================================
+// 👥 ÉQUIPE FLUXYA (2026-09-02) — clés principales SEULEMENT.
+// ------------------------------------------------------------
+// Jusqu'à 3 clés principales (le propriétaire + associés éventuels),
+// puis admin régulier, gestionnaire, technicien de support. Le sceau et
+// le niveau se posent CÔTÉ SERVEUR (route operateurs) — révocation en
+// deux clics, jamais soi-même, jamais la dernière clé principale.
+// ============================================================
+function SectionEquipe({ session }) {
+  const [operateurs, setOperateurs] = useState(null);
+  const [messageEq, setMessageEq] = useState("");
+  const [invite, setInvite] = useState({ courriel: "", nom: "", niveau: "technicien" });
+  const [enCours, setEnCours] = useState(false);
+  const [revoquePour, setRevoquePour] = useState(null);
+  const charger = () => {
+    listerOperateurs().then((r) => {
+      if (Array.isArray(r?.operateurs)) setOperateurs(r.operateurs);
+      else setMessageEq(r?.erreur || "Liste indisponible.");
+    });
+  };
+  useEffect(charger, []);
+  const inviter = async () => {
+    if (!invite.courriel.trim()) return;
+    setEnCours(true);
+    setMessageEq("");
+    const r = await gererOperateur({ action: "inviter", ...invite, courriel: invite.courriel.trim() });
+    setEnCours(false);
+    if (r?.fait) {
+      setMessageEq(
+        r.simule || r.courrielEchec
+          ? `✓ Compte préparé, mais le courriel n'est pas parti — remets ce lien à la personne : ${r.lien}`
+          : `✓ Invitation envoyée à ${invite.courriel.trim()} — la personne choisit son mot de passe puis se connecte sur /plateforme.`
+      );
+      setInvite({ courriel: "", nom: "", niveau: "technicien" });
+      charger();
+    } else {
+      setMessageEq(`⚠️ ${r?.erreur || "Invitation impossible — réessaie."}`);
+    }
+  };
+  const changerNiveau = async (o, niveau) => {
+    const r = await gererOperateur({ action: "niveau", id: o.id, niveau });
+    if (r?.fait) charger();
+    else setMessageEq(`⚠️ ${r?.erreur || "Changement refusé."}`);
+  };
+  const revoquer = async (o) => {
+    setRevoquePour(null);
+    const r = await gererOperateur({ action: "revoquer", id: o.id });
+    if (r?.fait) {
+      setMessageEq(`✓ Accès de ${o.courriel} révoqué — la porte est refermée.`);
+      charger();
+    } else setMessageEq(`⚠️ ${r?.erreur || "Révocation refusée."}`);
+  };
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">➕ Inviter un membre de l&apos;équipe Fluxya</p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input value={invite.courriel} onChange={(ev) => setInvite((p) => ({ ...p, courriel: ev.target.value }))}
+            placeholder="courriel@exemple.com" className="min-w-[180px] flex-1 rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+          <input value={invite.nom} onChange={(ev) => setInvite((p) => ({ ...p, nom: ev.target.value }))}
+            placeholder="Nom" className="w-36 rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+          <select value={invite.niveau} onChange={(ev) => setInvite((p) => ({ ...p, niveau: ev.target.value }))}
+            className="rounded-lg border border-slate-300 px-2 py-2 text-xs font-semibold">
+            {NIVEAUX_PLATEFORME.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+          <Bouton onClick={inviter} disabled={enCours || !invite.courriel.trim()} className="min-h-0 px-4 py-2 text-xs">
+            {enCours ? "Envoi…" : "Inviter"}
+          </Bouton>
+        </div>
+        <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
+          {NIVEAUX_PLATEFORME.map(([, label, desc]) => `${label} : ${desc}`).join(" · ")}
+        </p>
+      </div>
+
+      {messageEq && <p className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-600 break-all">{messageEq}</p>}
+
+      <div className="rounded-2xl border border-slate-200 bg-white">
+        {operateurs === null ? (
+          <p className="p-5 text-center text-xs text-slate-400">Chargement de l&apos;équipe…</p>
+        ) : (
+          operateurs.map((o) => (
+            <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 last:border-0">
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold text-slate-800">{o.nom || o.courriel}{o.id === session?.user?.id ? " (toi)" : ""}</p>
+                <p className="text-[10px] text-slate-400">
+                  {o.courriel} · {o.derniereConnexion ? `dernière connexion ${new Date(o.derniereConnexion).toLocaleDateString("fr-CA")}` : "jamais connecté"}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={o.niveau}
+                  disabled={o.id === session?.user?.id}
+                  onChange={(ev) => changerNiveau(o, ev.target.value)}
+                  title={o.id === session?.user?.id ? "On ne change pas son propre niveau" : "Changer le niveau"}
+                  className="rounded-lg border border-slate-300 px-2 py-1.5 text-[11px] font-semibold disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  {NIVEAUX_PLATEFORME.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                </select>
+                {o.id !== session?.user?.id && (
+                  revoquePour === o.id ? (
+                    <span className="flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                      Révoquer ?
+                      <button onClick={() => revoquer(o)} className="rounded-lg bg-red-600 px-2 py-1 text-[10px] font-extrabold text-white">Oui</button>
+                      <button onClick={() => setRevoquePour(null)} className="text-[10px] underline">Non</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setRevoquePour(o.id)} className="text-[10px] font-semibold text-slate-400 underline hover:text-red-600">
+                      Révoquer l&apos;accès
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <p className="text-[10px] leading-relaxed text-slate-400">
+        Maximum 3 clés principales. La révocation retire le sceau côté serveur : la porte se referme instantanément,
+        même si la personne connaît encore son mot de passe. Un opérateur n&apos;a AUCUN accès au contenu des
+        entreprises — seulement à cette console, selon son niveau.
+      </p>
+    </div>
+  );
+}
+
+function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, gestesLourds = true, onExporter, onBasculerSuspension, onMaj }) {
   const [editionId, setEditionId] = useState(null);
   return (
     <div className="space-y-3">
@@ -453,13 +691,23 @@ function SectionEntreprises({ entreprises, isolationOk, onExporter, onBasculerSu
                 </>
               ) : (
                 <>
-                  <Bouton variant="outline" onClick={() => setEditionId(e.id)} className="min-h-0 px-3 py-1.5 text-xs">
-                    Statut & modules… {Array.isArray(e.modules) ? `(🧩 ${e.modules.length}/${MODULES_CATALOGUE.length})` : ""}
-                  </Bouton>
-                  <Bouton variant="outline" onClick={() => onExporter(e)} className="min-h-0 px-3 py-1.5 text-xs">
-                    <Download size={13} /> Exporter ses données
-                  </Bouton>
-                  {e.statut !== "proprietaire" && (
+                  {/* 🔐 GESTION PAR NIVEAU (2026-09-02) : modifier =
+                      clé principale ou admin régulier ; les GESTES
+                      LOURDS (export, suspension) = clé principale
+                      seulement ; gestionnaire = lecture. */}
+                  {peutModifier ? (
+                    <Bouton variant="outline" onClick={() => setEditionId(e.id)} className="min-h-0 px-3 py-1.5 text-xs">
+                      Statut & modules… {Array.isArray(e.modules) ? `(🧩 ${e.modules.length}/${MODULES_CATALOGUE.length})` : ""}
+                    </Bouton>
+                  ) : (
+                    <span className="text-[10px] font-semibold text-slate-400">🔒 Lecture seulement (niveau gestionnaire)</span>
+                  )}
+                  {gestesLourds && (
+                    <Bouton variant="outline" onClick={() => onExporter(e)} className="min-h-0 px-3 py-1.5 text-xs">
+                      <Download size={13} /> Exporter ses données
+                    </Bouton>
+                  )}
+                  {gestesLourds && e.statut !== "proprietaire" && (
                     <Bouton variant={e.suspendue ? "outline" : "danger"} onClick={() => onBasculerSuspension(e)} className="min-h-0 px-3 py-1.5 text-xs">
                       {e.suspendue ? <><Play size={13} /> Réactiver</> : <><Pause size={13} /> Suspendre</>}
                     </Bouton>
