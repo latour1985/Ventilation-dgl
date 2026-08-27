@@ -340,7 +340,20 @@ function SectionRetoursPlateforme({ retours, session, onMaj }) {
               </p>
               <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{r.message}</p>
               {r.photoUrl && (
-                <a href={r.photoUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[11px] font-bold text-blue-600 underline">📷 Voir la photo</a>
+                // Les captures arrivent en data URL (compressées) — Chrome
+                // bloque la navigation directe vers une data URL, on ouvre
+                // donc une fenêtre et on y écrit l'image nous-mêmes.
+                <button
+                  type="button"
+                  onClick={() => {
+                    const f = window.open("", "_blank");
+                    if (f) f.document.write(`<title>Capture jointe</title><body style="margin:0;background:#0f172a;display:grid;place-items:center;min-height:100vh;"><img src="${r.photoUrl}" style="max-width:100%;height:auto;"></body>`);
+                  }}
+                  className="mt-1 inline-block"
+                  title="Agrandir la capture"
+                >
+                  <img src={r.photoUrl} alt="Capture jointe" className="h-16 w-auto rounded-lg border border-slate-200" />
+                </button>
               )}
               {r.commentaireTransmission && (
                 <p className="mt-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">

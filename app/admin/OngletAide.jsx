@@ -33,11 +33,39 @@ const TYPES_MESSAGE = [
   ["idee", "💡 Idée / suggestion"],
 ];
 
+// 📷 Capture d'écran jointe au message (retour du propriétaire,
+// 2026-09-06 : « pouvoir ajouter une photo ou un screenshot de ce qui
+// se passe comme bug »). Compressée en data URL COMPACTE (max 900 px,
+// JPEG 70 %) : elle vit dans la colonne photo_url et s'affiche dans le
+// triage ET dans la console Fluxya (déjà branchée : « Voir la photo »).
+function compresserCapture(fichier) {
+  return new Promise((resolve, reject) => {
+    const lecteur = new FileReader();
+    lecteur.onerror = () => reject(new Error("Fichier illisible"));
+    lecteur.onload = (e) => {
+      const img = new window.Image();
+      img.onerror = () => reject(new Error("Image invalide"));
+      img.onload = () => {
+        const largeurMax = 900;
+        const echelle = Math.min(1, largeurMax / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * echelle);
+        canvas.height = Math.round(img.height * echelle);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.src = e.target.result;
+    };
+    lecteur.readAsDataURL(fichier);
+  });
+}
+
 export function OngletAide({ session, nomAdmin, ajouterJournal }) {
   const [retours, setRetours] = useState([]);
   const [reponses, setReponses] = useState({});
   const [type, setType] = useState("question");
   const [message, setMessage] = useState("");
+  const [photo, setPhoto] = useState(null); // data URL compressée, prête à partir
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
   const [confirmation, setConfirmation] = useState("");
 
@@ -59,14 +87,15 @@ export function OngletAide({ session, nomAdmin, ajouterJournal }) {
     setEnvoiEnCours(true);
     setConfirmation("");
     try {
-      await creerRetourAdmin({ type, message: texte }, session);
+      await creerRetourAdmin({ type, message: texte, photoUrl: photo }, session);
       ajouterJournal?.(`💬 Message envoyé à Fluxya (${TYPES_MESSAGE.find(([t]) => t === type)?.[1] || type}).`);
       envoyerCourriel({
         a: [COURRIEL_PLATEFORME],
         sujet: `Fluxya — message d'un admin (${type})`,
-        html: `<p><strong>${nomAdmin || courrielSession}</strong> :</p><p style="white-space:pre-line;">${texte}</p><p>À traiter dans la console : onglet 💬 Retours.</p>`,
+        html: `<p><strong>${nomAdmin || courrielSession}</strong> :</p><p style="white-space:pre-line;">${texte}</p>${photo ? "<p>📷 Une capture d'écran est jointe — visible dans la console.</p>" : ""}<p>À traiter dans la console : onglet 💬 Retours.</p>`,
       }).catch(() => {});
       setMessage("");
+      setPhoto(null);
       setConfirmation("✓ Envoyé à Fluxya — tu suivras la réponse ici, dans « Mes messages ».");
     } catch {
       setConfirmation("⚠️ Envoi impossible — réessaie (le snippet SQL 82 est-il passé ?).");
@@ -109,6 +138,21 @@ export function OngletAide({ session, nomAdmin, ajouterJournal }) {
             <span className="ml-1.5 font-normal text-slate-400">{r.creeLe ? new Date(r.creeLe).toLocaleDateString("fr-CA") : ""}</span>
           </p>
           <p className="mt-0.5 whitespace-pre-line text-xs text-slate-700">{r.message}</p>
+          {r.photoUrl && (
+            // Chrome bloque la navigation directe vers une data URL — on
+            // ouvre une fenêtre et on y écrit l'image nous-mêmes.
+            <button
+              type="button"
+              onClick={() => {
+                const f = window.open("", "_blank");
+                if (f) f.document.write(`<title>Capture jointe</title><body style="margin:0;background:#0f172a;display:grid;place-items:center;min-height:100vh;"><img src="${r.photoUrl}" style="max-width:100%;height:auto;"></body>`);
+              }}
+              className="mt-1 inline-block"
+              title="Agrandir la capture"
+            >
+              <img src={r.photoUrl} alt="Capture jointe" className="h-14 w-auto rounded-lg border border-slate-200" />
+            </button>
+          )}
           {r.reponseAdmin && !avecTriage && (
             <p className="mt-1 rounded-lg bg-slate-50 px-2 py-1 text-[10px] text-slate-600">↩️ Réponse du bureau : {r.reponseAdmin}</p>
           )}
@@ -174,6 +218,34 @@ export function OngletAide({ session, nomAdmin, ajouterJournal }) {
           placeholder="Décris ta question, ton problème ou ton idée — plus c'est précis, plus la réponse est rapide."
           className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs"
         />
+        {/* 📷 Capture d'écran (facultative) */}
+        {photo ? (
+          <div className="mt-2 flex items-center gap-2">
+            <img src={photo} alt="Capture jointe" className="h-16 w-auto rounded-lg border border-slate-200" />
+            <button onClick={() => setPhoto(null)} className="rounded-lg border border-red-300 px-2.5 py-1.5 text-[11px] font-bold text-red-600">
+              ✕ Retirer la capture
+            </button>
+          </div>
+        ) : (
+          <label className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-600">
+            📷 Joindre une capture d&apos;écran
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (ev) => {
+                const fichier = ev.target.files?.[0];
+                ev.target.value = "";
+                if (!fichier) return;
+                try {
+                  setPhoto(await compresserCapture(fichier));
+                } catch {
+                  setConfirmation("⚠️ Image illisible — essaie un autre fichier.");
+                }
+              }}
+            />
+          </label>
+        )}
         <div className="mt-2 flex items-center gap-2">
           <button onClick={envoyer} disabled={envoiEnCours || !message.trim()}
             className="rounded-xl bg-[#131B2E] px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">

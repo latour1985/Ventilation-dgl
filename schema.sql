@@ -3350,3 +3350,21 @@ grant execute on function bon_travail_public(text) to anon, authenticated;
 --      (DGL intouchee : sa grille reelle reste.)
 delete from taux_metiers where entreprise_id <> 'dgl';
 select entreprise_id, count(*) as lignes_restantes from taux_metiers group by 1;
+
+-- ============================================================
+-- 94 - RAPATRIEMENT DU JOURNAL DGL CONTAMINE (Loi 25, 2026-09-06)
+--      PAS une fuite des cloisons : pendant la fenetre du compte vole
+--      (faille inviter, colmatee au commit f75a8e4), le compte du
+--      proprietaire etait etiquete ventilation-miroir COTE SERVEUR
+--      alors que son navigateur travaillait encore chez DGL (vieux
+--      jeton ~1 h) — ses ecritures de journal (et celles passees par
+--      sa session) ont ete estampillees MIROIR. On les rapatrie chez
+--      DGL par leur contenu, puis on AFFICHE la repartition.
+update journal_activite set entreprise_id = 'dgl'
+ where entreprise_id <> 'dgl'
+   and (texte like '%ventilationdgl.com%'
+     or par_nom = 'Dominic Gariepy'
+     or texte like '%Sophie Roy%'
+     or texte like '%Marc Gagnon%'
+     or texte like '%Descente des clients QuickBooks%');
+select entreprise_id, count(*) as entrees from journal_activite group by 1 order by 1;
