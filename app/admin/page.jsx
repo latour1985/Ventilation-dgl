@@ -4809,13 +4809,18 @@ function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravau
     <div className="mx-auto max-w-2xl space-y-3 p-4 md:p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Clients</h2>
+        {/* 🔐 Règle du propriétaire (2026-08-30) : les synchronisations
+            de CLIENTS sont ouvertes aux Admin principal ET régulier —
+            seul ce qui touche les PRIX reste à l'Admin principal. */}
         <Button
           variant="outline"
-          onClick={synchroniserDepuisQuickbooks}
+          onClick={peutSyncQb ? synchroniserDepuisQuickbooks : undefined}
+          disabled={!peutSyncQb}
           loading={syncEnCours}
+          title={peutSyncQb ? undefined : "Réservé aux administrateurs"}
           className="min-h-0 px-3 py-1.5 text-xs"
         >
-          {!syncEnCours && <RefreshCw size={13} />}
+          {!syncEnCours && (peutSyncQb ? <RefreshCw size={13} /> : <Lock size={13} />)}
           {dejaSyncQb ? "✓ Synchroniser depuis QuickBooks" : "Synchroniser depuis QuickBooks"}
         </Button>
       </div>
