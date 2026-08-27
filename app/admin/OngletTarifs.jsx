@@ -12,6 +12,7 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { ZONES_DEPOTS, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { listerCatalogueRetires, margePourcent, profitDollars, vendantPourMarge } from "@/lib/supabase/catalogue";
+import { listerItemsQbo } from "@/lib/quickbooksClient";
 import { Button, correspond, tauxAffiche, zonesEffectives, METIERS_BUREAU, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
 
 // ============================================================
@@ -59,7 +60,12 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
   // naît avec les niveaux CCQ standards, tous à 0 $.
   const [ajoutMetierOuvert, setAjoutMetierOuvert] = useState(false);
   // 🗺️ Ajout d'une zone d'appels (zones dynamiques par entreprise).
+  // Le bouton reste TOUJOURS cliquable (retour du propriétaire : un
+  // bouton grisé sans explication laisse croire que c'est brisé) — un
+  // clic à vide met le focus dans le champ et affiche la marche à suivre.
   const [nouvelleZoneNom, setNouvelleZoneNom] = useState("");
+  const [guideZoneVisible, setGuideZoneVisible] = useState(false);
+  const refChampZone = useRef(null);
   const CLES_CONFIG_INTERDITES = ["taux_horaire_vendant", "minutes_incluses", "minutes_incluses_hors_zone"];
   const [nouveauMetier, setNouveauMetier] = useState("");
   const ajouterMetier = () => {
@@ -355,27 +361,40 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
           ))}
         </div>
         {estAdminPrincipal && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <input
-              value={nouvelleZoneNom}
-              onChange={(e) => setNouvelleZoneNom(e.target.value)}
-              placeholder="Ex : Zone 5 (Rive-Sud)"
-              className="min-w-[170px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-            />
-            <Button
-              variant="outline"
-              onClick={() => {
-                const nom = nouvelleZoneNom.trim();
-                if (!nom || CLES_CONFIG_INTERDITES.includes(nom)) return;
-                setPrixDepots((prev) => ({ ...prev, [nom]: prev[nom] ?? 0 }));
-                setNouvelleZoneNom("");
-                ajouterJournal(`🗺️ Zone « ${nom} » ajoutée — fixe son prix puis « Sauvegarder la liste de prix ».`);
-              }}
-              disabled={!nouvelleZoneNom.trim()}
-              className="min-h-0 px-3 py-1.5 text-xs"
-            >
-              ➕ Ajouter une zone
-            </Button>
+          <div className="mt-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={refChampZone}
+                value={nouvelleZoneNom}
+                onChange={(e) => { setNouvelleZoneNom(e.target.value); if (e.target.value.trim()) setGuideZoneVisible(false); }}
+                placeholder="Nom de la nouvelle zone — ex : Zone 5 (Rive-Sud)"
+                className={`min-w-[170px] flex-1 rounded-lg border px-2 py-1.5 text-xs ${guideZoneVisible ? "border-amber-400 ring-1 ring-amber-300" : "border-slate-300"}`}
+              />
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const nom = nouvelleZoneNom.trim();
+                  if (!nom || CLES_CONFIG_INTERDITES.includes(nom)) {
+                    // Clic à vide : on GUIDE au lieu de bloquer.
+                    setGuideZoneVisible(true);
+                    refChampZone.current?.focus();
+                    return;
+                  }
+                  setGuideZoneVisible(false);
+                  setPrixDepots((prev) => ({ ...prev, [nom]: prev[nom] ?? 0 }));
+                  setNouvelleZoneNom("");
+                  ajouterJournal(`🗺️ Zone « ${nom} » ajoutée — fixe son prix puis « Sauvegarder la liste de prix ».`);
+                }}
+                className="min-h-0 px-3 py-1.5 text-xs"
+              >
+                ➕ Ajouter une zone
+              </Button>
+            </div>
+            {guideZoneVisible && (
+              <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800">
+                ✍️ Écris d&apos;abord le nom de la zone dans le champ à gauche (ex : « Zone 5 (Rive-Sud) »), puis clique sur « Ajouter une zone ».
+              </p>
+            )}
           </div>
         )}
         <p className="mt-2 text-[10px] text-slate-400">🗺️ Hors zone : pas de prix fixe — l'option « tarif sur mesure » de la liste déroulante ouvre la saisie manuelle. Chaque entreprise crée SES zones — rien n'est figé.</p>
@@ -689,6 +708,171 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
     setRetires((prev) => (prev === null ? prev : prev.filter((x) => x.id !== i.id)));
   };
 
+  // ============================================================
+  // 🔄 MISE À JOUR DEPUIS QUICKBOOKS (2026-08-28)
+  // ------------------------------------------------------------
+  // Deux exigences du propriétaire, non négociables :
+  //   1. JAMAIS de doublon — le lien se fait par qb_item_id, et à défaut
+  //      par le NOM normalisé (l'item est alors RACCORDÉ : il reçoit son
+  //      qb_item_id pour toutes les synchronisations suivantes).
+  //   2. RIEN ne s'écrase sans autorisation — l'analyse LISTE chaque
+  //      item qui serait modifié (vendant, coûtant, description :
+  //      avant → après) avec une case à cocher ; décocher = garder le
+  //      prix ajusté à la main. Le bouton « Appliquer » fait le reste.
+  // ============================================================
+  const [syncQb, setSyncQb] = useState(null); // null | "analyse" | { nouveaux, modifies, desactives }
+  const [syncCoches, setSyncCoches] = useState({});
+  const [syncEnCours, setSyncEnCours] = useState(false);
+  const [syncErreur, setSyncErreur] = useState("");
+  const normaliserNom = (n) =>
+    String(n || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  const memesPrix = (a, b) => {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    return Math.abs(Number(a) - Number(b)) < 0.005;
+  };
+  const analyserSyncQb = async () => {
+    setSyncQb("analyse");
+    setSyncErreur("");
+    const r = await listerItemsQbo();
+    if (!Array.isArray(r?.items)) {
+      setSyncQb(null);
+      setSyncErreur(
+        r?.nonConnecte
+          ? "QuickBooks n'est pas connecté — va dans Paramètres pour rebrancher."
+          : r?.simule
+            ? "Configuration QuickBooks absente sur ce serveur."
+            : r?.erreur || "Lecture impossible — réessaie."
+      );
+      return;
+    }
+    // Le catalogue complet (actifs + retirés) pour ne JAMAIS recréer en
+    // doublon un item qui existe mais a été retiré.
+    let listeRetires = retires;
+    if (listeRetires === null) {
+      listeRetires = await listerCatalogueRetires().catch(() => []);
+      setRetires(listeRetires);
+    }
+    const tous = [...(catalogue || []), ...listeRetires];
+    const parQbId = new Map(tous.filter((i) => i.qbItemId).map((i) => [String(i.qbItemId), i]));
+    const parNom = new Map();
+    tous.forEach((i) => {
+      const cle = normaliserNom(i.nom);
+      if (cle && !parNom.has(cle)) parNom.set(cle, i);
+    });
+    const dejaLie = new Set(parQbId.keys());
+    const nouveaux = [];
+    const modifies = [];
+    const qbActifs = new Set();
+    r.items.forEach((q) => {
+      if (!q.actif) return;
+      qbActifs.add(q.qbId);
+      const local = parQbId.get(q.qbId) || parNom.get(normaliserNom(q.nom)) || null;
+      // Un item Fluxya déjà lié à UN AUTRE qb_item_id ne se fait pas
+      // voler par un homonyme — l'homonyme devient un nouvel item.
+      if (!local || (local.qbItemId && String(local.qbItemId) !== q.qbId)) {
+        if (!local) nouveaux.push(q);
+        return;
+      }
+      // Un item RETIRÉ du catalogue bloque la création en doublon, mais
+      // on ne propose pas de le modifier : il a été retiré exprès — le
+      // bouton « Remettre au catalogue » existe pour ça.
+      if (local.actif === false) return;
+      const changements = [];
+      if (q.vendant != null && !memesPrix(local.prix_vendant, q.vendant))
+        changements.push({ champ: "vendant", avant: local.prix_vendant, apres: q.vendant });
+      if (q.coutant != null && !memesPrix(local.prix_coutant, q.coutant))
+        changements.push({ champ: "coûtant", avant: local.prix_coutant, apres: q.coutant });
+      const descQb = String(q.description || "").trim();
+      if (descQb && descQb !== String(local.description || "").trim())
+        changements.push({ champ: "description", avant: local.description || "", apres: descQb });
+      const raccord = !local.qbItemId;
+      if (changements.length > 0) modifies.push({ local, qb: q, changements, raccord });
+      else if (raccord) modifies.push({ local, qb: q, changements: [], raccord: true });
+    });
+    // Items Fluxya liés à un item QuickBooks devenu INACTIF → retrait offert.
+    const desactives = (catalogue || []).filter(
+      (i) => i.qbItemId && dejaLie.has(String(i.qbItemId)) && r.items.some((q) => q.qbId === String(i.qbItemId)) && !qbActifs.has(String(i.qbItemId))
+    );
+    const coches = {};
+    nouveaux.forEach((q) => { coches["n-" + q.qbId] = true; });
+    // Les modifications de prix/description NE SONT PAS pré-cochées :
+    // cocher = autoriser explicitement (règle du propriétaire). Les purs
+    // raccords (aucun changement) s'appliquent d'office, sans case.
+    modifies.forEach((m) => { if (m.changements.length > 0) coches["m-" + m.local.id] = false; });
+    desactives.forEach((i) => { coches["d-" + i.id] = false; });
+    setSyncCoches(coches);
+    setSyncQb({ nouveaux, modifies, desactives });
+  };
+  const basculerCoche = (cle) => setSyncCoches((p) => ({ ...p, [cle]: !p[cle] }));
+  const nbCoches = Object.values(syncCoches).filter(Boolean).length
+    + (syncQb && syncQb !== "analyse" ? syncQb.modifies.filter((m) => m.changements.length === 0).length : 0);
+  const appliquerSyncQb = async () => {
+    if (!syncQb || syncQb === "analyse" || syncEnCours) return;
+    setSyncEnCours(true);
+    setSyncErreur("");
+    let ajoutes = 0, ajustes = 0, raccordes = 0, retiresN = 0, echecs = 0;
+    for (const q of syncQb.nouveaux) {
+      if (!syncCoches["n-" + q.qbId]) continue;
+      try {
+        await onEnregistrerItem({
+          nom: q.nom,
+          description: q.description || "",
+          typeItem: q.type === "Service" ? "service" : "materiel",
+          prix_vendant: q.vendant,
+          prix_coutant: q.coutant,
+          actif: true,
+          qbItemId: q.qbId,
+        });
+        ajoutes++;
+      } catch { echecs++; }
+    }
+    for (const m of syncQb.modifies) {
+      const autorise = m.changements.length === 0 || syncCoches["m-" + m.local.id];
+      if (!autorise) {
+        // Modification refusée MAIS raccord quand même : le lien
+        // qb_item_id se pose sans toucher aux prix ajustés à la main.
+        if (m.raccord) {
+          try { await onEnregistrerItem({ ...m.local, qbItemId: m.qb.qbId }); raccordes++; } catch { echecs++; }
+        }
+        continue;
+      }
+      const maj = { ...m.local, qbItemId: m.qb.qbId };
+      m.changements.forEach((c) => {
+        if (c.champ === "vendant") maj.prix_vendant = c.apres;
+        if (c.champ === "coûtant") maj.prix_coutant = c.apres;
+        if (c.champ === "description") maj.description = c.apres;
+      });
+      try {
+        await onEnregistrerItem(maj);
+        if (m.changements.length > 0) ajustes++; else raccordes++;
+      } catch { echecs++; }
+    }
+    for (const i of syncQb.desactives) {
+      if (!syncCoches["d-" + i.id]) continue;
+      try { await onDesactiverItem(i); retiresN++; } catch { echecs++; }
+    }
+    setSyncEnCours(false);
+    if (echecs > 0) {
+      setSyncErreur(`${echecs} item${echecs > 1 ? "s" : ""} n'ont pas pu être enregistrés — relance l'analyse.`);
+      return;
+    }
+    setSyncQb(null);
+    if (ajoutes + ajustes + raccordes + retiresN === 0) return;
+    alert(
+      "Catalogue mis à jour depuis QuickBooks :\n" +
+      (ajoutes ? `• ${ajoutes} nouvel${ajoutes > 1 ? "s" : ""} item${ajoutes > 1 ? "s" : ""} ajouté${ajoutes > 1 ? "s" : ""}\n` : "") +
+      (ajustes ? `• ${ajustes} item${ajustes > 1 ? "s" : ""} ajusté${ajustes > 1 ? "s" : ""} (prix / description)\n` : "") +
+      (raccordes ? `• ${raccordes} item${raccordes > 1 ? "s" : ""} raccordé${raccordes > 1 ? "s" : ""} à QuickBooks (sans changement de prix)\n` : "") +
+      (retiresN ? `• ${retiresN} item${retiresN > 1 ? "s" : ""} retiré${retiresN > 1 ? "s" : ""} (inactifs dans QuickBooks)\n` : "")
+    );
+  };
+
   const categories = useMemo(
     () => [...new Set((catalogue || []).map((i) => i.categorie).filter(Boolean))].sort(),
     [catalogue]
@@ -739,7 +923,21 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
                 <Plus size={13} /> Nouvel item
               </Button>
             )}
+            {estAdminPrincipal && (
+              <Button
+                variant="outline"
+                onClick={analyserSyncQb}
+                loading={syncQb === "analyse"}
+                className="min-h-0 px-3 py-1.5 text-xs"
+                title="Compare le catalogue avec les items QuickBooks — rien ne change sans ton accord"
+              >
+                🔄 Mettre à jour depuis QuickBooks
+              </Button>
+            )}
           </div>
+          {syncErreur && !syncQb && (
+            <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">{syncErreur}</p>
+          )}
 
           <p className="mt-2 text-[10px] text-slate-400">
             {resultats.length} item{resultats.length > 1 ? "s" : ""} affiché{resultats.length > 1 ? "s" : ""}
@@ -873,6 +1071,120 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
           onFermer={() => setItemModal(null)}
           onEnregistrer={onEnregistrerItem}
         />
+      )}
+
+      {/* 🔄 FENÊTRE D'ANALYSE — ce que QuickBooks changerait. Les
+          nouveaux items sont pré-cochés (aucun risque : rien n'existe) ;
+          les MODIFICATIONS ne le sont pas — cocher = autoriser, décocher
+          = garder le prix ajusté à la main (le lien QuickBooks se pose
+          quand même, sans toucher aux prix). */}
+      {syncQb && syncQb !== "analyse" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget || syncEnCours) return; setSyncQb(null); }}>
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between border-b border-slate-100 p-5 pb-3">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-800">🔄 Mise à jour depuis QuickBooks</h3>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  Rien n&apos;est encore modifié — coche ce que tu autorises, puis « Appliquer ».
+                </p>
+              </div>
+              <button onClick={() => !syncEnCours && setSyncQb(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 pt-3">
+              {syncQb.nouveaux.length === 0 && syncQb.modifies.length === 0 && syncQb.desactives.length === 0 && (
+                <p className="rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-700">
+                  ✅ Le catalogue est déjà à jour — rien à importer, rien à ajuster.
+                </p>
+              )}
+
+              {syncQb.nouveaux.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                    ➕ Nouveaux items QuickBooks ({syncQb.nouveaux.length}) <span className="font-semibold normal-case text-slate-400">— absents du catalogue, pré-cochés</span>
+                  </p>
+                  <div className="max-h-[200px] overflow-y-auto rounded-xl border border-slate-200">
+                    {syncQb.nouveaux.map((q) => (
+                      <label key={q.qbId} className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0 hover:bg-slate-50">
+                        <input type="checkbox" checked={!!syncCoches["n-" + q.qbId]} onChange={() => basculerCoche("n-" + q.qbId)} className="shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-semibold text-slate-800">{q.nom}</span>
+                          {q.description && <span className="block truncate text-[10px] text-slate-400">{q.description}</span>}
+                        </span>
+                        <span className="shrink-0 text-right text-[11px] tabular-nums text-slate-600">
+                          {q.coutant != null && <span className="mr-2 text-slate-400">coûtant {q.coutant.toFixed(2)} $</span>}
+                          {q.vendant != null ? <span className="font-bold">{q.vendant.toFixed(2)} $</span> : "—"}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {syncQb.modifies.filter((m) => m.changements.length > 0).length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-700">
+                    ✏️ Modifications proposées ({syncQb.modifies.filter((m) => m.changements.length > 0).length}) <span className="font-semibold normal-case text-slate-400">— cocher = autoriser QuickBooks à écraser</span>
+                  </p>
+                  <div className="max-h-[240px] overflow-y-auto rounded-xl border border-amber-200">
+                    {syncQb.modifies.filter((m) => m.changements.length > 0).map((m) => (
+                      <label key={m.local.id} className="flex cursor-pointer items-start gap-2.5 border-b border-amber-100 px-2.5 py-2 last:border-0 hover:bg-amber-50/50">
+                        <input type="checkbox" checked={!!syncCoches["m-" + m.local.id]} onChange={() => basculerCoche("m-" + m.local.id)} className="mt-0.5 shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-xs font-semibold text-slate-800">{m.local.nom}</span>
+                          {m.changements.map((c) => (
+                            <span key={c.champ} className="block text-[10px] text-slate-500">
+                              {c.champ === "description" ? (
+                                <>description : <span className="text-slate-400 line-through">{String(c.avant || "—").slice(0, 60) || "—"}</span> → <span className="font-semibold text-slate-700">{String(c.apres).slice(0, 60)}</span></>
+                              ) : (
+                                <>{c.champ} : <span className="tabular-nums text-slate-400 line-through">{c.avant != null ? `${Number(c.avant).toFixed(2)} $` : "—"}</span> → <span className="font-bold tabular-nums text-slate-800">{Number(c.apres).toFixed(2)} $</span></>
+                              )}
+                            </span>
+                          ))}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[10px] leading-snug text-slate-400">
+                    Un item décoché garde ses prix tels quels — il est seulement relié à QuickBooks pour les prochaines fois.
+                  </p>
+                </div>
+              )}
+
+              {syncQb.modifies.filter((m) => m.changements.length === 0).length > 0 && (
+                <p className="text-[10px] text-slate-400">
+                  🔗 {syncQb.modifies.filter((m) => m.changements.length === 0).length} item{syncQb.modifies.filter((m) => m.changements.length === 0).length > 1 ? "s" : ""} identique{syncQb.modifies.filter((m) => m.changements.length === 0).length > 1 ? "s" : ""} ser{syncQb.modifies.filter((m) => m.changements.length === 0).length > 1 ? "ont" : "a"} simplement relié{syncQb.modifies.filter((m) => m.changements.length === 0).length > 1 ? "s" : ""} à QuickBooks (aucun prix ne change).
+                </p>
+              )}
+
+              {syncQb.desactives.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                    🗄️ Inactifs dans QuickBooks ({syncQb.desactives.length}) <span className="font-semibold normal-case text-slate-400">— cocher = retirer du catalogue (récupérable)</span>
+                  </p>
+                  <div className="max-h-[160px] overflow-y-auto rounded-xl border border-slate-200">
+                    {syncQb.desactives.map((i) => (
+                      <label key={i.id} className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0 hover:bg-slate-50">
+                        <input type="checkbox" checked={!!syncCoches["d-" + i.id]} onChange={() => basculerCoche("d-" + i.id)} className="shrink-0" />
+                        <span className="truncate text-xs font-semibold text-slate-700">{i.nom}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {syncErreur && <p className="rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">{syncErreur}</p>}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-5 pt-3">
+              <Button variant="outline" onClick={() => setSyncQb(null)} disabled={syncEnCours} className="min-h-0 py-2 text-xs">Annuler</Button>
+              <Button onClick={appliquerSyncQb} loading={syncEnCours} disabled={nbCoches === 0} className="min-h-0 py-2 text-xs">
+                Appliquer ({nbCoches})
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
