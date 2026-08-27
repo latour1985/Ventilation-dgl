@@ -42,6 +42,12 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   // proposition groupée à valider.
   const [editionLigne, setEditionLigne] = useState(null);
   const [erreurEdition, setErreurEdition] = useState("");
+  // ✏️ CORRECTION D'UNE PROPOSITION par l'admin (bannière du haut) :
+  // { groupe, valeurs: { [idLigne]: { debut, fin } } } — les champs
+  // partent des valeurs PROPOSÉES, l'admin les retouche, et sa version
+  // s'applique en direct (la proposition s'efface d'elle-même).
+  const [editionProposition, setEditionProposition] = useState(null);
+  const [erreurProposition, setErreurProposition] = useState("");
   // ➕ AJOUT D'HEURES PAR LE BUREAU (2026-08-31, GO du propriétaire) —
   // le seul trou du système : une journée que le technicien n'a PAS
   // pointée (oubli, téléphone mort, employé sans téléphone) n'offrait
@@ -568,8 +574,12 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       )}
 
       {/* AVIS AUX ADMINISTRATEURS — propositions d'ajustement d'heures du
-          répartiteur, à VALIDER ou REFUSER. Tant que rien n'est validé,
-          l'heure originale compte partout (paie, projets, agenda). */}
+          répartiteur, à VALIDER, CORRIGER ou REFUSER. Tant que rien n'est
+          validé, l'heure originale compte partout (paie, projets, agenda).
+          ✏️ CORRIGER (2026-09-01, retour du propriétaire : « je ne peux pas
+          corriger les heures, seulement valider ou refuser ») : l'admin
+          ajuste début/fin proposés et applique SA valeur — ajustement
+          direct, la proposition s'efface, journal et Report ± suivent. */}
       {(() => {
         const propositions = (travaux || []).filter((t) => t.supabase && t.heuresProposees != null);
         if (propositions.length === 0) return null;
@@ -603,14 +613,99 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                     <p className="text-[10px] text-slate-400">proposée par {lignes[0]?.propositionPar || "?"}{lignes.length > 1 ? ` — ${lignes.length} lignes corrigées ensemble` : ""}</p>
                   </div>
                   {droitHeures === "direct" ? (
-                    <div className="flex gap-1.5">
-                      <button onClick={() => onValiderGroupe?.(lignes)} className="rounded-md bg-emerald-600 px-2.5 py-1.5 text-[10px] font-bold text-white">
-                        ✅ Valider
-                      </button>
-                      <button onClick={() => onRefuserGroupe?.(lignes)} className="rounded-md border border-red-300 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
-                        ❌ Refuser
-                      </button>
-                    </div>
+                    editionProposition?.groupe === g ? (
+                      <div className="w-full border-t border-amber-100 pt-2">
+                        {lignes.map((t) => {
+                          const v = editionProposition.valeurs[t.id] || { debut: "07:00", fin: "15:30" };
+                          const d0 = new Date(`${t.date}T${v.debut || "00:00"}:00`);
+                          const f0 = new Date(`${t.date}T${v.fin || "00:00"}:00`);
+                          const lendemain = f0 <= d0;
+                          if (lendemain) f0.setDate(f0.getDate() + 1);
+                          const h = (f0 - d0) / 3600000;
+                          const majV = (champs) =>
+                            setEditionProposition((p) => ({ ...p, valeurs: { ...p.valeurs, [t.id]: { ...v, ...champs } } }));
+                          return (
+                            <div key={t.id} className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                              <span className="min-w-0 flex-1 truncate text-[10px] font-semibold text-slate-600">{t.titre}</span>
+                              <input type="time" value={v.debut} onChange={(ev) => majV({ debut: ev.target.value })}
+                                className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums" />
+                              <span className="text-[10px] text-slate-400">→</span>
+                              <input type="time" value={v.fin} onChange={(ev) => majV({ fin: ev.target.value })}
+                                className="rounded-md border border-blue-300 px-1.5 py-1 text-[11px] tabular-nums" />
+                              <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tabular-nums ${lendemain ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>
+                                = {hM(h)}{lendemain ? " · 🌙" : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {erreurProposition && <p className="mb-1.5 text-[10px] font-bold text-red-600">⚠️ {erreurProposition}</p>}
+                        <div className="flex gap-1.5">
+                          <button
+                            onClick={() => {
+                              // TA version s'applique — ajustement direct
+                              // sur chaque ligne du groupe (même chemin que
+                              // le crayon du détail de journée : Report ±,
+                              // journal, proposition effacée).
+                              const ajustements = [];
+                              for (const t of lignes) {
+                                const v = editionProposition.valeurs[t.id];
+                                if (!v?.debut || !v?.fin) { setErreurProposition("Heure de début et de fin requises sur chaque ligne."); return; }
+                                const d0 = new Date(`${t.date}T${v.debut}:00`);
+                                const f0 = new Date(`${t.date}T${v.fin}:00`);
+                                if (f0 <= d0) f0.setDate(f0.getDate() + 1);
+                                const h = Math.round(((f0 - d0) / 3600000) * 100) / 100;
+                                if (!(h > 0) || h > 24) { setErreurProposition(`Durée invalide sur « ${t.titre} ».`); return; }
+                                ajustements.push({ travail: t, heures: h, debutReel: d0.toISOString(), finReelle: f0.toISOString() });
+                              }
+                              onAjusterPlan?.(ajustements);
+                              setEditionProposition(null);
+                              setErreurProposition("");
+                            }}
+                            className="rounded-md bg-blue-600 px-2.5 py-1.5 text-[10px] font-bold text-white"
+                          >
+                            ✓ Appliquer ma correction
+                          </button>
+                          <button
+                            onClick={() => { setEditionProposition(null); setErreurProposition(""); }}
+                            className="rounded-md border border-slate-300 px-2.5 py-1.5 text-[10px] font-bold text-slate-500"
+                          >
+                            Annuler
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1.5">
+                        <button onClick={() => onValiderGroupe?.(lignes)} className="rounded-md bg-emerald-600 px-2.5 py-1.5 text-[10px] font-bold text-white">
+                          ✅ Valider
+                        </button>
+                        <button
+                          onClick={() => {
+                            // Champs pré-remplis avec les valeurs PROPOSÉES
+                            // (sinon les heures réelles, sinon 07:00 + durée).
+                            const valeurs = {};
+                            lignes.forEach((t) => {
+                              const debut = heureLocaleDe(t.debutPropose) || heureLocaleDe(t.debutReel) || "07:00";
+                              let fin = heureLocaleDe(t.finPropose) || heureLocaleDe(t.finReelle);
+                              if (!fin) {
+                                const d = new Date(`${t.date}T${debut}:00`);
+                                d.setMinutes(d.getMinutes() + Math.round((Number(t.heuresProposees ?? t.heures) || 1) * 60));
+                                fin = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+                              }
+                              valeurs[t.id] = { debut, fin };
+                            });
+                            setEditionProposition({ groupe: g, valeurs });
+                            setErreurProposition("");
+                          }}
+                          title="Modifier les heures proposées avant d'appliquer — ta version fait foi"
+                          className="rounded-md border border-blue-300 px-2.5 py-1.5 text-[10px] font-bold text-blue-700"
+                        >
+                          ✏️ Corriger
+                        </button>
+                        <button onClick={() => onRefuserGroupe?.(lignes)} className="rounded-md border border-red-300 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
+                          ❌ Refuser
+                        </button>
+                      </div>
+                    )
                   ) : (
                     <span className="text-[10px] font-bold text-amber-600">En attente d'un administrateur</span>
                   )}
