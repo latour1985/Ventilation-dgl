@@ -17926,6 +17926,8 @@ export default function App() {
         <OngletPaies
           travaux={travaux}
           utilisateurs={utilisateurs}
+          ajouterJournal={ajouterJournal}
+          nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
           // Droit sur les heures : admins = ajustement DIRECT ; répartiteur
           // = PROPOSITION à valider par un admin ; sinon consultation.
           droitHeures={

@@ -9,7 +9,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Pencil, Phone } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
-import { joursBloques, cleJour } from "@/lib/supabase/travauxEffectues";
+import { joursBloques, cleJour, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { HEURES, dateISO, ajouterJours, dimancheDeSemaineISO, ITEMS_PAR_PAGE, Button, DefilementHorizontal } from "./partage";
 
 // ============================================================
@@ -22,7 +22,7 @@ import { HEURES, dateISO, ajouterJours, dimancheDeSemaineISO, ITEMS_PAR_PAGE, Bu
 // enregistrées par les techniciens au bouton « Terminer »).
 // Heures seulement — AUCUN montant de salaire ici.
 // ============================================================
-export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets }) {
+export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets, ajouterJournal, nomAdmin }) {
   // Journée dont on demande le déblocage (fenêtre de confirmation).
   const [deblocageDemande, setDeblocageDemande] = useState(null);
   // Détail des heures administratives d'un employé (quelles visites,
@@ -42,6 +42,71 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   // proposition groupée à valider.
   const [editionLigne, setEditionLigne] = useState(null);
   const [erreurEdition, setErreurEdition] = useState("");
+  // ➕ AJOUT D'HEURES PAR LE BUREAU (2026-08-31, GO du propriétaire) —
+  // le seul trou du système : une journée que le technicien n'a PAS
+  // pointée (oubli, téléphone mort, employé sans téléphone) n'offrait
+  // rien à corriger. Réservé aux admins (effet direct) ; la ligne est
+  // marquée « Saisie par le bureau » (note interne + journal) — jamais
+  // confondue avec du pointage terrain. Taux figé, Report ± et coûts de
+  // projets suivent les mêmes règles que tout le reste.
+  const [ajoutHeures, setAjoutHeures] = useState(null); // null | { titre, categorie, projetId, secteur, debut, fin, note }
+  const [ajoutEnCours, setAjoutEnCours] = useState(false);
+  const [ajoutErreur, setAjoutErreur] = useState("");
+  const enregistrerAjoutHeures = async (e, iso) => {
+    const f = ajoutHeures;
+    if (!f?.debut || !f?.fin) {
+      setAjoutErreur("Heure de début et de fin requises.");
+      return;
+    }
+    const d0 = new Date(`${iso}T${f.debut}:00`);
+    const f0 = new Date(`${iso}T${f.fin}:00`);
+    if (f0 <= d0) f0.setDate(f0.getDate() + 1); // fin passée minuit
+    const h = Math.round(((f0 - d0) / 3600000) * 100) / 100;
+    if (!(h > 0) || h > 24) {
+      setAjoutErreur("Durée invalide — vérifie les heures.");
+      return;
+    }
+    setAjoutEnCours(true);
+    setAjoutErreur("");
+    // SEMAINE DE PAIE DÉJÀ PASSÉE : même convention que les corrections —
+    // les heures ajoutées partent en Report ± sur la semaine courante,
+    // la semaine payée n'est jamais rouverte.
+    const dimancheCourant = dimancheDeSemaineISO(new Date());
+    const tardive = dimancheDeSemaineISO(iso) < dimancheCourant;
+    try {
+      await enregistrerTravailPourEmploye(
+        {
+          tacheId: `saisie-bureau-${Date.now()}`,
+          titre:
+            f.titre.trim() ||
+            (f.categorie === "administratif" ? "Heures administratives" : f.categorie === "divers" ? "Heures diverses" : "Heures de chantier"),
+          clientNom: null,
+          date: iso,
+          heures: h,
+          debutReel: d0.toISOString(),
+          finReelle: f0.toISOString(),
+          projetId: f.categorie === "projet" ? f.projetId || null : null,
+          categorieHeures: f.categorie,
+          secteur: f.secteur,
+          noteInterne: `Saisie par le bureau (${nomAdmin || "admin"})${f.note.trim() ? ` — ${f.note.trim()}` : ""}`,
+          ...(tardive ? { corrigeLe: new Date().toISOString(), heuresAvantCorrection: 0 } : {}),
+        },
+        { courriel: e.email, nom: e.nom }
+      );
+      const nomProjet = f.categorie === "projet" && f.projetId ? (projets || []).find((p) => p.id === f.projetId)?.nom : null;
+      ajouterJournal?.(
+        `➕ ${h.toFixed(2)} h AJOUTÉES PAR LE BUREAU à ${e.nom} le ${iso} (${f.debut} → ${f.fin}, ${
+          f.categorie === "administratif" ? "administratif" : f.categorie === "divers" ? "divers" : "chantier"
+        }${nomProjet ? ` — projet « ${nomProjet} »` : ""}) par ${nomAdmin || "un administrateur"}.${
+          tardive ? " Semaine de paie déjà passée → la différence est REPORTÉE sur la semaine courante (colonne Report ±)." : ""
+        }`
+      );
+      setAjoutHeures(null);
+    } catch (err) {
+      setAjoutErreur(err?.message || "Enregistrement impossible — réessaie.");
+    }
+    setAjoutEnCours(false);
+  };
   // Dimanche de la semaine affichée (navigation ± 7 jours).
   const [dimancheAffiche, setDimancheAffiche] = useState(() => {
     const d = new Date();
@@ -633,7 +698,11 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                           <td
                             key={iso}
                             onClick={(ev) => {
-                              if (!e.parJour[iso]) return;
+                              // Une journée VIDE s'ouvre aussi pour les admins
+                              // (2026-08-31) : c'est là que vit « ➕ Ajouter des
+                              // heures » — technicien qui a oublié de pointer,
+                              // téléphone mort, employé sans téléphone.
+                              if (!e.parJour[iso] && droitHeures !== "direct") return;
                               // Ne pas déclencher aussi le détail SEMAINE (clic de ligne).
                               ev.stopPropagation();
                               setDetailJour(actif ? null : { email: e.email, iso });
@@ -852,7 +921,10 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                   const lignesJour = jourBloqueIci
                     ? lignesSemaineBrutes.filter((t) => t.date === iso && (t.employeEmail || "").toLowerCase() === e.email)
                     : e.details.filter((t) => t.date === iso);
-                  if (lignesJour.length === 0) return null;
+                  // Journée VIDE : la fenêtre s'ouvre quand même pour les
+                  // admins — c'est le seul chemin vers « ➕ Ajouter des
+                  // heures » (2026-08-31).
+                  if (lignesJour.length === 0 && droitHeures !== "direct") return null;
                   // Ordre lisible : Transport Début en premier, Fin en
                   // dernier (pas d'heure exacte sur les lignes — seulement
                   // des durées par tâche).
@@ -893,7 +965,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                   );
                   const labelJour = new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
                   return (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); })(); }}>
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); setAjoutHeures(null); setAjoutErreur(""); })(); }}>
                       <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
                         <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-blue-700">
                           📅 <span className="capitalize">{labelJour}</span> — journée de {e.nom} ({hM(tj.total)})
@@ -907,6 +979,11 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                             return null;
                           })()}
                         </p>
+                        {lignesJour.length === 0 && (
+                          <p className="rounded-xl border border-dashed border-slate-300 px-3 py-4 text-center text-xs text-slate-400">
+                            Aucune heure pointée ce jour — journée oubliée, téléphone mort ? Ajoute-les ci-dessous.
+                          </p>
+                        )}
                         <div className="space-y-1.5">
                           {ordonnees.map((t) => {
                             const cat = catDe(t);
@@ -1048,8 +1125,117 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                           )}
                           <span>Σ Total du jour : <span className="tabular-nums">{hM(tj.total)}</span></span>
                         </p>
+                        {/* ➕ AJOUT D'HEURES — admins seulement, jamais sur
+                            une journée bloquée (débloquer d'abord : c'est le
+                            geste qui dit « cette journée est juste »). */}
+                        {droitHeures === "direct" && !jourBloqueIci && (
+                          <div className="mt-3 border-t border-slate-100 pt-2.5">
+                            {!ajoutHeures ? (
+                              <button
+                                onClick={() => {
+                                  setAjoutHeures({ titre: "", categorie: "projet", projetId: "", secteur: "commercial", debut: "07:00", fin: "15:30", note: "" });
+                                  setAjoutErreur("");
+                                }}
+                                className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                              >
+                                ➕ Ajouter des heures pour {e.nom} — marquées « saisies par le bureau »
+                              </button>
+                            ) : (
+                              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                                <p className="mb-2 text-[11px] font-extrabold text-blue-800">➕ Heures ajoutées par le bureau — {e.nom}, le {iso}</p>
+                                <input
+                                  value={ajoutHeures.titre}
+                                  onChange={(ev) => setAjoutHeures((p) => ({ ...p, titre: ev.target.value }))}
+                                  placeholder="Quoi ? Ex : chantier Tremblay, formation, inventaire…"
+                                  className="mb-1.5 w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+                                />
+                                <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                                  <select
+                                    value={ajoutHeures.categorie}
+                                    onChange={(ev) => setAjoutHeures((p) => ({ ...p, categorie: ev.target.value, projetId: "" }))}
+                                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold"
+                                  >
+                                    <option value="projet">🟢 Chantier</option>
+                                    <option value="administratif">🔵 Administratif</option>
+                                    <option value="divers">⚪ Divers</option>
+                                  </select>
+                                  {ajoutHeures.categorie === "projet" && (
+                                    <>
+                                      <select
+                                        value={ajoutHeures.projetId}
+                                        onChange={(ev) => setAjoutHeures((p) => ({ ...p, projetId: ev.target.value }))}
+                                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                                      >
+                                        <option value="">Aucun projet (chantier hors projet)</option>
+                                        {(projets || []).filter((p) => p.statut !== "Terminé" && p.statut !== "Annulé").map((p) => (
+                                          <option key={p.id} value={p.id}>🏗️ {p.nom}</option>
+                                        ))}
+                                      </select>
+                                      <select
+                                        value={ajoutHeures.secteur}
+                                        onChange={(ev) => setAjoutHeures((p) => ({ ...p, secteur: ev.target.value }))}
+                                        title="Le secteur choisit la colonne de la grille CCQ (taux figé)"
+                                        className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                                      >
+                                        <option value="commercial">Commercial</option>
+                                        <option value="residentiel">🏠 Résidentiel</option>
+                                      </select>
+                                    </>
+                                  )}
+                                </div>
+                                <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                                  <input
+                                    type="time"
+                                    value={ajoutHeures.debut}
+                                    onChange={(ev) => setAjoutHeures((p) => ({ ...p, debut: ev.target.value }))}
+                                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
+                                  />
+                                  <span className="text-[10px] text-slate-400">→</span>
+                                  <input
+                                    type="time"
+                                    value={ajoutHeures.fin}
+                                    onChange={(ev) => setAjoutHeures((p) => ({ ...p, fin: ev.target.value }))}
+                                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums"
+                                  />
+                                  {(() => {
+                                    const d0 = new Date(`${iso}T${ajoutHeures.debut || "00:00"}:00`);
+                                    const f0 = new Date(`${iso}T${ajoutHeures.fin || "00:00"}:00`);
+                                    const lendemain = f0 <= d0;
+                                    if (lendemain) f0.setDate(f0.getDate() + 1);
+                                    const h = (f0 - d0) / 3600000;
+                                    return (
+                                      <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold tabular-nums ${lendemain ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>
+                                        = {hM(h)}{lendemain ? " · 🌙 le lendemain" : ""}
+                                      </span>
+                                    );
+                                  })()}
+                                  <input
+                                    value={ajoutHeures.note}
+                                    onChange={(ev) => setAjoutHeures((p) => ({ ...p, note: ev.target.value }))}
+                                    placeholder="Pourquoi ? Ex : téléphone mort (facultatif)"
+                                    className="min-w-[140px] flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs"
+                                  />
+                                </div>
+                                {dimancheDeSemaineISO(iso) < dimancheDeSemaineISO(new Date()) && (
+                                  <p className="mb-1.5 text-[10px] font-semibold text-purple-700">
+                                    ✏️ Semaine de paie déjà passée : ces heures partiront en Report ± sur la semaine courante — la semaine payée n&apos;est pas rouverte.
+                                  </p>
+                                )}
+                                {ajoutErreur && <p className="mb-1.5 text-[10px] font-bold text-red-600">⚠️ {ajoutErreur}</p>}
+                                <div className="flex gap-1.5">
+                                  <Button loading={ajoutEnCours} onClick={() => enregistrerAjoutHeures(e, iso)} className="min-h-0 flex-1 py-1.5 text-xs">
+                                    Enregistrer les heures
+                                  </Button>
+                                  <Button variant="outline" onClick={() => { setAjoutHeures(null); setAjoutErreur(""); }} className="min-h-0 py-1.5 text-xs">
+                                    Annuler
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         <button
-                          onClick={() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); }}
+                          onClick={() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); setAjoutHeures(null); setAjoutErreur(""); }}
                           className="mt-3 min-h-[44px] w-full rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
                         >
                           Fermer
