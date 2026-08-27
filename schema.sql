@@ -2776,8 +2776,28 @@ delete from catalogue_items;
 -- La console plateforme (sceau) garde ses acces cibles. Les tables
 -- heritees inutilisees sont verrouillees completement.
 
--- ---- 0. Colonne manquante : le catalogue ----
-alter table catalogue_items add column if not exists entreprise_id text not null default 'dgl';
+-- ---- 0. LA COLONNE entreprise_id SUR LES 29 TABLES (correctif
+--         2026-09-05 : la vraie base avait des tables creees par des
+--         versions plus anciennes des snippets, SANS la colonne —
+--         p. ex. push_abonnements. Idempotent : if not exists.) ----
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'clients_app','projets_app','devis_app','taches_attente','taches_assignees',
+    'travaux_effectues','bons_travail','depots','pieces_commandees','achats_libres',
+    'qb_attributions_manuelles','journal_activite','retours_logiciel','commandes_camion',
+    'photos_legendes','articles_fournisseurs','fournisseurs','sous_traitants_app',
+    'camions','inspections_vehicules','entretiens_vehicules','carnet_vehicules',
+    'catalogue_items','taux_metiers','prix_depots','repertoire_employes',
+    'permissions_utilisateurs','compteurs','push_abonnements'
+  ]
+  loop
+    if exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      execute format('alter table public.%I add column if not exists entreprise_id text not null default ''dgl''', t);
+    end if;
+  end loop;
+end $$;
 
 -- ---- 1. Etiqueter TOUS les comptes existants (tous DGL aujourd'hui) ----
 update auth.users
