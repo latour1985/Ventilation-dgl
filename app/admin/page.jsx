@@ -43,7 +43,7 @@ import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCa
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee, conditionsDepotAppel } from "@/lib/courriels";
+import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee, gabaritBcSimple, conditionsDepotAppel } from "@/lib/courriels";
 import { termesHtmlCourriel } from "@/lib/termes";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
@@ -3389,6 +3389,8 @@ function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQuickBook
 }
 
 function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, transactionsQb, fournisseurs, setFournisseurs, ajouterJournal, clients }) {
+  // Papier en-tête de l'entreprise pour le courriel du BC.
+  const configBc = useEntreprise();
   // 🧱 MATÉRIEL DU STOCK — pris sur la tablette du bureau, attribué à ce
   // projet (décision du propriétaire : bureau seulement, catalogue OU
   // coût manuel au choix — la liste de produits est grande).
@@ -3452,7 +3454,11 @@ function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, trans
     creerBC([]);
   };
 
-  // Étape 2 : création du BC + envoi (simulé) du bon au fournisseur.
+  // Étape 2 : création du BC + VRAI envoi du bon au fournisseur.
+  // ⚠️ RÉPARÉ le 2026-08-30 : depuis les débuts, l'« envoi » était
+  // simulé — le statut et le journal disaient « 📧 envoyé » sans
+  // qu'aucun courriel ne parte. Le vrai service d'envoi est branché,
+  // et le statut ne dit plus que la vérité.
   const creerBC = async (destinataires) => {
     setEnvoiOuvert(false);
     // Numéro saisi à la main, sinon prochain numéro SÉQUENTIEL de la base.
@@ -3465,6 +3471,25 @@ function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, trans
         ajouterJournal?.("⚠️ Numéro de BC séquentiel indisponible — numéro de secours attribué, à corriger manuellement.");
       }
     }
+    let envoiReussi = false;
+    if (destinataires.length > 0) {
+      const r = await envoyerCourriel({
+        a: destinataires,
+        sujet: `Bon de commande ${numero} — ${configBc.nomLegal}`,
+        html: gabaritBcSimple({ config: configBc, numeroBc: numero, description: bcDescription.trim(), adresseLivraison }),
+        // La réponse du fournisseur (« pas en stock avant le 12 »)
+        // revient à celui qui a commandé.
+        copieExpediteur: true,
+      });
+      envoiReussi = !!r.envoye;
+      if (!envoiReussi) {
+        ajouterJournal?.(
+          r.simule
+            ? "⚠️ Service d'envoi pas encore configuré (clé Resend absente) — le BC est créé mais AUCUN courriel n'est parti."
+            : `⚠️ Envoi du BC ${numero} refusé (${r.erreur || "réessaie"}) — le BC est créé, envoie-le à la main.`
+        );
+      }
+    }
     onAjouterBC(projet.id, {
       id: `bc-${Date.now()}`,
       numeroBC: numero,
@@ -3475,12 +3500,12 @@ function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r, trans
       // remplira tout seul quand la facture fournisseur portant le même
       // numéro arrivera de QuickBooks (voir calculerRentabiliteProjet).
       montantHT: parseFloat(bcMontant) || 0,
-      statut: destinataires.length > 0 ? "Envoyé au fournisseur" : "En attente",
-      courrielsEnvoi: destinataires,
+      statut: envoiReussi ? "Envoyé au fournisseur" : "En attente",
+      courrielsEnvoi: envoiReussi ? destinataires : [],
       date: todayISO(),
     });
     ajouterJournal?.(
-      destinataires.length > 0
+      envoiReussi
         ? `📧 Bon de commande ${numero} envoyé à ${fournisseurChoisi?.nom} (${destinataires.join(", ")}) — ${bcDescription.trim() || "sans description"}${adresseLivraison ? ` · livraison : ${adresseLivraison}` : ""}`
         : `📋 Bon de commande ${numero} créé pour ${fournisseurChoisi?.nom || "fournisseur"} — aucun courriel envoyé`
     );
@@ -17941,6 +17966,8 @@ export default function App() {
           prixDepots={prixDepots}
           onCreerDepot={creerDepotPourTache}
           fournisseurs={fournisseurs}
+          setFournisseurs={setFournisseurs}
+          ajouterJournal={ajouterJournal}
           nomUtilisateur={session?.user?.user_metadata?.nom || session?.user?.email}
           /* COMMANDER est réservé aux administrateurs. Répartiteur et
              chargé de projet VOIENT la liste pour répondre au client,

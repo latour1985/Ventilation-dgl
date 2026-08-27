@@ -7,10 +7,11 @@
 // MÉCANIQUE : aucun comportement ne change.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Lock, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Lock, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
-import { envoyerCourriel, gabaritBonCommande, gabaritDemandePaiement, gabaritCommandeGroupee } from "@/lib/courriels";
+import { envoyerCourriel, gabaritBonCommande, gabaritDemandePaiement, gabaritCommandeGroupee, gabaritBcSimple } from "@/lib/courriels";
+import { sauvegarderFournisseur, supprimerFournisseur } from "@/lib/supabase/fournisseurs";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { ZONES_DEPOTS } from "@/lib/supabase/prixDepots";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
@@ -18,7 +19,7 @@ import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/
 import { creerFactureQbo } from "@/lib/quickbooksClient";
 import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, SelecteurCibleAchat, Button, todayISO } from "./partage";
 
-export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
+export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
@@ -167,6 +168,38 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   };
   const [bcLibreEnCours, setBcLibreEnCours] = useState(false);
   const [bcLibreMsg, setBcLibreMsg] = useState("");
+  // 📧 OFFRE D'ENVOI DU BC LIBRE (2026-08-30) : si le fournisseur tapé
+  // correspond à une fiche du répertoire AVEC courriels, l'application
+  // propose de lui envoyer le bon directement — coche les adresses,
+  // clique, parti (même vrai service que les pièces).
+  const [offreEnvoiBc, setOffreEnvoiBc] = useState(null); // { numero, fournisseur, description, coches }
+  const [envoiBcLibreEnCours, setEnvoiBcLibreEnCours] = useState(false);
+  const ficheFournisseurParNom = (nom) =>
+    (fournisseurs || []).find((f) => (f.nom || "").trim().toLowerCase() === String(nom || "").trim().toLowerCase()) || null;
+  const envoyerBcLibre = async () => {
+    if (!offreEnvoiBc || offreEnvoiBc.coches.length === 0) return;
+    setEnvoiBcLibreEnCours(true);
+    const r = await envoyerCourriel({
+      a: offreEnvoiBc.coches,
+      sujet: `Bon de commande ${offreEnvoiBc.numero} — ${configEnt.nomLegal}`,
+      html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description }),
+      // La réponse du fournisseur revient à celui qui a commandé.
+      copieExpediteur: true,
+    });
+    setEnvoiBcLibreEnCours(false);
+    if (r.envoye) {
+      setBcLibreMsg(`✓ ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})`);
+      ajouterJournal?.(`📧 BC libre ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})`);
+      setOffreEnvoiBc(null);
+    } else {
+      setBcLibreMsg(
+        r.simule
+          ? "⚠️ Service d'envoi pas encore configuré (clé Resend absente) — le BC est créé, envoie-le à la main."
+          : `⚠️ Envoi refusé (${r.erreur || "réessaie"}) — le BC est créé.`
+      );
+      setOffreEnvoiBc(null);
+    }
+  };
   const [filtre, setFiltre] = useState("ouvertes");
   const [annulationPour, setAnnulationPour] = useState(null);
   const [raisonAnnulation, setRaisonAnnulation] = useState("");
@@ -535,6 +568,17 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
         )}
       </div>
 
+      {/* 🏭 RÉPERTOIRE DES FOURNISSEURS (2026-08-30, demande du
+          propriétaire) — LE endroit pour gérer les fournisseurs et leurs
+          courriels : le même répertoire sert aux BC de projet, aux BC
+          libres, aux pièces et aux commandes de camion. */}
+      <SectionFournisseurs
+        fournisseurs={fournisseurs}
+        setFournisseurs={setFournisseurs}
+        ajouterJournal={ajouterJournal}
+        peutModifier={peutCommander}
+      />
+
       {/* ➕ BON DE COMMANDE LIBRE — « 4 rouleaux de tape » : pas de tâche,
           pas de pièce client. Attribué à un PROJET = entre dans ses coûts
           matériaux (mécanisme existant) ; sinon achat général. */}
@@ -549,6 +593,46 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
             )}
           </div>
           {bcLibreMsg && <p className="mt-1 text-[11px] font-semibold text-emerald-700">{bcLibreMsg}</p>}
+          {/* 📧 Envoi du BC libre au fournisseur — offert quand la fiche
+              du répertoire a des courriels ; coche, envoie, terminé. */}
+          {offreEnvoiBc && (
+            <div className="mt-2 rounded-xl border border-blue-200 bg-blue-50 p-2.5">
+              <p className="text-[11px] font-bold text-blue-800">
+                📧 Envoyer le {offreEnvoiBc.numero} à {offreEnvoiBc.fournisseur} ?
+              </p>
+              <div className="mt-1.5 space-y-1">
+                {(offreEnvoiBc.courriels || []).map((c) => (
+                  <label key={c.id || c.email} className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={offreEnvoiBc.coches.includes(c.email)}
+                      onChange={() =>
+                        setOffreEnvoiBc((p) => ({
+                          ...p,
+                          coches: p.coches.includes(c.email) ? p.coches.filter((e) => e !== c.email) : [...p.coches, c.email],
+                        }))
+                      }
+                    />
+                    <span className="font-semibold">{c.email}</span>
+                    {c.label && <span className="text-[10px] text-slate-400">({c.label})</span>}
+                  </label>
+                ))}
+              </div>
+              <div className="mt-2 flex gap-1.5">
+                <Button
+                  loading={envoiBcLibreEnCours}
+                  disabled={offreEnvoiBc.coches.length === 0}
+                  onClick={envoyerBcLibre}
+                  className="min-h-0 flex-1 py-1.5 text-xs"
+                >
+                  📧 Envoyer le bon de commande
+                </Button>
+                <Button variant="outline" onClick={() => setOffreEnvoiBc(null)} className="min-h-0 py-1.5 text-xs">
+                  Pas maintenant
+                </Button>
+              </div>
+            </div>
+          )}
           {bcLibreOuvert && (
             <div className="mt-2 space-y-1.5 rounded-xl bg-slate-50 p-2.5">
               <input
@@ -616,6 +700,18 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     const numero = await onCreerBcLibre?.(bcLibre);
                     setBcLibreEnCours(false);
                     setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
+                    // 📧 Le fournisseur est au répertoire avec des
+                    // courriels ? On offre l'envoi direct du bon.
+                    const fiche = ficheFournisseurParNom(bcLibre.fournisseurNom);
+                    if (fiche && (fiche.courriels || []).length > 0) {
+                      setOffreEnvoiBc({
+                        numero,
+                        fournisseur: fiche.nom,
+                        description: (bcLibre.description || "").trim(),
+                        courriels: fiche.courriels,
+                        coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
+                      });
+                    }
                     setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "" });
                     setBcLibreOuvert(false);
                   }}
@@ -1495,3 +1591,294 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   );
 }
 
+
+// ============================================================
+// 🏭 RÉPERTOIRE DES FOURNISSEURS (2026-08-30)
+// ------------------------------------------------------------
+// Avant : on pouvait CRÉER un fournisseur (à la volée, depuis le BC
+// d'un projet) mais jamais le REVOIR — impossible de corriger un
+// courriel, d'ajouter une adresse ou de faire le ménage. Ici : la
+// liste avec recherche, chaque fiche s'ouvre et se modifie, retrait
+// en deux clics (le répertoire seulement — les BC existants gardent
+// le nom du fournisseur, rien d'historique ne casse).
+// ============================================================
+function SectionFournisseurs({ fournisseurs, setFournisseurs, ajouterJournal, peutModifier }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [recherche, setRecherche] = useState("");
+  const [ficheOuverte, setFicheOuverte] = useState(null); // null | {} (nouveau) | fournisseur
+
+  const resultats = (fournisseurs || [])
+    .filter((f) => {
+      const q = recherche.trim().toLowerCase();
+      if (!q) return true;
+      return `${f.nom} ${(f.courriels || []).map((c) => c.email).join(" ")} ${f.telephone}`.toLowerCase().includes(q);
+    })
+    .slice()
+    .sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
+
+  const sauvegarder = async (f) => {
+    setFournisseurs((prev) => {
+      const existe = prev.some((x) => x.id === f.id);
+      return (existe ? prev.map((x) => (x.id === f.id ? f : x)) : [...prev, f]).slice();
+    });
+    try {
+      await sauvegarderFournisseur(f);
+      ajouterJournal?.(`🏭 Fournisseur « ${f.nom} » enregistré (${(f.courriels || []).length} courriel${(f.courriels || []).length > 1 ? "s" : ""})`);
+    } catch {
+      ajouterJournal?.(`⚠️ Fournisseur « ${f.nom} » modifié à l'écran mais NON enregistré — réessaie.`);
+    }
+  };
+
+  const retirer = async (f) => {
+    setFournisseurs((prev) => prev.filter((x) => x.id !== f.id));
+    try {
+      await supprimerFournisseur(f.id);
+      ajouterJournal?.(`🗑️ Fournisseur « ${f.nom} » retiré du répertoire — les bons de commande existants gardent son nom.`);
+    } catch {
+      ajouterJournal?.(`⚠️ Retrait de « ${f.nom} » non enregistré — il reviendra au rechargement.`);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+      <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+            🏭 Fournisseurs <span className="text-slate-400">({(fournisseurs || []).length})</span>
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-400">
+            Le répertoire des bons de commande — courriels, téléphone, notes
+          </p>
+        </div>
+        {ouvert ? <ChevronUp size={16} className="shrink-0 text-slate-400" /> : <ChevronDown size={16} className="shrink-0 text-slate-400" />}
+      </button>
+
+      {ouvert && (
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-[180px] flex-1 items-center gap-1.5 rounded-lg border border-slate-300 px-2 py-1.5">
+              <Search size={13} className="shrink-0 text-slate-400" />
+              <input
+                value={recherche}
+                onChange={(e) => setRecherche(e.target.value)}
+                placeholder="Rechercher un fournisseur…"
+                className="w-full text-xs outline-none"
+              />
+              {recherche && (
+                <button onClick={() => setRecherche("")} aria-label="Effacer">
+                  <X size={12} className="text-slate-400" />
+                </button>
+              )}
+            </div>
+            {peutModifier && (
+              <Button onClick={() => setFicheOuverte({})} className="min-h-0 px-3 py-1.5 text-xs">
+                <Plus size={13} /> Nouveau fournisseur
+              </Button>
+            )}
+          </div>
+
+          <div className="mt-2 max-h-[320px] overflow-y-auto rounded-xl border border-slate-200">
+            {resultats.length === 0 ? (
+              <p className="px-3 py-5 text-center text-xs text-slate-400">
+                {(fournisseurs || []).length === 0
+                  ? "Aucun fournisseur au répertoire — clique « Nouveau fournisseur »."
+                  : "Aucun fournisseur ne correspond."}
+              </p>
+            ) : (
+              resultats.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => peutModifier && setFicheOuverte(f)}
+                  className={`flex w-full items-center justify-between gap-2 border-b border-slate-100 px-2.5 py-2 text-left last:border-0 ${peutModifier ? "hover:bg-slate-50" : "cursor-default"}`}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-slate-800">{f.nom}</p>
+                    <p className="truncate text-[10px] text-slate-400">
+                      {(f.courriels || []).length > 0
+                        ? (f.courriels || []).map((c) => c.email).join(" · ")
+                        : "aucun courriel — l'envoi de BC ne sera pas offert"}
+                      {f.telephone ? ` · ${f.telephone}` : ""}
+                    </p>
+                  </div>
+                  {peutModifier && <Pencil size={13} className="shrink-0 text-slate-300" />}
+                </button>
+              ))
+            )}
+          </div>
+          <p className="mt-1 text-[10px] leading-snug text-slate-400">
+            Ces fiches alimentent le choix de fournisseur des BC de projet, des BC libres, des pièces et des commandes
+            de camion — le courriel coché « défaut » est proposé en premier à l'envoi.
+          </p>
+        </div>
+      )}
+
+      {ficheOuverte !== null && (
+        <FicheFournisseur
+          fournisseur={ficheOuverte.id ? ficheOuverte : null}
+          onFermer={() => setFicheOuverte(null)}
+          onSauvegarder={sauvegarder}
+          onRetirer={retirer}
+        />
+      )}
+    </div>
+  );
+}
+
+// La fiche d'UN fournisseur — création et modification dans la même
+// fenêtre. Les courriels sont une vraie liste : étiquette + adresse +
+// bouton « défaut » (celui proposé coché à l'envoi des BC).
+function FicheFournisseur({ fournisseur, onFermer, onSauvegarder, onRetirer }) {
+  const [f, setF] = useState(() => ({
+    id: fournisseur?.id || `f-${Date.now()}`,
+    nom: fournisseur?.nom || "",
+    courriels: (fournisseur?.courriels || []).map((c) => ({ ...c })),
+    telephone: fournisseur?.telephone || "",
+    adresse: fournisseur?.adresse || "",
+    notes: fournisseur?.notes || "",
+  }));
+  const [erreur, setErreur] = useState("");
+  const [suppression, setSuppression] = useState(false);
+  const [enregistrement, setEnregistrement] = useState(false);
+
+  const majCourriel = (id, champs) =>
+    setF((p) => ({ ...p, courriels: p.courriels.map((c) => (c.id === id ? { ...c, ...champs } : c)) }));
+  const poserDefaut = (id) =>
+    setF((p) => ({ ...p, courriels: p.courriels.map((c) => ({ ...c, defaut: c.id === id })) }));
+  const retirerCourriel = (id) =>
+    setF((p) => {
+      const restants = p.courriels.filter((c) => c.id !== id);
+      // Toujours UN défaut tant qu'il reste une adresse.
+      if (restants.length > 0 && !restants.some((c) => c.defaut)) restants[0] = { ...restants[0], defaut: true };
+      return { ...p, courriels: restants };
+    });
+  const ajouterCourriel = () =>
+    setF((p) => ({
+      ...p,
+      courriels: [
+        ...p.courriels,
+        { id: `fc-${Date.now()}`, label: p.courriels.length === 0 ? "Principal" : "Autre", email: "", defaut: p.courriels.length === 0 },
+      ],
+    }));
+
+  const enregistrer = async () => {
+    const nom = f.nom.trim();
+    if (!nom) {
+      setErreur("Le nom est obligatoire.");
+      return;
+    }
+    const courriels = f.courriels
+      .map((c) => ({ ...c, email: c.email.trim(), label: (c.label || "").trim() }))
+      .filter((c) => c.email);
+    const invalides = courriels.filter((c) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email));
+    if (invalides.length > 0) {
+      setErreur(`Adresse invalide : ${invalides.map((c) => c.email).join(", ")}`);
+      return;
+    }
+    if (courriels.length > 0 && !courriels.some((c) => c.defaut)) courriels[0].defaut = true;
+    setErreur("");
+    setEnregistrement(true);
+    await onSauvegarder({ ...f, nom, courriels, telephone: f.telephone.trim(), adresse: f.adresse.trim(), notes: f.notes.trim() });
+    setEnregistrement(false);
+    onFermer();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <h3 className="text-sm font-extrabold text-slate-900">
+            {fournisseur ? `🏭 ${fournisseur.nom}` : "🏭 Nouveau fournisseur"}
+          </h3>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="space-y-2.5">
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Nom *</label>
+            <input value={f.nom} onChange={(e) => setF((p) => ({ ...p, nom: e.target.value }))}
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+          </div>
+
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Courriels — le « défaut » est proposé coché à l&apos;envoi des BC</label>
+            <div className="space-y-1.5">
+              {f.courriels.map((c) => (
+                <div key={c.id} className="flex items-center gap-1.5">
+                  <input
+                    value={c.email}
+                    onChange={(e) => majCourriel(c.id, { email: e.target.value })}
+                    placeholder="achats@fournisseur.com"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                  <input
+                    value={c.label || ""}
+                    onChange={(e) => majCourriel(c.id, { label: e.target.value })}
+                    placeholder="Étiquette"
+                    className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                  <button
+                    onClick={() => poserDefaut(c.id)}
+                    title={c.defaut ? "Adresse par défaut" : "En faire l'adresse par défaut"}
+                    className={`shrink-0 rounded-lg border px-1.5 py-1 text-[10px] font-bold ${c.defaut ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-300 hover:text-slate-500"}`}
+                  >
+                    ✓ défaut
+                  </button>
+                  <button onClick={() => retirerCourriel(c.id)} aria-label="Retirer ce courriel" className="shrink-0 text-slate-300 hover:text-red-500">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <button onClick={ajouterCourriel} className="text-[11px] font-bold text-slate-500 underline">
+                ➕ Ajouter un courriel
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Téléphone</label>
+              <input value={f.telephone} onChange={(e) => setF((p) => ({ ...p, telephone: e.target.value }))}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse</label>
+              <input value={f.adresse} onChange={(e) => setF((p) => ({ ...p, adresse: e.target.value }))}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Notes (interne — jamais envoyé)</label>
+            <textarea rows={2} value={f.notes} onChange={(e) => setF((p) => ({ ...p, notes: e.target.value }))}
+              placeholder="Ex : représentant Marc 514-555-0000, rabais 12 % sur conduits…"
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+          </div>
+        </div>
+
+        {erreur && <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">{erreur}</p>}
+
+        <div className="mt-4 flex items-center gap-2">
+          <Button variant="outline" onClick={onFermer} className="min-h-0 py-2 text-xs">Annuler</Button>
+          <Button onClick={enregistrer} loading={enregistrement} className="min-h-0 flex-1 py-2 text-xs">Enregistrer</Button>
+        </div>
+        {fournisseur && (
+          <div className="mt-2 text-right">
+            {suppression ? (
+              <span className="text-[11px] font-semibold text-slate-500">
+                Retirer « {fournisseur.nom} » du répertoire ?
+                <button onClick={() => { onRetirer(fournisseur); onFermer(); }} className="ml-1.5 rounded-lg bg-red-600 px-2 py-1 text-[10px] font-extrabold text-white">
+                  Oui, retirer
+                </button>
+                <button onClick={() => setSuppression(false)} className="ml-1.5 text-[10px] underline">Non</button>
+              </span>
+            ) : (
+              <button onClick={() => setSuppression(true)} className="text-[10px] font-semibold text-slate-400 underline hover:text-red-500">
+                🗑️ Retirer du répertoire (les BC existants gardent son nom)
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
