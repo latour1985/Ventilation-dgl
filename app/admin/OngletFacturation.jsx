@@ -1173,32 +1173,60 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     });
   }, [bons, devisListe]);
 
-  const enAttente = bonsGroupes.filter((b) => b.statutQb === "en_attente");
-  const rouges = enAttente.filter((b) => b.prixNonListe).length;
-  const bleus = enAttente.filter((b) => !b.prixNonListe && b.type === "devis").length;
-  const violets = enAttente.filter((b) => !b.prixNonListe && b.type === "entretien_contrat").length;
-  const gris = enAttente.filter((b) => !b.prixNonListe && b.type === "appel_service").length;
-  const retires = bonsGroupes.filter((b) => b.statutQb === "retire").length;
-  const jaunes = enAttente.filter((b) => !b.prixNonListe && b.type !== "devis" && b.type !== "entretien_contrat" && b.type !== "appel_service").length;
-  // ✅ DÉJÀ FACTURÉS (2026-09-02, demande du propriétaire : « celles qui
-  // sont traitées ne polluent pas le visuel du menu global ») — les bons
-  // complètement facturés sortent de la liste par défaut et vivent dans
-  // leur propre encadré, comme les retirés. Rien ne disparaît : un clic
-  // sur l'encadré les montre.
-  const dejaFactures = bonsGroupes.filter((b) => b.statutQb === "envoye").length;
+  // 🧾 DEVIS SANS SOLDE (2026-09-03, retour du propriétaire : « pourquoi
+  // ça reste là alors que la facturation a toute été faite ? ») —
+  // PLUSIEURS bons peuvent pointer le MÊME devis, mais le statut
+  // « envoyé » n'était posé que sur le bon d'où les factures sont
+  // parties : ses jumeaux restaient dans « À valider » pour toujours,
+  // avec un bouton qui ouvrait une fenêtre à 0,00 $. On calcule donc le
+  // CUMUL PAR DEVIS (toutes tâches confondues — même règle que le
+  // plafond anti-dépassement) : un bon dont le devis n'a plus de solde
+  // est classé « Déjà facturés », peu importe qui a porté les factures.
+  const devisSansSolde = (() => {
+    const cumulParDevis = {};
+    bonsGroupes.forEach((b) => {
+      if (!b.devisNumero) return;
+      cumulParDevis[b.devisNumero] =
+        (cumulParDevis[b.devisNumero] || 0) + (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+    });
+    const sansSolde = new Set();
+    Object.entries(cumulParDevis).forEach(([numero, cumul]) => {
+      const d = (devisListe || []).find((x) => x.numero === numero);
+      if (d && cumul >= (Number(d.totalVendant) || 0) - 0.01 && (Number(d.totalVendant) || 0) > 0) sansSolde.add(numero);
+    });
+    return sansSolde;
+  })();
 
   // Catégorie d'un bon — reprend exactement la même logique que les
-  // encadrés ci-dessus, pour que le filtrage par clic reste toujours
+  // encadrés ci-dessous, pour que le filtrage par clic reste toujours
   // cohérent avec les compteurs affichés.
   const categorieBon = (b) => {
     if (b.statutQb === "retire") return "retire";
     if (b.statutQb === "envoye") return "facture";
+    // Le devis de ce bon est facturé au complet (par ce bon ou un autre).
+    if (b.devisNumero && devisSansSolde.has(b.devisNumero)) return "facture";
     if (b.prixNonListe) return "rouge";
     if (b.type === "entretien_contrat") return "violet";
     if (b.type === "devis") return "bleu";
     if (b.type === "appel_service") return "gris";
     return "jaune";
   };
+
+  const parCategorie = {};
+  bonsGroupes.forEach((b) => {
+    const c = categorieBon(b);
+    parCategorie[c] = (parCategorie[c] || 0) + 1;
+  });
+  const rouges = parCategorie.rouge || 0;
+  const bleus = parCategorie.bleu || 0;
+  const violets = parCategorie.violet || 0;
+  const gris = parCategorie.gris || 0;
+  const retires = parCategorie.retire || 0;
+  const jaunes = parCategorie.jaune || 0;
+  // ✅ DÉJÀ FACTURÉS (2026-09-02) — les bons complètement facturés (ou
+  // dont le devis n'a plus de solde) sortent de la liste par défaut et
+  // vivent dans leur propre encadré. Rien ne disparaît : un clic les montre.
+  const dejaFactures = parCategorie.facture || 0;
 
   // Filtre multi-sélection sur les encadrés — clic pour activer/
   // désactiver une catégorie, plusieurs en même temps possible (union :
