@@ -34,6 +34,7 @@ import {
   niveauPlateformeDe,
   listerOperateurs,
   gererOperateur,
+  creerEntreprisePlateforme,
 } from "@/lib/supabase/plateforme";
 import { listerRetoursTransmis, majRetour, sAbonnerRetours, LIBELLES_STATUT_RETOUR } from "@/lib/supabase/retours";
 
@@ -266,6 +267,7 @@ function TableauPlateforme({ session }) {
             gestesLourds={clePrincipale}
             onExporter={exporter}
             onBasculerSuspension={basculerSuspension}
+            onCree={charger}
             onMaj={async (id, champs) => {
               setEntreprises((prev) => prev.map((x) => (x.id === id ? { ...x, ...champs } : x)));
               const bd = {};
@@ -530,8 +532,39 @@ function SectionEquipe({ session }) {
   );
 }
 
-function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, gestesLourds = true, onExporter, onBasculerSuspension, onMaj }) {
+function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, gestesLourds = true, onExporter, onBasculerSuspension, onMaj, onCree }) {
   const [editionId, setEditionId] = useState(null);
+  // 🏢 CRÉATION D'ENTREPRISE (2026-09-05 — après la sonde verte). Le
+  // bouton décoratif devient réel : fiche + invitation de SON admin,
+  // étiqueté à SA nouvelle bulle par la route service.
+  const CREATION_VIERGE = { nomLegal: "", nomCommercial: "", courrielEntreprise: "", telephone: "", statut: "essai", gratuitJusqua: "", adminNom: "", adminCourriel: "" };
+  const [formulaireOuvert, setFormulaireOuvert] = useState(false);
+  const [creation, setCreation] = useState(CREATION_VIERGE);
+  const [envoiEnCours, setEnvoiEnCours] = useState(false);
+  const [resultat, setResultat] = useState(null);
+  const poserChamp = (champ) => (ev) => setCreation((prev) => ({ ...prev, [champ]: ev.target.value }));
+  const creer = async () => {
+    if (!creation.nomLegal.trim()) { setResultat({ erreur: "Le nom légal est requis." }); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(creation.adminCourriel.trim())) { setResultat({ erreur: "Le courriel de l'admin est invalide." }); return; }
+    if (creation.statut === "fondateur" && entreprises.filter((x) => x.statut === "fondateur").length >= 3) {
+      setResultat({ erreur: "Les 3 places de client pionnier sont prises — utilise Essai ou Payant." });
+      return;
+    }
+    setEnvoiEnCours(true);
+    setResultat(null);
+    const r = await creerEntreprisePlateforme(creation);
+    setEnvoiEnCours(false);
+    if (!r?.fait) { setResultat({ erreur: r?.erreur || "Création impossible — réessaie." }); return; }
+    setResultat({
+      succes: `✓ « ${creation.nomCommercial || creation.nomLegal} » créée (${r.id}).`,
+      lien: r.simule || r.courrielEchec ? r.lien : null,
+      courrielEchec: !!r.courrielEchec,
+      adminCourriel: r.adminCourriel,
+    });
+    setCreation(CREATION_VIERGE);
+    setFormulaireOuvert(false);
+    if (onCree) onCree();
+  };
   return (
     <div className="space-y-3">
       {/* LE VERROU — visible et expliqué : personne ne crée une 2e
@@ -546,9 +579,73 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
             ? "Les cloisons RLS sont en place et le test-sonde d'étanchéité est passé — la création d'entreprises est permise."
             : "Les cloisons entre entreprises (RLS multi-locataires) ne sont pas encore basculées — le « grand soir ». Créer une entreprise maintenant exposerait les données existantes. Le verrou se lève en base de données, après le test-sonde d'étanchéité, jamais d'ici."}
         </p>
-        <Bouton disabled={!isolationOk} className="mt-3" title={isolationOk ? "" : "Verrouillé jusqu'au grand soir"}>
-          <Plus size={15} /> Créer une entreprise
-        </Bouton>
+        {!formulaireOuvert && (
+          <Bouton
+            disabled={!isolationOk || !gestesLourds}
+            className="mt-3"
+            title={!isolationOk ? "Verrouillé jusqu'au grand soir" : !gestesLourds ? "Réservé aux clés principales" : ""}
+            onClick={() => { setResultat(null); setFormulaireOuvert(true); }}
+          >
+            <Plus size={15} /> Créer une entreprise
+          </Bouton>
+        )}
+
+        {formulaireOuvert && (
+          <div className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+            <p className="text-[10px] font-extrabold uppercase text-slate-400">🏢 L&apos;entreprise</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input value={creation.nomLegal} onChange={poserChamp("nomLegal")} placeholder="Nom légal * (ex. Plomberie ABC inc.)"
+                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+              <input value={creation.nomCommercial} onChange={poserChamp("nomCommercial")} placeholder="Nom commercial (facultatif)"
+                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+              <input value={creation.courrielEntreprise} onChange={poserChamp("courrielEntreprise")} placeholder="Courriel de l'entreprise (facultatif)"
+                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+              <input value={creation.telephone} onChange={poserChamp("telephone")} placeholder="Téléphone (facultatif)"
+                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select value={creation.statut} onChange={poserChamp("statut")} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
+                <option value="essai">Essai</option>
+                <option value="fondateur">Pionnier (max 3)</option>
+                <option value="payant">Payant</option>
+              </select>
+              {creation.statut === "fondateur" && (
+                <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                  gratuit jusqu&apos;au
+                  <input type="date" value={creation.gratuitJusqua} onChange={poserChamp("gratuitJusqua")}
+                    className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                </span>
+              )}
+            </div>
+            <p className="pt-1 text-[10px] font-extrabold uppercase text-slate-400">👤 Son admin principal (reçoit le courriel d&apos;invitation)</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input value={creation.adminNom} onChange={poserChamp("adminNom")} placeholder="Nom de l'admin"
+                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+              <input value={creation.adminCourriel} onChange={poserChamp("adminCourriel")} placeholder="Courriel de l'admin * (NEUF — jamais utilisé dans Fluxya)"
+                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+            </div>
+            <p className="text-[10px] leading-relaxed text-slate-400">
+              Son compte sera étiqueté à SA nouvelle entreprise (scellé côté serveur) : dès sa première connexion,
+              il ne voit QUE sa bulle — vide et propre. Il invitera lui-même son équipe depuis son onglet Utilisateurs.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Bouton onClick={creer} disabled={envoiEnCours}>
+                {envoiEnCours ? "Création…" : <><Plus size={15} /> Créer et inviter l&apos;admin</>}
+              </Bouton>
+              <Bouton variant="outline" onClick={() => { setFormulaireOuvert(false); setResultat(null); }} disabled={envoiEnCours}>Annuler</Bouton>
+            </div>
+          </div>
+        )}
+
+        {resultat?.erreur && <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">⚠️ {resultat.erreur}</p>}
+        {resultat?.succes && (
+          <div className="mt-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-800">
+            {resultat.succes}{" "}
+            {resultat.lien
+              ? <>Le courriel n&apos;est {resultat.courrielEchec ? "PAS parti" : "pas envoyé (simulation)"} — remets ce lien à l&apos;admin ({resultat.adminCourriel}) : <span className="break-all font-mono text-[10px]">{resultat.lien}</span></>
+              : <>Courriel d&apos;invitation envoyé à {resultat.adminCourriel}.</>}
+          </div>
+        )}
       </div>
 
       {entreprises.map((e) => {
