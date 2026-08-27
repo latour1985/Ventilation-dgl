@@ -58,7 +58,6 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
 
   // ➕ AJOUTER UN MÉTIER — le nom est nettoyé et dédoublonné ; le métier
   // naît avec les niveaux CCQ standards, tous à 0 $.
-  const [ajoutMetierOuvert, setAjoutMetierOuvert] = useState(false);
   // 🗺️ Ajout d'une zone d'appels (zones dynamiques par entreprise).
   // Le bouton reste TOUJOURS cliquable (retour du propriétaire : un
   // bouton grisé sans explication laisse croire que c'est brisé) — un
@@ -80,7 +79,6 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
     if (masque) {
       onMasquerMetier?.(masque, false);
       ajouterJournal(`🧰 Métier « ${masque} » réaffiché — il était masqué, ses taux sont intacts.`);
-      setAjoutMetierOuvert(false);
       setNouveauMetier("");
       return;
     }
@@ -93,17 +91,36 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
       setTauxMetiers((prev) => ({ ...prev, [propre]: Object.fromEntries(NIVEAUX_CCQ_DEFAUT.map((n) => [n, 0])) }));
       ajouterJournal(`🧰 Métier « ${propre} » ajouté (Apprenti 1-4 + Compagnon, taux à 0) — remplis ses taux puis « Sauvegarder les taux ».`);
     }
-    setAjoutMetierOuvert(false);
     setNouveauMetier("");
   };
   const ajouterMetier = () => ajouterMetierNom(nouveauMetier);
-  // Pastilles de suggestions : les métiers CCQ courants pas encore
-  // dans la grille (ni masqués) — un clic les ajoute.
-  const suggestionsMetiers = METIERS_TERRAIN.filter(
-    (m) =>
-      !metiersTerrainDe(tauxMetiers).some((x) => x.toLowerCase() === m.toLowerCase()) &&
-      !(metiersMasques || []).some((x) => x.toLowerCase() === m.toLowerCase())
-  );
+  // 📋 CHOISIR MES MÉTIERS (retour du propriétaire, 2026-09-06 : « un
+  // menu déroulant pour sélectionner les métiers nécessaires — un
+  // électricien n'a pas besoin de voir Plâtrier ; ça reste accessible
+  // au cas où sa compagnie évolue »). Le CATALOGUE = les métiers CCQ
+  // courants + tout métier déjà connu de CETTE entreprise (dans la
+  // grille ou masqué). Coché = visible ; décoché = masqué, TAUX
+  // CONSERVÉS — recochable pour toujours.
+  const [choixMetiersOuvert, setChoixMetiersOuvert] = useState(false);
+  const catalogueMetiers = (() => {
+    const vus = new Map();
+    [...METIERS_TERRAIN, ...metiersTerrainDe(tauxMetiers), ...(metiersMasques || [])].forEach((m) => {
+      const cle = m.toLowerCase();
+      if (!vus.has(cle)) vus.set(cle, m);
+    });
+    return [...vus.values()];
+  })();
+  const metiersVisibles = metiersTerrainDe(tauxMetiers, metiersMasques);
+  const basculerMetier = (m, visible) => {
+    if (visible) {
+      onMasquerMetier?.(m, true);
+      ajouterJournal(`🧰 Métier « ${m} » retiré de la grille — ses taux sont conservés, recochable en tout temps.`);
+    } else {
+      // Réaffiche s'il était masqué, sinon le crée (niveaux à 0) —
+      // ajouterMetierNom fait déjà les deux et journalise.
+      ajouterMetierNom(m);
+    }
+  };
 
   // 🚚 COÛT DU CAMION — déménagé ici depuis Paramètres (demande du
   // propriétaire) : tous les COÛTANTS au même endroit. Un seul chiffre :
@@ -154,25 +171,61 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
             bureau ont leur taux individuel sur leur fiche employé.
             La liste est VIVANTE : les fondateurs + tout métier ajouté
             ci-dessous (électricien, plombier…). */}
-        {(metiersMasques || []).length > 0 && (
-          <div className="mb-2 flex flex-wrap items-center gap-1 rounded-lg bg-slate-50 px-2 py-1.5 text-[10px] text-slate-500">
-            <span className="font-bold">Métiers masqués :</span>
-            {(metiersMasques || []).map((m) => (
-              <button
-                key={m}
-                onClick={() => onMasquerMetier?.(m, false)}
-                className="rounded-full border border-slate-300 bg-white px-1.5 py-0.5 font-bold text-slate-600 underline-offset-2 hover:underline"
-                title="Réafficher ce métier (ses taux ont été conservés)"
-              >
-                {m} ↩︎
-              </button>
-            ))}
+        {/* 📋 LE SÉLECTEUR DE MÉTIERS — coché = dans la grille ;
+            décoché = masqué, taux conservés, recochable pour toujours. */}
+        {estAdminPrincipal && (
+          <div className="mb-3">
+            <Button variant="outline" onClick={() => setChoixMetiersOuvert(!choixMetiersOuvert)} className="min-h-0 gap-1 px-3 py-1.5 text-xs">
+              📋 Choisir mes métiers {choixMetiersOuvert ? "▲" : "▼"}
+            </Button>
+            {choixMetiersOuvert && (
+              <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="mb-2 text-[10px] leading-snug text-slate-500">
+                  Coche les métiers de TON domaine. Un métier décoché disparaît de la grille mais reste ici —
+                  ses taux sont conservés, tu le recoches le jour où ta compagnie évolue.
+                </p>
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-3">
+                  {catalogueMetiers.map((m) => {
+                    const visible = metiersVisibles.some((x) => x.toLowerCase() === m.toLowerCase());
+                    return (
+                      <label
+                        key={m}
+                        className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[11px] font-semibold ${visible ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-500"}`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={visible}
+                          onChange={() => basculerMetier(m, visible)}
+                          className="h-3.5 w-3.5 accent-[#131B2E]"
+                        />
+                        {m}
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-2">
+                  <input
+                    value={nouveauMetier}
+                    onChange={(e) => setNouveauMetier(e.target.value)}
+                    placeholder="Autre métier (hors liste)…"
+                    className="min-w-[180px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                  <Button onClick={ajouterMetier} disabled={!nouveauMetier.trim()} className="min-h-0 px-3 py-1.5 text-xs">
+                    Ajouter
+                  </Button>
+                  <p className="w-full text-[10px] text-slate-400">
+                    Un métier ajouté arrive avec ses niveaux (Apprenti 1-4 + Compagnon) et des taux à 0 $ —
+                    remplis-les puis clique « Sauvegarder les taux ».
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
-        {metiersTerrainDe(tauxMetiers, metiersMasques).length === 0 && (
+        {metiersVisibles.length === 0 && (
           <p className="mb-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-[11px] text-slate-500">
-            Aucun métier pour l&apos;instant — ajoute ceux de TON domaine avec les pastilles ou le bouton
-            « ➕ Ajouter un métier » ci-dessous. Chaque métier arrive avec ses niveaux (Apprenti 1-4 + Compagnon) à remplir.
+            Aucun métier pour l&apos;instant — clique « 📋 Choisir mes métiers » et coche ceux de TON domaine.
+            Chaque métier arrive avec ses niveaux (Apprenti 1-4 + Compagnon) à remplir.
           </p>
         )}
         {metiersTerrainDe(tauxMetiers, metiersMasques).map((m) => (
@@ -225,50 +278,8 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
           </div>
         ))}
 
-        {/* ➕ AJOUTER UN MÉTIER — la grille est le registre : un métier
-            ajouté ici apparaît aussitôt dans les fiches employés, avec
-            les niveaux CCQ standards et des taux à 0 à remplir. */}
-        {estAdminPrincipal && suggestionsMetiers.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
-            <span className="text-[10px] font-bold text-slate-400">Suggestions (un clic = ajouté) :</span>
-            {suggestionsMetiers.map((m) => (
-              <button
-                key={m}
-                onClick={() => ajouterMetierNom(m)}
-                className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:border-[#131B2E] hover:text-[#131B2E]"
-              >
-                + {m}
-              </button>
-            ))}
-          </div>
-        )}
-        {estAdminPrincipal && (
-          <div className="mt-3 border-t border-slate-100 pt-3">
-            {ajoutMetierOuvert ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  value={nouveauMetier}
-                  onChange={(e) => setNouveauMetier(e.target.value)}
-                  placeholder="Ex : Électricien, Plombier…"
-                  className="min-w-[180px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                />
-                <Button onClick={ajouterMetier} disabled={!nouveauMetier.trim()} className="min-h-0 px-3 py-1.5 text-xs">
-                  Ajouter
-                </Button>
-                <Button variant="outline" onClick={() => { setAjoutMetierOuvert(false); setNouveauMetier(""); }} className="min-h-0 px-3 py-1.5 text-xs">
-                  Annuler
-                </Button>
-                <p className="w-full text-[10px] text-slate-400">
-                  Le métier arrive avec les niveaux Apprenti 1-4 + Compagnon et des taux à 0 $ — remplis-les puis clique « Sauvegarder les taux ».
-                </p>
-              </div>
-            ) : (
-              <Button variant="outline" onClick={() => setAjoutMetierOuvert(true)} className="min-h-0 gap-1 px-3 py-1.5 text-xs">
-                <Plus size={12} /> Ajouter un métier
-              </Button>
-            )}
-          </div>
-        )}
+        {/* (L'ancien bloc « Ajouter un métier » + pastilles de
+            suggestions vit maintenant DANS le sélecteur ci-dessus.) */}
         {estAdminPrincipal && (
           <div className="mt-3 flex items-center gap-2">
             <Button onClick={() => setConfirmationTauxOuverte(true)} loading={etatTaux === "enregistrement"} className="min-h-0 px-4 py-2 text-xs">
