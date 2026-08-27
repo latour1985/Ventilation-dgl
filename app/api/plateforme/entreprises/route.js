@@ -78,6 +78,7 @@ export async function POST(request) {
   const nomCommercial = String(corps?.nomCommercial || "").trim().slice(0, 160) || null;
   const courrielEntreprise = String(corps?.courrielEntreprise || "").trim().toLowerCase().slice(0, 160) || null;
   const telephone = String(corps?.telephone || "").trim().slice(0, 40) || null;
+  const adresse = String(corps?.adresse || "").trim().slice(0, 240) || null;
   const statut = ["essai", "fondateur", "payant"].includes(corps?.statut) ? corps.statut : "essai";
   const gratuitJusqua = /^\d{4}-\d{2}-\d{2}$/.test(String(corps?.gratuitJusqua || "")) ? corps.gratuitJusqua : null;
   const adminNom = String(corps?.adminNom || "").trim().slice(0, 120);
@@ -141,6 +142,7 @@ export async function POST(request) {
     nom_commercial: nomCommercial,
     courriel: courrielEntreprise,
     telephone,
+    adresse,
     statut_plateforme: statut,
     gratuit_jusqua: statut === "fondateur" ? gratuitJusqua || dansUnAn : gratuitJusqua,
     rabais_pourcent: statut === "fondateur" ? 25 : 0,

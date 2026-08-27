@@ -198,11 +198,33 @@ export async function POST(request) {
   // 🔐 GRAND SOIR (2026-09-04) : le nouveau compte HERITE de
   // l'entreprise de son INVITEUR (app_metadata, scellee serveur) —
   // sans cette etiquette, les cloisons RLS ne lui montreraient rien.
+  //
+  // 🚧 COLMATAGE (2026-09-06) : un compte EXISTANT qui appartient deja
+  // a une AUTRE entreprise ne se fait JAMAIS re-etiqueter — l'ancienne
+  // version arrachait le compte a sa bulle (inviter le courriel d'un
+  // admin d'une autre compagnie l'aurait VOLE, lui et son acces).
+  // Meme refus pour un courriel d'operateur de la console (acces
+  // separes). La re-invitation d'un compte de SA propre entreprise,
+  // elle, passe toujours (mot de passe oublie / relance).
   if (idCompteInvite) {
+    const entrepriseInviteur = entrepriseDuCompte(utilisateur);
     try {
       const { data: fiche } = await admin.auth.admin.getUserById(idCompteInvite);
+      const meta = fiche?.user?.app_metadata || {};
+      if (!nouveau && meta.entreprise_id && meta.entreprise_id !== entrepriseInviteur) {
+        return Response.json(
+          { erreur: "Ce courriel appartient déjà à un compte d'une AUTRE entreprise — impossible de l'inviter ici. Chaque personne garde sa bulle : utilise un courriel différent." },
+          { status: 400 }
+        );
+      }
+      if (!nouveau && meta.plateforme === true && !meta.entreprise_id) {
+        return Response.json(
+          { erreur: "Ce courriel est un opérateur de la console Fluxya — les accès sont séparés : utilise un courriel dédié à l'entreprise." },
+          { status: 400 }
+        );
+      }
       await admin.auth.admin.updateUserById(idCompteInvite, {
-        app_metadata: { ...(fiche?.user?.app_metadata || {}), entreprise_id: entrepriseDuCompte(utilisateur) },
+        app_metadata: { ...meta, entreprise_id: entrepriseInviteur },
       });
     } catch {
       // etiquette non posee — l'invitation part quand meme, un passage

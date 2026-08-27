@@ -3161,3 +3161,22 @@ order by c.relname;
 -- ============================================================
 update plateforme_config set valeur = 'oui', updated_at = now() where cle = 'isolation_activee';
 select cle, valeur from plateforme_config where cle = 'isolation_activee';
+
+-- ============================================================
+-- 90 - RAPATRIEMENT DU COMPTE PROPRIETAIRE + VERIF DES ETIQUETTES
+--      (2026-09-06 — apres le test a blanc Ventilation Miroir : la
+--      route inviter re-etiquetait un compte existant vers
+--      l'entreprise de l'inviteur ; route colmatee, ce snippet remet
+--      le compte du proprietaire chez DGL et nettoie la fiche
+--      parasite, puis AFFICHE l'etiquette de TOUS les comptes.) ----
+update auth.users
+  set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"entreprise_id": "dgl"}'::jsonb
+  where email = 'jeanfrancois@ventilationdgl.com';
+delete from repertoire_employes
+  where lower(coalesce(courriel, '')) = 'jeanfrancois@ventilationdgl.com'
+    and entreprise_id <> 'dgl';
+select email,
+       raw_app_meta_data->>'entreprise_id' as entreprise,
+       coalesce(raw_app_meta_data->>'plateforme', '') as sceau_console
+from auth.users
+order by 2, 1;

@@ -13,7 +13,7 @@ import { ZONES_DEPOTS, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { listerCatalogueRetires, margePourcent, profitDollars, vendantPourMarge } from "@/lib/supabase/catalogue";
 import { listerItemsQbo } from "@/lib/quickbooksClient";
-import { Button, correspond, tauxAffiche, zonesEffectives, METIERS_BUREAU, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
+import { Button, correspond, tauxAffiche, zonesEffectives, METIERS_BUREAU, METIERS_TERRAIN, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
 
 // ============================================================
 // ONGLET TARIFS — grille des taux horaires + liste de prix des dépôts
@@ -68,10 +68,13 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
   const refChampZone = useRef(null);
   const CLES_CONFIG_INTERDITES = ["taux_horaire_vendant", "minutes_incluses", "minutes_incluses_hors_zone"];
   const [nouveauMetier, setNouveauMetier] = useState("");
-  const ajouterMetier = () => {
-    const nom = nouveauMetier.trim().replace(/\s+/g, " ");
-    if (!nom) return;
-    const propre = nom.charAt(0).toUpperCase() + nom.slice(1);
+  // Ajout par NOM (saisie libre OU pastille de suggestion CCQ) — les
+  // nouvelles entreprises partent d'une grille VIDE (retour du
+  // propriétaire 2026-09-06) et choisissent leurs métiers ici.
+  const ajouterMetierNom = (nom) => {
+    const net = String(nom || "").trim().replace(/\s+/g, " ");
+    if (!net) return;
+    const propre = net.charAt(0).toUpperCase() + net.slice(1);
     // S'il est simplement MASQUÉ : on le réaffiche (taux conservés).
     const masque = (metiersMasques || []).find((m) => m.toLowerCase() === propre.toLowerCase());
     if (masque) {
@@ -93,6 +96,14 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
     setAjoutMetierOuvert(false);
     setNouveauMetier("");
   };
+  const ajouterMetier = () => ajouterMetierNom(nouveauMetier);
+  // Pastilles de suggestions : les métiers CCQ courants pas encore
+  // dans la grille (ni masqués) — un clic les ajoute.
+  const suggestionsMetiers = METIERS_TERRAIN.filter(
+    (m) =>
+      !metiersTerrainDe(tauxMetiers).some((x) => x.toLowerCase() === m.toLowerCase()) &&
+      !(metiersMasques || []).some((x) => x.toLowerCase() === m.toLowerCase())
+  );
 
   // 🚚 COÛT DU CAMION — déménagé ici depuis Paramètres (demande du
   // propriétaire) : tous les COÛTANTS au même endroit. Un seul chiffre :
@@ -158,6 +169,12 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
             ))}
           </div>
         )}
+        {metiersTerrainDe(tauxMetiers, metiersMasques).length === 0 && (
+          <p className="mb-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-[11px] text-slate-500">
+            Aucun métier pour l&apos;instant — ajoute ceux de TON domaine avec les pastilles ou le bouton
+            « ➕ Ajouter un métier » ci-dessous. Chaque métier arrive avec ses niveaux (Apprenti 1-4 + Compagnon) à remplir.
+          </p>
+        )}
         {metiersTerrainDe(tauxMetiers, metiersMasques).map((m) => (
           <div key={m} className="mb-3 last:mb-0">
             <div className="mb-1 flex items-center justify-between">
@@ -211,6 +228,20 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
         {/* ➕ AJOUTER UN MÉTIER — la grille est le registre : un métier
             ajouté ici apparaît aussitôt dans les fiches employés, avec
             les niveaux CCQ standards et des taux à 0 à remplir. */}
+        {estAdminPrincipal && suggestionsMetiers.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
+            <span className="text-[10px] font-bold text-slate-400">Suggestions (un clic = ajouté) :</span>
+            {suggestionsMetiers.map((m) => (
+              <button
+                key={m}
+                onClick={() => ajouterMetierNom(m)}
+                className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:border-[#131B2E] hover:text-[#131B2E]"
+              >
+                + {m}
+              </button>
+            ))}
+          </div>
+        )}
         {estAdminPrincipal && (
           <div className="mt-3 border-t border-slate-100 pt-3">
             {ajoutMetierOuvert ? (

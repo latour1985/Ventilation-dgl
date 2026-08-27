@@ -272,6 +272,12 @@ function TableauPlateforme({ session }) {
               setEntreprises((prev) => prev.map((x) => (x.id === id ? { ...x, ...champs } : x)));
               const bd = {};
               if (champs.statut) bd.statut_plateforme = champs.statut;
+              // 📇 Coordonnées de la fiche (2026-09-06).
+              if ("nomLegal" in champs) bd.nom_legal = champs.nomLegal || null;
+              if ("nomCommercial" in champs) bd.nom_commercial = champs.nomCommercial || null;
+              if ("courriel" in champs) bd.courriel = champs.courriel || null;
+              if ("telephone" in champs) bd.telephone = champs.telephone || null;
+              if ("adresse" in champs) bd.adresse = champs.adresse || null;
               if ("gratuitJusqua" in champs) bd.gratuit_jusqua = champs.gratuitJusqua || null;
               if ("modules" in champs) bd.modules = champs.modules;
               if ("prixBase" in champs) bd.prix_base = champs.prixBase === "" ? null : Number(champs.prixBase);
@@ -330,7 +336,7 @@ function SectionRetoursPlateforme({ retours, session, onMaj }) {
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-xs font-extrabold text-slate-800">
-                {r.type === "idee" ? "💡 Idée" : "🐛 Bug"} · <span className="text-slate-400">{r.entrepriseId}</span> · {r.auteurNom || r.auteurEmail}
+                {r.type === "idee" ? "💡 Idée" : r.type === "question" ? "❓ Question" : "🐛 Bug"} · <span className="text-slate-400">{r.entrepriseId}</span> · {r.auteurNom || r.auteurEmail}
               </p>
               <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{r.message}</p>
               {r.photoUrl && (
@@ -534,10 +540,14 @@ function SectionEquipe({ session }) {
 
 function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, gestesLourds = true, onExporter, onBasculerSuspension, onMaj, onCree }) {
   const [editionId, setEditionId] = useState(null);
+  // 📇 FICHE DÉPLIABLE (2026-09-06 — retour du propriétaire) : cliquer
+  // sur l'entreprise montre ses coordonnées complètes (adresse de
+  // facturation incluse), modifiables directement.
+  const [ficheId, setFicheId] = useState(null);
   // 🏢 CRÉATION D'ENTREPRISE (2026-09-05 — après la sonde verte). Le
   // bouton décoratif devient réel : fiche + invitation de SON admin,
   // étiqueté à SA nouvelle bulle par la route service.
-  const CREATION_VIERGE = { nomLegal: "", nomCommercial: "", courrielEntreprise: "", telephone: "", statut: "essai", gratuitJusqua: "", adminNom: "", adminCourriel: "" };
+  const CREATION_VIERGE = { nomLegal: "", nomCommercial: "", courrielEntreprise: "", telephone: "", adresse: "", statut: "essai", gratuitJusqua: "", adminNom: "", adminCourriel: "" };
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   const [creation, setCreation] = useState(CREATION_VIERGE);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
@@ -602,6 +612,8 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                 className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
               <input value={creation.telephone} onChange={poserChamp("telephone")} placeholder="Téléphone (facultatif)"
                 className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+              <input value={creation.adresse} onChange={poserChamp("adresse")} placeholder="Adresse complète (pour la facturation)"
+                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs sm:col-span-2" />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -678,17 +690,54 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
         return (
           <div key={e.id} className={`rounded-2xl border bg-white p-4 ${e.suspendue ? "border-red-200 opacity-70" : "border-slate-200"}`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <p className="text-sm font-extrabold text-slate-900">{e.nom}</p>
+              <button className="min-w-0 text-left" onClick={() => setFicheId(ficheId === e.id ? null : e.id)} title="Voir la fiche complète">
+                <p className="text-sm font-extrabold text-slate-900">{e.nom} <span className="text-[10px] font-bold text-slate-300">{ficheId === e.id ? "▲" : "▼ fiche"}</span></p>
                 <p className="text-[11px] text-slate-400">
                   {e.courriel || "—"} · depuis {e.creeLe ? new Date(e.creeLe).toLocaleDateString("fr-CA") : "—"}
                 </p>
-              </div>
+              </button>
               <div className="flex items-center gap-1.5">
                 {e.suspendue && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-extrabold text-red-700">SUSPENDUE</span>}
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${st.cls}`}>{st.label}</span>
               </div>
             </div>
+
+            {/* 📇 LA FICHE — coordonnées complètes, adresse de facturation
+                incluse ; modifiables ici même (sauvegarde immédiate). */}
+            {ficheId === e.id && (
+              <div className="mt-2 space-y-1.5 rounded-xl bg-slate-50 p-3">
+                <p className="text-[10px] font-extrabold uppercase text-slate-400">📇 Fiche de l&apos;entreprise <span className="ml-1 font-mono normal-case">({e.id})</span></p>
+                <div className="grid gap-1.5 sm:grid-cols-2">
+                  {[
+                    ["Nom légal", "nomLegal", e.nomLegal],
+                    ["Nom commercial", "nomCommercial", e.nomCommercial],
+                    ["Courriel", "courriel", e.courriel],
+                    ["Téléphone", "telephone", e.telephone],
+                  ].map(([label, champ, valeur]) => (
+                    <label key={champ} className="block">
+                      <span className="mb-0.5 block text-[10px] font-bold text-slate-400">{label}</span>
+                      <input
+                        defaultValue={valeur || ""}
+                        disabled={!peutModifier}
+                        onBlur={(ev) => { if (ev.target.value !== (valeur || "")) onMaj(e.id, { [champ]: ev.target.value }); }}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs disabled:bg-slate-100 disabled:text-slate-400"
+                      />
+                    </label>
+                  ))}
+                  <label className="block sm:col-span-2">
+                    <span className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse complète (facturation)</span>
+                    <input
+                      defaultValue={e.adresse || ""}
+                      disabled={!peutModifier}
+                      onBlur={(ev) => { if (ev.target.value !== (e.adresse || "")) onMaj(e.id, { adresse: ev.target.value }); }}
+                      placeholder="N°, rue, ville, province, code postal"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs disabled:bg-slate-100 disabled:text-slate-400"
+                    />
+                  </label>
+                </div>
+                <p className="text-[9px] text-slate-400">Modifié = sauvegardé aussitôt. L&apos;entreprise voit ses coordonnées dans ses Paramètres.</p>
+              </div>
+            )}
 
             {e.statut === "fondateur" && e.gratuitJusqua && (
               <p className={`mt-2 rounded-lg px-2 py-1 text-[11px] font-bold ${rappel ? "bg-amber-50 text-amber-800" : "bg-slate-50 text-slate-500"}`}>

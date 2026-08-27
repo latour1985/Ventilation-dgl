@@ -8,6 +8,7 @@ import {
   AlertCircle, Search, Users, UserPlus, RefreshCw, Phone, CreditCard,
   Camera, ClipboardList, UserCog, KeyRound, ShieldCheck, Lock, Loader2, User, Pencil, Briefcase, Car,
   Cloud, CheckCircle2, AlertTriangle, LayoutGrid, List, BarChart3, Menu, LogOut, Banknote, Copy, Settings, Package,
+  LifeBuoy,
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionAdmin from "@/components/ConnexionAdmin";
@@ -74,6 +75,8 @@ import { OngletFacturation, ModalFacturationDevis, ModalReviserPrixNonListe, Ape
 import { TYPES_TACHE, TYPE_INFO, estTypeSansClient, HEURES_QUART, HEURE_PAR_DEFAUT, listeCellule, cleTacheDesHeures, camionsEntretienDu, tachesDuJourPourEmploye } from "./partage";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { OngletTableauDeBord } from "./OngletTableauDeBord";
+import { OngletAide } from "./OngletAide";
+import { listerRetoursEntreprise, sAbonnerRetours } from "@/lib/supabase/retours";
 import { COULEUR_TYPE_TACHE, COULEUR_TYPE_DEFAUT, estTypeAdministratif, estTypeNonFacturable, estTypeSansHeures, heureLocaleHHMM, joursDuMois, calculerJoursCibles, compresserImageJointe, tacheTransportSysteme, recalculerTransports, tachesDuJourAvecHeure, techniciensPourTache, texteDevisPourDescription, ModalChoixFacturable, ModalProjetDepuisTache, OngletAgenda } from "./OngletAgenda";
 
 // CONFIGURATION DE L'ENTREPRISE — disponible partout
@@ -93,14 +96,13 @@ const CATALOGUE_REPLI = [];
 
 const CLIENTS_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
-const TAUX_METIERS_INIT = {
-  Frigoriste: { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
-  Ferblantier: { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
-  "Électricien": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
-  "Plombier": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Apprenti 4": 0, "Compagnon": 0 },
-  "Peintre": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
-  "Plâtrier": { "Apprenti 1": 0, "Apprenti 2": 0, "Apprenti 3": 0, "Compagnon": 0 },
-};
+// 🧹 GRILLE VIDE AU DÉPART (retour du propriétaire, test à blanc
+// 2026-09-06 : « partir vide et sélectionner les métiers qu'on veut à
+// la place des métiers à retirer ») : une nouvelle entreprise n'a
+// AUCUN métier pré-imposé — elle ajoute les siens dans Tarifs
+// (suggestions CCQ en un clic + saisie libre). La grille de DGL, elle,
+// vit dans la table taux_metiers et se charge par listerTaux.
+const TAUX_METIERS_INIT = {};
 
 const UTILISATEURS_INIT = []; // 🧹 données de démonstration PURGÉES (2026-09-05) — l'application est en vraie vie, tout vient de Supabase
 
@@ -354,8 +356,13 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
       { id: "utilisateurs", label: "Utilisateurs", icone: UserCog },
       { id: "parametres", label: "Paramètres", icone: Settings },
     ]},
+    // 💬 AIDE & SUGGESTIONS — TOUJOURS visible (aucun module ni accès ne
+    // le retire) : la ligne de vie vers Fluxya pour tout rôle bureau.
+    { titre: "Support", items: [
+      { id: "aide", label: "Aide & suggestions", icone: LifeBuoy, badge: badges?.aide },
+    ]},
   ]
-    .map((g) => ({ ...g, items: g.items.filter((i) => permissions.includes(i.id)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => i.id === "aide" || permissions.includes(i.id)) }))
     .filter((g) => g.items.length > 0);
 
   // Bascule réduit/agrandi : flèche ‹ à droite de « Vue d'ensemble »
@@ -2037,6 +2044,19 @@ export default function App() {
     };
   }, [session]);
 
+  // 💬 Badge « Aide & suggestions » — signalements des techniciens à
+  // trier (l'admin les voit du menu sans ouvrir l'onglet).
+  const [retoursATrier, setRetoursATrier] = useState(0);
+  useEffect(() => {
+    if (!session) return;
+    const charger = () =>
+      listerRetoursEntreprise()
+        .then((liste) => setRetoursATrier(liste.filter((r) => r.statut === "nouveau").length))
+        .catch(() => {});
+    charger();
+    return sAbonnerRetours(charger);
+  }, [session]);
+
   // Chargement des inspections & entretiens depuis Supabase + mise à
   // jour en direct (Realtime). Repli sur les données de démo si la
   // table n'est pas accessible (policies pas encore lancées).
@@ -2417,7 +2437,8 @@ export default function App() {
   const peutSynchroniserQb = role === "Admin principal" || role === "Admin régulier";
   const sectionsAdmin = ORDRE_SECTIONS.filter((s) => s !== "technicien" && permissions.includes(s));
   // Onglet effectif : si l'onglet courant n'est pas permis, on retombe sur le 1er autorisé.
-  const vue = permissions.includes(onglet) && onglet !== "technicien" ? onglet : sectionsAdmin[0] || "tableau-de-bord";
+  // « aide » est TOUJOURS permis (hors modules et accès — la ligne de vie vers Fluxya).
+  const vue = onglet === "aide" ? "aide" : permissions.includes(onglet) && onglet !== "technicien" ? onglet : sectionsAdmin[0] || "tableau-de-bord";
 
 
   if (sectionsAdmin.length === 0) {
@@ -2453,6 +2474,7 @@ export default function App() {
           paies:
             travaux.filter((t) => t.supabase && t.heuresProposees != null).length +
             joursBloques(travaux).size,
+          aide: retoursATrier,
         }}
         courriel={session.user?.email}
         role={role}
@@ -3327,6 +3349,14 @@ export default function App() {
             await sauvegarderEntreprise(nouvelle);
             setConfigEntreprise(nouvelle);
           }}
+        />
+      )}
+
+      {vue === "aide" && (
+        <OngletAide
+          session={session}
+          nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
+          ajouterJournal={ajouterJournal}
         />
       )}
 
