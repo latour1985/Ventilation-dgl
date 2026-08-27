@@ -137,17 +137,6 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
 // passe par l'effet de persistance existant (clients modifiés =
 // réécrits automatiquement en base).
 // ============================================================
-
-// ============================================================
-// ✏️ MODIFIER LA FICHE CLIENT — après la création
-// ------------------------------------------------------------
-// Demande du propriétaire (2026-08-15) : tout se corrige après coup —
-// le nom du contact, l'entreprise, LE NOM AFFICHÉ (personne vs
-// entreprise — ex. afficher « Toitures Lavallée inc. » plutôt que le
-// contact), le téléphone et l'ADRESSE DE FACTURATION. La sauvegarde
-// passe par l'effet de persistance existant (clients modifiés =
-// réécrits automatiquement en base).
-// ============================================================
 export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   const [nom, setNom] = useState(client.nom || "");
   const [entreprise, setEntreprise] = useState(client.entreprise || "");

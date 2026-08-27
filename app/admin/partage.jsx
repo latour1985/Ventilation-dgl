@@ -235,23 +235,6 @@ export function PhotosInspection({ photos }) {
 // Le compteur de JOURS est ce qui fait relancer un fournisseur qui
 // traîne : une pièce commandée depuis trois semaines doit crier.
 // ============================================================
-
-// ============================================================
-// ONGLET PIÈCES EN COMMANDE
-// ------------------------------------------------------------
-// Le pont entre le diagnostic et la réparation. Une pièce manquante
-// bloque la 2e visite : tant qu'elle n'est pas arrivée (et payée si le
-// paiement est exigé), la tâche de retour ne peut pas aller à l'horaire.
-//
-// DEUX NIVEAUX D'ACCÈS :
-//   • Les administrateurs COMMANDENT (bon de commande, réception, annulation)
-//   • Répartiteur et chargé de projet VOIENT seulement — pour répondre
-//     au client qui appelle savoir où en est sa pièce. Voir n'est pas
-//     commander : deux personnes qui commandent, c'est deux commandes.
-//
-// Le compteur de JOURS est ce qui fait relancer un fournisseur qui
-// traîne : une pièce commandée depuis trois semaines doit crier.
-// ============================================================
 export const STATUTS_PIECE = {
   a_commander: { label: "À commander", cls: "bg-red-100 text-red-700 border-red-300" },
   commandee: { label: "Commandée", cls: "bg-amber-100 text-amber-800 border-amber-300" },
@@ -259,21 +242,6 @@ export const STATUTS_PIECE = {
   recue: { label: "Reçue", cls: "bg-emerald-100 text-emerald-700 border-emerald-300" },
   annulee: { label: "Annulée", cls: "bg-slate-100 text-slate-500 border-slate-300" },
 };
-
-// ============================================================
-// 📄 BARRE DE PAGINATION RÉUTILISABLE (2026-08-26)
-// ------------------------------------------------------------
-// Demande du propriétaire : « 10 items max par page, puis 1 2 3 4… le
-// nombre nécessaire ». Les longues listes (64 pièces empilées…)
-// devenaient des murs à défiler. Utilisée par : Pièces en commande,
-// Facturation, Devis, Clients, BC libres — 10 par page partout.
-//   • moins de 2 pages → la barre ne s'affiche pas du tout ;
-//   • plus de 9 pages → fenêtre condensée « 1 … 4 [5] 6 … 12 » (sinon
-//     la barre serait elle-même un mur) ;
-//   • changer de page remonte l'écran au haut de la liste (refHaut).
-// L'appelant garde sa page dans SON état et BORNE lui-même la valeur
-// (Math.min) : une liste qui rétrécit ne laisse jamais une page vide.
-// ============================================================
 
 // ============================================================
 // 📄 BARRE DE PAGINATION RÉUTILISABLE (2026-08-26)
@@ -350,16 +318,6 @@ export function BarrePagination({ total, page, onPage, refHaut = null, libelle =
     </div>
   );
 }
-
-// ============================================================
-// 🔎 SÉLECTEUR DE RATTACHEMENT AVEC RECHERCHE (2026-08-26)
-// ------------------------------------------------------------
-// Les listes de clients et de tâches s'allongent : dérouler un <select>
-// ne suffisait plus (demande du propriétaire). On TAPE quelques lettres
-// — ou on clique pour voir toute la liste — et les familles restent
-// groupées : Tâches (jobs) / Clients / Projets. La valeur garde le même
-// encodage qu'avant : "" | "t:id" | "c:id" | "p:id".
-// ============================================================
 
 // ============================================================
 // 🔎 SÉLECTEUR DE RATTACHEMENT AVEC RECHERCHE (2026-08-26)
@@ -578,21 +536,10 @@ export const TYPES_ACCES = ["Admin principal", "Admin régulier", "Administratio
 
 // Zones d'appels EFFECTIVES : celles des données ; à défaut (première
 // ouverture, table vide) les quatre historiques de DGL.
-
-// Zones d'appels EFFECTIVES : celles des données ; à défaut (première
-// ouverture, table vide) les quatre historiques de DGL.
 export const zonesEffectives = (prixDepots) => {
   const z = zonesDepuis(prixDepots);
   return z.length > 0 ? z : ZONES_DEPOTS;
 };
-
-// Métiers et niveaux (les frigoristes ont un Apprenti 4, pas les ferblantiers).
-// MÉTIERS DE TERRAIN (taux = grille CCQ selon niveau + prime horaire
-// individuelle éventuelle) et MÉTIERS DE BUREAU (taux horaire individuel
-// complet, saisi sur la fiche de chaque employé).
-// Périodes d'apprentissage CCQ vérifiées (ccq.org, 2026-08) :
-// Électricien 4 · Plombier (tuyauteur) 4 · Peintre 3 · Plâtrier 3 —
-// périodes de 2 000 h chacune, puis Compagnon.
 
 // Métiers et niveaux (les frigoristes ont un Apprenti 4, pas les ferblantiers).
 // MÉTIERS DE TERRAIN (taux = grille CCQ selon niveau + prime horaire
@@ -613,21 +560,12 @@ export const estMetierBureau = (m) => METIERS_BUREAU.includes(m);
 // de terrain ; les administrateurs peuvent porter n'importe quel métier.
 // `tauxMetiers` (facultatif) apporte les métiers AJOUTÉS par l'admin —
 // sans lui, seuls les métiers fondateurs apparaissent.
-
-// Métiers permis selon le type d'accès : « Administration bureau » choisit
-// un métier de bureau (sa sous-catégorie d'accès), « Technicien » un métier
-// de terrain ; les administrateurs peuvent porter n'importe quel métier.
-// `tauxMetiers` (facultatif) apporte les métiers AJOUTÉS par l'admin —
-// sans lui, seuls les métiers fondateurs apparaissent.
 export const metiersPourTypeAcces = (typeAcces, tauxMetiers) =>
   typeAcces === "Administration bureau"
     ? METIERS_BUREAU
     : typeAcces === "Technicien"
       ? metiersTerrainDe(tauxMetiers)
       : [...metiersTerrainDe(tauxMetiers), ...METIERS_BUREAU];
-
-// Accès par défaut selon le type d'accès + métier (la sous-catégorie
-// d'« Administration bureau » est le métier de bureau).
 
 // Accès par défaut selon le type d'accès + métier (la sous-catégorie
 // d'« Administration bureau » est le métier de bureau).
@@ -655,17 +593,9 @@ export const NIVEAUX_PAR_METIER = {
 // taux est leur registre : tout métier qui y figure existe. Un métier
 // absent de la table ci-dessus reçoit la structure CCQ standard — jamais
 // de plantage sur un métier inconnu.
-
-// MÉTIERS AJOUTÉS PAR L'ADMIN (électricien, plombier…) — la grille des
-// taux est leur registre : tout métier qui y figure existe. Un métier
-// absent de la table ci-dessus reçoit la structure CCQ standard — jamais
-// de plantage sur un métier inconnu.
 export const NIVEAUX_CCQ_DEFAUT = ["Apprenti 1", "Apprenti 2", "Apprenti 3", "Apprenti 4", "Compagnon"];
 
 export const niveauxPourMetier = (m) => NIVEAUX_PAR_METIER[m] || NIVEAUX_CCQ_DEFAUT;
-// Métiers de terrain effectifs = les deux fondateurs + ceux ajoutés dans
-// la grille des taux (Tarifs). Les métiers de bureau n'y sont jamais.
-
 // Métiers de terrain effectifs = les deux fondateurs + ceux ajoutés dans
 // la grille des taux (Tarifs). Les métiers de bureau n'y sont jamais.
 export const metiersTerrainDe = (tauxMetiers, masques = []) =>
@@ -731,9 +661,6 @@ export const ContexteClients = createContext([]);
 export function useClients() {
   return useContext(ContexteClients) || [];
 }
-
-// LISTE DES DEVIS — la facture d'un devis doit pouvoir reprendre ses
-// lignes détaillées, sinon le client reçoit un montant sans explication.
 
 // LISTE DES DEVIS — la facture d'un devis doit pouvoir reprendre ses
 // lignes détaillées, sinon le client reçoit un montant sans explication.
@@ -815,15 +742,6 @@ export function projetEnRetard(projet) {
   if (!projet.dateFin || projet.statut === "Terminé") return false;
   return new Date(projet.dateFin).getTime() < Date.now();
 }
-
-// ------------------------------------------------------------
-// SANTÉ GLOBALE D'UN PROJET — règle unifiée utilisée PARTOUT (Hub,
-// Kanban, fiche client, tableau de bord) pour que le même projet
-// affiche toujours la même couleur, peu importe l'endroit :
-//   VERT  = sous-budget ET dans les temps
-//   JAUNE = 75-100% du budget consommé OU échéance dans les 7 jours
-//   ROUGE = dépassement de budget OU en retard OU en perte
-// ------------------------------------------------------------
 
 // ------------------------------------------------------------
 // SANTÉ GLOBALE D'UN PROJET — règle unifiée utilisée PARTOUT (Hub,
@@ -1001,9 +919,6 @@ export function adresseFacturationClient(client) {
   if (!principale) return "";
   return [libelleAdresse(principale), principale.codePostal].filter(Boolean).join(", ");
 }
-
-// Nom normalisé pour la détection de DOUBLONS : minuscules, accents
-// retirés, espaces réduits — « Raphaël  Gélinas » = « raphael gelinas ».
 
 // Nom normalisé pour la détection de DOUBLONS : minuscules, accents
 // retirés, espaces réduits — « Raphaël  Gélinas » = « raphael gelinas ».
@@ -1610,8 +1525,6 @@ export function listeDestinataires(choix) {
   return Array.isArray(choix) ? choix.filter(Boolean) : [choix];
 }
 // « courriel1 (Principal), courriel2 (Comptabilité) » pour le journal.
-
-// « courriel1 (Principal), courriel2 (Comptabilité) » pour le journal.
 export function libelleDestinataires(choix) {
   return listeDestinataires(choix)
     .map((c) => `${c.email}${c.label ? ` (${c.label})` : ""}`)
@@ -1857,8 +1770,6 @@ export const TYPES_TACHE = [
   // qu'on n'y place pas de travail par erreur.
   { id: "conge", label: "Congé / absence", description: "Bloque l'agenda — aucune heure, aucun chronomètre", nonFacturable: true, sansHeures: true },
 ];
-
-// Raccourcis lisibles, utilisés partout plutôt que de répéter les listes.
 
 // Raccourcis lisibles, utilisés partout plutôt que de répéter les listes.
 export const TYPE_INFO = (id) => TYPES_TACHE.find((t) => t.id === id) || null;

@@ -1139,9 +1139,24 @@ export default function App() {
     window.addEventListener("hashchange", versOnglet);
     return () => window.removeEventListener("hashchange", versOnglet);
   }, []);
+  // La PREMIÈRE écriture d'ancre REMPLACE l'entrée d'historique au lieu
+  // d'en empiler une (polissage de l'audit 2026-08-17, fait 2026-09-02) :
+  // avant, arriver sur /admin ajoutait « #tableau-de-bord » PAR-DESSUS
+  // /admin — le premier « Reculer » revenait sur /admin nu (re-synchro
+  // inutile) et il fallait reculer deux fois pour vraiment sortir.
+  const premierHashPoseRef = useRef(false);
   useEffect(() => {
     const cible = `#${onglet}`;
-    if (window.location.hash !== cible) window.history.pushState(null, "", cible);
+    if (window.location.hash === cible) {
+      premierHashPoseRef.current = true;
+      return;
+    }
+    if (premierHashPoseRef.current) {
+      window.history.pushState(null, "", cible);
+    } else {
+      premierHashPoseRef.current = true;
+      window.history.replaceState(null, "", cible);
+    }
   }, [onglet]);
   // RECHERCHE GLOBALE — tapée dans la barre d'en-tête (visible partout)
   // ou dans la page Recherche : même valeur, deux endroits.

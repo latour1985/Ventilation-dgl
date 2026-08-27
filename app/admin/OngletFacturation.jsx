@@ -75,12 +75,6 @@ export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
 // (registre QuickBooks), son PDF officiel et, au besoin, son bouton
 // « Renvoyer ». Rien ne se perd : pas de preuve = alerte rouge.
 // ============================================================
-
-// ============================================================
-// FACTURES ÉMISES D'UN BON — chaque ligne porte sa PREUVE d'envoi
-// (registre QuickBooks), son PDF officiel et, au besoin, son bouton
-// « Renvoyer ». Rien ne se perd : pas de preuve = alerte rouge.
-// ============================================================
 export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, envoiAuto = true }) {
   return (
     <div className="mt-1.5 space-y-1">
@@ -535,14 +529,6 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-
-// ============================================================
-// RÉVISION D'UN PRIX NON LISTÉ — l'admin ouvre la tâche
-// manuellement, ajuste le prix ET la description, puis doit
-// explicitement attester avoir tout validé avant que la tâche ne
-// devienne éligible à l'envoi au client (fenêtre contextuelle de
-// confirmation obligatoire — pas de déblocage silencieux).
-// ============================================================
 export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
@@ -770,15 +756,6 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
 // TPS/TVQ. S'il y a des factures progressives déjà émises, montre la
 // dernière ; sinon, montre le montant total à facturer.
 // ============================================================
-
-// ============================================================
-// APERÇU DE LA FACTURE — VERSION CLIENT
-// ------------------------------------------------------------
-// Même principe que le devis et le bon de travail : coordonnées
-// d'entreprise complètes, description du travail facturé, ventilation
-// TPS/TVQ. S'il y a des factures progressives déjà émises, montre la
-// dernière ; sinon, montre le montant total à facturer.
-// ============================================================
 export function ApercuFactureClient({ bon, onFermer }) {
   const fiche = (useClients() || []).find((c) => c.nom === bon.client);
   // Devis d'origine — c'est lui qui porte le détail que le client a
@@ -894,17 +871,6 @@ export function ApercuFactureClient({ bon, onFermer }) {
     </div>
   );
 }
-
-// ============================================================
-// FENÊTRE D'AVANT-ENVOI — le choix de paiement PAR FACTURE
-// ------------------------------------------------------------
-// Règle validée avec le propriétaire : pour tout ce qui n'est pas un
-// dépôt d'appel de service, offrir la carte ou le virement est une
-// DÉCISION HUMAINE, facture par facture — cases décochées par défaut,
-// et les frais du marchand affichés en DOLLARS sur le montant réel
-// (2,9 % sur 8 450 $, ça se juge mieux en voyant « ≈ 245 $ »).
-// Ces frais ne s'ajoutent JAMAIS à la facture du client (LPC Québec).
-// ============================================================
 
 // ============================================================
 // FENÊTRE D'AVANT-ENVOI — le choix de paiement PAR FACTURE

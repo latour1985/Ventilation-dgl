@@ -86,14 +86,6 @@ export function ApercuCourrielConnexion({ utilisateur, onFermer }) {
 // FICHE PROFIL UTILISATEUR — ajout/modification des informations
 // personnelles et du profil de l'employé
 // ============================================================
-
-// ============================================================
-// ONGLET UTILISATEURS
-// ============================================================
-// ============================================================
-// FICHE PROFIL UTILISATEUR — ajout/modification des informations
-// personnelles et du profil de l'employé
-// ============================================================
 export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSupprimer, estAdminPrincipal, tauxMetiers }) {
   // Confirmation explicite avant suppression (2 clics).
   const [confirmeSuppression, setConfirmeSuppression] = useState(false);

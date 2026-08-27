@@ -706,11 +706,6 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
 // HUB PROJETS & RENTABILITÉ — vue générale, recherche/filtres,
 // cartes synthétiques de tous les projets
 // ============================================================
-
-// ============================================================
-// HUB PROJETS & RENTABILITÉ — vue générale, recherche/filtres,
-// cartes synthétiques de tous les projets
-// ============================================================
 export const FILTRES_STATUT_HUB = ["Tous", "À planifier", "En cours", "Facturation d'acompte", "Terminé", "En retard"];
 
 

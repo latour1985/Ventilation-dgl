@@ -251,18 +251,6 @@ export function techniciensPourTache(planning, tacheId, employes) {
 // ajustable ensuite dans l'onglet Projets — ici on garde le strict
 // minimum pour que la rentabilité soit juste dès le départ.
 // ============================================================
-
-// ============================================================
-// 🏗️ CRÉER UN PROJET À PARTIR D'UNE TÂCHE (2026-08-22)
-// ------------------------------------------------------------
-// Un projet n'est pas qu'un dossier : c'est un BUDGET (prévu vs réel)
-// — rien de tout ça n'existe sur une tâche, la transformation ne peut
-// donc pas être automatique. On pré-remplit ce qu'on SAIT (client,
-// adresse, secteur, nom, date) et l'humain n'entre que les montants.
-// La ventilation fine (transport, matériaux, sous-traitants) reste
-// ajustable ensuite dans l'onglet Projets — ici on garde le strict
-// minimum pour que la rentabilité soit juste dès le départ.
-// ============================================================
 export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
   const client = (clients || []).find((c) => c.id === tache.clientId) || (clients || []).find((c) => c.nom === tache.clientNom);
   const [nom, setNom] = useState(tache.titre || tache.clientNom || "Nouveau chantier");
