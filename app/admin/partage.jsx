@@ -1582,3 +1582,169 @@ export function SelecteurItem({ catalogue, onChoisir, libelle = "+ Ajouter un pr
   );
 }
 
+
+
+export const LARGEUR_LIGNE_DESCRIPTION = 52; // caractères visibles par rangée
+
+export function hauteurDescription(texte) {
+  const contenu = String(texte || "");
+  if (!contenu.trim()) return 2;
+  const rangees = contenu
+    .split("\n")
+    .reduce((total, ligne) => total + Math.max(1, Math.ceil(ligne.length / LARGEUR_LIGNE_DESCRIPTION)), 0);
+  // Plafond haut : au-delà, on garde une barre de défilement plutôt
+  // qu'un champ qui repousserait les totaux hors de l'écran.
+  return Math.min(30, Math.max(2, rangees));
+}
+
+
+export function courrielDefautClient(client) {
+  if (!client?.courriels?.length) return null;
+  return client.courriels.find((c) => c.defaut) || client.courriels[0];
+}
+
+
+export function listeDestinataires(choix) {
+  if (!choix) return [];
+  return Array.isArray(choix) ? choix.filter(Boolean) : [choix];
+}
+// « courriel1 (Principal), courriel2 (Comptabilité) » pour le journal.
+
+// « courriel1 (Principal), courriel2 (Comptabilité) » pour le journal.
+export function libelleDestinataires(choix) {
+  return listeDestinataires(choix)
+    .map((c) => `${c.email}${c.label ? ` (${c.label})` : ""}`)
+    .join(", ");
+}
+
+
+export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer, onAjouterFiche = null }) {
+  const courriels = client?.courriels || [];
+  const [selectionIds, setSelectionIds] = useState(() => {
+    const parDefaut = courrielDefautClient(client);
+    return parDefaut ? [parDefaut.id] : [];
+  });
+  const basculer = (id) =>
+    setSelectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const selection = courriels.filter((cc) => selectionIds.includes(cc.id));
+  // COURRIEL AJOUTÉ À LA MAIN — parfois le document doit aussi partir
+  // ailleurs (assureur, gestionnaire d'immeuble, notaire…). Plusieurs
+  // adresses possibles, séparées par une virgule ou un point-virgule.
+  // Seules les adresses au format valide partent — jamais de rebond
+  // silencieux à cause d'une coquille.
+  const [extra, setExtra] = useState("");
+  // 💾 L'adresse tapée peut rejoindre la FICHE du client — la prochaine
+  // fois, elle sera dans la liste à cocher.
+  const [ajouterAFiche, setAjouterAFiche] = useState(false);
+  const extras = extra
+    .split(/[,;]/)
+    .map((x) => x.trim())
+    .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x))
+    .map((x, i) => ({ id: `extra-${i}`, email: x, label: "Ajouté à la main" }));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Choisir les courriels de destination</h3>
+            <p className="text-xs text-slate-500">{contexte}</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        {courriels.length === 0 ? (
+          <p className="rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-700">
+            {client?.nom} n'a aucun courriel enregistré — ajoute-en un dans sa fiche (onglet Clients), ou utilise le champ « autre adresse » ci-dessous pour cet envoi-ci.
+          </p>
+        ) : (
+          <>
+            <p className="mb-1.5 text-[11px] text-slate-400">Coche une ou plusieurs adresses — le document part à toutes en même temps.</p>
+            <div className="space-y-1.5">
+              {courriels.map((cc) => (
+                <label
+                  key={cc.id}
+                  className={`flex cursor-pointer items-start gap-2 rounded-xl border p-2.5 ${
+                    selectionIds.includes(cc.id) ? "border-[#FF6A13] bg-orange-50" : "border-slate-200"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectionIds.includes(cc.id)}
+                    onChange={() => basculer(cc.id)}
+                    className="mt-0.5 h-4 w-4 accent-[#FF6A13]"
+                  />
+                  <div>
+                    <p className="text-xs font-bold text-slate-800">{cc.email}</p>
+                    <p className="text-[11px] text-slate-500">{cc.label}{cc.defaut ? " · défaut" : ""}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            {courriels.length > 1 && (
+              <button
+                onClick={() => setSelectionIds(selectionIds.length === courriels.length ? [] : courriels.map((cc) => cc.id))}
+                className="mt-2 text-[11px] font-bold text-slate-500 underline underline-offset-2"
+              >
+                {selectionIds.length === courriels.length ? "Tout décocher" : "Tout cocher"}
+              </button>
+            )}
+          </>
+        )}
+
+        <div className="mt-3">
+          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+            Envoyer aussi à une autre adresse (facultatif)
+          </label>
+          <input
+            type="email"
+            value={extra}
+            onChange={(e) => setExtra(e.target.value)}
+            placeholder="ex : assureur@exemple.com — virgule pour plusieurs"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#FF6A13]"
+          />
+          {extra.trim() !== "" && extras.length === 0 && (
+            <p className="mt-0.5 text-[10px] font-bold text-amber-600">
+              Adresse incomplète — vérifie le format (nom@domaine.com).
+            </p>
+          )}
+          {extras.length > 0 && client && onAjouterFiche && (
+            <label className="mt-1 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+              <input
+                type="checkbox"
+                checked={ajouterAFiche}
+                onChange={(e) => setAjouterAFiche(e.target.checked)}
+                className="h-4 w-4 accent-[#FF6A13]"
+              />
+              💾 Ajouter cette adresse à la fiche de {client?.nom || "ce client"}
+            </label>
+          )}
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={onFermer}>Annuler</Button>
+          <Button
+            disabled={selection.length + extras.length === 0}
+            onClick={() => {
+              if (ajouterAFiche && onAjouterFiche) extras.forEach((x) => onAjouterFiche(x.email));
+              onConfirmer([...selection, ...extras]);
+            }}
+          >
+            Envoyer{selection.length + extras.length > 1 ? ` (${selection.length + extras.length})` : ""}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// TRAITEMENT D'UN DEVIS ACCEPTÉ — choix explicite entre intervention
+// directe (bon de travail unique) et nouveau projet d'envergure
+// (le devis devient le budget initial + une tâche par ligne).
+// ============================================================
+
+export const FREQUENCES_CONTRAT = [1, 2, 3, 4];
+
+// Couleurs distinctes par type de tâche, utilisées dans les cartes en
+// attente et les cases du calendrier, pour les différencier d'un
+// coup d'œil.
