@@ -22,7 +22,7 @@
 // Une ligne au journal d'activité confirme chaque passage — le bureau
 // voit la ceinture se boucler sans ouvrir Supabase.
 
-import { clientSupabaseService, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 // TOUTES les tables applicatives — la liste de l'export Loi 25
 // (lib/supabase/plateforme.js) PLUS les tables arrivées depuis
@@ -50,7 +50,12 @@ export async function GET(request) {
   if (!estCron) {
     const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
     const utilisateur = jeton ? await utilisateurDepuisJeton(jeton) : null;
-    estAdmin = !!utilisateur && String(utilisateur.user_metadata?.role || "").trim() !== "Technicien";
+    // 🔐 GRAND SOIR : la sauvegarde exporte TOUTE la base — reservee aux
+    // admins DGL (ou au sceau plateforme), jamais a une entreprise d'essai.
+    estAdmin =
+      !!utilisateur &&
+      String(utilisateur.user_metadata?.role || "").trim() !== "Technicien" &&
+      (entrepriseDuCompte(utilisateur) === "dgl" || utilisateur.app_metadata?.plateforme === true);
     // CRON_SECRET défini = porte fermée à tout le reste.
     if (secretCron && !estAdmin) {
       return Response.json({ erreur: "Accès refusé." }, { status: 401 });

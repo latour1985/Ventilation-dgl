@@ -18,7 +18,7 @@
 //   { nonConnecte: true }   — config posée mais OAuth pas encore fait
 //   { transactions: [...] } — la vraie liste
 
-import { configQuickbooksPresente, jetonAccesValide, requeteQbo, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { configQuickbooksPresente, jetonAccesValide, requeteQbo, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 // Date locale (règle gelée : jamais toISOString pour une date calendrier).
 function dateLocale(d) {
@@ -69,6 +69,13 @@ export async function GET(request) {
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) {
     return Response.json({ erreur: "Connexion requise." }, { status: 401 });
+  }
+  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
+  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
+  // QuickBooks a elles. Refus net plutot que de servir les chiffres
+  // d'une autre entreprise.
+  if (entrepriseDuCompte(utilisateur) !== "dgl") {
+    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
   }
   if (!configQuickbooksPresente()) {
     return Response.json({ simule: true });

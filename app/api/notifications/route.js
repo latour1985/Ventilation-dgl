@@ -9,7 +9,7 @@
 // un abonnement expiré (410/404) est effacé tout seul.
 
 import webpush from "web-push";
-import { clientSupabaseService, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -33,6 +33,8 @@ export async function POST(request) {
     const { error } = await admin.from("push_abonnements").upsert({
       courriel: utilisateur.email.toLowerCase(),
       abonnement,
+      // 🔐 GRAND SOIR : l'abonnement appartient a l'entreprise de l'appelant.
+      entreprise_id: entrepriseDuCompte(utilisateur),
       updated_at: new Date().toISOString(),
     });
     if (error) return Response.json({ erreur: `Enregistrement refusé : ${error.message}` }, { status: 502 });

@@ -18,7 +18,7 @@
 // L'admin peut de toute façon réinitialiser n'importe quel mot de passe,
 // lui remettre ce lien ne lui donne rien qu'il n'a pas déjà.
 
-import { clientSupabaseService, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 const ROLES_ADMINS = ["Admin principal", "Admin régulier"];
 const ROLES_VALIDES = ["Admin principal", "Admin régulier", "Administration bureau", "Technicien"];
@@ -162,6 +162,7 @@ export async function POST(request) {
   // robots d'aperçu chargent la page sans rien consommer.
   const origine = new URL(request.url).origin;
   let jetonHache = null;
+  let idCompteInvite = null;
   let typeLien = "invite";
   let nouveau = true;
   try {
@@ -175,6 +176,7 @@ export async function POST(request) {
     });
     if (error) throw error;
     jetonHache = data?.properties?.hashed_token || null;
+    idCompteInvite = data?.user?.id || null;
   } catch (e) {
     const deja = /already|exist|registered/i.test(String(e?.message || ""));
     if (!deja) {
@@ -191,6 +193,21 @@ export async function POST(request) {
       return Response.json({ erreur: `Lien de réinitialisation refusé : ${error.message}` }, { status: 502 });
     }
     jetonHache = data?.properties?.hashed_token || null;
+    idCompteInvite = data?.user?.id || null;
+  }
+  // 🔐 GRAND SOIR (2026-09-04) : le nouveau compte HERITE de
+  // l'entreprise de son INVITEUR (app_metadata, scellee serveur) —
+  // sans cette etiquette, les cloisons RLS ne lui montreraient rien.
+  if (idCompteInvite) {
+    try {
+      const { data: fiche } = await admin.auth.admin.getUserById(idCompteInvite);
+      await admin.auth.admin.updateUserById(idCompteInvite, {
+        app_metadata: { ...(fiche?.user?.app_metadata || {}), entreprise_id: entrepriseDuCompte(utilisateur) },
+      });
+    } catch {
+      // etiquette non posee — l'invitation part quand meme, un passage
+      // du snippet d'etiquetage rattrapera le compte
+    }
   }
   if (!jetonHache) {
     return Response.json({ erreur: "Le lien n'a pas pu être fabriqué — réessaie." }, { status: 502 });

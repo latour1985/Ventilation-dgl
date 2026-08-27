@@ -29,8 +29,7 @@ import {
   utilisateurDepuisJeton,
   clientQboPour,
   mettreAJourClientQbo,
-  requeteQbo,
-} from "@/lib/quickbooksServeur";
+  requeteQbo, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 const MAX_PAR_PASSE = 100;
 
@@ -53,9 +52,13 @@ function nomNormalise(n) {
 // adresse de facturation). Les fiches naissent en UN upsert groupé.
 // ------------------------------------------------------------
 async function descendreClientsQbo(acces, admin) {
+  // 🔐 GRAND SOIR : la cle service voit toutes les entreprises — on se
+  // borne aux fiches DGL (la seule comptabilite branchee) pour ne
+  // jamais raccorder la fiche d'un testeur a un client QuickBooks DGL.
   const { data: fiches, error: erreurLecture } = await admin
     .from("clients_app")
-    .select("id, nom, entreprise, quickbooks_customer_id");
+    .select("id, nom, entreprise, quickbooks_customer_id")
+    .eq("entreprise_id", "dgl");
   if (erreurLecture) throw new Error(`Lecture des fiches : ${erreurLecture.message}`);
 
   const dejaRelies = new Set((fiches || []).map((f) => f.quickbooks_customer_id).filter(Boolean));
@@ -114,6 +117,7 @@ async function descendreClientsQbo(acces, admin) {
       adresse_facturation: adresse || null,
       quickbooks_customer_id: qbId,
       sync_qb: "synchronise",
+      entreprise_id: "dgl",
     });
   }
 
@@ -134,6 +138,13 @@ export async function POST(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
+  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
+  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
+  // QuickBooks a elles. Refus net plutot que de servir les chiffres
+  // d'une autre entreprise.
+  if (entrepriseDuCompte(utilisateur) !== "dgl") {
+    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
+  }
   if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
@@ -172,6 +183,7 @@ export async function POST(request) {
     const { data, error } = await admin
       .from("clients_app")
       .select("id, nom, quickbooks_customer_id")
+      .eq("entreprise_id", "dgl")
       .is("quickbooks_customer_id", null)
       .limit(MAX_PAR_PASSE);
     if (error) return Response.json({ erreur: `Lecture des clients : ${error.message}` }, { status: 502 });

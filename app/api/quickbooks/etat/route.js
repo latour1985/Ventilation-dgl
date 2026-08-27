@@ -5,7 +5,7 @@
 // JAMAIS les jetons eux-mêmes. Requiert une session utilisateur valide
 // (même verrou que /api/courriel).
 
-import { configQuickbooksPresente, environnementQb, lireConnexionQb, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { configQuickbooksPresente, environnementQb, lireConnexionQb, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 export async function GET(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -13,6 +13,13 @@ export async function GET(request) {
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) {
     return Response.json({ erreur: "Connexion requise." }, { status: 401 });
+  }
+  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
+  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
+  // QuickBooks a elles. Refus net plutot que de servir les chiffres
+  // d'une autre entreprise.
+  if (entrepriseDuCompte(utilisateur) !== "dgl") {
+    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
   }
   if (!configQuickbooksPresente()) {
     return Response.json({ configure: false, connecte: false, environnement: environnementQb() });

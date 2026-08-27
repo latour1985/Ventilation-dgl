@@ -15,7 +15,7 @@
 // assigné à cette tâche. Même patron que les routes QuickBooks.
 
 import webpush from "web-push";
-import { clientSupabaseService, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 // Notification push à UN coéquipier — un bonus, jamais un bloqueur :
 // sans abonnement ou sans clés VAPID, on passe simplement au suivant.
@@ -65,7 +65,10 @@ export async function POST(request) {
   const { data: lignes, error } = await admin
     .from("taches_assignees")
     .select("id, employe_email, donnees")
-    .eq("tache_id", tacheId);
+    .eq("tache_id", tacheId)
+    // 🔐 GRAND SOIR : borne a l'entreprise de l'appelant — un id de
+    // tache d'une autre entreprise ne retourne rien.
+    .eq("entreprise_id", entrepriseDuCompte(utilisateur));
   if (error) return Response.json({ erreur: error.message }, { status: 502 });
 
   // Garde : seul un membre de l'équipe de CETTE tâche peut déclarer.

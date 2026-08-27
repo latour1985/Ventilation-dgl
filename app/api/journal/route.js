@@ -15,7 +15,7 @@
 //   • { action: "lister", limite } — réservé à l'administration/bureau
 //     (pas aux Techniciens), comme l'onglet Journal lui-même.
 
-import { clientSupabaseService, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -42,6 +42,8 @@ export async function POST(request) {
     const { error } = await admin.from("journal_activite").insert({
       texte: `${texte} — par ${nom}`,
       created_by: utilisateur.id,
+      // 🔐 GRAND SOIR : la ligne nait dans l'entreprise de l'appelant.
+      entreprise_id: entrepriseDuCompte(utilisateur),
     });
     if (error) return Response.json({ erreur: error.message }, { status: 502 });
     return Response.json({ ok: true });

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Lock, RefreshCw, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
+import { supabase } from "@/lib/supabase/client";
 import { etatQuickbooks, synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { Button, tauxAffiche } from "./partage";
 
@@ -138,12 +139,26 @@ export function CarteConnexionQuickbooks({ estAdminPrincipal }) {
             🔌 Les clés sont posées, mais l&apos;entreprise n&apos;est pas encore reliée.
           </p>
           {estAdminPrincipal ? (
-            <a
-              href="/api/quickbooks/connexion"
+            // 🔐 La route exige maintenant le JETON (grand soir 2026-09-04)
+            // — on la joint, on reçoit l'adresse Intuit, on s'y rend.
+            <button
+              onClick={async () => {
+                const { data } = await supabase.auth.getSession();
+                const jeton = data?.session?.access_token;
+                if (!jeton) return;
+                try {
+                  const r = await fetch("/api/quickbooks/connexion", { headers: { Authorization: `Bearer ${jeton}` } });
+                  const rep = await r.json();
+                  if (rep?.url) window.location.href = rep.url;
+                  else window.alert(rep?.erreur || "Connexion impossible — réessaie.");
+                } catch {
+                  window.alert("Réseau indisponible — réessaie.");
+                }
+              }}
               className="inline-flex items-center gap-2 rounded-xl bg-[#131B2E] px-4 py-2.5 text-sm font-extrabold text-white active:scale-[0.99]"
             >
               <RefreshCw size={14} /> Connecter QuickBooks
-            </a>
+            </button>
           ) : (
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
               <Lock size={12} /> Connexion réservée à l&apos;Admin principal.

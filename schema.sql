@@ -2761,3 +2761,166 @@ delete from catalogue_items;
 -- bucket « photos-travaux » → tout selectionner → Delete ; idem pour
 -- le bucket « signatures ». (Le bucket « sauvegardes » ne se touche
 -- JAMAIS — c est le parachute.)
+
+-- ============================================================
+-- 85 - LE GRAND SOIR : CLOISONS RLS MULTI-ENTREPRISES
+--      (2026-09-04 — a passer LE SOIR, hors des heures de pointage :
+--      les sessions deja ouvertes prennent jusqu'a ~1 h pour recevoir
+--      leur etiquette dans le jeton ; se deconnecter/reconnecter regle
+--      tout de suite.)
+-- ============================================================
+-- AVANT : toutes les policies etaient « authenticated → tout » (mode
+-- test assume). APRES : chaque ligne porte son entreprise_id, chaque
+-- compte porte son etiquette (app_metadata, scellee serveur), et une
+-- policy par table n'ouvre QUE les lignes de SA propre entreprise.
+-- La console plateforme (sceau) garde ses acces cibles. Les tables
+-- heritees inutilisees sont verrouillees completement.
+
+-- ---- 0. Colonne manquante : le catalogue ----
+alter table catalogue_items add column if not exists entreprise_id text not null default 'dgl';
+
+-- ---- 1. Etiqueter TOUS les comptes existants (tous DGL aujourd'hui) ----
+update auth.users
+  set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"entreprise_id": "dgl"}'::jsonb;
+
+-- ---- 2. Les deux fonctions de garde (lisent le JETON, done infalsifiable) ----
+create or replace function public.entreprise_du_jeton() returns text
+language sql stable as
+$fn$ select nullif((auth.jwt() -> 'app_metadata') ->> 'entreprise_id', '') $fn$;
+
+create or replace function public.est_plateforme() returns boolean
+language sql stable as
+$fn$ select coalesce(((auth.jwt() -> 'app_metadata') ->> 'plateforme')::boolean, false) $fn$;
+
+-- ---- 3. Trigger d'etiquetage a l'insertion ----
+-- Un utilisateur connecte ecrit TOUJOURS dans SA propre entreprise —
+-- meme si l'application envoyait une autre valeur, le jeton l'emporte.
+-- Les routes serveur (cle service, jeton absent) gardent la valeur
+-- qu'elles posent explicitement, sinon 'dgl'.
+create or replace function public.poser_entreprise_id() returns trigger
+language plpgsql as
+$fn$
+begin
+  new.entreprise_id := coalesce(public.entreprise_du_jeton(), new.entreprise_id, 'dgl');
+  return new;
+end
+$fn$;
+
+-- ---- 4. CLOISONS : une policy d'isolation par table d'entreprise ----
+do $$
+declare
+  t text;
+  p record;
+begin
+  foreach t in array array[
+    'clients_app','projets_app','devis_app','taches_attente','taches_assignees',
+    'travaux_effectues','bons_travail','depots','pieces_commandees','achats_libres',
+    'qb_attributions_manuelles','journal_activite','retours_logiciel','commandes_camion',
+    'photos_legendes','articles_fournisseurs','fournisseurs','sous_traitants_app',
+    'camions','inspections_vehicules','entretiens_vehicules','carnet_vehicules',
+    'catalogue_items','taux_metiers','prix_depots','repertoire_employes',
+    'permissions_utilisateurs','compteurs','push_abonnements'
+  ]
+  loop
+    execute format('alter table public.%I enable row level security', t);
+    -- retirer TOUTES les anciennes policies de la table (mode test)
+    for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
+    loop
+      execute format('drop policy %I on public.%I', p.policyname, t);
+    end loop;
+    -- la cloison : chacun chez soi, lecture ET ecriture
+    execute format(
+      'create policy %I on public.%I for all to authenticated
+         using (entreprise_id = public.entreprise_du_jeton())
+         with check (entreprise_id = public.entreprise_du_jeton())',
+      'iso_' || t, t
+    );
+    -- l'etiquette se pose toute seule a l'insertion
+    execute format('drop trigger if exists trg_entreprise_%I on public.%I', t, t);
+    execute format(
+      'create trigger trg_entreprise_%I before insert on public.%I
+         for each row execute function public.poser_entreprise_id()',
+      t, t
+    );
+  end loop;
+end $$;
+
+-- ---- 5. EXCEPTION : retours_logiciel — la plateforme lit/traite AUSSI ----
+drop policy if exists "iso_retours_logiciel" on retours_logiciel;
+create policy "iso_retours_logiciel" on retours_logiciel
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton() or public.est_plateforme())
+  with check (entreprise_id = public.entreprise_du_jeton() or public.est_plateforme());
+
+-- ---- 6. EXCEPTION : entreprises — sa propre fiche, ou la plateforme ----
+do $$
+declare p record;
+begin
+  for p in select policyname from pg_policies where schemaname = 'public' and tablename = 'entreprises'
+  loop
+    execute format('drop policy %I on public.entreprises', p.policyname);
+  end loop;
+end $$;
+alter table entreprises enable row level security;
+create policy "entreprises_sa_fiche" on entreprises
+  for select to authenticated
+  using (id = public.entreprise_du_jeton() or public.est_plateforme());
+create policy "entreprises_maj_sa_fiche" on entreprises
+  for update to authenticated
+  using (id = public.entreprise_du_jeton() or public.est_plateforme())
+  with check (id = public.entreprise_du_jeton() or public.est_plateforme());
+create policy "entreprises_creation_plateforme" on entreprises
+  for insert to authenticated
+  with check (public.est_plateforme());
+
+-- ---- 7. plateforme_config : lecture plateforme seulement (le verrou
+--         d'isolation se LIT de la console ; il ne s'ecrit qu'en base) ----
+alter table plateforme_config enable row level security;
+do $$
+declare p record;
+begin
+  for p in select policyname from pg_policies where schemaname = 'public' and tablename = 'plateforme_config'
+  loop
+    execute format('drop policy %I on public.plateforme_config', p.policyname);
+  end loop;
+end $$;
+create policy "config_lecture_plateforme" on plateforme_config
+  for select to authenticated using (public.est_plateforme());
+
+-- ---- 8. VERROUILLAGE des tables service et heritees ----
+-- RLS active + AUCUNE policy = porte fermee pour tout navigateur.
+-- (Les routes serveur passent par la cle service, qui n'est pas soumise
+-- aux policies.) Tables heritees : code mort confirme, on condamne.
+alter table quickbooks_connexion enable row level security;
+alter table connexion_echecs enable row level security;
+do $$
+declare
+  t text;
+  p record;
+begin
+  foreach t in array array['quickbooks_connexion','connexion_echecs','travaux','travaux_photos','travaux_signatures','signatures','bons_travail_facturation']
+  loop
+    if exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      execute format('alter table public.%I enable row level security', t);
+      for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
+      loop
+        execute format('drop policy %I on public.%I', p.policyname, t);
+      end loop;
+    end if;
+  end loop;
+end $$;
+
+-- (incidents_confidentialite garde sa policy plateforme existante.)
+
+-- ============================================================
+-- 86 - COMPTE-SONDE D'ETANCHEITE (grand soir)
+-- ============================================================
+-- Etiquette le compte-espion cree dans Authentication → Add user
+-- (sonde@etancheite.test) comme une entreprise ETRANGERE : la sonde
+-- doit tout se faire refuser. Voir sonde-etancheite.mjs a la racine
+-- du projet pour l'execution du test.
+
+update auth.users
+  set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+    || '{"entreprise_id": "sonde-entreprise-test", "plateforme": false}'::jsonb
+  where email = 'sonde@etancheite.test';

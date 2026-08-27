@@ -17,7 +17,7 @@
 //   • seuls les deux types sans client sont acceptés — aucune tâche
 //     facturable ne peut naître ici.
 
-import { clientSupabaseService, utilisateurDepuisJeton } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 // 🏗️ LISTE DES PROJETS pour le sélecteur « C'est pour un projet ? » du
 // travail au shop (2026-08-31, décision du propriétaire : le technicien
@@ -35,6 +35,9 @@ export async function GET(request) {
   const { data, error } = await admin
     .from("projets_app")
     .select("id, nom, statut")
+    // 🔐 GRAND SOIR : la cle service voit TOUT — on borne a l'entreprise
+    // de l'appelant, sinon un technicien testeur verrait les projets DGL.
+    .eq("entreprise_id", entrepriseDuCompte(utilisateur))
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) return Response.json({ erreur: error.message }, { status: 502 });
@@ -94,11 +97,14 @@ export async function POST(request) {
       .from("projets_app")
       .select("id, nom")
       .eq("id", String(corps.projetProposeId))
+      .eq("entreprise_id", entrepriseDuCompte(utilisateur))
       .maybeSingle();
     if (p) projetPropose = { id: p.id, nom: p.nom };
   }
   const { error } = await admin.from("taches_assignees").upsert(
     {
+      // 🔐 GRAND SOIR : la ligne nait dans l'entreprise de l'appelant.
+      entreprise_id: entrepriseDuCompte(utilisateur),
       tache_id: id,
       employe_email: email,
       employe_nom: nom,

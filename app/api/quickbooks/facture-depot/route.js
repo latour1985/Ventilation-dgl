@@ -32,8 +32,7 @@ import {
   clientQboPour,
   articleServiceQboPour,
   envoyerFactureParQb,
-  environnementQb,
-} from "@/lib/quickbooksServeur";
+  environnementQb, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 // (Les helpers d'écriture vivent dans quickbooksServeur.js — partagés
 // avec les routes facture, estimate et clients-sync.)
 
@@ -42,6 +41,13 @@ export async function POST(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
+  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
+  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
+  // QuickBooks a elles. Refus net plutot que de servir les chiffres
+  // d'une autre entreprise.
+  if (entrepriseDuCompte(utilisateur) !== "dgl") {
+    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
+  }
   // Les techniciens n'émettent pas de factures — tous les rôles de
   // bureau (admins, répartiteur...) le peuvent : ce sont eux qui créent
   // les appels de service.
