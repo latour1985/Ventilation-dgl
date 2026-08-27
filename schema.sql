@@ -2842,6 +2842,10 @@ begin
     'permissions_utilisateurs','compteurs','push_abonnements'
   ]
   loop
+    -- table absente de la vraie base (derive de versions) : on saute
+    if not exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      continue;
+    end if;
     execute format('alter table public.%I enable row level security', t);
     -- retirer TOUTES les anciennes policies de la table (mode test)
     for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
@@ -2911,8 +2915,6 @@ create policy "config_lecture_plateforme" on plateforme_config
 -- RLS active + AUCUNE policy = porte fermee pour tout navigateur.
 -- (Les routes serveur passent par la cle service, qui n'est pas soumise
 -- aux policies.) Tables heritees : code mort confirme, on condamne.
-alter table quickbooks_connexion enable row level security;
-alter table connexion_echecs enable row level security;
 do $$
 declare
   t text;
