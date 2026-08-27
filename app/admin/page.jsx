@@ -3453,9 +3453,14 @@ export default function App() {
             }}
             supprimerUtilisateur={(u) => {
               // SUPPRESSION DE LA FICHE + RÉVOCATION IMMÉDIATE DES ACCÈS :
-              // la fiche disparaît du répertoire (et de l'agenda), et son
-              // entrée d'accès est remplacée par « aucune section » — le
-              // compte ne peut plus rien ouvrir dès sa prochaine connexion.
+              // la fiche disparaît du répertoire (et de l'agenda), son
+              // entrée d'accès est remplacée par « aucune section », ET —
+              // colmatage 2026-09-06 (audit du propriétaire : « assure-toi
+              // qu'ils sont vraiment bien retirés ») — son COMPTE est
+              // BANNI côté serveur + sessions coupées, comme à la
+              // désactivation. Avant, seule l'app se vidait : la personne
+              // pouvait encore SE CONNECTER et, jeton en main, interroger
+              // les données de l'entreprise directement.
               setUtilisateurs((prev) => prev.filter((x) => x.id !== u.id));
               supprimerEmploye(u.id).catch(() => {});
               const courriel = (u.courriel || "").trim().toLowerCase();
@@ -3466,8 +3471,26 @@ export default function App() {
                   .then(({ error }) => {
                     if (error) ajouterJournal(`⚠️ Fiche de ${u.nom} supprimée, mais la révocation de ses accès a ÉCHOUÉ — retire-les dans Gestion des accès.`);
                   });
+                (async () => {
+                  try {
+                    const { data } = await supabase.auth.getSession();
+                    const r = await fetch("/api/utilisateurs/acces", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", Authorization: `Bearer ${data?.session?.access_token}` },
+                      body: JSON.stringify({ action: "desactiver", courriel }),
+                    }).then((x) => x.json());
+                    ajouterJournal(
+                      r?.fait
+                        ? `🗑️ Fiche de ${u.nom} supprimée — accès révoqués ET compte banni${r.sansCompte ? " (aucun compte à bannir)" : r.sessionsCoupees ? " + sessions coupées" : ""} (⛔ aucun accès).`
+                        : `⚠️ Fiche de ${u.nom} supprimée, mais le BANNISSEMENT du compte a échoué (${r?.erreur || "réessaie"}) — désactive-le depuis un autre profil ou réessaie.`
+                    );
+                  } catch {
+                    ajouterJournal(`⚠️ Fiche de ${u.nom} supprimée, mais le bannissement du compte n'a pas pu partir — vérifie la connexion.`);
+                  }
+                })();
+              } else {
+                ajouterJournal(`🗑️ Fiche de ${u.nom} supprimée — aucun courriel sur la fiche, donc aucun compte à bannir.`);
               }
-              ajouterJournal(`🗑️ Fiche de ${u.nom} supprimée — tous ses accès sont révoqués (⛔ aucun accès).`);
             }}
           />
         </>

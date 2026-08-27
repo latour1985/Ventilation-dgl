@@ -69,5 +69,27 @@ export async function POST(request) {
     ban_duration: action === "desactiver" ? "87600h" : "none",
   });
   if (error) return Response.json({ erreur: error.message }, { status: 502 });
-  return Response.json({ fait: true });
+
+  // 🔌 SESSIONS COUPÉES SUR-LE-CHAMP (2026-09-06) : le ban bloque les
+  // NOUVELLES connexions et le renouvellement, mais un téléphone déjà
+  // connecté garderait son jeton d'accès jusqu'à ~1 h. On révoque donc
+  // aussi tous ses jetons de renouvellement — à la prochaine action de
+  // l'app, la session meurt au lieu de se renouveler. Non bloquant :
+  // si l'appel échoue, le ban fait le travail dans l'heure.
+  let sessionsCoupees = false;
+  if (action === "desactiver") {
+    try {
+      const r = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/admin/users/${cible.id}/logout`, {
+        method: "POST",
+        headers: {
+          apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      });
+      sessionsCoupees = r.ok;
+    } catch {
+      sessionsCoupees = false;
+    }
+  }
+  return Response.json({ fait: true, sessionsCoupees });
 }
