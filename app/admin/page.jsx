@@ -9695,6 +9695,13 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setContactRole("");
     setContactTel("");
     setNouveauDevisId("");
+    // Les items du devis de l'ANCIEN client sortent de la description —
+    // le texte tapé à la main, lui, reste.
+    if (dernierTexteDevisRef.current) {
+      const ancien = dernierTexteDevisRef.current;
+      dernierTexteDevisRef.current = "";
+      setNouvelleDescription((prev) => (prev.includes(ancien) ? prev.split(ancien).join("").trim() : prev));
+    }
     setUnitesChoisies([]);
   }, [nouveauClientId]);
   // 🔧 UNITÉS CONCERNÉES (2026-08-25, demande du propriétaire) : le
@@ -9774,6 +9781,11 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
   // Description des travaux — saisissable dès la création (avant, il
   // fallait rouvrir la fenêtre d'édition pour en écrire une).
   const [nouvelleDescription, setNouvelleDescription] = useState("");
+  // 📝 Le texte de devis INJECTÉ dans la description (2026-08-29 — retour
+  // du propriétaire : « je sélectionne un devis et la description ne suit
+  // pas »). Mémorisé pour qu'un changement de devis REMPLACE les lignes de
+  // l'ancien sans toucher à ce qui a été tapé à la main.
+  const dernierTexteDevisRef = useRef("");
 
   // Filtrage dynamique : si un client est choisi, ne montrer que SES
   // projets ; sinon, montrer tous les projets actifs (on exclut
@@ -10060,8 +10072,20 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         // Texte du devis transmis sur la tâche, SANS les prix — ajouté à la
         // suite de la description saisie manuellement (si elle existe).
         // UN ITEM PAR LIGNE pour rester facile à lire.
+        // ⚠️ Depuis le 2026-08-29, les items se posent DÉJÀ dans le champ à
+        // la sélection du devis. Deux cas ici : (a) l'injection a eu lieu
+        // (dernierTexteDevisRef) → le champ fait foi TEL QUEL — même si
+        // l'admin a effacé des lignes exprès, rien ne revient en douce ;
+        // (b) le devis est arrivé par un autre chemin sans injection → on
+        // ajoute les items comme avant (l'ancien comportement en filet).
         const texteDevis = devis.lignes.map((l) => `${l.quantite} × ${l.nom}`).join("\n");
-        nouvelle.description = nouvelleDescription.trim() ? `${nouvelleDescription.trim()}\n${texteDevis}` : texteDevis;
+        const descSaisie = nouvelleDescription.trim();
+        const dejaInjecte = dernierTexteDevisRef.current === texteDevis || descSaisie.includes(texteDevis);
+        nouvelle.description = dejaInjecte
+          ? descSaisie
+          : descSaisie
+            ? `${descSaisie}\n${texteDevis}`
+            : texteDevis;
         // Lignes du devis SANS AUCUN PRIX ni total — pour la fenêtre
         // « Voir le devis » de l'app technicien. Les montants ne quittent
         // jamais l'admin : seuls nom, quantité et unité sont transmis.
@@ -10205,6 +10229,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
     setNouvellesPiecesJointes([]);
     setNouvelleDescription("");
     setNouveauDevisId("");
+    dernierTexteDevisRef.current = "";
     setNouvelleFrequence(4);
     setNouveauProjetId("");
     setAdresseTravauxDifferente(false);
@@ -11179,7 +11204,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                 />
                 {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
                   <p className="mt-0.5 text-[9px] text-slate-400">
-                    Le contenu du devis (quantités × items, sans les prix) s'ajoutera automatiquement à cette description.
+                    Les items du devis (quantités × items, sans les prix) apparaissent ici dès que tu choisis le devis — modifiables avant de créer la tâche.
                   </p>
                 )}
               </div>
@@ -11476,6 +11501,26 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       // devis est reprise automatiquement (modifiable).
                       const d = devisListe.find((x) => x.id === e.target.value);
                       if (d?.estContrat && d.frequenceFacturationAnnuelle) setNouvelleFrequence(d.frequenceFacturationAnnuelle);
+                      // 📝 LA DESCRIPTION SUIT LE DEVIS, sous les yeux
+                      // (2026-08-29) : les items (quantité × nom, jamais de
+                      // prix) se posent dans le champ dès la sélection —
+                      // modifiables. Changer de devis remplace les lignes de
+                      // l'ancien ; le texte tapé à la main reste intact.
+                      if (d && (nouveauType === "devis" || nouveauType === "entretien_contrat")) {
+                        const texteDevis = (d.lignes || []).map((l) => `${l.quantite} × ${l.nom}`).join("\n");
+                        setNouvelleDescription((prev) => {
+                          let base = prev;
+                          const ancien = dernierTexteDevisRef.current;
+                          if (ancien && base.includes(ancien)) {
+                            // split/join — jamais String.replace (piège des $
+                            // dans le texte remplacé, vécu).
+                            base = base.split(ancien).join("").trim();
+                          }
+                          dernierTexteDevisRef.current = texteDevis;
+                          if (!texteDevis) return base;
+                          return base ? `${base}\n${texteDevis}` : texteDevis;
+                        });
+                      }
                     }}
                     className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                   >
