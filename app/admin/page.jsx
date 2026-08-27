@@ -336,6 +336,22 @@ const EMPLOYES = [
 ];
 
 const HEURES_QUART = HEURES.flatMap((h) => ["00", "15", "30", "45"].map((m) => `${h.slice(0, 2)}:${m}`));
+
+// 📝 LE TEXTE D'UN DEVIS pour une description de tâche (2026-08-30,
+// retour du propriétaire : « toute l'information de la description,
+// pas seulement le titre »). Quantité × nom PUIS la description
+// complète de chaque item — JAMAIS de prix (seule chose interdite).
+// Une seule définition : l'injection à la sélection et le filet à la
+// création doivent produire EXACTEMENT le même texte (l'anti-doublon
+// compare les deux).
+function texteDevisPourDescription(devis) {
+  return (devis?.lignes || [])
+    .map((l) => {
+      const detail = String(l.description || "").trim();
+      return `${l.quantite} × ${l.nom}${detail ? `\n${detail}` : ""}`;
+    })
+    .join("\n\n");
+}
 function nomAffichageClient(c) {
   if (!c) return "";
   const nom = (c.nom || "").trim();
@@ -2150,7 +2166,7 @@ function ApercuBonTravailClient({ travail, clients, onFermer }) {
   const client = (clients || []).find((c) => c.id === travail.clientId);
   const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${libelleAdresse(client.adresses[0])}` : null);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
         <div className="mb-3 flex items-start justify-between">
           <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
@@ -2222,7 +2238,7 @@ function DetailTravail({ travail, clients, onFermer, onReactiver }) {
   const [apercuClientOuvert, setApercuClientOuvert] = useState(false);
   const complete = travail.statut === "complete";
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
@@ -8047,7 +8063,7 @@ function ApercuDevisClient({ devis, onFermer }) {
   const { tps, tvq, total } = calculerTaxes(sousTotal, configEnt);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
         <div className="mb-3 flex items-start justify-between">
           <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
@@ -10103,7 +10119,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
         // l'admin a effacé des lignes exprès, rien ne revient en douce ;
         // (b) le devis est arrivé par un autre chemin sans injection → on
         // ajoute les items comme avant (l'ancien comportement en filet).
-        const texteDevis = devis.lignes.map((l) => `${l.quantite} × ${l.nom}`).join("\n");
+        const texteDevis = texteDevisPourDescription(devis);
         const descSaisie = nouvelleDescription.trim();
         const dejaInjecte = dernierTexteDevisRef.current === texteDevis || descSaisie.includes(texteDevis);
         nouvelle.description = dejaInjecte
@@ -11532,7 +11548,7 @@ function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, 
                       // modifiables. Changer de devis remplace les lignes de
                       // l'ancien ; le texte tapé à la main reste intact.
                       if (d && (nouveauType === "devis" || nouveauType === "entretien_contrat")) {
-                        const texteDevis = (d.lignes || []).map((l) => `${l.quantite} × ${l.nom}`).join("\n");
+                        const texteDevis = texteDevisPourDescription(d);
                         setNouvelleDescription((prev) => {
                           let base = prev;
                           const ancien = dernierTexteDevisRef.current;
@@ -13632,9 +13648,51 @@ function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons })
 
   const confirmer = () => {
     if (!peutEmettre) return;
+    const montantFinal = Math.round(montantCalcule * 100) / 100;
+    // 📋 LIGNES DÉTAILLÉES POUR QUICKBOOKS (2026-08-30, retour du
+    // propriétaire : « la description ne se transmet pas au complet à
+    // la facture ») : la facture reprend les items du devis — quantité,
+    // nom ET description complète — au lieu d'une ligne générique.
+    //   • sur mesure : une ligne par item facturé, à son montant (avec
+    //     la portion si partielle) ;
+    //   • complète SANS facture antérieure : chaque item du devis à son
+    //     montant ;
+    //   • sinon (pourcentage, échéance, complète après des partielles) :
+    //     null — emettreFacture garde sa ligne unique au montant et
+    //     ajoute le détail des travaux en lignes descriptives à 0 $.
+    // Filet : si la somme des lignes ne retombe pas sur le montant (un
+    // sou d'arrondi), on revient à la ligne unique — le total prime.
+    const detailLigne = (l) => {
+      const detail = String(l.description || "").trim();
+      return `${l.quantite} × ${l.nom}${detail ? `\n${detail}` : ""}`;
+    };
+    let lignesFacture = null;
+    if (devis && type === "sur_mesure") {
+      lignesFacture = devis.lignes
+        .map((l) => ({ l, prog: progressionLigne(l) }))
+        .filter((x) => x.prog.billedAmount > 0.005)
+        .map(({ l, prog }) => {
+          const totalHT = l.quantite * (Number(l.prix_vendant) || 0);
+          const partiel = prog.billedAmount < totalHT - 0.005;
+          return {
+            description: `${detailLigne(l)}${partiel ? `\n(portion facturée : ${prog.progressPercent} % de ${totalHT.toFixed(2)} $)` : ""}`,
+            montant: Math.round(prog.billedAmount * 100) / 100,
+          };
+        });
+    } else if (devis && type === "complete" && montantCumule < 0.01) {
+      lignesFacture = devis.lignes.map((l) => ({
+        description: detailLigne(l),
+        montant: Math.round(l.quantite * (Number(l.prix_vendant) || 0) * 100) / 100,
+      }));
+    }
+    if (lignesFacture) {
+      const somme = lignesFacture.reduce((s, l) => s + l.montant, 0);
+      if (lignesFacture.length === 0 || Math.abs(somme - montantFinal) > 0.011) lignesFacture = null;
+    }
     onEmettre({
-      montant: Math.round(montantCalcule * 100) / 100,
+      montant: montantFinal,
       type,
+      lignesFacture,
       detail:
         type === "pourcentage"
           ? `${pourcentage}%`
@@ -14108,7 +14166,10 @@ function ApercuFactureClient({ bon, onFermer }) {
   const { tps, tvq, total } = calculerTaxes(montant, configEnt);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    // Fermeture au clic sur le fond (retour du propriétaire 2026-08-30 :
+    // « je dois obligatoirement peser sur le X ») — surligner du texte à
+    // l'intérieur ne ferme pas (règle du 2026-08-19 : cible exacte).
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
         <div className="mb-3 flex items-start justify-between">
           <h3 className="text-sm font-extrabold text-slate-500">Aperçu — version envoyée au client</h3>
@@ -14878,7 +14939,7 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
   // montant possible (voir ModalFacturationDevis) — le statut ne passe
   // à « envoyé » que lorsque le cumul atteint le montant total du
   // devis/contrat.
-  const emettreFacture = async (bonId, { montant, type, detail }, choixCourriels, paiements = {}) => {
+  const emettreFacture = async (bonId, { montant, type, detail, lignesFacture }, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
     // Le devis maison d'abord ; sinon le devis QuickBooks retrouvé par
     // numéro — son total sert au statut « envoyé » (cumul atteint).
@@ -14893,10 +14954,24 @@ function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients,
     // repli quand QuickBooks n'est pas configuré (développement local).
     const fiche = trouverClientDuBon(bons.find((x) => x.id === bonId) || {});
     const libelle = type === "pourcentage" ? `${detail}` : type === "echeance" ? `échéance (${detail})` : type === "sur_mesure" ? "sur mesure par item" : "complète";
+    // 📋 Les LIGNES de la facture : le détail du devis quand la modale
+    // l'a fourni (sur mesure, complète) ; sinon la ligne unique au
+    // montant + les items du devis en lignes DESCRIPTIVES à 0 $ (le
+    // client voit sur quoi porte son pourcentage ou son échéance).
+    const lignesEnvoyees =
+      Array.isArray(lignesFacture) && lignesFacture.length > 0
+        ? lignesFacture
+        : [
+            { description: `${bons.find((x) => x.id === bonId)?.projet || "Travaux"} — facturation ${libelle}`, montant },
+            ...(devisCourant?.lignes || []).map((l) => ({
+              description: `${l.quantite} × ${l.nom}${String(l.description || "").trim() ? `\n${String(l.description).trim()}` : ""}`,
+              montant: 0,
+            })),
+          ];
     const rQbo = await creerFactureQbo({
       clientId: fiche?.id || null,
       clientNom: bons.find((x) => x.id === bonId)?.client || "",
-      lignes: [{ description: `${bons.find((x) => x.id === bonId)?.projet || "Travaux"} — facturation ${libelle}`, montant }],
+      lignes: lignesEnvoyees,
       termePaiement: configEnt?.termePaiementDefaut || "Net 30",
       reference: `${bons.find((x) => x.id === bonId)?.devisNumero || "travaux"}`,
       paiementCarte: paiements.carte === true,
