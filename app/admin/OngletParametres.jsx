@@ -538,6 +538,41 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
       {ongletActif === "connexions" && (
         <div className="space-y-3">
           <CarteConnexionQuickbooks estAdminPrincipal={estAdminPrincipal} />
+
+          {/* 📅 DATE-PLANCHER (2026-08-28, snippet SQL 81) — l'historique
+              d'avant Fluxya reste dans QuickBooks : sans coûts en face,
+              l'importer fabriquerait des marges fausses et des centaines
+              de cartes « à rattacher ». Modifiable en tout temps. */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">📅 Historique lu dans QuickBooks</p>
+            <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+              Les factures et dépenses d&apos;AVANT cette date restent dans QuickBooks — elles n&apos;apparaissent ni
+              dans les listes à rattacher ni dans les marges. Mets la date où vous avez commencé à travailler pour
+              vrai dans Fluxya. Tu peux la reculer plus tard si tu veux remonter plus loin.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-[11px] font-bold text-slate-500">Ne rien lire avant le</label>
+              <input
+                type="date"
+                value={brouillon.qbLectureDepuis || ""}
+                onChange={(e) => champ("qbLectureDepuis", e.target.value)}
+                disabled={!estAdminPrincipal}
+                className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none disabled:bg-slate-50 disabled:text-slate-400"
+              />
+              {brouillon.qbLectureDepuis && estAdminPrincipal && (
+                <button
+                  onClick={() => champ("qbLectureDepuis", "")}
+                  className="text-[10px] font-semibold text-slate-400 underline"
+                >
+                  Effacer (revenir aux 12 derniers mois)
+                </button>
+              )}
+            </div>
+            <p className="mt-2 text-[10px] leading-snug text-slate-400">
+              Sans date : l&apos;application lit les 12 derniers mois (le maximum). La date ne peut que resserrer cette
+              fenêtre. N&apos;oublie pas « 💾 Enregistrer les paramètres » en bas.
+            </p>
+          </div>
         </div>
       )}
 

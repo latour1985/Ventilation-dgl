@@ -88,7 +88,15 @@ export async function GET(request) {
   // cours, sans aspirer toute la comptabilité.
   const depuis = new Date();
   depuis.setMonth(depuis.getMonth() - 12);
-  const borne = dateLocale(depuis);
+  let borne = dateLocale(depuis);
+  // 📅 DATE-PLANCHER (2026-08-28) — « ne rien lire avant le … »
+  // (Paramètres → Connexions). L'historique d'avant Fluxya reste dans
+  // QuickBooks : sans coûts en face dans l'application, l'importer
+  // fabriquerait des marges fausses et une liste « à rattacher » de
+  // centaines de cartes. Le plancher ne peut que RESSERRER la fenêtre
+  // de 12 mois, jamais l'élargir.
+  const plancher = new URL(request.url).searchParams.get("depuis") || "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(plancher) && plancher > borne) borne = plancher;
   const aujourdhui = dateLocale(new Date());
 
   try {
@@ -104,6 +112,10 @@ export async function GET(request) {
         quickbooksId: `QBO-INV-${f.Id}`,
         type: "INVOICE",
         customerRefId: f.CustomerRef?.value || null,
+        // 👤 Le NOM du client tel que QuickBooks le connaît (2026-08-28) :
+        // affiché sur les cartes « à rattacher » (une carte anonyme est
+        // inclassable) et utilisé pour l'appariement automatique par nom.
+        clientNomQb: f.CustomerRef?.name || null,
         qbProjectRef: f.ProjectRef?.value || null,
         poNumber: null,
         amountHT: montantHT(f),
@@ -118,6 +130,7 @@ export async function GET(request) {
         quickbooksId: `QBO-EXP-${a.Id}`,
         type: "EXPENSE",
         customerRefId: null,
+        fournisseurNomQb: a.EntityRef?.name || null,
         qbProjectRef: null,
         poNumber: (a.DocNumber || "").trim() || null,
         referenceTexte: texteCherchable(a),
@@ -131,6 +144,7 @@ export async function GET(request) {
         quickbooksId: `QBO-BILL-${b.Id}`,
         type: "EXPENSE",
         customerRefId: null,
+        fournisseurNomQb: b.VendorRef?.name || null,
         qbProjectRef: null,
         poNumber: (b.DocNumber || "").trim() || null,
         referenceTexte: texteCherchable(b),

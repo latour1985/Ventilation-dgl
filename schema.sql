@@ -2629,3 +2629,15 @@ delete from taches_attente t
 create unique index if not exists idx_pieces_tache_origine_unique
   on pieces_commandees (tache_origine_id)
   where tache_origine_id is not null;
+
+-- ============================================================
+-- 81 - Date-plancher QuickBooks (« ne rien lire avant le... »)
+-- ============================================================
+-- L'historique d'AVANT Fluxya (des annees de factures) reste dans
+-- QuickBooks : sans coûts en face dans l'application (pas d'heures
+-- pointees, pas de BC), l'importer fabriquerait des marges fausses et
+-- remplirait la liste « a rattacher » de centaines de cartes inutiles.
+-- Cette colonne porte la date choisie dans Parametres → Connexions ;
+-- vide = comportement d'origine (les 12 derniers mois).
+
+alter table entreprises add column if not exists qb_lecture_depuis date;

@@ -22,7 +22,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
-import { chargerDevisPublic, repondreDevis } from "@/lib/supabase/devisPublic";
+import { chargerDevisPublic, repondreDevis, JOURS_VALIDITE_PRIX_DEVIS } from "@/lib/supabase/devisPublic";
 import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
 import { CONFIG_DEFAUT, chargerEntreprise, calculerTaxes } from "@/lib/supabase/entreprise";
 
@@ -102,6 +102,11 @@ export default function PageDevisPublic({ params }) {
   // Réponse déjà donnée (par ce clic-ci ou lors d'une visite précédente).
   const dejaRepondu = fait || devis.reponseClient;
   const taxes = calculerTaxes(devis.totalVendant, config);
+  // ⏳ PRIX PÉRIMÉS (clause 1 : prix valides 30 jours). Le LIEN, lui,
+  // vit 1 an : le client revoit son devis longtemps après et peut
+  // demander une mise à jour — mais un vieux prix ne s'accepte pas.
+  const agePrixJours = devis.date ? Math.floor((Date.now() - new Date(`${devis.date}T00:00:00`).getTime()) / 86400000) : 0;
+  const prixPerimes = agePrixJours > JOURS_VALIDITE_PRIX_DEVIS;
 
   return (
     <div className="min-h-screen bg-slate-100 py-6 px-4">
@@ -195,9 +200,9 @@ export default function PageDevisPublic({ params }) {
         ) : devis.expire ? (
           <div className="rounded-2xl bg-white p-6 text-center">
             <AlertTriangle size={28} className="mx-auto text-amber-500" />
-            <p className="mt-3 text-sm font-bold text-slate-800">Ce devis est expiré</p>
+            <p className="mt-3 text-sm font-bold text-slate-800">Ce lien est expiré</p>
             <p className="mt-1 text-sm text-slate-500">
-              Nos prix sont valides 30 jours. Communique avec nous pour une mise à jour.
+              Communiquez avec nous — nous vous renverrons votre devis, mis à jour au besoin.
             </p>
             {config.telephone && <p className="mt-2 text-sm font-bold text-slate-700">{config.telephone}</p>}
           </div>
@@ -243,29 +248,46 @@ export default function PageDevisPublic({ params }) {
               </>
             ) : (
               <>
-                <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl border-2 border-slate-200 p-3">
-                  <input
-                    type="checkbox"
-                    checked={accepte}
-                    onChange={(e) => setAccepte(e.target.checked)}
-                    className="mt-0.5 h-5 w-5 shrink-0 accent-[#131B2E]"
-                  />
-                  <span className="text-[13px] font-semibold leading-snug text-slate-700">
-                    J&apos;ai lu et j&apos;accepte les termes et conditions générales ci-dessus.
-                  </span>
-                </label>
+                {/* ⏳ Après 30 jours, la clause 1 prend le dessus : le
+                    devis reste consultable (le lien vit 1 an) mais un
+                    vieux prix ne s'accepte plus — on guide vers la
+                    demande de mise à jour. */}
+                {prixPerimes ? (
+                  <div className="mt-3 rounded-xl border-2 border-amber-200 bg-amber-50 p-3">
+                    <p className="text-[13px] font-bold leading-snug text-amber-800">
+                      ⏳ Ce devis date de plus de {JOURS_VALIDITE_PRIX_DEVIS} jours — nos prix sont valides {JOURS_VALIDITE_PRIX_DEVIS} jours.
+                    </p>
+                    <p className="mt-1 text-[12px] leading-snug text-amber-700">
+                      Vous pouvez le consulter et nous demander une mise à jour ci-dessous — nous vous reviendrons avec une version à jour.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl border-2 border-slate-200 p-3">
+                      <input
+                        type="checkbox"
+                        checked={accepte}
+                        onChange={(e) => setAccepte(e.target.checked)}
+                        className="mt-0.5 h-5 w-5 shrink-0 accent-[#131B2E]"
+                      />
+                      <span className="text-[13px] font-semibold leading-snug text-slate-700">
+                        J&apos;ai lu et j&apos;accepte les termes et conditions générales ci-dessus.
+                      </span>
+                    </label>
 
-                <button
-                  onClick={() => repondre("accepte")}
-                  disabled={!accepte || nom.trim().length < 3 || envoi === "envoi"}
-                  className="mt-3 min-h-[54px] w-full rounded-xl bg-emerald-600 text-base font-extrabold text-white active:scale-[0.99] disabled:opacity-40"
-                >
-                  {envoi === "envoi" ? "Envoi…" : "✓ Accepter ce devis"}
-                </button>
-                {!accepte && (
-                  <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                    Coche la case et écris ton nom pour accepter.
-                  </p>
+                    <button
+                      onClick={() => repondre("accepte")}
+                      disabled={!accepte || nom.trim().length < 3 || envoi === "envoi"}
+                      className="mt-3 min-h-[54px] w-full rounded-xl bg-emerald-600 text-base font-extrabold text-white active:scale-[0.99] disabled:opacity-40"
+                    >
+                      {envoi === "envoi" ? "Envoi…" : "✓ Accepter ce devis"}
+                    </button>
+                    {!accepte && (
+                      <p className="mt-1.5 text-center text-[11px] text-slate-400">
+                        Coche la case et écris ton nom pour accepter.
+                      </p>
+                    )}
+                  </>
                 )}
 
                 <div className="mt-4 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
@@ -273,7 +295,7 @@ export default function PageDevisPublic({ params }) {
                     onClick={() => setModeModif(true)}
                     className="min-h-[44px] rounded-xl border border-slate-300 text-xs font-bold text-slate-700"
                   >
-                    Demander une modification
+                    {prixPerimes ? "Demander une mise à jour" : "Demander une modification"}
                   </button>
                   <button
                     onClick={() => repondre("refuse")}

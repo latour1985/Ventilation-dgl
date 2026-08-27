@@ -38,7 +38,7 @@ import { listerDepots, creerDepot, marquerDepotPayeManuellement, annulerDepotDel
 import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots, zonesDepuis, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
-import { genererJeton, lienDevisPublic } from "@/lib/supabase/devisPublic";
+import { genererJeton, lienDevisPublic, JOURS_VALIDITE_LIEN_DEVIS } from "@/lib/supabase/devisPublic";
 import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres, majAchatLibre, supprimerAchatLibre, listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
@@ -513,13 +513,14 @@ function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLib
   }
   // Règle 1b : correspondance par CustomerRef QuickBooks → client de
   // l'appli → projet "En cours" le plus pertinent pour ce client.
-  if (transaction.customerRefId) {
-    const client = clients.find((c) => c.quickbooksCustomerId === transaction.customerRefId);
-    if (client) {
-      const projetsDuClient = projets.filter((p) => p.clientId === client.id);
-      const projetPertinent = projetsDuClient.find((p) => p.statut === "En cours") || projetsDuClient[0];
-      if (projetPertinent) return { type: "projet", id: projetPertinent.id };
-    }
+  // Depuis le 2026-08-28, le NOM QuickBooks sert de repli : les clients
+  // d'avant Fluxya n'ont pas de lien quickbooksCustomerId sur leur
+  // fiche — leur nom, lui, est le même des deux côtés.
+  const clientDeLaTransaction = clientQbDeTransaction(transaction, clients);
+  if (clientDeLaTransaction) {
+    const projetsDuClient = projets.filter((p) => p.clientId === clientDeLaTransaction.id);
+    const projetPertinent = projetsDuClient.find((p) => p.statut === "En cours") || projetsDuClient[0];
+    if (projetPertinent) return { type: "projet", id: projetPertinent.id };
   }
   // Règle 2a : le numéro de BC est SEUL dans le champ « Nº de
   // référence » — le cas propre, correspondance exacte.
@@ -583,11 +584,28 @@ function attribuerTransactionQuickBooks(transaction, projets, clients, achatsLib
   // Le fournisseur a facturé au nom du client mais aucun projet ni
   // aucun BC ne colle : la dépense appartient quand même à ce client.
   // Mieux vaut un coût rattaché au bon DOSSIER qu'un coût nulle part.
-  if (transaction.customerRefId) {
-    const client = clients.find((c) => c.quickbooksCustomerId === transaction.customerRefId);
-    if (client) return { type: "client", id: client.id };
-  }
+  if (clientDeLaTransaction) return { type: "client", id: clientDeLaTransaction.id };
   return null; // Fallback → attribution manuelle requise.
+}
+
+// 👤 QUEL CLIENT FLUXYA pour cette transaction QuickBooks ? Par le lien
+// quickbooksCustomerId d'abord (fiable), par le NOM sinon (2026-08-28 :
+// les factures des clients d'avant Fluxya n'ont que leur nom pour se
+// faire reconnaître). Normalisation : nomClientNormalise (plus bas).
+function clientQbDeTransaction(transaction, clients) {
+  if (transaction.customerRefId) {
+    const parId = clients.find((c) => c.quickbooksCustomerId === transaction.customerRefId);
+    if (parId) return parId;
+  }
+  const nomQb = nomClientNormalise(transaction.clientNomQb);
+  if (!nomQb) return null;
+  // Nom de la fiche OU nom d'entreprise de la fiche — QuickBooks mélange
+  // les deux (« Amir Elbaz » vs « Constructions AB inc. »).
+  return (
+    clients.find((c) => nomClientNormalise(c.nom) === nomQb) ||
+    clients.find((c) => c.entreprise && nomClientNormalise(c.entreprise) === nomQb) ||
+    null
+  );
 }
 
 // Pose la cible sur une transaction — attribution MANUELLE d'abord (la
@@ -904,7 +922,7 @@ function nomClientNormalise(nom) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
-    .replace(/s+/g, " ")
+    .replace(/[ \t]+/g, " ")
     .trim();
 }
 
@@ -4048,6 +4066,10 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
     (t) => Math.abs(Number(t.amountHT) || 0) > 0
   );
   const nbQbMontantNul = transactionsSansProjet.length - transactionsNonAssignees.length;
+  // 🚫 Transactions marquées « Hors Fluxya » — sorties de la liste mais
+  // jamais perdues : un petit tiroir permet de les remettre à classer.
+  const transactionsHorsFluxya = transactionsQb.filter((t) => t.cible?.type === "hors");
+  const [horsFluxyaOuvert, setHorsFluxyaOuvert] = useState(false);
 
   const ajouterBonCommandeProjet = (projetId, bc) => {
     setProjets((prev) => prev.map((p) => (p.id === projetId ? { ...p, bonsCommande: [...(p.bonsCommande || []), bc] } : p)));
@@ -4140,8 +4162,10 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
         </select>
       </div>
 
-      {/* FACTURES QUICKBOOKS NON ASSIGNÉES — repliées par défaut */}
-      {transactionsNonAssignees.length > 0 && (
+      {/* FACTURES QUICKBOOKS NON ASSIGNÉES — repliées par défaut.
+          (Le bloc reste visible tant qu'il existe des transactions
+          « Hors Fluxya » : c'est là qu'on peut les remettre à classer.) */}
+      {(transactionsNonAssignees.length > 0 || transactionsHorsFluxya.length > 0) && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
           <button
             type="button"
@@ -4177,15 +4201,25 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
               return (
                 <div key={t.quickbooksId} className="rounded-lg border border-amber-200 bg-white p-2 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1 font-semibold text-slate-800">
-                      <AlertTriangle size={11} className="text-red-500" /> {t.quickbooksId} · {t.type === "INVOICE" ? "Vente" : "Dépense"}
+                    <span className="flex min-w-0 items-center gap-1 font-semibold text-slate-800">
+                      <AlertTriangle size={11} className="shrink-0 text-red-500" />
+                      {/* 👤 Le NOM d'abord (2026-08-28) : une carte « QBO-INV-1042 »
+                          est inclassable — « Toitures Marleau · 12 mars » se classe
+                          en une seconde. Le numéro QuickBooks passe en second. */}
+                      <span className="truncate">
+                        {(t.type === "INVOICE" ? t.clientNomQb : t.fournisseurNomQb) || t.quickbooksId}
+                      </span>
+                      <span className="shrink-0 text-[10px] font-normal text-slate-400">
+                        · {t.type === "INVOICE" ? "Vente" : "Dépense"}{t.date ? ` · ${t.date}` : ""}
+                      </span>
                     </span>
-                    <span className="font-bold tabular-nums text-slate-700">{t.amountHT.toFixed(2)} $ HT</span>
+                    <span className="shrink-0 font-bold tabular-nums text-slate-700">{t.amountHT.toFixed(2)} $ HT</span>
                   </div>
-                  {(t.poNumber || t.referenceTexte) && (
+                  {((t.type === "INVOICE" ? t.clientNomQb : t.fournisseurNomQb) || t.poNumber || t.referenceTexte) && (
                     <p className="mt-0.5 truncate text-[10px] text-slate-400">
-                      {t.poNumber ? `Nº ${t.poNumber}` : ""}{t.poNumber && t.referenceTexte ? " · " : ""}
-                      {t.referenceTexte ? String(t.referenceTexte).slice(0, 70) : ""}
+                      {t.quickbooksId}
+                      {t.poNumber ? ` · Nº ${t.poNumber}` : ""}
+                      {t.referenceTexte ? ` · ${String(t.referenceTexte).slice(0, 60)}` : ""}
                     </p>
                   )}
                   <div className="mt-1.5 flex gap-1.5">
@@ -4227,6 +4261,18 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
                     >
                       Assigner
                     </Button>
+                    {/* 🚫 HORS FLUXYA (2026-08-28) : la transaction ne
+                        concerne aucune job (essence, comptable, frais
+                        généraux…) — elle sort de la liste sans entrer
+                        dans aucune marge. Réversible en bas du bloc. */}
+                    <Button
+                      variant="outline"
+                      onClick={() => onAssignerTransaction(t.quickbooksId, { type: "hors", id: "hors" })}
+                      title="Cette transaction ne concerne aucune job — la sortir de la liste (récupérable)"
+                      className="min-h-0 px-2 py-1 text-[11px] text-slate-500"
+                    >
+                      🚫 Hors Fluxya
+                    </Button>
                   </div>
                 </div>
               );
@@ -4236,6 +4282,35 @@ function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, t
                 {nbQbMontantNul} facture{nbQbMontantNul > 1 ? "s" : ""} à 0,00 $ {nbQbMontantNul > 1 ? "sont" : "est"}{" "}
                 écartée{nbQbMontantNul > 1 ? "s" : ""} de cette liste — un montant nul ne change aucune marge.
               </p>
+            )}
+            {transactionsHorsFluxya.length > 0 && (
+              <div className="border-t border-amber-200 pt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setHorsFluxyaOuvert((v) => !v)}
+                  className="text-[10px] font-bold text-amber-600 underline"
+                >
+                  🚫 {transactionsHorsFluxya.length} transaction{transactionsHorsFluxya.length > 1 ? "s" : ""} marquée{transactionsHorsFluxya.length > 1 ? "s" : ""} « Hors Fluxya » {horsFluxyaOuvert ? "▲" : "▼"}
+                </button>
+                {horsFluxyaOuvert && (
+                  <div className="mt-1 space-y-1">
+                    {transactionsHorsFluxya.map((t) => (
+                      <div key={t.quickbooksId} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]">
+                        <span className="min-w-0 truncate text-slate-500">
+                          {(t.type === "INVOICE" ? t.clientNomQb : t.fournisseurNomQb) || t.quickbooksId}
+                          {t.date ? ` · ${t.date}` : ""} · <span className="tabular-nums">{t.amountHT.toFixed(2)} $</span>
+                        </span>
+                        <button
+                          onClick={() => onAssignerTransaction(t.quickbooksId, null)}
+                          className="shrink-0 text-[10px] font-bold text-slate-500 underline"
+                        >
+                          Remettre à classer
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
           )}
@@ -6482,18 +6557,20 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
   // LIEN D'ACCEPTATION — crée le jeton au premier clic (pas à la
   // création du devis : inutile d'exposer un lien qu'on n'enverra
   // peut-être jamais), puis le copie dans le presse-papier.
-  // Expiration à 30 jours, comme la clause 1 sur la validité des prix.
+  // Le LIEN vit 1 an (des clients reviennent un an plus tard) ; la
+  // clause « prix valides 30 jours » se joue sur la page publique, qui
+  // ferme le bouton « Accepter » passé 30 jours.
   const [lienCopie, setLienCopie] = useState(null);
   const creerLienAcceptation = async (devis) => {
     let jeton = devis.jetonPublic;
     // ON REGÉNÈRE AUSSI UN JETON EXPIRÉ. Sans ça, recopier le lien d'un
-    // devis de plus de 30 jours redonnait l'ancien jeton : le client
-    // cliquait et tombait sur « Ce devis est expiré ». Quand on clique
-    // pour envoyer un lien, on veut un lien qui MARCHE.
+    // vieux devis redonnait l'ancien jeton : le client cliquait et
+    // tombait sur « Ce devis est expiré ». Quand on clique pour envoyer
+    // un lien, on veut un lien qui MARCHE.
     const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
     if (!jeton || perime) {
       jeton = genererJeton();
-      const expire = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const expire = new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString();
       const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
       try {
@@ -6504,8 +6581,8 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
       }
       ajouterJournal(
         perime
-          ? `🔗 Lien d'acceptation de ${devis.numero} EXPIRÉ — un nouveau lien a été créé (valide 30 jours). L'ancien ne fonctionne plus.`
-          : `🔗 Lien d'acceptation créé pour ${devis.numero} (valide 30 jours).`
+          ? `🔗 Lien d'acceptation de ${devis.numero} EXPIRÉ — un nouveau lien a été créé (valide 1 an). L'ancien ne fonctionne plus.`
+          : `🔗 Lien d'acceptation créé pour ${devis.numero} (valide 1 an — l'acceptation ferme après 30 jours, la consultation reste).`
       );
     }
     try {
@@ -6564,7 +6641,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
     const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
     if (!jeton || perime) {
       jeton = genererJeton();
-      const expire = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const expire = new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString();
       const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
       try {
@@ -6843,7 +6920,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
     // ENVOI RÉEL À LA CRÉATION — le détour « aller dans Devis récents
     // puis Envoyer par courriel » créait des oublis. Désormais : des
     // destinataires choisis = le courriel part TOUT DE SUITE, avec le
-    // lien d'acceptation (jeton généré ici, 30 jours, comme partout).
+    // lien d'acceptation (jeton généré ici, 1 an, comme partout).
     const jeton = destinataires.length > 0 ? genererJeton() : null;
     const nouveauDevis = {
       id: numero,
@@ -6862,7 +6939,7 @@ function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJo
       date: todayISO(),
       courrielEnvoi: destinataires[0]?.email || null,
       courrielsEnvoi: destinataires.map((c) => c.email),
-      ...(jeton ? { jetonPublic: jeton, jetonExpireLe: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() } : {}),
+      ...(jeton ? { jetonPublic: jeton, jetonExpireLe: new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString() } : {}),
       // Contrat d'entretien : fréquence portée par le devis lui-même,
       // reprise automatiquement à la création de la tâche.
       estContrat,
@@ -16741,6 +16818,10 @@ export default function App() {
   clientsRef.current = clients;
   const achatsLibresRef = useRef(achatsLibres);
   achatsLibresRef.current = achatsLibres;
+  // 📅 Miroir de la config — le sondage d'arrière-plan lit la
+  // date-plancher fraîche sans se réinstaller quand elle change.
+  const configEntRef = useRef(configEntreprise);
+  configEntRef.current = configEntreprise;
   useEffect(() => {
     if (!session) return;
     listerAttributionsQb()
@@ -16762,7 +16843,9 @@ export default function App() {
     // VRAIES transactions d'abord (route serveur — Sandbox tant que la
     // bascule production n'est pas faite). Repli honnête : tant que les
     // clés ne sont pas posées, la démo continue de fonctionner.
-    const reponse = await listerTransactionsQuickbooks();
+    // 📅 La date-plancher des Paramètres voyage avec la demande : rien
+    // n'est lu dans QuickBooks avant cette date.
+    const reponse = await listerTransactionsQuickbooks(configEntreprise?.qbLectureDepuis);
     let brutes;
     let sourceReelle = false;
     if (Array.isArray(reponse.transactions)) {
@@ -16786,6 +16869,27 @@ export default function App() {
     const manuelles = attributionsQbRef.current || {};
     const enrichies = brutes.map((t) => enrichirTransactionQb(t, manuelles, projets, clients, achatsLibres));
     setTransactionsQb(enrichies);
+    // 🔗 RACCORD DES FICHES PAR NOM (2026-08-28) : une facture dont le
+    // client QuickBooks porte le même nom qu'une fiche SANS lien pose le
+    // lien quickbooksCustomerId sur la fiche — les prochaines synchros
+    // (et les factures de dépôt) le trouveront directement.
+    try {
+      const dejaRaccordes = new Set();
+      for (const t of brutes) {
+        if (t.type !== "INVOICE" || !t.customerRefId || !t.clientNomQb) continue;
+        if (dejaRaccordes.has(t.customerRefId)) continue;
+        if (clients.some((c) => c.quickbooksCustomerId === t.customerRefId)) continue;
+        const fiche = clientQbDeTransaction({ clientNomQb: t.clientNomQb }, clients);
+        if (!fiche || fiche.quickbooksCustomerId) continue;
+        dejaRaccordes.add(t.customerRefId);
+        const ficheMaj = { ...fiche, quickbooksCustomerId: t.customerRefId };
+        setClients((prev) => prev.map((c) => (c.id === fiche.id ? ficheMaj : c)));
+        await sauvegarderClient(ficheMaj);
+        ajouterJournal(`🔗 Fiche « ${fiche.nom} » reliée à son client QuickBooks (nº ${t.customerRefId}) — appariement par nom.`);
+      }
+    } catch {
+      // le raccord est un bonus — un échec ne bloque jamais la synchro
+    }
     // ⚠️ Écarts de prix BC ↔ facture réelle : UNE ligne agrégée par
     // synchro manuelle (le sondage d'arrière-plan, lui, reste muet —
     // les badges s'allument d'eux-mêmes dans Pièces en commande).
@@ -16835,6 +16939,10 @@ export default function App() {
     );
     if (!valide) {
       ajouterJournal(`✋ Transaction QuickBooks ${quickbooksId} détachée — elle redevient à attribuer.`);
+      return;
+    }
+    if (valide.type === "hors") {
+      ajouterJournal(`🚫 Transaction QuickBooks ${quickbooksId} marquée « Hors Fluxya » — elle ne concerne aucune job (réversible dans le bloc des factures à rattacher).`);
       return;
     }
     const nom =
@@ -16922,7 +17030,7 @@ export default function App() {
       if (maintenant - sondageQbRef.current.derniereTransactions >= INTERVALLE_TRANSACTIONS) {
         sondageQbRef.current.derniereTransactions = maintenant;
         try {
-          const r = await listerTransactionsQuickbooks();
+          const r = await listerTransactionsQuickbooks(configEntRef.current?.qbLectureDepuis);
           if (annule || !Array.isArray(r?.transactions)) return;
           const manuelles = attributionsQbRef.current || {};
           setTransactionsQb(
