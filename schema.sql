@@ -3393,3 +3393,31 @@ begin
 end $$;
 delete from taches_attente where id = 'tache-seed1';
 select entreprise_id, count(*) as clients_restants from clients_app group by 1 order by 1;
+
+-- ============================================================
+-- 96 - FICHES D'EMPLOYES CONTAMINEES (le « doublon » de l'agenda)
+--      (2026-09-06) Ventilation Miroir affichait DEUX fois le
+--      proprietaire : sa vraie fiche (jflatour1985@gmail.com) ET une
+--      fiche DGL (jeanfrancois@ventilationdgl.com) tombee dans sa
+--      bulle pendant la fenetre du compte vole (faille inviter, deja
+--      colmatee). Le snippet 90 ne l'avait pas attrapee : il filtrait
+--      sur la colonne courriel, or la fiche auto-creee porte parfois
+--      un courriel vide — son ID, lui, contient toujours l'adresse.
+--      Ici on ratisse les DEUX (courriel ET id), pour toute entreprise
+--      autre que DGL. La meme personne ne peut plus etre doublee dans
+--      l'agenda ni les paies (garde-fou pose cote application aussi).
+-- ============================================================
+delete from repertoire_employes
+ where entreprise_id <> 'dgl'
+   and (lower(coalesce(courriel, '')) like '%@ventilationdgl.com'
+     or lower(coalesce(id, ''))       like '%@ventilationdgl.com');
+
+-- Meme menage cote autorisations (aucun effet sur DGL).
+delete from permissions_utilisateurs
+ where entreprise_id <> 'dgl'
+   and lower(coalesce(email, '')) like '%@ventilationdgl.com';
+
+-- Ce qui RESTE, entreprise par entreprise (verification a l'oeil) :
+select entreprise_id, nom, courriel, nom_utilisateur, coalesce(statut, 'actif') as statut
+  from repertoire_employes
+ order by entreprise_id, nom;

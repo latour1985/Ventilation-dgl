@@ -1061,10 +1061,37 @@ export default function App() {
   // employes desactives (2026-09-05) vivent dans le tiroir « Anciens
   // employes » d'Utilisateurs ; leurs heures PASSEES restent dans les
   // paies via les lignes de travaux elles-memes.
-  const utilisateursActifs = useMemo(
-    () => utilisateurs.filter((u) => (u.statut || "actif") !== "inactif"),
-    [utilisateurs]
-  );
+  // 👥 DÉDOUBLONNAGE PAR COURRIEL (2026-09-06 — « je suis toujours doublé
+  // dans l'agenda ») : deux fiches portant le MÊME courriel, c'est la
+  // même personne — elle ne doit apparaître qu'une fois dans l'agenda,
+  // les paies et les sélecteurs. On garde la plus complète (celle qui
+  // porte un métier / un niveau). Les fiches SANS courriel ne se
+  // dédoublonnent pas (rien ne prouve que c'est la même personne).
+  const utilisateursActifs = useMemo(() => {
+    const actifs = utilisateurs.filter((u) => (u.statut || "actif") !== "inactif");
+    const parCourriel = new Map();
+    const resultat = [];
+    actifs.forEach((u) => {
+      const cle = (u.courriel || "").trim().toLowerCase();
+      if (!cle) {
+        resultat.push(u);
+        return;
+      }
+      const dejaVu = parCourriel.get(cle);
+      if (!dejaVu) {
+        parCourriel.set(cle, u);
+        resultat.push(u);
+        return;
+      }
+      // Doublon : on garde la fiche la mieux remplie.
+      const score = (f) => (f.metier ? 2 : 0) + (f.niveau ? 1 : 0) + (f.telephone ? 1 : 0);
+      if (score(u) > score(dejaVu)) {
+        parCourriel.set(cle, u);
+        resultat[resultat.indexOf(dejaVu)] = u;
+      }
+    });
+    return resultat;
+  }, [utilisateurs]);
   const [tauxMetiers, setTauxMetiers] = useState(TAUX_METIERS_INIT);
   // Inspections & entretiens — VRAIES données Supabase (Phase 2). Le
   // chargement se fait plus bas, une fois la session déclarée.
