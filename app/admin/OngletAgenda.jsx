@@ -500,6 +500,21 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // curseur » : passer au-dessus du bloc lui-même ou d'un bloc voisin
       // renvoyait le numéro de SA première case → la tâche sautait à
       // 1 h puis se ré-étirait d'un coup.
+      //
+      // ⬅️ POIGNÉE DE GAUCHE (2026-08-28) : le bord DROIT reste figé et
+      // c'est l'HEURE DE DÉBUT qui bouge — « la job commence une heure
+      // plus tôt » sans avoir à déplacer le bloc puis l'étirer.
+      if (redim.cote === "gauche") {
+        const indexFin = redim.indexDebut + redim.spanInitial - 1;
+        const nbHeures = Math.max(1, Math.min(indexFin + 1, Math.ceil((redim.finX - e.clientX) / redim.largeurCase)));
+        const nouvelIndex = indexFin + 1 - nbHeures;
+        setRedim((prev) =>
+          prev && (prev.spanActuel !== nbHeures || prev.indexActuel !== nouvelIndex)
+            ? { ...prev, spanActuel: nbHeures, indexActuel: nouvelIndex }
+            : prev
+        );
+        return;
+      }
       const maxSpan = HEURES.length - redim.indexDebut;
       const nouveauSpan = Math.max(1, Math.min(maxSpan, Math.ceil((e.clientX - redim.origineX) / redim.largeurCase)));
       setRedim((prev) => (prev && prev.spanActuel !== nouveauSpan ? { ...prev, spanActuel: nouveauSpan } : prev));
@@ -508,7 +523,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     const surRelachement = () => {
       setRedim((actuel) => {
         if (actuel && actuel.spanActuel !== actuel.spanInitial) {
-          redimensionnerTache(actuel.tache, actuel.employeId, actuel.jourCible, actuel.heureDebut, actuel.spanActuel);
+          // Par la gauche, l'heure de début a bougé aussi —
+          // redimensionnerTache repose la tâche à partir de CETTE heure.
+          const indexDepart = actuel.indexActuel ?? actuel.indexDebut;
+          redimensionnerTache(actuel.tache, actuel.employeId, actuel.jourCible, HEURES[indexDepart], actuel.spanActuel);
         }
         return null;
       });
@@ -3801,11 +3819,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       const enRedimensionnement =
                         redim && redim.tache.id === seg.tache.id && redim.employeId === emp.id && redim.jourCible === jourKey;
                       const spanAffiche = enRedimensionnement ? redim.spanActuel : seg.span;
+                      // Par la poignée de GAUCHE, la colonne de départ bouge aussi.
+                      const indexAffiche =
+                        enRedimensionnement && redim.indexActuel != null ? redim.indexActuel : seg.index;
                       const peutRedimensionner = !lectureSeule && !seg.tache.est_tache_systeme && (seg.tache.jours ?? 0) < 1; // ni journée complète, ni tâche système, ni lecture seule
                       return (
                         <div
                           key={seg.tache.id}
-                          style={{ gridColumn: `${seg.index + 2} / span ${spanAffiche}`, gridRow: `${seg.piste + 1}` }}
+                          style={{ gridColumn: `${indexAffiche + 2} / span ${spanAffiche}`, gridRow: `${seg.piste + 1}` }}
                           onMouseMove={(e) => setSurvol({ tache: seg.tache, employe: emp, heure: h, x: e.clientX, y: e.clientY })}
                           onMouseLeave={() => setSurvol(null)}
                           onDragOver={(ev) => ev.preventDefault()}
@@ -3885,30 +3906,47 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                               )}
                             </span>
                           </button>
-                          {peutRedimensionner && (
-                            <div
-                              onPointerDown={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                // Mesure RÉELLE du bloc à l'écran : la durée suit
-                                // ensuite la distance parcourue par la souris.
-                                const rect = e.currentTarget.parentElement.getBoundingClientRect();
-                                setRedim({
-                                  tache: seg.tache,
-                                  employeId: emp.id,
-                                  jourCible: jourKey,
-                                  heureDebut: h,
-                                  indexDebut: seg.index,
-                                  spanInitial: seg.span,
-                                  spanActuel: seg.span,
-                                  origineX: rect.left,
-                                  largeurCase: rect.width / seg.span,
-                                });
-                              }}
-                              title="Glisser pour changer la durée"
-                              className="absolute right-0 top-0 h-full w-2.5 cursor-ew-resize touch-none rounded-r-lg hover:bg-black/10"
-                            />
-                          )}
+                          {peutRedimensionner && (() => {
+                            // Les DEUX poignées partagent la même mesure du bloc.
+                            const attraper = (cote) => (e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              // Mesure RÉELLE du bloc à l'écran : la durée suit
+                              // ensuite la distance parcourue par la souris.
+                              const rect = e.currentTarget.parentElement.getBoundingClientRect();
+                              setRedim({
+                                cote,
+                                tache: seg.tache,
+                                employeId: emp.id,
+                                jourCible: jourKey,
+                                heureDebut: h,
+                                indexDebut: seg.index,
+                                indexActuel: seg.index,
+                                spanInitial: seg.span,
+                                spanActuel: seg.span,
+                                origineX: rect.left,
+                                finX: rect.right,
+                                largeurCase: rect.width / seg.span,
+                              });
+                            };
+                            return (
+                              <>
+                                {/* ⬅️ Poignée GAUCHE : recule ou avance l'HEURE DE
+                                    DÉBUT, la fin reste où elle est. */}
+                                <div
+                                  onPointerDown={attraper("gauche")}
+                                  title="Glisser pour changer l'heure de début"
+                                  className="absolute left-0 top-0 h-full w-2.5 cursor-ew-resize touch-none rounded-l-lg hover:bg-black/10"
+                                />
+                                {/* ➡️ Poignée DROITE : change la durée, le début reste. */}
+                                <div
+                                  onPointerDown={attraper("droite")}
+                                  title="Glisser pour changer la durée"
+                                  className="absolute right-0 top-0 h-full w-2.5 cursor-ew-resize touch-none rounded-r-lg hover:bg-black/10"
+                                />
+                              </>
+                            );
+                          })()}
                         </div>
                       );
                     })}
