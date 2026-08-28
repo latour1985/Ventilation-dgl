@@ -47,13 +47,8 @@ export async function POST(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
-  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
-  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
-  // QuickBooks a elles. Refus net plutot que de servir les chiffres
-  // d'une autre entreprise.
-  if (entrepriseDuCompte(utilisateur) !== "dgl") {
-    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
-  }
+  // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
+  const entrepriseId = entrepriseDuCompte(utilisateur);
 
   // Un TECHNICIEN n'a rien à faire ici : les dépôts sont une affaire de
   // bureau (et son application ne montre aucun montant d'argent).
@@ -73,13 +68,16 @@ export async function POST(request) {
     .from("depots")
     .select("tache_id, statut, montant_ht, qbo_depot_invoice_id, qbo_depot_doc_number")
     .eq("statut", "en_attente_paiement")
+    // 🏢 Multi-QuickBooks : SEULEMENT les dépôts de l'entreprise du
+    // demandeur — son sondage ne vérifie jamais les factures des autres.
+    .eq("entreprise_id", entrepriseId)
     .not("qbo_depot_invoice_id", "is", null);
   if (error) return Response.json({ erreur: error.message }, { status: 502 });
   if (!enAttente || enAttente.length === 0) return Response.json({ verifies: 0, payes: [] });
 
   let acces;
   try {
-    acces = await jetonAccesValide();
+    acces = await jetonAccesValide(entrepriseId);
   } catch {
     return Response.json({ nonConnecte: true });
   }
@@ -129,6 +127,7 @@ export async function POST(request) {
       })
       .eq("tache_id", d.tache_id)
       .eq("statut", "en_attente_paiement")
+      .eq("entreprise_id", entrepriseId)
       .select("tache_id");
     if (e2 || !maj || maj.length === 0) continue;
 

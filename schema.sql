@@ -3576,3 +3576,23 @@ as $$
   where b.jeton_public = p_jeton;
 $$;
 grant execute on function bon_travail_public(text) to anon, authenticated;
+
+-- ============================================================
+-- 98 - UN QUICKBOOKS PAR ENTREPRISE (2026-09-08)
+-- ------------------------------------------------------------
+-- GO du proprietaire : « assure-toi que chaque client a son QuickBooks
+-- separe et independant de tous ». Avant : UNE connexion pour toute la
+-- plateforme (unique par environnement), verrouillee « DGL seulement ».
+-- Maintenant : une ligne PAR entreprise — son realm, ses jetons, son
+-- environnement (sandbox/production peuvent coexister). Les routes
+-- serveur ne servent que la connexion de l'entreprise du demandeur.
+-- ============================================================
+alter table quickbooks_connexion add column if not exists entreprise_id text not null default 'dgl';
+-- L'ancienne unicite « une ligne par environnement » saute — elle
+-- interdirait a deux entreprises d'etre en sandbox en meme temps…
+alter table quickbooks_connexion drop constraint if exists quickbooks_connexion_environnement_key;
+alter table quickbooks_connexion drop constraint if exists quickbooks_connexion_pkey cascade;
+-- …remplacee par : UNE connexion par entreprise (nouvelle cle primaire).
+alter table quickbooks_connexion add primary key (entreprise_id);
+-- Verification : la connexion existante doit etre etiquetee dgl.
+select entreprise_id, environnement, realm_id, updated_at from quickbooks_connexion;

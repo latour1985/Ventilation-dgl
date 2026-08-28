@@ -29,9 +29,12 @@ export async function GET(request) {
   if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
-  if (entrepriseDuCompte(utilisateur) !== "dgl") {
-    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte à votre entreprise." }, { status: 403 });
-  }
+  // 🏢 MULTI-QUICKBOOKS (2026-09-08) : le verrou « DGL seulement » du
+  // grand soir saute — CHAQUE entreprise branche maintenant SON propre
+  // QuickBooks. L'identité de l'entreprise voyage dans le cookie
+  // anti-CSRF : le callback rangera les jetons dans SA case, jamais
+  // celle d'une autre.
+  const entrepriseId = entrepriseDuCompte(utilisateur);
   if (!configQuickbooksPresente()) {
     return Response.json(
       { erreur: "QuickBooks n'est pas configuré — pose QB_CLIENT_ID, QB_CLIENT_SECRET et SUPABASE_SERVICE_ROLE_KEY d'abord." },
@@ -52,8 +55,11 @@ export async function GET(request) {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      // 10 minutes pour compléter l'écran Intuit — large.
-      "Set-Cookie": `qb_state=${state}; Path=/api/quickbooks; HttpOnly; SameSite=Lax; Max-Age=600`,
+      // 10 minutes pour compléter l'écran Intuit — large. Le cookie
+      // porte `state:entreprise` — le state venant d'Intuit doit
+      // correspondre, ET l'entreprise vient du cookie HttpOnly (jamais
+      // d'un paramètre que quelqu'un pourrait forger).
+      "Set-Cookie": `qb_state=${state}:${entrepriseId}; Path=/api/quickbooks; HttpOnly; SameSite=Lax; Max-Age=600`,
     },
   });
 }

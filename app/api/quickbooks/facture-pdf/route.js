@@ -16,13 +16,8 @@ export async function GET(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
-  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
-  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
-  // QuickBooks a elles. Refus net plutot que de servir les chiffres
-  // d'une autre entreprise.
-  if (entrepriseDuCompte(utilisateur) !== "dgl") {
-    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
-  }
+  // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
+  const entrepriseId = entrepriseDuCompte(utilisateur);
   if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
@@ -33,7 +28,7 @@ export async function GET(request) {
 
   let acces;
   try {
-    acces = await jetonAccesValide();
+    acces = await jetonAccesValide(entrepriseId);
   } catch (e) {
     return Response.json({ erreur: `Jeton QuickBooks : ${e?.message || "erreur"}` }, { status: 502 });
   }

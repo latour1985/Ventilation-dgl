@@ -41,13 +41,8 @@ export async function POST(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
-  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
-  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
-  // QuickBooks a elles. Refus net plutot que de servir les chiffres
-  // d'une autre entreprise.
-  if (entrepriseDuCompte(utilisateur) !== "dgl") {
-    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
-  }
+  // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
+  const entrepriseId = entrepriseDuCompte(utilisateur);
   // Les techniciens n'émettent pas de factures — tous les rôles de
   // bureau (admins, répartiteur...) le peuvent : ce sont eux qui créent
   // les appels de service.
@@ -65,7 +60,7 @@ export async function POST(request) {
 
   let acces;
   try {
-    acces = await jetonAccesValide();
+    acces = await jetonAccesValide(entrepriseId);
   } catch (e) {
     return Response.json({ erreur: `Jeton QuickBooks : ${e?.message || "erreur"}` }, { status: 502 });
   }
@@ -103,7 +98,8 @@ export async function POST(request) {
     const [customerId, itemId, entreprise] = await Promise.all([
       clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
       articleServiceQboPour(acces),
-      admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels, note_facture").limit(1).maybeSingle(),
+      // Scopé à L'ENTREPRISE DU DEMANDEUR (multi-QuickBooks 2026-09-08).
+      admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels, note_facture").eq("id", entrepriseId).maybeSingle(),
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
@@ -140,7 +136,7 @@ export async function POST(request) {
           .join("\n\n");
         return memo ? { CustomerMemo: { value: memo.slice(0, 900) } } : {};
       })()),
-      PrivateNote: `Dépôt d'appel de service — tâche ${corps?.tacheId || "?"} — créé par l'application Ventilation DGL`,
+      PrivateNote: `Dépôt d'appel de service — tâche ${corps?.tacheId || "?"} — créé par l'application Fluxya`,
       AllowOnlineCreditCardPayment: carteOfferte,
       AllowOnlineACHPayment: virementOffert,
       Line: [
@@ -177,7 +173,7 @@ export async function POST(request) {
       carteOfferte,
       virementOffert,
       envoiQb,
-      environnement: environnementQb(),
+      environnement: acces.environnement,
     });
   } catch (e) {
     return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });

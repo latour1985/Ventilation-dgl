@@ -70,20 +70,15 @@ export async function GET(request) {
   if (!utilisateur) {
     return Response.json({ erreur: "Connexion requise." }, { status: 401 });
   }
-  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
-  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
-  // QuickBooks a elles. Refus net plutot que de servir les chiffres
-  // d'une autre entreprise.
-  if (entrepriseDuCompte(utilisateur) !== "dgl") {
-    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
-  }
+  // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
+  const entrepriseId = entrepriseDuCompte(utilisateur);
   if (!configQuickbooksPresente()) {
     return Response.json({ simule: true });
   }
 
   let acces;
   try {
-    acces = await jetonAccesValide();
+    acces = await jetonAccesValide(entrepriseId);
   } catch (e) {
     return Response.json({ erreur: `Renouvellement du jeton refusé : ${e?.message || "erreur"}` }, { status: 502 });
   }

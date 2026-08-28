@@ -9,7 +9,7 @@
 //      du navigateur),
 //   4. on renvoie l'admin vers /admin avec un petit mot de confirmation.
 
-import { configQuickbooksPresente, echangerJetonsIntuit, sauverConnexionQb, urlRedirectionQb } from "@/lib/quickbooksServeur";
+import { configQuickbooksPresente, echangerJetonsIntuit, sauverConnexionQb, urlRedirectionQb, environnementQb } from "@/lib/quickbooksServeur";
 
 function pageRetour(titre, detail, ok) {
   // Page minimaliste : le callback arrive dans l'onglet du navigateur,
@@ -37,22 +37,32 @@ export async function GET(request) {
   const realmId = url.searchParams.get("realmId");
   const state = url.searchParams.get("state");
   const cookies = request.headers.get("cookie") || "";
-  const stateAttendu = /(?:^|;\s*)qb_state=([^;]+)/.exec(cookies)?.[1];
+  // 🏢 MULTI-QUICKBOOKS (2026-09-08) : le cookie porte `state:entreprise`
+  // — l'entreprise vient du cookie HttpOnly posé au départ de la
+  // connexion (jamais d'un paramètre d'URL forgeable). Les jetons se
+  // rangent dans SA case.
+  const brutCookie = /(?:^|;\s*)qb_state=([^;]+)/.exec(cookies)?.[1] || "";
+  const [stateAttendu, entrepriseId] = brutCookie.split(":");
 
   if (!code || !realmId) {
     return pageRetour("Connexion annulée", "Intuit n'a pas fourni de code d'autorisation. Réessaie depuis l'application.", false);
   }
-  if (!state || !stateAttendu || state !== stateAttendu) {
+  if (!state || !stateAttendu || state !== stateAttendu || !entrepriseId) {
     return pageRetour("Demande non reconnue", "Le jeton de sécurité ne correspond pas — recommence la connexion depuis l'application.", false);
   }
 
   try {
+    // Une NOUVELLE connexion part dans l'environnement par défaut de la
+    // plateforme (variable Vercel) — chaque connexion mémorise le sien.
+    const env = environnementQb();
     const jetons = await echangerJetonsIntuit({
       grant_type: "authorization_code",
       code,
       redirect_uri: urlRedirectionQb(request),
-    });
+    }, env);
     await sauverConnexionQb({
+      entrepriseId,
+      environnement: env,
       realmId,
       accessToken: jetons.access_token,
       refreshToken: jetons.refresh_token,

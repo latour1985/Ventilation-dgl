@@ -14,22 +14,20 @@ export async function GET(request) {
   if (!utilisateur) {
     return Response.json({ erreur: "Connexion requise." }, { status: 401 });
   }
-  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
-  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
-  // QuickBooks a elles. Refus net plutot que de servir les chiffres
-  // d'une autre entreprise.
-  if (entrepriseDuCompte(utilisateur) !== "dgl") {
-    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
-  }
+  // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
+  const entrepriseId = entrepriseDuCompte(utilisateur);
   if (!configQuickbooksPresente()) {
     return Response.json({ configure: false, connecte: false, environnement: environnementQb() });
   }
   try {
-    const connexion = await lireConnexionQb();
+    const connexion = await lireConnexionQb(entrepriseId);
     return Response.json({
       configure: true,
       connecte: !!connexion && new Date(connexion.refresh_expire_a).getTime() > Date.now(),
-      environnement: environnementQb(),
+      // L'environnement de SA connexion (production/sandbox peuvent
+      // coexister d'une entreprise à l'autre) — le défaut global sert
+      // seulement tant que rien n'est branché.
+      environnement: connexion?.environnement || environnementQb(),
       realmId: connexion?.realm_id || null,
       expireLe: connexion?.refresh_expire_a || null,
     });

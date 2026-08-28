@@ -33,13 +33,8 @@ export async function POST(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
-  // 🔐 GRAND SOIR (2026-09-04) : la comptabilite branchee est celle de
-  // DGL — les entreprises d'essai n'ont pas (encore) de connexion
-  // QuickBooks a elles. Refus net plutot que de servir les chiffres
-  // d'une autre entreprise.
-  if (entrepriseDuCompte(utilisateur) !== "dgl") {
-    return Response.json({ erreur: "La connexion comptable n'est pas encore offerte a votre entreprise." }, { status: 403 });
-  }
+  // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
+  const entrepriseId = entrepriseDuCompte(utilisateur);
   if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
@@ -80,7 +75,7 @@ export async function POST(request) {
 
   let acces;
   try {
-    acces = await jetonAccesValide();
+    acces = await jetonAccesValide(entrepriseId);
   } catch (e) {
     return Response.json({ erreur: `Jeton QuickBooks : ${e?.message || "erreur"}` }, { status: 502 });
   }
@@ -135,8 +130,11 @@ export async function POST(request) {
       ...(await (async () => {
         let note = "";
         try {
-          const { data } = await clientSupabaseService().from("entreprises").select("note_facture").order("created_at").limit(1);
-          note = data?.[0]?.note_facture || "";
+          // Scopé à L'ENTREPRISE DU DEMANDEUR (multi-QuickBooks
+          // 2026-09-08) : .limit(1) sans filtre prenait la note de la
+          // PREMIÈRE compagnie de la table.
+          const { data } = await clientSupabaseService().from("entreprises").select("note_facture").eq("id", entrepriseId).maybeSingle();
+          note = data?.note_facture || "";
         } catch {
           // note indisponible — la facture part sans, jamais bloquée
         }
@@ -200,7 +198,7 @@ export async function POST(request) {
       docNumber: facture?.DocNumber || null,
       lienPaiement: facture?.InvoiceLink || null,
       envoiQb,
-      environnement: environnementQb(),
+      environnement: acces.environnement,
     });
   } catch (e) {
     return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });
