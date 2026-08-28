@@ -22,7 +22,9 @@ import {
   ecrireQbo,
   echapperQbo,
   clientQboPour,
-  articleServiceQboPour, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+  articleServiceQboPour,
+  codeTaxeVente,
+  proprietesTaxe, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -121,9 +123,12 @@ export async function POST(request) {
 
   try {
     const admin = clientSupabaseService();
-    const [customerId, itemId] = await Promise.all([
+    const [customerId, itemId, codeTaxe] = await Promise.all([
       clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
       articleServiceQboPour(acces),
+      // 🍁 Code de taxe du fichier — un fichier canadien exige un code
+      // sur chaque ligne, devis compris (2026-09-09).
+      codeTaxeVente(acces),
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
@@ -132,11 +137,18 @@ export async function POST(request) {
       CustomerRef: { value: customerId },
       DocNumber: numero.slice(0, 21), // limite QBO
       PrivateNote: `Devis ${numero} — créé par l'application Ventilation DGL`,
+      // 🍁 Montants HORS TAXES — QuickBooks ajoute TPS/TVQ.
+      ...proprietesTaxe(codeTaxe),
       Line: lignes.map((l) => ({
         DetailType: "SalesItemLineDetail",
         Amount: Math.round(l.quantite * l.prixUnitaire * 100) / 100,
         Description: l.description,
-        SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: l.quantite, UnitPrice: l.prixUnitaire },
+        SalesItemLineDetail: {
+          ItemRef: { value: itemId },
+          Qty: l.quantite,
+          UnitPrice: l.prixUnitaire,
+          ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
+        },
       })),
     };
 

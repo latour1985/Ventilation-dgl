@@ -31,6 +31,8 @@ import {
   echapperQbo,
   clientQboPour,
   articleServiceQboPour,
+  codeTaxeVente,
+  proprietesTaxe,
   envoyerFactureParQb,
   environnementQb, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 // (Les helpers d'écriture vivent dans quickbooksServeur.js — partagés
@@ -95,11 +97,15 @@ export async function POST(request) {
 
   try {
     const admin = clientSupabaseService();
-    const [customerId, itemId, entreprise] = await Promise.all([
+    const [customerId, itemId, entreprise, codeTaxe] = await Promise.all([
       clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
       articleServiceQboPour(acces),
       // Scopé à L'ENTREPRISE DU DEMANDEUR (multi-QuickBooks 2026-09-08).
       admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels, note_facture").eq("id", entrepriseId).maybeSingle(),
+      // 🍁 Code de taxe du fichier — OBLIGATOIRE au Canada (2026-09-09) :
+      // sans lui, le fichier réel REFUSE la facture de dépôt et la
+      // création de tâche avec dépôt échoue. Null sur un fichier US.
+      codeTaxeVente(acces),
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
@@ -122,6 +128,9 @@ export async function POST(request) {
     const cree = await ecrireQbo(acces, "invoice?include=invoiceLink", {
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
+      // 🍁 Le dépôt est HORS TAXES — QuickBooks ajoute TPS/TVQ dessus,
+      // comme le courriel au client l'annonce déjà.
+      ...proprietesTaxe(codeTaxe),
       // ENVOI PAR QUICKBOOKS (2026-08-17) : les courriels choisis et
       // notre message de réservation voyagent SUR la facture — le
       // client reçoit la facture officielle avec notre contexte dedans.
@@ -144,7 +153,12 @@ export async function POST(request) {
           DetailType: "SalesItemLineDetail",
           Amount: montantHT,
           Description: description,
-          SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: 1, UnitPrice: montantHT },
+          SalesItemLineDetail: {
+            ItemRef: { value: itemId },
+            Qty: 1,
+            UnitPrice: montantHT,
+            ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
+          },
         },
       ],
     });

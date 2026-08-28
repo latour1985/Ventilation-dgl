@@ -25,6 +25,8 @@ import {
   ecrireQbo,
   clientQboPour,
   articleServiceQboPour,
+  codeTaxeVente,
+  proprietesTaxe,
   envoyerFactureParQb,
   environnementQb, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 
@@ -83,9 +85,12 @@ export async function POST(request) {
 
   try {
     const admin = clientSupabaseService();
-    const [customerId, itemId] = await Promise.all([
+    const [customerId, itemId, codeTaxe] = await Promise.all([
       clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
       articleServiceQboPour(acces),
+      // 🍁 Code de taxe du fichier (TPS/TVQ) — OBLIGATOIRE au Canada,
+      // absent d'un fichier américain type Sandbox (voir quickbooksServeur).
+      codeTaxeVente(acces),
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
@@ -114,12 +119,19 @@ export async function POST(request) {
             DetailType: "SalesItemLineDetail",
             Amount: l.montant,
             Description: l.description,
-            SalesItemLineDetail: { ItemRef: { value: itemId }, Qty: 1, UnitPrice: l.montant },
+            SalesItemLineDetail: {
+              ItemRef: { value: itemId },
+              Qty: 1,
+              UnitPrice: l.montant,
+              ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
+            },
           };
 
     const corpsFacture = async (texteSeulement) => ({
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
+      // 🍁 Nos montants sont HORS TAXES — QuickBooks ajoute TPS/TVQ.
+      ...proprietesTaxe(codeTaxe),
       ...(envoyerA.length > 0 ? { BillEmail: { Address: envoyerA.join(", ") } } : {}),
       // Notre MESSAGE au client — il apparaît sur la facture et dans le
       // courriel QuickBooks (contexte : réservation, délai, référence).
