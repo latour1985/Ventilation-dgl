@@ -35,7 +35,9 @@ export async function GET(request) {
   if (!acces) return Response.json({ nonConnecte: true });
 
   try {
-    const url = `${urlBaseApiQb()}/v3/company/${acces.realmId}/invoice/${factureId}/pdf?minorversion=75`;
+    // ⚠️ L'ENVIRONNEMENT DE LA CONNEXION, jamais le défaut : sans lui,
+    // une entreprise en production irait chercher son PDF au Sandbox.
+    const url = `${urlBaseApiQb(acces.environnement)}/v3/company/${acces.realmId}/invoice/${factureId}/pdf?minorversion=75`;
     const reponse = await fetch(url, {
       headers: { Authorization: `Bearer ${acces.accessToken}`, Accept: "application/pdf" },
       cache: "no-store",

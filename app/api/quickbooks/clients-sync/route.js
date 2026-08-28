@@ -74,10 +74,11 @@ async function descendreClientsQbo(acces, admin, entrepriseId) {
   const clientsQb = [];
   const PAGE = 500;
   for (let depart = 1; ; depart += PAGE) {
-    const lu = await requeteQbo(
-      acces,
-      `select Id, DisplayName, CompanyName, PrimaryEmailAddr, PrimaryPhone, BillAddr from Customer startposition ${depart} maxresults ${PAGE}`
-    );
+    // « select * » obligatoire : la PRODUCTION QuickBooks refuse de
+    // nommer un champ imbriqué (« Property BillAddr not found ») alors
+    // que le Sandbox le tolérait — découvert au premier vrai fichier
+    // (2026-09-09, intuit_tid 1-6a91d886-443106f062aff6081a5c7e9f).
+    const lu = await requeteQbo(acces, `select * from Customer startposition ${depart} maxresults ${PAGE}`);
     const page = lu?.Customer || [];
     clientsQb.push(...page);
     if (page.length < PAGE) break;
