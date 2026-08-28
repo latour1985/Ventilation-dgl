@@ -3370,3 +3370,26 @@ update journal_activite set entreprise_id = 'dgl'
      or texte like '%Marc Gagnon%'
      or texte like '%Descente des clients QuickBooks%');
 select entreprise_id, count(*) as entrees from journal_activite group by 1 order by 1;
+
+-- ============================================================
+-- 95 - MENAGE DES CLIENTS DE DEMONSTRATION PERSISTES (2026-09-06)
+--      « Toitures Lavallee inc. » et « Residence Tremblay » (nos
+--      donnees de test d'origine, QBO-1001/1002) vivaient encore
+--      comme VRAIES lignes dans clients_app de DGL — persistees par
+--      les vieux flux de demo. Les sources de demo dans le code sont
+--      toutes purgees (commit du meme jour) ; ce snippet efface les
+--      lignes deja en base, ainsi que la tache-semence de demo.
+delete from clients_app
+ where nom in ('Toitures Lavallée inc.', 'Résidence Tremblay');
+-- (la clause par numero QuickBooks est GARDEE par un test d'existence de
+--  colonne — la vraie base derive parfois de schema.sql, lecon apprise)
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'clients_app'
+               and column_name = 'quickbooks_customer_id') then
+    delete from clients_app where quickbooks_customer_id in ('QBO-1001', 'QBO-1002');
+  end if;
+end $$;
+delete from taches_attente where id = 'tache-seed1';
+select entreprise_id, count(*) as clients_restants from clients_app group by 1 order by 1;

@@ -84,51 +84,23 @@ const DEPOT_ADRESSE = {
 // Matrix (ou équivalent), qui retourne une durée routière réelle.
 const VITESSE_MOYENNE_ESTIMATION_KMH = 45;
 
-const CLIENTS = [
-  {
-    id: "c1",
-    nom: "Toitures Lavallée inc.",
-    adresses: [
-      { id: "a1", nom: "Entrepôt principal", ligne1: "1450 rue Bélanger, Montréal, QC", defaut: true, lat: 45.5495, lng: -73.6198 },
-      { id: "a2", nom: "Chantier Nord", ligne1: "88 boul. des Laurentides, Laval, QC", defaut: false, lat: 45.5610, lng: -73.7420 },
-    ],
-  },
-  {
-    id: "c2",
-    nom: "Résidence Tremblay",
-    adresses: [
-      { id: "a3", nom: "Domicile", ligne1: "22 rue des Érables, Longueuil, QC", defaut: true, lat: 45.5312, lng: -73.5185 },
-    ],
-  },
-];
+// 🧹 Données de démonstration PURGÉES (2026-09-06) : Toitures Lavallée /
+// Résidence Tremblay et les faux produits resurgissaient chez toute
+// nouvelle entreprise. Tout vient de Supabase (tâches assignées avec
+// leur client embarqué — le repli « client absent de la liste locale »
+// affiche le nom + téléphone, déjà en place).
+const CLIENTS = [];
 
-const PRODUITS_CATALOGUE = [
-  { id: "p1", nom: "Main d'œuvre (heure)", prix_vendant: 95.0 },
-  { id: "p2", nom: "Filtre standard 20x25", prix_vendant: 34.5 },
-  { id: "p3", nom: "Thermostat programmable", prix_vendant: 189.0 },
-  { id: "p4", nom: "Déplacement urgence", prix_vendant: 65.0 },
-];
+const PRODUITS_CATALOGUE = [];
 
 // Taux utilisés pour estimer le coût du déplacement (à déplacer dans
 // une table de configuration Supabase — ex: table `parametres_paie`).
 const TAUX_KM = 0.68; // $/km
 const TAUX_HORAIRE_DEPLACEMENT = 45.0; // $/heure
 
-const TACHES_INITIALES = [
-  // --- Aujourd'hui (jourOffset 0) : la journée complète ---
-  { id: "transport-debut", type: "transport", momentTransport: "debut", heure: "08:00", titre: "Transport — Début de journée", jourOffset: 0 },
-  { id: "t1", type: "travail", heure: "08:30", clientId: "c1", adresseId: "a1", projetId: "proj1", typeIntervention: "Installation", jourOffset: 0 },
-  { id: "t2", type: "travail", heure: "11:00", clientId: "c2", adresseId: "a3", projetId: null, typeIntervention: "Réparation", jourOffset: 0 },
-  { id: "t3", type: "travail", heure: "14:00", clientId: "c1", adresseId: "a2", projetId: "proj1", typeIntervention: "Entretien", jourOffset: 0 },
-  { id: "transport-fin", type: "transport", momentTransport: "fin", heure: "16:30", titre: "Transport — Fin de journée", jourOffset: 0 },
-  // --- Demain (jourOffset 1) ---
-  { id: "t4", type: "travail", heure: "09:00", clientId: "c1", adresseId: "a2", projetId: "proj1", typeIntervention: "Installation", jourOffset: 1 },
-  { id: "t5", type: "travail", heure: "13:30", clientId: "c2", adresseId: "a3", projetId: null, typeIntervention: "Entretien", jourOffset: 1 },
-  // --- Après-demain (jourOffset 2) ---
-  { id: "t6", type: "travail", heure: "10:00", clientId: "c1", adresseId: "a1", projetId: "proj1", typeIntervention: "Réparation", jourOffset: 2 },
-  // --- Hier (jourOffset -1) ---
-  { id: "t7", type: "travail", heure: "11:30", clientId: "c2", adresseId: "a3", projetId: null, typeIntervention: "Inspection", jourOffset: -1 },
-];
+// 🧹 Journées de démonstration PURGÉES (2026-09-06) — la journée d'un
+// technicien vient de l'agenda de SON entreprise (Supabase), sinon vide.
+const TACHES_INITIALES = [];
 
 // Clé utilisée pour la persistance locale des tâches (mode hors-ligne).
 // ⚠️ localStorage n'est pas disponible dans l'aperçu Artifact de
@@ -4837,28 +4809,32 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           </div>
 
           {!lectureSeule && (
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <div className="relative">
-                <select
-                  onChange={(e) => {
-                    const produit = PRODUITS_CATALOGUE.find((p) => p.id === e.target.value);
-                    if (produit) ajouterProduit(produit);
-                    e.target.value = "";
-                  }}
-                  defaultValue=""
-                  className="w-full appearance-none rounded-xl border border-slate-300 bg-white py-2.5 pl-3 pr-8 text-xs font-bold text-slate-700"
-                >
-                  <option value="" disabled>
-                    + Ajouter du catalogue
-                  </option>
-                  {PRODUITS_CATALOGUE.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nom} — {p.prix_vendant.toFixed(2)} $
+            <div className={`mt-2 grid gap-2 ${PRODUITS_CATALOGUE.length > 0 ? "grid-cols-2" : "grid-cols-1"}`}>
+              {/* Le sélecteur de catalogue ne s'affiche que s'il y a un
+                  catalogue (les faux produits de démo sont purgés). */}
+              {PRODUITS_CATALOGUE.length > 0 && (
+                <div className="relative">
+                  <select
+                    onChange={(e) => {
+                      const produit = PRODUITS_CATALOGUE.find((p) => p.id === e.target.value);
+                      if (produit) ajouterProduit(produit);
+                      e.target.value = "";
+                    }}
+                    defaultValue=""
+                    className="w-full appearance-none rounded-xl border border-slate-300 bg-white py-2.5 pl-3 pr-8 text-xs font-bold text-slate-700"
+                  >
+                    <option value="" disabled>
+                      + Ajouter du catalogue
                     </option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-              </div>
+                    {PRODUITS_CATALOGUE.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nom} — {p.prix_vendant.toFixed(2)} $
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                </div>
+              )}
               <Button variant="outline" onClick={ajouterHorsCatalogue} className="min-h-0 py-2.5 text-xs">
                 <Plus size={14} /> Item hors catalogue
               </Button>

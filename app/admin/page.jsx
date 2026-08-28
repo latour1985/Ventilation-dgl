@@ -139,20 +139,10 @@ async function fetchQuickBooksTransactions() {
   //   plus bas). C'est LE SEUL champ utilisé pour filtrer les
   //   transactions d'un projet dans calculerRentabiliteProjet — jamais
   //   les champs bruts, qui ne sont que les entrées du mapping.
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  return [
-    // Facture de vente liée au client "Toitures Lavallée inc." via son
-    // CustomerRef QuickBooks (QBO-1001) — correspondance Règle 1.
-    { quickbooksId: "QBO-INV-501", type: "INVOICE", customerRefId: "QBO-1001", qbProjectRef: null, poNumber: null, amountHT: 4250.0, amountTTC: 4886.29, status: "PAID", date: "2026-06-15" },
-    // Dépense fournisseur portant le numéro de BC "BC-1001" — aucun
-    // CustomerRef, donc correspondance par Règle 2 (numéro de BC).
-    { quickbooksId: "QBO-EXP-812", type: "EXPENSE", customerRefId: null, qbProjectRef: null, poNumber: "BC-1001", amountHT: 6200.0, amountTTC: 7128.15, status: "PAID", date: "2026-06-05" },
-    // Dépense dont le numéro de BC ne correspond à aucun projet connu
-    // — tombe dans "Factures QuickBooks non assignées".
-    { quickbooksId: "QBO-EXP-813", type: "EXPENSE", customerRefId: null, qbProjectRef: null, poNumber: "BC-9999", amountHT: 340.0, amountTTC: 390.83, status: "DUE", date: "2026-07-01" },
-    // Facture sans CustomerRef ni numéro de BC reconnu — non assignée.
-    { quickbooksId: "QBO-INV-502", type: "INVOICE", customerRefId: null, qbProjectRef: null, poNumber: null, amountHT: 890.0, amountTTC: 1023.53, status: "UNPAID", date: "2026-07-10" },
-  ];
+  // 🧹 Données de démonstration PURGÉES (2026-09-06 — les fausses
+  // factures QBO-INV-501… resurgissaient chez toute entreprise sans
+  // vraie connexion QuickBooks). Sans clés : AUCUNE transaction.
+  return [];
 }
 
 // ============================================================
@@ -1113,9 +1103,7 @@ export default function App() {
       }))
       .sort((a, b) => b.jours - a.jours);
   }, [travaux, devisListe]);
-  const [tachesAttente, setTachesAttente] = useState([
-    { id: "tache-seed1", clientNom: "Toitures Lavallée inc.", titre: "Réfection toiture - Chantier Nord", description: "3 × Membrane élastomère, 12 × Bardeau architectural", statut: "a_planifier", heures: 4, jours: 2, sauterWeekend: true, typeTache: "temps_materiel" },
-  ]);
+  const [tachesAttente, setTachesAttente] = useState([]); // 🧹 tâche-semence de démo PURGÉE (2026-09-06)
   const [planning, setPlanning] = useState({});
   const [bons, setBons] = useState(BONS_TRAVAIL_COMPLETES_INIT);
   // Répertoire des fournisseurs (matériaux, location, sous-traitance) —

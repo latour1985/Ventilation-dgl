@@ -513,10 +513,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const supprimerLigne = (uid) => setLignes((prev) => prev.filter((l) => l.uid !== uid));
 
   const enregistrerAdresse = (place) => {
-    if (!nouvelleAdresseNom.trim()) return;
+    // Le petit nom est FACULTATIF (correctif 2026-09-06 : quand il était
+    // vide, choisir une suggestion Google ne faisait RIEN, en silence —
+    // « l'adresse n'apparaît pas »). Sans petit nom : l'adresse elle-même.
     const nouvelle = {
       id: `a-${Date.now()}`,
-      nom: nouvelleAdresseNom,
+      nom: nouvelleAdresseNom.trim() || place.label,
       ligne1: place.label,
       ...(nouvelleAdresseNomUnite.trim() ? { appartement: nouvelleAdresseNomUnite.trim() } : {}),
       codePostal: place.codePostal,
@@ -1034,21 +1036,24 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
               retrait de la présélection, 2026-08-17). */}
           {client && (
             <div className="rounded-xl bg-slate-50 p-3">
-              <label className="mb-1 block text-xs font-bold text-slate-500">Ajouter une adresse au dossier client</label>
+              {/* 📍 L'ADRESSE D'ABORD (correctif 2026-09-06 : le champ
+                  Google était le 3e — les gens tapaient l'adresse dans
+                  « Nom de l'adresse » et rien n'apparaissait). */}
+              <label className="mb-1 block text-xs font-bold text-slate-500">📍 Ajouter une adresse au dossier client — tape-la ici et CHOISIS dans la liste</label>
+              <AutocompleteAdresse onSelection={enregistrerAdresse} />
               <input
                 value={nouvelleAdresseNom}
                 onChange={(e) => setNouvelleAdresseNom(e.target.value)}
-                placeholder="Nom de l'adresse (ex: Chantier Sud)"
-                className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                placeholder="Petit nom de l'adresse (facultatif — ex: Chantier Sud)"
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
               <input
                 value={nouvelleAdresseNomUnite}
                 onChange={(e) => setNouvelleAdresseNomUnite(e.target.value)}
                 placeholder="App. / bureau / casier postal (facultatif)"
-                className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
-              <AutocompleteAdresse onSelection={enregistrerAdresse} />
-              <p className="mt-1 text-[11px] text-slate-400">Sélectionner un résultat enregistre l'adresse au dossier de {client.nom}.</p>
+              <p className="mt-1 text-[11px] text-slate-400">Choisir un résultat enregistre l&apos;adresse au dossier de {client.nom} (avec le petit nom s&apos;il est rempli).</p>
             </div>
           )}
 
