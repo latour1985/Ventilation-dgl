@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { deverrouillerApresReinitialisation } from "@/lib/connexionSurveillee";
 import Logo from "@/components/Logo";
+import ChampMotDePasse from "@/components/ChampMotDePasse";
 
 export default function ChoisirMotDePasse() {
   const [etat, setEtat] = useState("verification"); // verification | a_confirmer | pret | verification_en_cours | enregistrement | reussi | sans_session
@@ -137,8 +138,7 @@ export default function ChoisirMotDePasse() {
             <p className="text-sm text-slate-600">Choisis ton mot de passe pour l&apos;application :</p>
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Nouveau mot de passe (8 caractères et plus)</label>
-              <input
-                type="password"
+              <ChampMotDePasse
                 value={motDePasse}
                 onChange={(e) => setMotDePasse(e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
@@ -146,8 +146,7 @@ export default function ChoisirMotDePasse() {
             </div>
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Répète le mot de passe</label>
-              <input
-                type="password"
+              <ChampMotDePasse
                 value={confirmation}
                 onChange={(e) => setConfirmation(e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"

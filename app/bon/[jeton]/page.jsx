@@ -21,6 +21,7 @@ import { use } from "react";
 import dynamic from "next/dynamic";
 import { AlertTriangle, Loader2, FileCheck2, MapPin, Wrench } from "lucide-react";
 import { chargerBonPublic, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
+import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 
 // @react-pdf/renderer ne tourne que dans le navigateur.
@@ -139,6 +140,14 @@ export default function PageBonPublic({ params }) {
               <p className="text-[11px] text-slate-500">
                 {[bon.entreprise.telephone, bon.entreprise.courriel].filter(Boolean).join(" · ")}
               </p>
+              {/* 🪪 RBQ + associations — le bon voyageait déjà avec le
+                  RBQ sans jamais l'afficher (snippet 97 pour les
+                  associations). */}
+              {ligneAccreditations(bon.entreprise.numeroRbq, bon.entreprise.associations) && (
+                <p className="text-[11px] font-semibold text-slate-600">
+                  {ligneAccreditations(bon.entreprise.numeroRbq, bon.entreprise.associations)}
+                </p>
+              )}
             </div>
           </div>
 

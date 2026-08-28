@@ -7,6 +7,7 @@ import {
   Clock, User, Loader2, Play, Pause, Square, Car, Lock, LogOut, RotateCcw, X, FileText, Check, Phone,
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
+import ChampMotDePasse from "@/components/ChampMotDePasse";
 import ConnexionTechnicien from "@/components/ConnexionTechnicien";
 import Logo from "@/components/Logo";
 import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
@@ -1157,8 +1158,7 @@ function EcranConnexion({ compte, setCompte, onConnecte }) {
               placeholder="Nom d'utilisateur"
               className="w-full rounded-xl border border-slate-600 bg-white/5 px-4 py-3.5 text-sm text-white placeholder:text-slate-400"
             />
-            <input
-              type="password"
+            <ChampMotDePasse
               value={motDePasse}
               onChange={(e) => setMotDePasse(e.target.value)}
               placeholder="Mot de passe"
@@ -1177,15 +1177,13 @@ function EcranConnexion({ compte, setCompte, onConnecte }) {
             <p className="text-center text-xs text-slate-300">
               Première connexion pour <span className="font-bold text-white">{nomUtilisateur}</span> — crée ton mot de passe.
             </p>
-            <input
-              type="password"
+            <ChampMotDePasse
               value={nouveauMdp}
               onChange={(e) => setNouveauMdp(e.target.value)}
               placeholder="Nouveau mot de passe (6 caractères min.)"
               className="w-full rounded-xl border border-slate-600 bg-white/5 px-4 py-3.5 text-sm text-white placeholder:text-slate-400"
             />
-            <input
-              type="password"
+            <ChampMotDePasse
               value={confirmationMdp}
               onChange={(e) => setConfirmationMdp(e.target.value)}
               placeholder="Confirmer le mot de passe"

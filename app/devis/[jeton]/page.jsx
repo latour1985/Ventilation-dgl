@@ -22,7 +22,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
-import { chargerDevisPublic, repondreDevis, JOURS_VALIDITE_PRIX_DEVIS } from "@/lib/supabase/devisPublic";
+import { chargerDevisPublic, repondreDevis, JOURS_VALIDITE_PRIX_DEVIS, ligneAccreditations } from "@/lib/supabase/devisPublic";
 import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
 import { CONFIG_DEFAUT, calculerTaxes } from "@/lib/supabase/entreprise";
 
@@ -142,6 +142,15 @@ export default function PageDevisPublic({ params }) {
               <p className="text-[11px] text-slate-500">
                 {[config.telephone, config.courriel].filter(Boolean).join(" · ")}
               </p>
+              {/* 🪪 RBQ + associations (snippet 97) — sur un devis, la
+                  licence et les memberships sont un argument de
+                  CONFIANCE, pas une formalité : ils s'affichent sous
+                  l'identité, là où le client vérifie à qui il a affaire. */}
+              {ligneAccreditations(devis?.entrepriseRbq, devis?.entrepriseAssociations) && (
+                <p className="text-[11px] font-semibold text-slate-600">
+                  {ligneAccreditations(devis?.entrepriseRbq, devis?.entrepriseAssociations)}
+                </p>
+              )}
             </div>
           </div>
 

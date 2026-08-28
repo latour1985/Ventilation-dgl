@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { seConnecterSurveille, demanderReinitialisation } from "@/lib/connexionSurveillee";
 import Logo from "@/components/Logo";
+import ChampMotDePasse from "@/components/ChampMotDePasse";
 
 export default function ConnexionAdmin() {
   const [courriel, setCourriel] = useState("");
@@ -64,8 +65,7 @@ export default function ConnexionAdmin() {
             </div>
             <div>
               <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">Mot de passe</label>
-              <input
-                type="password"
+              <ChampMotDePasse
                 value={motDePasse}
                 onChange={(e) => setMotDePasse(e.target.value)}
                 required

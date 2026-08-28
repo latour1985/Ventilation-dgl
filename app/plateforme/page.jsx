@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import { Building2, Lock, LogOut, Plus, ShieldAlert, Download, Pause, Play, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { seConnecterSurveille } from "@/lib/connexionSurveillee";
+import ChampMotDePasse from "@/components/ChampMotDePasse";
 import {
   listerEntreprisesPlateforme,
   majEntreprisePlateforme,
@@ -139,8 +140,10 @@ export default function Plateforme() {
           <input value={courriel} onChange={(e) => setCourriel(e.target.value)} type="email" autoComplete="username"
             className="mb-3 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
           <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Mot de passe</label>
-          <input value={motDePasse} onChange={(e) => setMotDePasse(e.target.value)} type="password" autoComplete="current-password"
-            className="mb-4 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
+          <div className="mb-4">
+            <ChampMotDePasse value={motDePasse} onChange={(e) => setMotDePasse(e.target.value)} autoComplete="current-password"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm" />
+          </div>
           {erreurConnexion && <p className="mb-3 text-xs font-bold text-red-600">{erreurConnexion}</p>}
           <Bouton type="submit" disabled={connexionEnCours || !courriel || !motDePasse} className="w-full">
             {connexionEnCours ? "Connexion…" : "Entrer"}
