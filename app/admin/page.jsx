@@ -37,7 +37,7 @@ import { listerJournal, ajouterEntreeJournal } from "@/lib/supabase/journal";
 import { listerTaux, sauvegarderTaux } from "@/lib/supabase/tauxMetiers";
 import { listerDepots, creerDepot, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
 import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots, zonesDepuis, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
-import { listerCatalogue, sauvegarderItem, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
+import { listerCatalogue, sauvegarderItem, enregistrerItemsEnLot, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { genererJeton, lienDevisPublic, JOURS_VALIDITE_LIEN_DEVIS } from "@/lib/supabase/devisPublic";
 import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCamion, creerAchatLibre, listerAchatsLibres, majAchatLibre, supprimerAchatLibre, listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
@@ -3249,6 +3249,19 @@ export default function App() {
               [...prev.filter((x) => x.id !== sauve.id), sauve].sort((a, b) => a.nom.localeCompare(b.nom))
             );
             ajouterJournal(`💲 Item de catalogue enregistré : ${sauve.nom}`);
+          }}
+          // 📦 EN LOT — import d'une liste de prix / synchronisation
+          // QuickBooks. Un catalogue, c'est 300 items d'un coup : les
+          // envoyer un par un (avec une écriture de journal chacun)
+          // saturait la base. Un envoi par tranche, UNE ligne au journal.
+          onImporterItems={async (items, description) => {
+            const sauves = await enregistrerItemsEnLot(items);
+            setCatalogue((prev) => {
+              const ids = new Set(sauves.map((s) => s.id));
+              return [...prev.filter((x) => !ids.has(x.id)), ...sauves].sort((a, b) => a.nom.localeCompare(b.nom));
+            });
+            ajouterJournal(`💲 Catalogue : ${sauves.length} item${sauves.length > 1 ? "s" : ""} enregistré${sauves.length > 1 ? "s" : ""}${description ? ` (${description})` : ""}`);
+            return sauves;
           }}
           onDesactiverItem={async (item) => {
             await desactiverItem(item.id);

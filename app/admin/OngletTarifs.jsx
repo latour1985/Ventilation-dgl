@@ -13,14 +13,14 @@ import { ZONES_DEPOTS, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { listerCatalogueRetires, margePourcent, profitDollars, vendantPourMarge } from "@/lib/supabase/catalogue";
 import { listerItemsQbo } from "@/lib/quickbooksClient";
-import { itemsDepuisCsv } from "@/lib/importCatalogue";
+import { itemsDepuisCsv, itemsDepuisLignes } from "@/lib/importCatalogue";
 import { Button, correspond, tauxAffiche, zonesEffectives, METIERS_BUREAU, METIERS_TERRAIN, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
 
 // ============================================================
 // ONGLET TARIFS — grille des taux horaires + liste de prix des dépôts
 // (modification réservée à l'Admin principal, consultation sinon)
 // ============================================================
-export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMetiersRes, onSauvegarderTaux, prixDepots, setPrixDepots, onSauvegarderPrixDepots, estAdminPrincipal, ajouterJournal, catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, onSauvegarderCoutCamion, metiersMasques = [], onMasquerMetier }) {
+export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setTauxMetiersRes, onSauvegarderTaux, prixDepots, setPrixDepots, onSauvegarderPrixDepots, estAdminPrincipal, ajouterJournal, catalogue, onEnregistrerItem, onImporterItems, onDesactiverItem, onReactiverItem, onSauvegarderCoutCamion, metiersMasques = [], onMasquerMetier }) {
   // Taux de taxes des Paramètres — pour afficher les prix taxes incluses.
   const configEnt = useEntreprise();
   // État du bouton « Sauvegarder la liste de prix » (dépôts par zone).
@@ -151,6 +151,7 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
       <SectionCatalogue
         catalogue={catalogue}
         onEnregistrerItem={onEnregistrerItem}
+        onImporterItems={onImporterItems}
         onDesactiverItem={onDesactiverItem}
         onReactiverItem={onReactiverItem}
         estAdminPrincipal={estAdminPrincipal}
@@ -718,7 +719,7 @@ export function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }
 // ce composant sert à monter des devis et des factures, deux documents
 // qui vont chez le client.
 
-export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverItem, onReactiverItem, estAdminPrincipal }) {
+export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems, onDesactiverItem, onReactiverItem, estAdminPrincipal }) {
   const [ouvert, setOuvert] = useState(false);
   const [recherche, setRecherche] = useState("");
   const [categorie, setCategorie] = useState("");
@@ -863,6 +864,10 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
   // ============================================================
   const [sourceMaj, setSourceMaj] = useState("quickbooks"); // "quickbooks" | "csv"
   const refFichierCsv = useRef(null);
+  // Le fichier lu reste en mémoire : si une colonne a été mal devinée
+  // (« les prix sont à zéro »), on recompose SANS redemander le fichier.
+  const [csvBrut, setCsvBrut] = useState(null); // { entetes, donnees }
+  const [csvMapping, setCsvMapping] = useState({});
   // Clé de case à cocher : l'identifiant QuickBooks quand il existe,
   // sinon le rang de la ligne dans le fichier.
   const cleDe = (q) => q.qbId || q.cle;
@@ -879,19 +884,14 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
       setSyncErreur("Fichier illisible — réessaie avec un export CSV.");
       return;
     }
-    const { items, ignorees, entetes, mapping } = itemsDepuisCsv(texte);
-    if (mapping.nom === undefined) {
-      setSyncQb(null);
-      setSyncErreur(
-        `Aucune colonne de NOM reconnue${entetes.length ? ` (en-têtes lus : ${entetes.join(", ").slice(0, 120)})` : ""} — renomme la colonne des produits « Nom » puis réessaie.`
-      );
-      return;
-    }
-    if (items.length === 0) {
+    const { entetes, donnees, mapping } = itemsDepuisCsv(texte);
+    if (!entetes.length || !donnees.length) {
       setSyncQb(null);
       setSyncErreur("Aucune ligne exploitable dans ce fichier.");
       return;
     }
+    setCsvBrut({ entetes, donnees });
+    setCsvMapping(mapping);
     // Le catalogue COMPLET (actifs + retirés) : on ne recrée jamais en
     // doublon un item qui existe mais a été retiré exprès.
     let listeRetires = retires;
@@ -899,8 +899,20 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
       listeRetires = await listerCatalogueRetires().catch(() => []);
       setRetires(listeRetires);
     }
+    composerDepuisCsv({ entetes, donnees }, mapping, listeRetires);
+  };
+
+  // Recompose la revue à partir d'un mapping de colonnes — appelée à la
+  // lecture du fichier ET à chaque correction de colonne par l'admin.
+  const composerDepuisCsv = (brut, mapping, listeRetires) => {
+    if (!brut) return;
+    if (mapping.nom === undefined) {
+      setSyncQb({ nouveaux: [], modifies: [], desactives: [], lues: 0, ignorees: brut.donnees.length });
+      return;
+    }
+    const { items, ignorees } = itemsDepuisLignes(brut.donnees, mapping);
     const parNom = new Map();
-    [...(catalogue || []), ...listeRetires].forEach((i) => {
+    [...(catalogue || []), ...(listeRetires || [])].forEach((i) => {
       const cle = normaliserNom(i.nom);
       if (cle && !parNom.has(cle)) parNom.set(cle, i);
     });
@@ -944,34 +956,35 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
     if (!syncQb || syncQb === "analyse" || syncEnCours) return;
     setSyncEnCours(true);
     setSyncErreur("");
+    // 📦 UN SEUL ENVOI EN LOT (correctif 2026-08-28) : enregistrer 293
+    // items un par un — chacun suivi d'une écriture au journal lancée en
+    // parallèle — saturait la base et la plupart échouaient. On rassemble
+    // tout, on envoie par tranches, et l'erreur RÉELLE s'affiche.
     let ajoutes = 0, ajustes = 0, raccordes = 0, retiresN = 0, echecs = 0;
+    const aEnregistrer = [];
     for (const q of syncQb.nouveaux) {
       if (!syncCoches["n-" + cleDe(q)]) continue;
-      try {
-        await onEnregistrerItem({
-          nom: q.nom,
-          description: q.description || "",
-          typeItem: q.type === "Service" ? "service" : "materiel",
-          prix_vendant: q.vendant,
-          prix_coutant: q.coutant,
-          actif: true,
-          // Import CSV : pas d'identifiant QuickBooks à poser
-          // (undefined = la colonne n'est pas touchée).
-          qbItemId: q.qbId,
-          ...(q.unite ? { unite: q.unite } : {}),
-          ...(q.categorie ? { categorie: q.categorie } : {}),
-        });
-        ajoutes++;
-      } catch { echecs++; }
+      aEnregistrer.push({
+        nom: q.nom,
+        description: q.description || "",
+        typeItem: q.type === "Service" ? "service" : "materiel",
+        prix_vendant: q.vendant,
+        prix_coutant: q.coutant,
+        actif: true,
+        // Import CSV : pas d'identifiant QuickBooks à poser
+        // (undefined = la colonne n'est pas touchée).
+        qbItemId: q.qbId,
+        ...(q.unite ? { unite: q.unite } : {}),
+        ...(q.categorie ? { categorie: q.categorie } : {}),
+      });
+      ajoutes++;
     }
     for (const m of syncQb.modifies) {
       const autorise = m.changements.length === 0 || syncCoches["m-" + m.local.id];
       if (!autorise) {
         // Modification refusée MAIS raccord quand même : le lien
         // qb_item_id se pose sans toucher aux prix ajustés à la main.
-        if (m.raccord) {
-          try { await onEnregistrerItem({ ...m.local, qbItemId: m.qb.qbId }); raccordes++; } catch { echecs++; }
-        }
+        if (m.raccord) { aEnregistrer.push({ ...m.local, qbItemId: m.qb.qbId }); raccordes++; }
         continue;
       }
       const maj = { ...m.local, qbItemId: m.qb.qbId };
@@ -980,10 +993,22 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
         if (c.champ === "coûtant") maj.prix_coutant = c.apres;
         if (c.champ === "description") maj.description = c.apres;
       });
+      aEnregistrer.push(maj);
+      if (m.changements.length > 0) ajustes++; else raccordes++;
+    }
+    if (aEnregistrer.length > 0) {
       try {
-        await onEnregistrerItem(maj);
-        if (m.changements.length > 0) ajustes++; else raccordes++;
-      } catch { echecs++; }
+        if (onImporterItems) {
+          await onImporterItems(aEnregistrer, sourceMaj === "csv" ? "import de liste de prix" : "synchronisation QuickBooks");
+        } else {
+          // Repli (aucun chemin en lot fourni) : un par un.
+          for (const item of aEnregistrer) await onEnregistrerItem(item);
+        }
+      } catch (e) {
+        setSyncEnCours(false);
+        setSyncErreur(`Enregistrement refusé : ${e?.message || "erreur inconnue"} — rien n'a été appliqué, réessaie.`);
+        return;
+      }
     }
     for (const i of syncQb.desactives) {
       if (!syncCoches["d-" + i.id]) continue;
@@ -991,7 +1016,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
     }
     setSyncEnCours(false);
     if (echecs > 0) {
-      setSyncErreur(`${echecs} item${echecs > 1 ? "s" : ""} n'ont pas pu être enregistrés — relance l'analyse.`);
+      setSyncErreur(`${echecs} item${echecs > 1 ? "s" : ""} n'ont pas pu être RETIRÉS — relance l'analyse.`);
       return;
     }
     setSyncQb(null);
@@ -1257,6 +1282,65 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
             </div>
 
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5 pt-3">
+              {/* 🧭 LES COLONNES RECONNUES — visibles ET corrigeables.
+                  Sans ce panneau, une colonne de prix au nom inattendu
+                  passait inaperçue et TOUT s'importait à zéro. */}
+              {sourceMaj === "csv" && csvBrut && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                    🧭 Colonnes de ton fichier <span className="font-semibold normal-case text-slate-400">— corrige si une est mal devinée</span>
+                  </p>
+                  <div className="grid gap-1.5 sm:grid-cols-2">
+                    {[
+                      ["nom", "Nom du produit *"],
+                      ["prix_vendant", "Prix de vente"],
+                      ["prix_coutant", "Coûtant"],
+                      ["unite", "Unité"],
+                      ["categorie", "Catégorie"],
+                      ["description", "Description"],
+                    ].map(([champ, libelle]) => (
+                      <label key={champ} className="flex items-center gap-1.5 text-[11px]">
+                        <span className={`w-[92px] shrink-0 font-bold ${champ === "nom" && csvMapping.nom === undefined ? "text-red-600" : "text-slate-600"}`}>{libelle}</span>
+                        <select
+                          value={csvMapping[champ] === undefined ? "" : String(csvMapping[champ])}
+                          onChange={(e) => {
+                            const suivant = { ...csvMapping };
+                            if (e.target.value === "") delete suivant[champ];
+                            else suivant[champ] = Number(e.target.value);
+                            setCsvMapping(suivant);
+                            composerDepuisCsv(csvBrut, suivant, retires);
+                          }}
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-1.5 py-1 text-[11px]"
+                        >
+                          <option value="">— aucune —</option>
+                          {csvBrut.entetes.map((e, i) => (
+                            <option key={i} value={i}>{e || `(colonne ${i + 1})`}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                  {csvMapping.nom === undefined && (
+                    <p className="mt-1.5 text-[11px] font-bold text-red-600">
+                      Choisis la colonne qui contient le NOM des produits pour continuer.
+                    </p>
+                  )}
+                  {csvMapping.prix_vendant === undefined && csvMapping.nom !== undefined && (
+                    <p className="mt-1.5 text-[11px] font-bold text-amber-700">
+                      ⚠️ Aucune colonne de prix de vente — les items entreraient SANS prix. Choisis-la ci-dessus si elle existe.
+                    </p>
+                  )}
+                  {/* Un aperçu de la 1re ligne : la preuve que la lecture est bonne. */}
+                  {csvMapping.nom !== undefined && csvBrut.donnees[0] && (
+                    <p className="mt-1.5 truncate text-[10px] text-slate-500">
+                      1<sup>re</sup> ligne lue : <span className="font-semibold">{csvBrut.donnees[0][csvMapping.nom]}</span>
+                      {csvMapping.prix_vendant !== undefined && <> · vente <span className="font-semibold">{csvBrut.donnees[0][csvMapping.prix_vendant] || "—"}</span></>}
+                      {csvMapping.prix_coutant !== undefined && <> · coûtant <span className="font-semibold">{csvBrut.donnees[0][csvMapping.prix_coutant] || "—"}</span></>}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {syncQb.nouveaux.length === 0 && syncQb.modifies.length === 0 && syncQb.desactives.length === 0 && (
                 <p className="rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-bold text-emerald-700">
                   ✅ Le catalogue est déjà à jour — rien à importer, rien à ajuster.

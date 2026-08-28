@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
+import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet }) {
@@ -329,9 +330,14 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Heures / jour</label>
-              <input
-                type="number" min={0} max={HEURES.length} value={heures}
-                onChange={(e) => { const v = parseInt(e.target.value); setHeures(Number.isNaN(v) ? 0 : Math.max(0, v)); }}
+              {/* ⏱️ DEMI-HEURES ET QUARTS D'HEURE (2026-08-28) : le champ
+                  faisait un parseInt — « 9,5 h » devenait 9 h en silence,
+                  et le champ « number » du navigateur refusait de toute
+                  façon la virgule. InputNombreDecimal accepte 9.5 ET 9,5,
+                  comme partout ailleurs dans l'application. */}
+              <InputNombreDecimal
+                valeur={heures}
+                onChange={(v) => setHeures(Math.max(0, Math.min(HEURES.length, Number(v) || 0)))}
                 className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm tabular-nums"
               />
             </div>
