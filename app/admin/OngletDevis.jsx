@@ -24,8 +24,28 @@ export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravai
   const [option, setOption] = useState(null); // "bon_travail" | "projet" | null
   const client = clients.find((c) => c.id === devis.clientId);
   const [adresseTravauxId, setAdresseTravauxId] = useState("");
-  const [tauxHoraireCoutant, setTauxHoraireCoutant] = useState("45");
   const [dateFin, setDateFin] = useState("");
+
+  // 💰 COÛTANT PRÉVU (2026-08-28 — remplace l'ancien champ « Taux horaire
+  // coûtant »). Ce champ-là était un vestige : le coût réel d'une heure
+  // vient du taux FIGÉ à la saisie, sinon du taux individuel de la fiche,
+  // sinon de la grille CCQ — le taux du projet n'était qu'un filet de
+  // dernier recours qui ne servait presque jamais. Ce qui manquait, en
+  // revanche, c'est le COÛTANT ATTENDU du projet, pour comparer avec le
+  // réel. Or le devis le connaît déjà : chaque ligne porte son coûtant.
+  const lignesDevis = Array.isArray(devis.lignes) ? devis.lignes : [];
+  const coutantDuDevis = lignesDevis.reduce(
+    (s, l) => s + (Number(l.prix_coutant) || 0) * (Number(l.quantite) || 0),
+    0
+  );
+  // ⚠️ Règle gelée : un coût à 0 est INCONNU, jamais zéro. On signale les
+  // lignes vendues sans coûtant plutôt que de gonfler la marge en silence.
+  const lignesSansCoutant = lignesDevis.filter(
+    (l) => !l.estRabais && (Number(l.prix_coutant) || 0) === 0 && (Number(l.prix_vendant) || 0) > 0
+  ).length;
+  const [coutantPrevu, setCoutantPrevu] = useState(coutantDuDevis);
+  const margePrevue =
+    devis.totalVendant > 0 ? ((devis.totalVendant - (Number(coutantPrevu) || 0)) / devis.totalVendant) * 100 : 0;
 
   const adresseChoisie = () => {
     const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
@@ -121,12 +141,13 @@ export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravai
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-500">Taux horaire coûtant</label>
-                <input
-                  type="number" min={0} step="0.01" value={tauxHoraireCoutant}
-                  onChange={(e) => setTauxHoraireCoutant(e.target.value)}
+                <label className="mb-1 block text-xs font-bold text-slate-500">Coûtant prévu du projet</label>
+                <InputNombreDecimal
+                  valeur={coutantPrevu}
+                  onChange={setCoutantPrevu}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
+                <p className="mt-0.5 text-[10px] text-slate-400">Calculé depuis les lignes du devis — ajuste-le si tu sais mieux.</p>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-500">Date de fin prévue</label>
@@ -137,12 +158,22 @@ export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravai
               </div>
             </div>
             <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-              Budget initial du projet : <span className="font-bold text-slate-800">{devis.totalVendant.toFixed(2)} $</span> ·{" "}
-              {devis.lignes.length} étape{devis.lignes.length > 1 ? "s" : ""} seront créées dans l'agenda
+              Budget initial du projet : <span className="font-bold text-slate-800">{devis.totalVendant.toFixed(2)} $</span>
+              {" · coûtant prévu "}
+              <span className="font-bold text-slate-800">{(Number(coutantPrevu) || 0).toFixed(2)} $</span>
+              {" · marge prévue "}
+              <span className={`font-bold ${margePrevue < 0 ? "text-red-600" : "text-emerald-700"}`}>{margePrevue.toFixed(1)} %</span>
+              <br />
+              {devis.lignes.length} étape{devis.lignes.length > 1 ? "s" : ""} seront créées dans l&apos;agenda
+              {lignesSansCoutant > 0 && (
+                <span className="mt-1 block font-semibold text-amber-700">
+                  ⚠️ {lignesSansCoutant} ligne{lignesSansCoutant > 1 ? "s" : ""} vendue{lignesSansCoutant > 1 ? "s" : ""} sans coûtant connu — la marge prévue est donc optimiste.
+                </span>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" onClick={() => setOption(null)}>Retour</Button>
-              <Button onClick={() => onChoisirProjet(devis, { tauxHoraireCoutant, dateFin, adresseTravaux: adresseChoisie() })}>
+              <Button onClick={() => onChoisirProjet(devis, { coutantPrevu: Number(coutantPrevu) || 0, dateFin, adresseTravaux: adresseChoisie() })}>
                 Créer le projet
               </Button>
             </div>
@@ -868,8 +899,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // devient le budget initial du projet, et chaque ligne du devis
   // devient une tâche/étape distincte dans l'agenda, rattachée au
   // projet via projetId — pour un suivi de rentabilité dès le départ.
-  const traiterCommeProjet = (devis, { tauxHoraireCoutant, dateFin, adresseTravaux }) => {
+  const traiterCommeProjet = (devis, { coutantPrevu, dateFin, adresseTravaux }) => {
     const nouveauProjetId = `projet-${Date.now()}`;
+    const coutantAttendu = Number(coutantPrevu) || 0;
     const nouveauProjet = {
       id: nouveauProjetId,
       nom: `Devis ${devis.numero} — ${devis.clientNom}`,
@@ -879,7 +911,22 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       dateFin: dateFin || "",
       statut: "a_planifier",
       budgetTotal: devis.totalVendant,
-      tauxHoraireCoutant: parseFloat(tauxHoraireCoutant) || 45,
+      // Filet historique : le taux du projet ne sert QUE si une heure
+      // n'a ni taux figé, ni taux de fiche, ni grille CCQ (cas rare).
+      // On ne le demande plus — 45 $ reste la valeur de repli d'avant.
+      tauxHoraireCoutant: 45,
+      // 💰 Le COÛTANT PRÉVU, dans la même structure que les projets créés
+      // depuis une tâche — c'est lui qui se compare au coût réel.
+      budgetPrevu: {
+        mainOeuvreChantier: { heures: 0, facture: 0, coutant: 0 },
+        transport: { heures: 0, facture: 0, coutant: 0 },
+        materiaux: { facture: 0, coutant: 0 },
+        sousTraitants: [],
+        totalFacture: devis.totalVendant,
+        totalCoutant: coutantAttendu,
+        marge: devis.totalVendant > 0 ? ((devis.totalVendant - coutantAttendu) / devis.totalVendant) * 100 : 0,
+        source: `devis ${devis.numero}`,
+      },
       bonsCommande: [],
     };
     setProjets((prev) => [...prev, nouveauProjet]);

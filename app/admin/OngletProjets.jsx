@@ -127,11 +127,31 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQu
           <div className="flex justify-between text-slate-500"><span>Kilométrage transport</span><span className="tabular-nums">{r.kilometrageTransport.toFixed(1)} km</span></div>
         )}
         <div className="flex justify-between font-semibold text-slate-600"><span>Total heures projet</span><span className="tabular-nums">{r.totalHeures} h</span></div>
-        <div className="flex justify-between text-slate-500"><span>Coût main-d'œuvre ({r.totalHeures} h × {projet.tauxHoraireCoutant.toFixed(2)} $)</span><span className="tabular-nums">{r.coutMainOeuvre.toFixed(2)} $</span></div>
+        {/* Le coût d'une heure vient du taux FIGÉ à la saisie (sinon du
+            taux de la fiche, sinon de la grille CCQ) — jamais d'un taux
+            unique de projet : l'ancienne étiquette « X h × 45,00 $ »
+            annonçait un calcul qui n'avait plus lieu. */}
+        <div className="flex justify-between text-slate-500"><span>Coût main-d&apos;œuvre ({r.totalHeures} h, taux réels)</span><span className="tabular-nums">{r.coutMainOeuvre.toFixed(2)} $</span></div>
         {(r.coutCamion || 0) > 0 && (
           <div className="flex justify-between text-slate-500"><span>Coût camion (heures avec véhicule)</span><span className="tabular-nums">{r.coutCamion.toFixed(2)} $</span></div>
         )}
         <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-slate-700"><span>Coût total réel</span><span className="tabular-nums">{r.coutTotalReel.toFixed(2)} $</span></div>
+        {/* 💰 PRÉVU vs RÉEL (2026-08-28) : le coûtant attendu vient du
+            devis (ou de la tâche) à la création du projet. Sans lui, on
+            ne montre rien — jamais un écart calculé sur du vide. */}
+        {Number(projet.budgetPrevu?.totalCoutant) > 0 && (() => {
+          const prevu = Number(projet.budgetPrevu.totalCoutant);
+          const ecart = r.coutTotalReel - prevu;
+          return (
+            <>
+              <div className="flex justify-between text-slate-500"><span>Coûtant prévu{projet.budgetPrevu.source ? ` (${projet.budgetPrevu.source})` : ""}</span><span className="tabular-nums">{prevu.toFixed(2)} $</span></div>
+              <div className={`flex justify-between font-semibold ${ecart > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                <span>{ecart > 0 ? "Dépassement du coûtant prévu" : "Sous le coûtant prévu"}</span>
+                <span className="tabular-nums">{ecart > 0 ? "+" : ""}{ecart.toFixed(2)} $</span>
+              </div>
+            </>
+          );
+        })()}
         <div className="flex justify-between font-bold text-slate-800"><span>Budget initial</span><span className="tabular-nums">{projet.budgetTotal.toFixed(2)} $</span></div>
         <div className={`flex justify-between border-t border-slate-200 pt-1 text-sm font-extrabold ${r.profitReel < 0 ? "text-red-600" : "text-emerald-600"}`}>
           <span>Profit réel ({r.pourcentageMarge.toFixed(1)}%)</span><span className="tabular-nums">{r.profitReel.toFixed(2)} $</span>

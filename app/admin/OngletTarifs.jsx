@@ -13,6 +13,7 @@ import { ZONES_DEPOTS, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { listerCatalogueRetires, margePourcent, profitDollars, vendantPourMarge } from "@/lib/supabase/catalogue";
 import { listerItemsQbo } from "@/lib/quickbooksClient";
+import { itemsDepuisCsv } from "@/lib/importCatalogue";
 import { Button, correspond, tauxAffiche, zonesEffectives, METIERS_BUREAU, METIERS_TERRAIN, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
 
 // ============================================================
@@ -851,6 +852,91 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
     setSyncCoches(coches);
     setSyncQb({ nouveaux, modifies, desactives });
   };
+  // ============================================================
+  // 📄 IMPORT D'UNE LISTE DE PRIX (fichier CSV/Excel) — 2026-08-28
+  // ------------------------------------------------------------
+  // MÊME écran de revue que la synchro QuickBooks (rien ne s'écrase sans
+  // autorisation) — seule la SOURCE change. Décidé ainsi parce que lire
+  // le catalogue de QuickBooks exige la même connexion OAuth que tout le
+  // reste : un fichier, lui, marche pour tous les clients (QuickBooks,
+  // Sage, Acomba, tableur) sans dépendre d'un connecteur.
+  // ============================================================
+  const [sourceMaj, setSourceMaj] = useState("quickbooks"); // "quickbooks" | "csv"
+  const refFichierCsv = useRef(null);
+  // Clé de case à cocher : l'identifiant QuickBooks quand il existe,
+  // sinon le rang de la ligne dans le fichier.
+  const cleDe = (q) => q.qbId || q.cle;
+  const analyserFichierCsv = async (fichier) => {
+    if (!fichier) return;
+    setSyncErreur("");
+    setSourceMaj("csv");
+    setSyncQb("analyse");
+    let texte = "";
+    try {
+      texte = await fichier.text();
+    } catch {
+      setSyncQb(null);
+      setSyncErreur("Fichier illisible — réessaie avec un export CSV.");
+      return;
+    }
+    const { items, ignorees, entetes, mapping } = itemsDepuisCsv(texte);
+    if (mapping.nom === undefined) {
+      setSyncQb(null);
+      setSyncErreur(
+        `Aucune colonne de NOM reconnue${entetes.length ? ` (en-têtes lus : ${entetes.join(", ").slice(0, 120)})` : ""} — renomme la colonne des produits « Nom » puis réessaie.`
+      );
+      return;
+    }
+    if (items.length === 0) {
+      setSyncQb(null);
+      setSyncErreur("Aucune ligne exploitable dans ce fichier.");
+      return;
+    }
+    // Le catalogue COMPLET (actifs + retirés) : on ne recrée jamais en
+    // doublon un item qui existe mais a été retiré exprès.
+    let listeRetires = retires;
+    if (listeRetires === null) {
+      listeRetires = await listerCatalogueRetires().catch(() => []);
+      setRetires(listeRetires);
+    }
+    const parNom = new Map();
+    [...(catalogue || []), ...listeRetires].forEach((i) => {
+      const cle = normaliserNom(i.nom);
+      if (cle && !parNom.has(cle)) parNom.set(cle, i);
+    });
+    const nouveaux = [];
+    const modifies = [];
+    items.forEach((it, rang) => {
+      const commun = {
+        cle: `csv-${rang}`,
+        nom: it.nom,
+        description: it.description,
+        type: it.typeItem,
+        vendant: it.prix_vendant,
+        coutant: it.prix_coutant, // null = INCONNU (jamais 0)
+        unite: it.unite,
+        categorie: it.categorie,
+      };
+      const local = parNom.get(normaliserNom(it.nom));
+      if (!local) { nouveaux.push(commun); return; }
+      if (local.actif === false) return; // retiré exprès — « Remettre au catalogue » existe pour ça
+      const changements = [];
+      if (commun.vendant != null && !memesPrix(local.prix_vendant, commun.vendant))
+        changements.push({ champ: "vendant", avant: local.prix_vendant, apres: commun.vendant });
+      if (commun.coutant != null && !memesPrix(local.prix_coutant, commun.coutant))
+        changements.push({ champ: "coûtant", avant: local.prix_coutant, apres: commun.coutant });
+      const desc = String(commun.description || "").trim();
+      if (desc && desc !== String(local.description || "").trim())
+        changements.push({ champ: "description", avant: local.description || "", apres: desc });
+      if (changements.length > 0) modifies.push({ local, qb: commun, changements, raccord: false });
+    });
+    const coches = {};
+    nouveaux.forEach((q) => { coches["n-" + cleDe(q)] = true; });
+    modifies.forEach((m) => { coches["m-" + m.local.id] = false; }); // écraser un prix s'AUTORISE
+    setSyncCoches(coches);
+    setSyncQb({ nouveaux, modifies, desactives: [], lues: items.length, ignorees });
+  };
+
   const basculerCoche = (cle) => setSyncCoches((p) => ({ ...p, [cle]: !p[cle] }));
   const nbCoches = Object.values(syncCoches).filter(Boolean).length
     + (syncQb && syncQb !== "analyse" ? syncQb.modifies.filter((m) => m.changements.length === 0).length : 0);
@@ -860,7 +946,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
     setSyncErreur("");
     let ajoutes = 0, ajustes = 0, raccordes = 0, retiresN = 0, echecs = 0;
     for (const q of syncQb.nouveaux) {
-      if (!syncCoches["n-" + q.qbId]) continue;
+      if (!syncCoches["n-" + cleDe(q)]) continue;
       try {
         await onEnregistrerItem({
           nom: q.nom,
@@ -869,7 +955,11 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
           prix_vendant: q.vendant,
           prix_coutant: q.coutant,
           actif: true,
+          // Import CSV : pas d'identifiant QuickBooks à poser
+          // (undefined = la colonne n'est pas touchée).
           qbItemId: q.qbId,
+          ...(q.unite ? { unite: q.unite } : {}),
+          ...(q.categorie ? { categorie: q.categorie } : {}),
         });
         ajoutes++;
       } catch { echecs++; }
@@ -907,7 +997,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
     setSyncQb(null);
     if (ajoutes + ajustes + raccordes + retiresN === 0) return;
     alert(
-      "Catalogue mis à jour depuis QuickBooks :\n" +
+      (sourceMaj === "csv" ? "Catalogue mis à jour depuis le fichier :\n" : "Catalogue mis à jour depuis QuickBooks :\n") +
       (ajoutes ? `• ${ajoutes} nouvel${ajoutes > 1 ? "s" : ""} item${ajoutes > 1 ? "s" : ""} ajouté${ajoutes > 1 ? "s" : ""}\n` : "") +
       (ajustes ? `• ${ajustes} item${ajustes > 1 ? "s" : ""} ajusté${ajustes > 1 ? "s" : ""} (prix / description)\n` : "") +
       (raccordes ? `• ${raccordes} item${raccordes > 1 ? "s" : ""} raccordé${raccordes > 1 ? "s" : ""} à QuickBooks (sans changement de prix)\n` : "") +
@@ -968,13 +1058,39 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
             {estAdminPrincipal && (
               <Button
                 variant="outline"
-                onClick={analyserSyncQb}
-                loading={syncQb === "analyse"}
+                onClick={() => { setSourceMaj("quickbooks"); analyserSyncQb(); }}
+                loading={syncQb === "analyse" && sourceMaj === "quickbooks"}
                 className="min-h-0 px-3 py-1.5 text-xs"
                 title="Compare le catalogue avec les items QuickBooks — rien ne change sans ton accord"
               >
                 🔄 Mettre à jour depuis QuickBooks
               </Button>
+            )}
+            {/* 📄 IMPORT PAR FICHIER — pour toute entreprise, avec ou sans
+                connecteur comptable (QuickBooks, Sage, Acomba, tableur). */}
+            {estAdminPrincipal && (
+              <>
+                <input
+                  ref={refFichierCsv}
+                  type="file"
+                  accept=".csv,.txt,text/csv,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    const fichier = e.target.files?.[0];
+                    e.target.value = "";
+                    analyserFichierCsv(fichier);
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => refFichierCsv.current?.click()}
+                  loading={syncQb === "analyse" && sourceMaj === "csv"}
+                  className="min-h-0 px-3 py-1.5 text-xs"
+                  title="Importer une liste de prix exportée de QuickBooks, Sage, Acomba ou d'un tableur — rien ne change sans ton accord"
+                >
+                  📄 Importer une liste de prix
+                </Button>
+              </>
             )}
           </div>
           {syncErreur && !syncQb && (
@@ -1126,9 +1242,15 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
           <div className="flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between border-b border-slate-100 p-5 pb-3">
               <div>
-                <h3 className="text-sm font-extrabold text-slate-800">🔄 Mise à jour depuis QuickBooks</h3>
+                <h3 className="text-sm font-extrabold text-slate-800">
+                  {sourceMaj === "csv" ? "📄 Import d'une liste de prix" : "🔄 Mise à jour depuis QuickBooks"}
+                </h3>
                 <p className="mt-0.5 text-[11px] text-slate-400">
                   Rien n&apos;est encore modifié — coche ce que tu autorises, puis « Appliquer ».
+                  {sourceMaj === "csv" && syncQb.lues != null && (
+                    <> {syncQb.lues} ligne{syncQb.lues > 1 ? "s" : ""} lue{syncQb.lues > 1 ? "s" : ""} dans le fichier
+                      {syncQb.ignorees > 0 ? `, ${syncQb.ignorees} ignorée${syncQb.ignorees > 1 ? "s" : ""} (sans nom ou en double)` : ""}.</>
+                  )}
                 </p>
               </div>
               <button onClick={() => !syncEnCours && setSyncQb(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
@@ -1144,12 +1266,12 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
               {syncQb.nouveaux.length > 0 && (
                 <div>
                   <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
-                    ➕ Nouveaux items QuickBooks ({syncQb.nouveaux.length}) <span className="font-semibold normal-case text-slate-400">— absents du catalogue, pré-cochés</span>
+                    ➕ Nouveaux items {sourceMaj === "csv" ? "du fichier" : "QuickBooks"} ({syncQb.nouveaux.length}) <span className="font-semibold normal-case text-slate-400">— absents du catalogue, pré-cochés</span>
                   </p>
                   <div className="max-h-[200px] overflow-y-auto rounded-xl border border-slate-200">
                     {syncQb.nouveaux.map((q) => (
-                      <label key={q.qbId} className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0 hover:bg-slate-50">
-                        <input type="checkbox" checked={!!syncCoches["n-" + q.qbId]} onChange={() => basculerCoche("n-" + q.qbId)} className="shrink-0" />
+                      <label key={cleDe(q)} className="flex cursor-pointer items-center gap-2.5 border-b border-slate-100 px-2.5 py-1.5 last:border-0 hover:bg-slate-50">
+                        <input type="checkbox" checked={!!syncCoches["n-" + cleDe(q)]} onChange={() => basculerCoche("n-" + cleDe(q))} className="shrink-0" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-xs font-semibold text-slate-800">{q.nom}</span>
                           {q.description && <span className="block truncate text-[10px] text-slate-400">{q.description}</span>}
@@ -1167,7 +1289,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onDesactiverIte
               {syncQb.modifies.filter((m) => m.changements.length > 0).length > 0 && (
                 <div>
                   <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-700">
-                    ✏️ Modifications proposées ({syncQb.modifies.filter((m) => m.changements.length > 0).length}) <span className="font-semibold normal-case text-slate-400">— cocher = autoriser QuickBooks à écraser</span>
+                    ✏️ Modifications proposées ({syncQb.modifies.filter((m) => m.changements.length > 0).length}) <span className="font-semibold normal-case text-slate-400">— cocher = autoriser {sourceMaj === "csv" ? "le fichier" : "QuickBooks"} à écraser</span>
                   </p>
                   <div className="max-h-[240px] overflow-y-auto rounded-xl border border-amber-200">
                     {syncQb.modifies.filter((m) => m.changements.length > 0).map((m) => (
