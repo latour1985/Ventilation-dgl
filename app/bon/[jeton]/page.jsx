@@ -138,7 +138,7 @@ export default function PageBonPublic({ params }) {
             <div>
               <p className="text-sm font-extrabold text-[#131B2E]">{bon.entreprise.nomLegal}</p>
               <p className="text-[11px] text-slate-500">
-                {[bon.entreprise.telephone, bon.entreprise.courriel].filter(Boolean).join(" · ")}
+                {[bon.entreprise.telephone, bon.entreprise.courriel, bon.entreprise.siteWeb].filter(Boolean).join(" · ")}
               </p>
               {/* 🪪 RBQ + associations — le bon voyageait déjà avec le
                   RBQ sans jamais l'afficher (snippet 97 pour les

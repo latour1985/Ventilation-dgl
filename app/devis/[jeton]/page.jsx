@@ -139,8 +139,13 @@ export default function PageDevisPublic({ params }) {
             )}
             <div>
               <p className="text-sm font-extrabold text-[#131B2E]">{config.nomLegal}</p>
+              {/* 🏢 Adresse (snippet 99) — l'identité complète, comme sur
+                  du papier à en-tête. */}
+              {devis?.entrepriseAdresse && (
+                <p className="text-[11px] text-slate-500">{devis.entrepriseAdresse}</p>
+              )}
               <p className="text-[11px] text-slate-500">
-                {[config.telephone, config.courriel].filter(Boolean).join(" · ")}
+                {[config.telephone, config.courriel, devis?.entrepriseSiteWeb].filter(Boolean).join(" · ")}
               </p>
               {/* 🪪 RBQ + associations (snippet 97) — sur un devis, la
                   licence et les memberships sont un argument de
@@ -183,8 +188,17 @@ export default function PageDevisPublic({ params }) {
 
           <div className="mt-3 space-y-1 border-t border-slate-200 pt-3 text-sm">
             <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">{argent(devis.totalVendant)}</span></div>
-            <div className="flex justify-between text-slate-500"><span>TPS</span><span className="tabular-nums">{argent(taxes.tps)}</span></div>
-            <div className="flex justify-between text-slate-500"><span>TVQ</span><span className="tabular-nums">{argent(taxes.tvq)}</span></div>
+            {/* 🍁 Les numéros d'inscription TPS/TVQ (snippet 99) sont
+                OBLIGATOIRES sur un document qui charge les taxes — ils
+                s'affichent à côté de chaque ligne, comme le veut l'usage. */}
+            <div className="flex justify-between text-slate-500">
+              <span>TPS{devis?.entrepriseNumeroTps ? ` (nº ${devis.entrepriseNumeroTps})` : ""}</span>
+              <span className="tabular-nums">{argent(taxes.tps)}</span>
+            </div>
+            <div className="flex justify-between text-slate-500">
+              <span>TVQ{devis?.entrepriseNumeroTvq ? ` (nº ${devis.entrepriseNumeroTvq})` : ""}</span>
+              <span className="tabular-nums">{argent(taxes.tvq)}</span>
+            </div>
             <div className="flex justify-between border-t border-slate-200 pt-1.5 text-lg font-extrabold text-slate-900">
               <span>Total</span><span className="tabular-nums">{argent(taxes.total)}</span>
             </div>

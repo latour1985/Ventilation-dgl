@@ -3596,3 +3596,165 @@ alter table quickbooks_connexion drop constraint if exists quickbooks_connexion_
 alter table quickbooks_connexion add primary key (entreprise_id);
 -- Verification : la connexion existante doit etre etiquetee dgl.
 select entreprise_id, environnement, realm_id, updated_at from quickbooks_connexion;
+
+-- ============================================================
+-- 99 - IDENTITE COMPLETE SUR LE DEVIS PUBLIC (2026-09-09)
+-- ------------------------------------------------------------
+-- Retour du proprietaire : « ce ne sont pas toutes les informations de
+-- l'entreprise qui apparaissent dans le devis ». L'en-tete montrait
+-- telephone, courriel, RBQ et associations — mais pas l'ADRESSE, pas le
+-- SITE WEB, et surtout pas les NUMEROS TPS/TVQ, obligatoires sur un
+-- document qui charge les taxes (Revenu Quebec).
+-- Les deux fonctions publiques ajoutent ces colonnes A LA FIN (les
+-- pages qui ne les lisent pas encore continuent de marcher).
+-- ============================================================
+
+-- ---- 1. devis_public : + adresse, site web, numeros TPS/TVQ ----
+drop function if exists devis_public(text);
+create function devis_public(p_jeton text)
+returns table (
+  numero text, client_nom text, date_emission date,
+  lignes jsonb, total_vendant numeric,
+  statut text, reponse_client text, repondu_le timestamptz, expire boolean,
+  entreprise_id text,
+  entreprise_nom text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_taux_tps numeric,
+  entreprise_taux_tvq numeric,
+  entreprise_logo text,
+  entreprise_rbq text,
+  entreprise_associations jsonb,
+  entreprise_adresse text,
+  entreprise_site_web text,
+  entreprise_numero_tps text,
+  entreprise_numero_tvq text
+)
+language sql security definer set search_path = public as $$
+  select
+    d.numero, d.client_nom, d.date_emission,
+    -- Les lignes sont RECONSTRUITES sans prix_coutant : le coutant ne
+    -- peut pas fuir, meme par erreur de programmation cote page.
+    (select coalesce(jsonb_agg(jsonb_build_object(
+        'uid', l->>'uid', 'nom', l->>'nom', 'description', l->>'description',
+        'quantite', l->'quantite', 'prix_vendant', l->'prix_vendant')), '[]'::jsonb)
+     from jsonb_array_elements(d.lignes) l),
+    d.total_vendant, d.statut, d.reponse_client, d.repondu_le,
+    (d.jeton_expire_le is not null and d.jeton_expire_le < now()),
+    d.entreprise_id,
+    coalesce(e.nom_commercial, e.nom_legal),
+    e.telephone,
+    e.courriel,
+    e.taux_tps,
+    e.taux_tvq,
+    e.logo_donnees,
+    e.numero_rbq,
+    coalesce(e.associations, case when e.membre_cmmtq then '["cmmtq"]'::jsonb else '[]'::jsonb end),
+    e.adresse,
+    e.site_web,
+    e.numero_tps,
+    e.numero_tvq
+  from devis_app d
+  left join entreprises e on e.id = d.entreprise_id
+  where d.jeton_public = p_jeton and d.version_active;
+$$;
+revoke all on function devis_public(text) from public;
+grant execute on function devis_public(text) to anon, authenticated;
+
+-- ---- 2. bon_travail_public : + site web (adresse et RBQ y sont deja) ----
+-- Recreee a l'identique du snippet 97, avec UNE colonne de plus a la fin.
+drop function if exists bon_travail_public(text);
+create function bon_travail_public(p_jeton text)
+returns table (
+  entreprise_nom text,
+  entreprise_adresse text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_rbq text,
+  titre text,
+  client_nom text,
+  client_adresse_facturation text,
+  description text,
+  date_travail date,
+  adresse_travaux text,
+  photos jsonb,
+  legendes jsonb,
+  signe_par_nom text,
+  signe_par_collegue boolean,
+  client_absent boolean,
+  unites jsonb,
+  expire boolean,
+  entreprise_id text,
+  entreprise_logo text,
+  entreprise_associations jsonb,
+  entreprise_site_web text
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    coalesce(e.nom_commercial, e.nom_legal, 'Ventilation DGL inc.'),
+    e.adresse,
+    e.telephone,
+    e.courriel,
+    e.numero_rbq,
+    b.titre,
+    b.client_nom,
+    c.adresse_facturation,
+    b.description,
+    b.date_travail,
+    b.adresse_travaux,
+    ph.photos,
+    coalesce((
+      select jsonb_object_agg(pl.url, pl.legende)
+      from photos_legendes pl
+      where pl.legende is not null and pl.legende <> ''
+        and pl.url in (
+          select jsonb_array_elements_text(coalesce(ph.photos->'avant', '[]'::jsonb))
+          union
+          select jsonb_array_elements_text(coalesce(ph.photos->'apres', '[]'::jsonb))
+        )
+    ), '{}'::jsonb),
+    b.signe_par_nom,
+    coalesce(b.signe_par_collegue, false),
+    b.client_absent,
+    coalesce(b.unites, '[]'::jsonb),
+    (b.jeton_expire_le is not null and b.jeton_expire_le < now()),
+    b.entreprise_id,
+    e.logo_donnees,
+    coalesce(e.associations, case when e.membre_cmmtq then '["cmmtq"]'::jsonb else '[]'::jsonb end),
+    e.site_web
+  from bons_travail b
+  left join entreprises e on e.id = b.entreprise_id
+  left join clients_app c
+    on c.nom = b.client_nom and c.entreprise_id = b.entreprise_id
+  cross join lateral (
+    select jsonb_build_object(
+      'avant', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'avant', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'avant', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb),
+      'apres', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'apres', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'apres', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb)
+    ) as photos
+  ) ph
+  where b.jeton_public = p_jeton;
+$$;
+grant execute on function bon_travail_public(text) to anon, authenticated;
