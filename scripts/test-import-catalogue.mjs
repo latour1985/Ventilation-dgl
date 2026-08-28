@@ -1,4 +1,6 @@
-import { itemsDepuisCsv, nombreDepuisTexte, repererColonnes } from "file:///C:/Users/Administrateur/Desktop/test%20sur%20gemini%20pour%20claude/pour%20claude%20code/lib/importCatalogue.js";
+// Tests de l'import de liste de prix — `node scripts/test-import-catalogue.mjs`
+// (chemin RELATIF : le fichier doit tourner sur n'importe quel poste).
+import { itemsDepuisCsv, nombreDepuisTexte, repererColonnes } from "../lib/importCatalogue.js";
 
 let echecs = 0;
 const verifie = (nom, obtenu, attendu) => {
