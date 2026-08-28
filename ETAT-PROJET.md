@@ -19,8 +19,16 @@
 - Next.js 16 (App Router, JavaScript) · React 19 · Tailwind v4 · Supabase
   (auth, Postgres, Realtime, Storage) · @react-pdf/renderer · Vercel.
 - **Windows** : toujours `npm.cmd`, `npx.cmd`, `vercel.cmd` (les scripts .ps1 sont bloqués).
-- `npm.cmd run verifier` — ESLint étroit (uniquement ce qui plante). **Toujours avant de publier.**
-- `npm.cmd run publier` — vérifie → build → déploie en production.
+- `npm.cmd run verifier` — ESLint étroit (uniquement ce qui plante). **Toujours avant tout envoi.**
+- **⚠️ RÈGLE DE MISE EN LIGNE (2026-09-06, décidée avec le propriétaire) — deux adresses :**
+  - `npm.cmd run essayer` — déploie sur **https://fluxya-essai.vercel.app** (bandeau ambré
+    « Version d'essai » automatique ; la production ne bouge pas). **C'est le geste par défaut
+    pour TOUT changement.** On teste là, idéalement connecté comme Ventilation Miroir.
+  - `npm.cmd run publier` — déploie en **PRODUCTION** (fluxya.vercel.app + ventilation-dgl.vercel.app).
+    **SEULEMENT sur un « GO production » explicite de Jean-François**, au moment qu'il choisit.
+    Retour en arrière : Vercel garde toutes les versions (`vercel promote <ancienne-url>`).
+  - Corollaire : les changements de schéma restent ADDITIFS (colonnes ajoutées avec filet,
+    jamais retirées) — l'ancienne prod et le nouvel essai partagent la même base.
 - `.env.local` (JAMAIS dans git — règle absolue, même pour des clés « publiques » :
   l'historique git est éternel et des clés vraiment secrètes s'ajouteront un jour).
   **Sur un nouveau poste, RIEN à transporter** — reconstruire le fichier ainsi :

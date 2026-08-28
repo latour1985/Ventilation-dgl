@@ -8,6 +8,7 @@
     "start": "next start",
     "verifier": "eslint app lib components --quiet",
     "verifier:tout": "eslint app lib components",
+    "essayer": "node scripts/essayer.mjs",
     "publier": "eslint app lib components --quiet && next build && vercel --prod --yes"
   },
   "dependencies": {

@@ -1,5 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import BandeauEssai from "@/components/BandeauEssai";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,7 +43,12 @@ export default function RootLayout({ children }) {
       lang="fr"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {/* 🧪 Ruban « version d'essai » — visible seulement hors des
+            adresses de production (voir components/BandeauEssai.jsx). */}
+        <BandeauEssai />
+        {children}
+      </body>
     </html>
   );
 }
