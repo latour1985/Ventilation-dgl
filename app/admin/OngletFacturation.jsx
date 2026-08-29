@@ -1210,6 +1210,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // paiements : le même enchaînement que toutes les autres factures.
   const [factureLibreOuverte, setFactureLibreOuverte] = useState(false);
   const [courrielFactureLibre, setCourrielFactureLibre] = useState(null);
+  // 📅 Facture groupée : le groupe choisi passe par les deux mêmes
+  // fenêtres que les autres factures (destinataires, puis paiements).
+  const [groupeAFacturer, setGroupeAFacturer] = useState(null);
   const clientsFacturation = useClients();
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
@@ -1536,6 +1539,61 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         : bonsGroupes.filter((b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture")
       : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)))
   ).filter((b) => bonCorrespond(b, rechercheFact));
+  // ============================================================
+  // 📋 À FACTURER — PAR CLIENT ET PAR PROJET (2026-08-28)
+  // ------------------------------------------------------------
+  // Demande du propriétaire : « pour les gros projets on ne facture
+  // qu'une fois par mois — et groupe les factures par client pour
+  // trouver rapidement ce qu'il y a à faire, sans en oublier. »
+  //
+  // Ce tableau ne CACHE rien : les cartes détaillées restent en dessous.
+  // Il répond à une seule question — « qu'est-ce que je dois facturer,
+  // et à qui ? » — et donne le bouton qui fait UNE facture pour tout un
+  // chantier (une ligne par bon, donc le client voit le détail du mois).
+  // Après l'envoi, les bons passent « facturés » et quittent la pile :
+  // impossible de les facturer deux fois.
+  // ============================================================
+  const resteAFacturerDe = (b) => {
+    const cumule = (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+    return Math.max(0, (Number(b.montant) || 0) - cumule);
+  };
+  const groupesAFacturer = useMemo(() => {
+    // Seuls les bons qui restent VRAIMENT à facturer — ni retirés, ni
+    // déjà soldés (sinon le tableau annoncerait du travail imaginaire).
+    const candidats = bonsGroupes.filter(
+      (b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture" && resteAFacturerDe(b) > 0
+    );
+    const parClient = new Map();
+    candidats.forEach((b) => {
+      const client = (b.client || "").trim() || "— sans client —";
+      if (!parClient.has(client)) parClient.set(client, new Map());
+      const projet = (projets || []).find((p) => p.id === b.projetId) || null;
+      const cleProjet = projet ? projet.id : "__hors__";
+      const parProjet = parClient.get(client);
+      if (!parProjet.has(cleProjet)) parProjet.set(cleProjet, { projet, bons: [] });
+      parProjet.get(cleProjet).bons.push(b);
+    });
+    return [...parClient.entries()]
+      .map(([client, parProjet]) => {
+        const sousGroupes = [...parProjet.values()]
+          .map((g) => ({ ...g, total: g.bons.reduce((s, b) => s + resteAFacturerDe(b), 0) }))
+          // Les chantiers d'abord, « hors projet » en dernier.
+          .sort((a, b) => (a.projet ? 0 : 1) - (b.projet ? 0 : 1) || b.total - a.total);
+        return {
+          client,
+          sousGroupes,
+          nbBons: sousGroupes.reduce((s, g) => s + g.bons.length, 0),
+          total: sousGroupes.reduce((s, g) => s + g.total, 0),
+        };
+      })
+      // Le plus gros montant en haut : ce qu'on ne veut surtout pas oublier.
+      .sort((a, b) => b.total - a.total);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bonsGroupes, projets]);
+  const [groupesOuverts, setGroupesOuverts] = useState({});
+  const totalAFacturer = groupesAFacturer.reduce((s, g) => s + g.total, 0);
+  const nbBonsAFacturer = groupesAFacturer.reduce((s, g) => s + g.nbBons, 0);
+
   // 📄 Pagination (2026-08-26) : 10 cartes par page — les plus grosses
   // cartes de l'application s'empilaient sans fin. Changer de filtre
   // ramène page 1 ; la borne Math.min évite toute page vide.
@@ -1868,6 +1926,92 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     );
   };
 
+  // 📅 UNE FACTURE POUR TOUT UN CHANTIER (2026-08-28) — la facturation
+  // mensuelle des gros projets. UNE seule facture QuickBooks, mais UNE
+  // LIGNE PAR BON (date + description + montant) : le client voit le
+  // détail de son mois, et les N bons passent « facturés » d'un coup —
+  // ils quittent la pile, donc plus de risque de facturer deux fois.
+  const facturerGroupe = async (groupe, choixCourriels, paiements = {}) => {
+    const destinataires = listeDestinataires(choixCourriels);
+    const bonsDuGroupe = (groupe?.bons || []).filter((b) => resteAFacturerDe(b) > 0);
+    if (bonsDuGroupe.length === 0) return;
+    const clientNom = groupe.clientNom || bonsDuGroupe[0]?.client || "";
+    const fiche = (clientsFacturation || []).find((c) => c.nom === clientNom) || null;
+    const lignes = bonsDuGroupe.map((b) => ({
+      description: [b.date, b.projet || "Travaux"].filter(Boolean).join(" — "),
+      montant: resteAFacturerDe(b),
+    }));
+    const total = lignes.reduce((s, l) => s + l.montant, 0);
+    const r = await creerFactureQbo({
+      clientId: fiche?.id || null,
+      clientNom,
+      lignes,
+      termePaiement: configEnt?.termePaiementDefaut || "Net 30",
+      reference: groupe.projetNom || "travaux",
+      paiementCarte: paiements.carte === true,
+      paiementVirement: paiements.virement === true,
+      envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
+      adresseTravaux: bonsDuGroupe[0]?.adresseTravaux || null,
+    });
+    if (r?.erreur) {
+      ajouterJournal(`⚠️ Facture groupée NON créée pour ${clientNom} : ${r.erreur} — les ${bonsDuGroupe.length} bons restent en attente`);
+      return;
+    }
+    if (r?.nonConnecte) {
+      ajouterJournal("🔌 QuickBooks non connecté — facture groupée NON créée. Les bons restent en attente.");
+      return;
+    }
+    const numero = r?.docNumber || r?.factureId || "—";
+    const envoiSimple = r?.envoiQb
+      ? r.envoiQb.envoyee
+        ? { statut: "envoyee", date: r.envoiQb.envoyeeLe || new Date().toISOString() }
+        : { statut: "non_confirme", date: null }
+      : null;
+    // Chaque bon reçoit SA part de la facture commune — les montants
+    // restent justes bon par bon, et le numéro les relie entre eux.
+    const idsDuGroupe = new Set(bonsDuGroupe.map((b) => b.id));
+    const partDe = new Map(bonsDuGroupe.map((b) => [b.id, resteAFacturerDe(b)]));
+    setBons((prev) =>
+      prev.map((x) => {
+        if (!idsDuGroupe.has(x.id)) return x;
+        const entree = {
+          id: `fact-${Date.now()}-${x.id}`,
+          montant: partDe.get(x.id) || 0,
+          type: "complete",
+          detail: `facture groupée ${numero}`,
+          date: dateISO(new Date()),
+          numeroFactureQb: numero,
+          qboInvoiceId: r?.factureId || null,
+          courrielEnvoi: destinataires[0]?.email || null,
+          courrielsEnvoi: destinataires.map((c) => c.email),
+          envoiQb: envoiSimple,
+        };
+        const nouvelles = [...(x.facturesEmises || []), entree];
+        // Persistance — sinon les factures émises meurent au rechargement.
+        if (String(x.id).startsWith("sbb-")) {
+          majFacturesEmises(String(x.id).slice(4), nouvelles, "envoye").catch(() =>
+            ajouterJournal(`⚠️ Facture ${numero} affichée sur « ${x.projet} » mais NON enregistrée — vérifie la connexion.`)
+          );
+        }
+        return {
+          ...x,
+          statutQb: "envoye",
+          facturesEmises: nouvelles,
+          courrielFacturation: destinataires[0]?.email || null,
+          courrielsFacturation: destinataires.map((c) => c.email),
+        };
+      })
+    );
+    ajouterJournal(
+      `📅 Facture GROUPÉE ${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length} bons réunis, ${total.toFixed(2)} $ HT` +
+        (configEnt?.envoiAutoFactureQb === true
+          ? r?.envoiQb?.envoyee
+            ? ` · envoyée à ${destinataires.map((c) => c.email).join(", ")}`
+            : " · ⚠️ envoi par QuickBooks NON confirmé"
+          : " · à envoyer depuis QuickBooks")
+    );
+  };
+
   const envoyerQb = async (id, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
     const b = bons.find((x) => x.id === id);
@@ -2164,6 +2308,79 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           <p className="text-xs font-semibold text-emerald-700">✅ Déjà facturés</p>
         </button>
       </div>
+
+      {/* 📋 À FACTURER — PAR CLIENT ET PAR PROJET */}
+      {groupesAFacturer.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+              📋 À facturer — par client et par projet
+            </p>
+            <p className="text-[11px] font-bold tabular-nums text-slate-600">
+              {groupesAFacturer.length} client{groupesAFacturer.length > 1 ? "s" : ""} · {nbBonsAFacturer} bon{nbBonsAFacturer > 1 ? "s" : ""} · {totalAFacturer.toFixed(2)} $
+            </p>
+          </div>
+          <div className="space-y-1">
+            {groupesAFacturer.map((g) => {
+              const ouvert = groupesOuverts[g.client] !== false; // ouvert par défaut
+              return (
+                <div key={g.client} className="rounded-lg border border-slate-200">
+                  <button
+                    onClick={() => setGroupesOuverts((p) => ({ ...p, [g.client]: !ouvert }))}
+                    className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left hover:bg-slate-50"
+                  >
+                    <span className="min-w-0 truncate text-xs font-extrabold text-slate-800">
+                      {ouvert ? "▾" : "▸"} {g.client}
+                    </span>
+                    <span className="shrink-0 text-[11px] font-bold tabular-nums text-slate-600">
+                      {g.nbBons} bon{g.nbBons > 1 ? "s" : ""} · {g.total.toFixed(2)} $
+                    </span>
+                  </button>
+                  {ouvert && (
+                    <div className="border-t border-slate-100 px-2.5 py-1.5">
+                      {g.sousGroupes.map((sg) => (
+                        <div key={sg.projet?.id || "hors"} className="flex flex-wrap items-center justify-between gap-2 py-1">
+                          <span className="min-w-0 flex-1 truncate text-[11px] text-slate-600">
+                            {sg.projet ? `🏗️ ${sg.projet.nom}` : "— hors projet —"}
+                            <span className="ml-1.5 text-slate-400">
+                              {sg.bons.length} bon{sg.bons.length > 1 ? "s" : ""} · {sg.total.toFixed(2)} $
+                            </span>
+                          </span>
+                          {estAdminPrincipal && sg.bons.length > 0 && (
+                            <button
+                              onClick={() =>
+                                setGroupeAFacturer({
+                                  bons: sg.bons,
+                                  clientNom: g.client,
+                                  projetNom: sg.projet?.nom || null,
+                                  total: sg.total,
+                                  client: (clientsFacturation || []).find((c) => c.nom === g.client) || null,
+                                })
+                              }
+                              title={
+                                sg.bons.length > 1
+                                  ? "UNE facture pour tous ces bons — une ligne par bon, le client voit le détail"
+                                  : "Facturer ce bon"
+                              }
+                              className="shrink-0 rounded-lg bg-[#131B2E] px-2.5 py-1 text-[10px] font-bold text-white active:scale-95"
+                            >
+                              {sg.bons.length > 1 ? `📅 Facturer les ${sg.bons.length} d'un coup` : "Facturer"}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
+            Une facture groupée réunit plusieurs bons en UN seul document (une ligne par bon, avec sa date).
+            Les bons facturés quittent cette liste — impossible de les facturer deux fois.
+          </p>
+        </div>
+      )}
 
       {/* ➕ FACTURER SANS TÂCHE — vente au comptoir, contrat, frais. */}
       {estAdminPrincipal && (
@@ -2737,10 +2954,35 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           onFermer={() => setPaiementAConfirmer(null)}
           onEmettre={async (paiements) => {
             const pa = paiementAConfirmer;
-            if (pa.mode === "libre") await emettreFactureLibre(pa.donnees, pa.courriels, paiements);
+            if (pa.mode === "groupe") await facturerGroupe(pa.groupe, pa.courriels, paiements);
+            else if (pa.mode === "libre") await emettreFactureLibre(pa.donnees, pa.courriels, paiements);
             else if (pa.mode === "simple") await envoyerQb(pa.bonId, pa.courriels, paiements);
             else await emettreFacture(pa.bonId, pa.info, pa.courriels, paiements);
             setPaiementAConfirmer(null);
+          }}
+        />
+      )}
+
+      {/* 📅 FACTURE GROUPÉE — mêmes fenêtres que les autres factures. */}
+      {groupeAFacturer && (
+        <ModalSelectionCourriel
+          client={groupeAFacturer.client}
+          contexte={
+            groupeAFacturer.bons.length > 1
+              ? `cette facture groupée (${groupeAFacturer.bons.length} bons, ${groupeAFacturer.total.toFixed(2)} $)`
+              : "cette facture"
+          }
+          onFermer={() => setGroupeAFacturer(null)}
+          onConfirmer={(choix) => {
+            const g = groupeAFacturer;
+            setGroupeAFacturer(null);
+            setPaiementAConfirmer({
+              mode: "groupe",
+              groupe: g,
+              montant: g.total,
+              clientNom: g.clientNom,
+              courriels: choix,
+            });
           }}
         />
       )}
