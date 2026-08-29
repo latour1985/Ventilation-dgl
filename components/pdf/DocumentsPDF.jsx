@@ -123,6 +123,8 @@ function EnTetePDF({ config }) {
           {e.numeroTps ? <Text style={s.small}>Nº d'inscription TPS/TVH : {e.numeroTps}</Text> : null}
           {e.numeroTvq ? <Text style={s.small}>Nº d'enregistrement TVQ : {e.numeroTvq}</Text> : null}
           {ligneRbq ? <Text style={s.small}>{ligneRbq}</Text> : null}
+          {/* NEQ (2026-08-28) : saisi dans les Paramètres, jamais affiché. */}
+          {e.numeroNeq ? <Text style={s.small}>NEQ {e.numeroNeq}</Text> : null}
         </View>
       </View>
     </View>

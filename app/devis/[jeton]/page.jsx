@@ -151,9 +151,9 @@ export default function PageDevisPublic({ params }) {
                   licence et les memberships sont un argument de
                   CONFIANCE, pas une formalité : ils s'affichent sous
                   l'identité, là où le client vérifie à qui il a affaire. */}
-              {ligneAccreditations(devis?.entrepriseRbq, devis?.entrepriseAssociations) && (
+              {ligneAccreditations(devis?.entrepriseRbq, devis?.entrepriseAssociations, devis?.entrepriseNeq) && (
                 <p className="text-[11px] font-semibold text-slate-600">
-                  {ligneAccreditations(devis?.entrepriseRbq, devis?.entrepriseAssociations)}
+                  {ligneAccreditations(devis?.entrepriseRbq, devis?.entrepriseAssociations, devis?.entrepriseNeq)}
                 </p>
               )}
             </div>

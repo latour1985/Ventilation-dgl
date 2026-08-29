@@ -2804,6 +2804,9 @@ export default function App() {
         <OngletDevis
           clients={clients}
           setClients={setClients}
+          // Grille CCQ : sert à pré-remplir le taux coûtant prévu d'un
+          // projet créé depuis un devis (chiffre réel, pas un 45 $ inventé).
+          tauxMetiers={tauxMetiers}
           devisListe={devisListe}
           setDevisListe={setDevisListe}
           persisterDevis={async (d) => {

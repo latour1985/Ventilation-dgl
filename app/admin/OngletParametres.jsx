@@ -799,6 +799,9 @@ export function EnTeteEntreprise({ compact, config }) {
         {e.numeroTps ? <p>Nº d'inscription TPS/TVH : {e.numeroTps}</p> : null}
         {e.numeroTvq ? <p>Nº d'enregistrement TVQ : {e.numeroTvq}</p> : null}
         {e.numeroRbq ? <p>RBQ# {e.numeroRbq}</p> : null}
+        {/* NEQ (2026-08-28) : le champ existait dans les Paramètres et se
+            sauvegardait, mais n'était affiché NULLE PART. */}
+        {e.numeroNeq ? <p>NEQ {e.numeroNeq}</p> : null}
         {e.membreCmmtq ? (
           <div className="flex items-center gap-1.5">
             {/* Le logo officiel (fourni par l'utilisateur, fond rendu

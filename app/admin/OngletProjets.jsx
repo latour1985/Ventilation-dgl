@@ -140,11 +140,37 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQu
             devis (ou de la tâche) à la création du projet. Sans lui, on
             ne montre rien — jamais un écart calculé sur du vide. */}
         {Number(projet.budgetPrevu?.totalCoutant) > 0 && (() => {
-          const prevu = Number(projet.budgetPrevu.totalCoutant);
+          const bp = projet.budgetPrevu;
+          const prevu = Number(bp.totalCoutant);
           const ecart = r.coutTotalReel - prevu;
+          // 🔎 LE DÉTAIL quand il a été saisi : savoir OÙ ça a dépassé
+          // (les heures ? le matériel ?) est ce qui fait apprendre pour
+          // la soumission suivante.
+          const moPrevu = Number(bp.mainOeuvreChantier?.coutant) || 0;
+          const matPrevu = Number(bp.materiaux?.coutant) || 0;
+          const heuresPrevues = Number(bp.mainOeuvreChantier?.heures) || 0;
+          const ligneEcart = (libelle, prevuLigne, reelLigne, complement) => {
+            const d = reelLigne - prevuLigne;
+            return (
+              <div className="flex justify-between text-[11px] text-slate-500">
+                <span className="pl-2">↳ {libelle}{complement ? ` ${complement}` : ""}</span>
+                <span className="tabular-nums">
+                  {prevuLigne.toFixed(2)} $ → {reelLigne.toFixed(2)} $
+                  <span className={`ml-1.5 font-bold ${d > 0 ? "text-red-600" : "text-emerald-600"}`}>{d > 0 ? "+" : ""}{d.toFixed(2)}</span>
+                </span>
+              </div>
+            );
+          };
           return (
             <>
-              <div className="flex justify-between text-slate-500"><span>Coûtant prévu{projet.budgetPrevu.source ? ` (${projet.budgetPrevu.source})` : ""}</span><span className="tabular-nums">{prevu.toFixed(2)} $</span></div>
+              <div className="flex justify-between text-slate-500"><span>Coûtant prévu{bp.source ? ` (${bp.source})` : ""}</span><span className="tabular-nums">{prevu.toFixed(2)} $</span></div>
+              {bp.detaille && moPrevu > 0 && ligneEcart(
+                "Main-d'œuvre",
+                moPrevu,
+                r.coutMainOeuvre,
+                heuresPrevues > 0 ? `(${heuresPrevues} h prévues → ${r.totalHeures} h)` : ""
+              )}
+              {bp.detaille && matPrevu > 0 && ligneEcart("Matériaux", matPrevu, r.coutMateriaux)}
               <div className={`flex justify-between font-semibold ${ecart > 0 ? "text-red-600" : "text-emerald-600"}`}>
                 <span>{ecart > 0 ? "Dépassement du coûtant prévu" : "Sous le coûtant prévu"}</span>
                 <span className="tabular-nums">{ecart > 0 ? "+" : ""}{ecart.toFixed(2)} $</span>

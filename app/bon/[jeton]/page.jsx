@@ -143,9 +143,9 @@ export default function PageBonPublic({ params }) {
               {/* 🪪 RBQ + associations — le bon voyageait déjà avec le
                   RBQ sans jamais l'afficher (snippet 97 pour les
                   associations). */}
-              {ligneAccreditations(bon.entreprise.numeroRbq, bon.entreprise.associations) && (
+              {ligneAccreditations(bon.entreprise.numeroRbq, bon.entreprise.associations, bon.entreprise.neq) && (
                 <p className="text-[11px] font-semibold text-slate-600">
-                  {ligneAccreditations(bon.entreprise.numeroRbq, bon.entreprise.associations)}
+                  {ligneAccreditations(bon.entreprise.numeroRbq, bon.entreprise.associations, bon.entreprise.neq)}
                 </p>
               )}
             </div>
