@@ -3945,3 +3945,62 @@ grant execute on function bon_travail_public(text) to anon, authenticated;
 -- ============================================================
 alter table projets_app add column if not exists reprise jsonb not null default '{}'::jsonb;
 select count(*) as projets, count(*) filter (where reprise <> '{}'::jsonb) as avec_reprise from projets_app;
+
+-- ============================================================
+-- 102 - PROJET DE DEMONSTRATION RESIDUEL (2026-08-28)
+-- ------------------------------------------------------------
+-- « Refection toiture — Entrepot & Chantier Nord » est un residu de nos
+-- toutes premieres donnees de test (scenario de couvreur), persiste
+-- dans projets_app de DGL. Il ne vient PAS du code : les constantes de
+-- demo sont vides depuis le 2026-09-05, donc aucun nouvel utilisateur
+-- ne peut le voir apparaitre — il fallait seulement effacer la ligne.
+-- Les taches qui pointaient dessus sont detachees (jamais supprimees).
+-- ============================================================
+update taches_assignees set projet_id = null
+ where projet_id in (select id from projets_app where nom ilike '%refection toiture%');
+update taches_attente set projet_id = null
+ where projet_id in (select id from projets_app where nom ilike '%refection toiture%');
+
+delete from projets_app where nom ilike '%refection toiture%';
+
+-- Ce qui RESTE, entreprise par entreprise (verification a l'oeil) :
+select entreprise_id, nom, statut, budget_total from projets_app order by entreprise_id, nom;
+
+-- ============================================================
+-- 103 - UNICITE DU CATALOGUE : PAR ENTREPRISE (2026-08-28)
+-- ------------------------------------------------------------
+-- BOGUE MULTI-ENTREPRISES : « duplicate key value violates unique
+-- constraint idx_catalogue_items_nom » a l'import d'une liste de prix
+-- chez Ventilation Miroir. L'index d'unicite portait sur le NOM SEUL,
+-- pour TOUTE la base : un item nomme « Appel de service base Montreal »
+-- chez DGL empechait une AUTRE entreprise de creer le sien. Un index
+-- s'applique a toutes les lignes, RLS ou pas — les cloisons cachent les
+-- donnees, elles ne suspendent pas les contraintes.
+-- Desormais l'unicite est (entreprise_id, nom) : chacune chez soi.
+-- Insensible a la casse et aux espaces de bordure, comme la
+-- reconnaissance des doublons dans l'application.
+-- ============================================================
+-- Garde-fou : si des doublons existent DEJA dans une meme entreprise,
+-- on s'arrete avec un message clair au lieu d'une erreur cryptique.
+do $$
+declare n int;
+begin
+  select count(*) into n from (
+    select entreprise_id, lower(btrim(nom)) as cle
+      from catalogue_items
+     group by 1, 2
+    having count(*) > 1
+  ) doublons;
+  if n > 0 then
+    raise exception 'STOP : % nom(s) sont en double DANS une meme entreprise. Lance d abord la requete de diagnostic fournie dans le message, corrige-les, puis rejoue ce snippet.', n;
+  end if;
+end $$;
+
+drop index if exists idx_catalogue_items_nom;
+create unique index if not exists idx_catalogue_items_nom_entreprise
+  on catalogue_items (entreprise_id, lower(btrim(nom)));
+
+select indexname, indexdef
+  from pg_indexes
+ where schemaname = 'public' and tablename = 'catalogue_items'
+ order by indexname;

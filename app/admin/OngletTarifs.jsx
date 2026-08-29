@@ -996,10 +996,13 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
       aEnregistrer.push(maj);
       if (m.changements.length > 0) ajustes++; else raccordes++;
     }
+    let ignores = [];
     if (aEnregistrer.length > 0) {
       try {
         if (onImporterItems) {
-          await onImporterItems(aEnregistrer, sourceMaj === "csv" ? "import de liste de prix" : "synchronisation QuickBooks");
+          const sauves = await onImporterItems(aEnregistrer, sourceMaj === "csv" ? "import de liste de prix" : "synchronisation QuickBooks");
+          ignores = sauves?.ignores || [];
+          ajoutes -= ignores.length > ajoutes ? ajoutes : ignores.length;
         } else {
           // Repli (aucun chemin en lot fourni) : un par un.
           for (const item of aEnregistrer) await onEnregistrerItem(item);
@@ -1020,6 +1023,14 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
       return;
     }
     setSyncQb(null);
+    if (ignores.length > 0) {
+      alert(
+        `⚠️ ${ignores.length} item${ignores.length > 1 ? "s" : ""} refusé${ignores.length > 1 ? "s" : ""} : un item porte déjà ce nom.\n\n` +
+          ignores.slice(0, 10).join("\n") +
+          (ignores.length > 10 ? `\n… et ${ignores.length - 10} autre(s)` : "") +
+          "\n\nLe reste a bien été enregistré."
+      );
+    }
     if (ajoutes + ajustes + raccordes + retiresN === 0) return;
     alert(
       (sourceMaj === "csv" ? "Catalogue mis à jour depuis le fichier :\n" : "Catalogue mis à jour depuis QuickBooks :\n") +

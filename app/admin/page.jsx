@@ -3272,7 +3272,13 @@ export default function App() {
               const ids = new Set(sauves.map((s) => s.id));
               return [...prev.filter((x) => !ids.has(x.id)), ...sauves].sort((a, b) => a.nom.localeCompare(b.nom));
             });
-            ajouterJournal(`💲 Catalogue : ${sauves.length} item${sauves.length > 1 ? "s" : ""} enregistré${sauves.length > 1 ? "s" : ""}${description ? ` (${description})` : ""}`);
+            const ignores = sauves.ignores || [];
+            ajouterJournal(
+              `💲 Catalogue : ${sauves.length} item${sauves.length > 1 ? "s" : ""} enregistré${sauves.length > 1 ? "s" : ""}${description ? ` (${description})` : ""}` +
+                (ignores.length > 0
+                  ? ` — ⚠️ ${ignores.length} refusé${ignores.length > 1 ? "s" : ""} (nom déjà pris) : ${ignores.slice(0, 5).join(", ")}${ignores.length > 5 ? "…" : ""}`
+                  : "")
+            );
             return sauves;
           }}
           onDesactiverItem={async (item) => {
