@@ -23,7 +23,7 @@
 // de modification) suffit donc à sortir la ligne, sans rien cocher.
 
 import { useState } from "react";
-import { Check, FileText, Plus } from "lucide-react";
+import { Check, FileText, Mail, Plus } from "lucide-react";
 
 const GENRES = {
   modification: {
@@ -55,7 +55,7 @@ function depuisQuand(iso) {
   return `il y a ${jours} jours`;
 }
 
-export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, onNouvelleVersion, onTraiterDevis, onClasser }) {
+export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, onNouvelleVersion, onTraiterDevis, onRenvoyer, onClasser }) {
   const [replie, setReplie] = useState(false);
   if (!reponses || reponses.length === 0) {
     if (compact) return null; // tableau de bord : rien à dire, rien à montrer
@@ -128,6 +128,19 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       className="rounded-lg bg-[#131B2E] px-2.5 py-1 text-[10px] font-bold text-white active:scale-95"
                     >
                       Traiter le devis →
+                    </button>
+                  )}
+                  {/* 📧 RENVOYER — le geste après avoir répondu à sa
+                      question au téléphone : le devis repart, et le
+                      client peut ACCEPTER en ligne (sa réponse est
+                      rouverte, sinon son lien resterait mort). */}
+                  {genre !== "accepte" && onRenvoyer && (
+                    <button
+                      onClick={() => onRenvoyer(d)}
+                      title="Le devis repart au client, qui pourra répondre de nouveau (accepter, refuser…)"
+                      className="flex items-center gap-1 rounded-lg border border-[#131B2E] bg-white px-2.5 py-1 text-[10px] font-bold text-[#131B2E] active:scale-95"
+                    >
+                      <Mail size={11} /> Renvoyer le devis
                     </button>
                   )}
                   {/* Classer : pour les cas réglés autrement (un appel au

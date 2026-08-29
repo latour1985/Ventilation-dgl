@@ -14,7 +14,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
 import { genererJeton, lienDevisPublic, JOURS_VALIDITE_LIEN_DEVIS } from "@/lib/supabase/devisPublic";
-import { activerVersionDevis, supprimerDevis, reponsesClientATraiter, classerReponseDevis } from "@/lib/supabase/devis";
+import { activerVersionDevis, supprimerDevis, reponsesClientATraiter, classerReponseDevis, rouvrirReponseDevis } from "@/lib/supabase/devis";
 import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
@@ -646,6 +646,52 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const [versionAffichee, setVersionAffichee] = useState(null);
   // 💬 Ce à quoi les clients ont répondu et qui attend une action.
   const reponsesATraiter = reponsesClientATraiter(devisListe);
+  // 🎯 ALLER AU DOSSIER (2026-08-28) : « Voir le devis » et « Nouvelle
+  // version » ne semblaient RIEN faire — ils marchaient, mais la carte
+  // visée était souvent sur une AUTRE PAGE de la liste (10 par page) et
+  // hors de l'écran. On amène donc l'écran jusqu'à elle : bonne page,
+  // dossier ouvert, défilement centré, et un surlignage de 2,5 s pour
+  // que l'œil la retrouve tout de suite.
+  const [dossierSurligne, setDossierSurligne] = useState(null);
+  const allerAuDossier = (d) => {
+    const base = d.numeroBase || d.numero;
+    const index = dossiersDevis.findIndex((x) => x.base === base);
+    if (index >= 0) setPageDevis(Math.floor(index / ITEMS_PAR_PAGE) + 1);
+    setDossierOuvert(base);
+    setVersionAffichee(d.numero);
+    setDossierSurligne(base);
+    // Laisse React afficher la bonne page AVANT de faire défiler.
+    setTimeout(() => {
+      document.getElementById(`dossier-${base}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+    setTimeout(() => setDossierSurligne((actuel) => (actuel === base ? null : actuel)), 2500);
+  };
+
+  // 📧 RENVOYER APRÈS AVOIR RÉPONDU (2026-08-28) : le client avait une
+  // question, tu l'as appelé — il faut maintenant qu'il puisse ACCEPTER.
+  // Or il ne peut répondre qu'UNE fois : son lien était mort. On rouvre
+  // donc sa réponse (jamais une acceptation), on garde sa question au
+  // journal pour la trace, et on ouvre la fenêtre d'envoi habituelle.
+  const renvoyerApresReponse = async (d) => {
+    const question = d.messageClient;
+    try {
+      const rouvert = await rouvrirReponseDevis(d.id);
+      if (!rouvert) {
+        ajouterJournal(`⚠️ ${d.numero} : impossible de rouvrir — une ACCEPTATION ne s'efface jamais (c'est la preuve du client).`);
+        return;
+      }
+    } catch {
+      ajouterJournal(`⚠️ ${d.numero} : la réouverture a échoué — le client ne pourra pas répondre de nouveau. Réessaie.`);
+      return;
+    }
+    const maj = { ...d, reponseClient: null, reponduLe: null, reponduParNom: "", messageClient: "", reponseTraiteeLe: null };
+    setDevisListe((prev) => prev.map((x) => (x.id === d.id ? maj : x)));
+    ajouterJournal(
+      `🔁 ${d.numero} rouvert pour une nouvelle réponse du client${question ? ` — sa question était « ${question} »` : ""} : il peut de nouveau accepter en ligne.`
+    );
+    ouvrirEnvoiDevis(maj);
+  };
+
   // « J'ai répondu » / « Pris en note » — la ligne se range, en base
   // (sinon elle reviendrait au prochain rechargement).
   const classerReponse = async (d) => {
@@ -1064,14 +1110,14 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           d'une carte de devis (retour du propriétaire, 2026-08-28). */}
       <BlocReponsesClients
         reponses={reponsesATraiter}
-        onOuvrirDevis={(d) => { setDossierOuvert(d.numeroBase || d.numero); setVersionAffichee(d.numero); }}
+        onOuvrirDevis={allerAuDossier}
         onNouvelleVersion={(d) => {
-          setDossierOuvert(d.numeroBase || d.numero);
-          setVersionAffichee(d.numero);
+          allerAuDossier(d);
           setCreationVersionPour(d.numero);
           setNoteNouvelleVersion(d.messageClient ? `Demande du client : ${d.messageClient}` : "");
         }}
         onTraiterDevis={(d) => setDevisATraiterId(d.id)}
+        onRenvoyer={renvoyerApresReponse}
         onClasser={classerReponse}
       />
 
@@ -1682,7 +1728,13 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
             const affichee = ouvert ? versions.find((v) => v.numero === versionAffichee) || active : active;
             const estActive = affichee.numero === active.numero;
             return (
-              <div key={base} className="rounded-xl border border-slate-200 bg-white p-3.5">
+              <div
+                key={base}
+                id={`dossier-${base}`}
+                className={`rounded-xl border bg-white p-3.5 transition-shadow ${
+                  dossierSurligne === base ? "border-[#FF6A13] ring-2 ring-orange-300" : "border-slate-200"
+                }`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
