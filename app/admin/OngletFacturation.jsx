@@ -1558,10 +1558,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     return Math.max(0, (Number(b.montant) || 0) - cumule);
   };
   const groupesAFacturer = useMemo(() => {
-    // Seuls les bons qui restent VRAIMENT à facturer — ni retirés, ni
-    // déjà soldés (sinon le tableau annoncerait du travail imaginaire).
+    // Tout ce qui n'est ni retiré ni déjà soldé. ⚠️ On garde les bons
+    // « à réviser » (prix pas encore fixé, donc montant à 0) : les
+    // exclure faisait disparaître le tableau entier quand toute la pile
+    // attendait une révision — et c'est justement ceux-là qu'on ne doit
+    // pas oublier. Ils sont comptés à part, jamais facturés à 0 $.
     const candidats = bonsGroupes.filter(
-      (b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture" && resteAFacturerDe(b) > 0
+      (b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture"
     );
     const parClient = new Map();
     candidats.forEach((b) => {
@@ -1576,7 +1579,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     return [...parClient.entries()]
       .map(([client, parProjet]) => {
         const sousGroupes = [...parProjet.values()]
-          .map((g) => ({ ...g, total: g.bons.reduce((s, b) => s + resteAFacturerDe(b), 0) }))
+          .map((g) => ({
+            ...g,
+            total: g.bons.reduce((s, b) => s + resteAFacturerDe(b), 0),
+            // Seuls ceux qui ont un montant partent dans une facture.
+            facturables: g.bons.filter((b) => resteAFacturerDe(b) > 0),
+            aReviser: g.bons.filter((b) => resteAFacturerDe(b) <= 0).length,
+          }))
           // Les chantiers d'abord, « hors projet » en dernier.
           .sort((a, b) => (a.projet ? 0 : 1) - (b.projet ? 0 : 1) || b.total - a.total);
         return {
@@ -1879,7 +1888,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       reference: donnees.reference || "Facture",
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
-      envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
+      // 📧 TOUJOURS envoyée : contrairement aux factures issues d'un bon
+      // (qui ont leur propre bouton « Renvoyer »), ici l'utilisateur vient
+      // de CHOISIR les destinataires dans une fenêtre dédiée — les ignorer
+      // parce que l'envoi automatique est décoché ne produisait qu'une
+      // facture muette que personne ne recevait.
+      envoyerA: destinataires.map((c) => c.email),
       adresseTravaux: null,
     });
     if (r?.erreur) {
@@ -1918,11 +1932,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     ajouterJournal(
       `🧾 Facture libre ${numero} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
         (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} » (montant intégré à sa rentabilité)` : " · sans projet") +
-        (configEnt?.envoiAutoFactureQb === true
-          ? envoyee
-            ? ` · envoyée par QuickBooks à ${destinataires.map((c) => c.email).join(", ")}`
-            : " · ⚠️ envoi par QuickBooks NON confirmé"
-          : " · à envoyer depuis QuickBooks")
+        (envoyee
+          ? ` · envoyée par QuickBooks à ${destinataires.map((c) => c.email).join(", ")}`
+          : " · ⚠️ envoi par QuickBooks NON confirmé — renvoie-la depuis QuickBooks")
     );
   };
 
@@ -1950,7 +1962,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       reference: groupe.projetNom || "travaux",
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
-      envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
+      // 📧 TOUJOURS envoyée : contrairement aux factures issues d'un bon
+      // (qui ont leur propre bouton « Renvoyer »), ici l'utilisateur vient
+      // de CHOISIR les destinataires dans une fenêtre dédiée — les ignorer
+      // parce que l'envoi automatique est décoché ne produisait qu'une
+      // facture muette que personne ne recevait.
+      envoyerA: destinataires.map((c) => c.email),
       adresseTravaux: bonsDuGroupe[0]?.adresseTravaux || null,
     });
     if (r?.erreur) {
@@ -2004,11 +2021,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     );
     ajouterJournal(
       `📅 Facture GROUPÉE ${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length} bons réunis, ${total.toFixed(2)} $ HT` +
-        (configEnt?.envoiAutoFactureQb === true
-          ? r?.envoiQb?.envoyee
-            ? ` · envoyée à ${destinataires.map((c) => c.email).join(", ")}`
-            : " · ⚠️ envoi par QuickBooks NON confirmé"
-          : " · à envoyer depuis QuickBooks")
+        (r?.envoiQb?.envoyee
+          ? ` · envoyée à ${destinataires.map((c) => c.email).join(", ")}`
+          : " · ⚠️ envoi par QuickBooks NON confirmé — renvoie-la depuis QuickBooks")
     );
   };
 
@@ -2309,7 +2324,20 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         </button>
       </div>
 
-      {/* 📋 À FACTURER — PAR CLIENT ET PAR PROJET */}
+      {/* 📋 À FACTURER — PAR CLIENT ET PAR PROJET.
+          TOUJOURS affiché (même vide) : caché, on ne pouvait pas savoir
+          s'il n'y avait rien à facturer ou si la section était brisée. */}
+      {groupesAFacturer.length === 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+            📋 À facturer — par client et par projet
+          </p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Rien à facturer pour l&apos;instant. Dès qu&apos;un bon de travail est prêt, il apparaît ici, regroupé
+            par client puis par chantier — avec le bouton qui réunit tout un mois en UNE facture.
+          </p>
+        </div>
+      )}
       {groupesAFacturer.length > 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-3">
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
@@ -2345,12 +2373,20 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                             <span className="ml-1.5 text-slate-400">
                               {sg.bons.length} bon{sg.bons.length > 1 ? "s" : ""} · {sg.total.toFixed(2)} $
                             </span>
+                            {/* Les bons sans prix ne partent dans aucune
+                                facture — mieux vaut le dire que de les
+                                compter en silence. */}
+                            {sg.aReviser > 0 && (
+                              <span className="ml-1.5 font-bold text-amber-700">
+                                · {sg.aReviser} à réviser
+                              </span>
+                            )}
                           </span>
-                          {estAdminPrincipal && sg.bons.length > 0 && (
+                          {estAdminPrincipal && sg.facturables.length > 0 && (
                             <button
                               onClick={() =>
                                 setGroupeAFacturer({
-                                  bons: sg.bons,
+                                  bons: sg.facturables,
                                   clientNom: g.client,
                                   projetNom: sg.projet?.nom || null,
                                   total: sg.total,
@@ -2364,7 +2400,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                               }
                               className="shrink-0 rounded-lg bg-[#131B2E] px-2.5 py-1 text-[10px] font-bold text-white active:scale-95"
                             >
-                              {sg.bons.length > 1 ? `📅 Facturer les ${sg.bons.length} d'un coup` : "Facturer"}
+                              {sg.facturables.length > 1 ? `📅 Facturer les ${sg.facturables.length} d'un coup` : "Facturer"}
                             </button>
                           )}
                         </div>
