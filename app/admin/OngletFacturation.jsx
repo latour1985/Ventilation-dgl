@@ -17,7 +17,9 @@ import { creerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdf
 import { majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
-import { AdressesDocument, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, dateISO, hauteurDescription, libelleDestinataires, listeDestinataires, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
+import { AdressesDocument, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
+import InputNombreDecimal from "@/components/InputNombreDecimal";
+import { enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 
 export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
   const [raison, setRaison] = useState("travaux_en_cours");
@@ -934,10 +936,244 @@ export function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmet
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {} }) {
+// ============================================================
+// ➕ FACTURE LIBRE — facturer SANS tâche ni bon de travail
+// ------------------------------------------------------------
+// Demande du propriétaire (2026-08-28) : « comment on peut créer une
+// facture sans tâche ? ». Jusqu'ici, toute facture partait d'un bon de
+// travail — donc d'un chantier. Or il y a de vrais cas sans chantier :
+// vente de matériel au comptoir, contrat d'entretien facturé d'avance,
+// frais d'annulation, refacturation d'une pièce.
+//
+// La route QuickBooks n'a JAMAIS eu besoin d'une tâche (client + lignes
+// suffisent) : il ne manquait que cet écran.
+//
+// 🔗 RATTACHEMENT À UN PROJET (choix du propriétaire) : la facture peut
+// compter dans la rentabilité d'un chantier en cours. On le fait avec
+// la mécanique d'attribution qui existe déjà (qb_attributions_manuelles) —
+// la facture créée porte l'identifiant « QBO-INV-<id> », exactement la
+// forme que la synchronisation QuickBooks utilise. Sans projet choisi,
+// elle est attribuée au CLIENT : elle ne tombe donc jamais dans la pile
+// « factures QuickBooks à rattacher ».
+// ============================================================
+export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFermer, onContinuer }) {
+  const [clientId, setClientId] = useState("");
+  const [recherche, setRecherche] = useState("");
+  const [projetId, setProjetId] = useState("");
+  const [reference, setReference] = useState("");
+  const [lignes, setLignes] = useState([]);
+
+  const client = (clients || []).find((c) => c.id === clientId) || null;
+  const resultatsClients = useMemo(() => {
+    const t = recherche.trim().toLowerCase();
+    const base = clients || [];
+    if (!t) return base.slice(0, 8);
+    // `correspond` prend la FICHE (elle cherche dans le nom, l'entreprise,
+    // les courriels, le téléphone et l'adresse), pas une chaîne montée
+    // à la main.
+    return base.filter((c) => correspond(c, t)).slice(0, 8);
+  }, [clients, recherche]);
+
+  // Projets ouverts seulement : rattacher à un chantier terminé n'a pas
+  // de sens, et la liste resterait polluée à vie.
+  const projetsOuverts = (projets || []).filter((p) => p.statut !== "Terminé" && p.statut !== "Annulé");
+
+  const ajouterLigne = (item) =>
+    setLignes((prev) => [
+      ...prev,
+      {
+        uid: `l-${Date.now()}-${prev.length}`,
+        description: item?.nom || "",
+        quantite: 1,
+        prix: item?.prix_vendant ?? "",
+      },
+    ]);
+  const majLigne = (uid, champs) => setLignes((prev) => prev.map((l) => (l.uid === uid ? { ...l, ...champs } : l)));
+  const retirerLigne = (uid) => setLignes((prev) => prev.filter((l) => l.uid !== uid));
+
+  const lignesValides = lignes.filter((l) => String(l.description || "").trim());
+  const sousTotal = lignesValides.reduce((s, l) => s + (Number(l.quantite) || 0) * (Number(l.prix) || 0), 0);
+  const taxes = calculerTaxes(sousTotal, configEnt);
+  const peutContinuer = !!client && lignesValides.length > 0 && sousTotal > 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onMouseDown={(ev) => { if (ev.target === ev.currentTarget) onFermer(); }}>
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-slate-100 p-5 pb-3">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">➕ Nouvelle facture</h3>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              Sans tâche ni bon de travail — vente au comptoir, contrat, frais, refacturation.
+            </p>
+          </div>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5 pt-3">
+          {/* CLIENT — une fiche existante seulement : facturer un nom
+              libre créerait un client dans QuickBooks sans fiche ici,
+              exactement le genre d'orphelin qu'on passe son temps à
+              réconcilier. */}
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">Client *</label>
+            {client ? (
+              <div className="flex items-center justify-between gap-2 rounded-lg border-2 border-[#FF6A13] bg-orange-50 px-3 py-2">
+                <span className="min-w-0 truncate text-sm font-bold text-slate-800">{nomAffichageClient(client)}</span>
+                <button onClick={() => { setClientId(""); setRecherche(""); }} className="shrink-0 text-[11px] font-bold text-slate-500 underline">changer</button>
+              </div>
+            ) : (
+              <>
+                <input
+                  value={recherche}
+                  onChange={(e) => setRecherche(e.target.value)}
+                  placeholder="🔍 Cherche un client par nom, entreprise ou téléphone…"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+                <div className="mt-1 max-h-[130px] overflow-y-auto rounded-lg border border-slate-200">
+                  {resultatsClients.length === 0 ? (
+                    <p className="px-3 py-2 text-[11px] text-slate-400">
+                      Aucun client trouvé — crée sa fiche dans l&apos;onglet Clients d&apos;abord.
+                    </p>
+                  ) : (
+                    resultatsClients.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => setClientId(c.id)}
+                        className="block w-full border-b border-slate-100 px-3 py-1.5 text-left text-xs last:border-0 hover:bg-slate-50"
+                      >
+                        {nomAffichageClient(c)}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* LIGNES */}
+          <div>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <label className="text-xs font-bold text-slate-500">Lignes de la facture *</label>
+              <div className="flex gap-1.5">
+                <SelecteurItem catalogue={catalogue} onChoisir={ajouterLigne} libelle="+ Du catalogue" />
+                <Button variant="outline" onClick={() => ajouterLigne(null)} className="min-h-0 px-2.5 py-1 text-[11px]">
+                  + Ligne libre
+                </Button>
+              </div>
+            </div>
+            {lignes.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-300 px-3 py-4 text-center text-[11px] text-slate-400">
+                Aucune ligne — ajoute un produit du catalogue ou une ligne écrite à la main.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {lignes.map((l) => (
+                  <div key={l.uid} className="rounded-lg border border-slate-200 p-2">
+                    <div className="flex items-start gap-1.5">
+                      <textarea
+                        value={l.description}
+                        onChange={(e) => majLigne(l.uid, { description: e.target.value })}
+                        rows={1}
+                        placeholder="Description (ex. : Filtre 20x25 — vente comptoir)"
+                        className="min-w-0 flex-1 resize-y rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                      />
+                      <button onClick={() => retirerLigne(l.uid)} title="Retirer cette ligne" className="shrink-0 pt-1.5 text-slate-300 hover:text-red-500">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-400">Qté</span>
+                      <InputNombreDecimal valeur={l.quantite} onChange={(v) => majLigne(l.uid, { quantite: v })} className="w-[64px] rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                      <span className="text-[10px] text-slate-400">×</span>
+                      <InputNombreDecimal valeur={l.prix} onChange={(v) => majLigne(l.uid, { prix: v })} className="w-[86px] rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+                      <span className="text-[10px] font-bold text-slate-400">$</span>
+                      <span className="ml-auto text-xs font-bold tabular-nums text-slate-700">
+                        {((Number(l.quantite) || 0) * (Number(l.prix) || 0)).toFixed(2)} $
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* RATTACHEMENT + RÉFÉRENCE */}
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">🔗 Rattacher à un projet</label>
+              <select
+                value={projetId}
+                onChange={(e) => setProjetId(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs"
+              >
+                <option value="">— aucun (facture indépendante) —</option>
+                {projetsOuverts.map((p) => <option key={p.id} value={p.id}>{p.nom}</option>)}
+              </select>
+              <p className="mt-0.5 text-[10px] text-slate-400">Son montant comptera dans la rentabilité du projet.</p>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Référence (facultatif)</label>
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="Ex. : vente comptoir, contrat 2026"
+                className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs"
+              />
+            </div>
+          </div>
+
+          {/* TOTAUX — les mêmes taux de taxes que partout ailleurs */}
+          <div className="rounded-xl bg-slate-50 p-3 text-xs">
+            <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">{sousTotal.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TPS</span><span className="tabular-nums">{taxes.tps.toFixed(2)} $</span></div>
+            <div className="flex justify-between text-slate-500"><span>TVQ</span><span className="tabular-nums">{taxes.tvq.toFixed(2)} $</span></div>
+            <div className="mt-1 flex justify-between border-t border-slate-200 pt-1 text-sm font-extrabold text-slate-900">
+              <span>Total</span><span className="tabular-nums">{taxes.total.toFixed(2)} $</span>
+            </div>
+            <p className="mt-1 text-[10px] text-slate-400">
+              Les taxes sont calculées par QuickBooks sur la facture officielle — ce total est l&apos;aperçu.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-5 pt-3">
+          <Button variant="outline" onClick={onFermer}>Annuler</Button>
+          <Button
+            disabled={!peutContinuer}
+            title={peutContinuer ? "" : "Choisis un client et ajoute au moins une ligne avec un montant"}
+            onClick={() =>
+              onContinuer({
+                client,
+                projetId: projetId || null,
+                reference: reference.trim(),
+                lignes: lignesValides.map((l) => ({
+                  description: String(l.description).trim(),
+                  montant: (Number(l.quantite) || 0) * (Number(l.prix) || 0),
+                  quantite: Number(l.quantite) || 0,
+                })),
+                sousTotal,
+              })
+            }
+          >
+            Continuer →
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null }) {
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
+  // ➕ Facture libre (sans tâche) — saisie, puis destinataires, puis
+  // paiements : le même enchaînement que toutes les autres factures.
+  const [factureLibreOuverte, setFactureLibreOuverte] = useState(false);
+  const [courrielFactureLibre, setCourrielFactureLibre] = useState(null);
+  const clientsFacturation = useClients();
   // (`configEnt` est déclaré plus bas dans ce composant — même portée.)
   // DÉPÔT DÉJÀ PAYÉ sur cette tâche (appel de service payé d'avance).
   // Sans ce raccord, la révision de prix demandait le PLEIN montant
@@ -1527,6 +1763,66 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // dans la fenêtre d'avant-envoi (carte/virement, décochés par défaut).
   // Un échec QuickBooks n'invente rien : le bon RESTE « en attente » et
   // le journal dit pourquoi — pas de numéro fictif sur un vrai échec.
+  // ➕ FACTURE LIBRE (2026-08-28) — même route QuickBooks que les
+  // autres factures, mais sans bon de travail. Le rattachement à un
+  // projet passe par la mécanique d'attribution existante : la facture
+  // créée s'appelle « QBO-INV-<id> », exactement la forme que la
+  // synchronisation QuickBooks produit — son montant entre donc dans la
+  // rentabilité du projet à la prochaine synchro. Sans projet, elle est
+  // attribuée au CLIENT : elle ne tombe jamais dans la pile « à
+  // rattacher ».
+  const emettreFactureLibre = async (donnees, choixCourriels, paiements = {}) => {
+    const destinataires = listeDestinataires(choixCourriels);
+    const lignes = (donnees.lignes || []).filter((l) => l.description && l.montant > 0);
+    if (lignes.length === 0) return;
+    const nomClient = donnees.client?.nom || "";
+    const r = await creerFactureQbo({
+      clientId: donnees.client?.id || null,
+      clientNom: nomClient,
+      lignes: lignes.map((l) => ({ description: l.description, montant: l.montant })),
+      termePaiement: configEnt?.termePaiementDefaut || "Net 30",
+      reference: donnees.reference || "Facture",
+      paiementCarte: paiements.carte === true,
+      paiementVirement: paiements.virement === true,
+      envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
+      adresseTravaux: null,
+    });
+    if (r?.erreur) {
+      ajouterJournal(`⚠️ Facture libre NON créée pour ${nomClient} : ${r.erreur}`);
+      return;
+    }
+    if (r?.nonConnecte) {
+      ajouterJournal("🔌 QuickBooks non connecté — facture libre NON créée (Paramètres → Connexions).");
+      return;
+    }
+    const total = lignes.reduce((s, l) => s + l.montant, 0);
+    const numero = r?.docNumber || r?.factureId || "—";
+    // Rattachement : projet choisi, sinon le dossier du client.
+    const projetChoisi = (projets || []).find((p) => p.id === donnees.projetId) || null;
+    if (r?.factureId) {
+      const cible = projetChoisi
+        ? { type: "projet", id: projetChoisi.id }
+        : donnees.client?.id
+          ? { type: "client", id: donnees.client.id }
+          : null;
+      if (cible) {
+        await enregistrerAttributionQb(`QBO-INV-${r.factureId}`, cible, nomAdmin || null).catch(() =>
+          ajouterJournal(`⚠️ Facture ${numero} créée, mais son rattachement n'a PAS été enregistré — rattache-la à la main dans la liste des factures QuickBooks.`)
+        );
+      }
+    }
+    const envoyee = r?.envoiQb?.envoyee;
+    ajouterJournal(
+      `🧾 Facture libre ${numero} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
+        (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} »` : " · sans projet") +
+        (configEnt?.envoiAutoFactureQb === true
+          ? envoyee
+            ? ` · envoyée par QuickBooks à ${destinataires.map((c) => c.email).join(", ")}`
+            : " · ⚠️ envoi par QuickBooks NON confirmé"
+          : " · à envoyer depuis QuickBooks")
+    );
+  };
+
   const envoyerQb = async (id, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
     const b = bons.find((x) => x.id === id);
@@ -1823,6 +2119,18 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           <p className="text-xs font-semibold text-emerald-700">✅ Déjà facturés</p>
         </button>
       </div>
+
+      {/* ➕ FACTURER SANS TÂCHE — vente au comptoir, contrat, frais. */}
+      {estAdminPrincipal && (
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+          <p className="min-w-0 text-[11px] text-slate-500">
+            Une vente au comptoir, un contrat, des frais ? Une facture peut partir sans chantier.
+          </p>
+          <Button onClick={() => setFactureLibreOuverte(true)} className="min-h-0 shrink-0 gap-1 px-2.5 py-1.5 text-[11px]">
+            <Plus size={13} /> Nouvelle facture
+          </Button>
+        </div>
+      )}
 
       {/* GARANTIE D'ENVOI — le filet : compare nos factures au registre
           d'envoi de QuickBooks. Toute facture créée mais jamais partie
@@ -2384,9 +2692,44 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           onFermer={() => setPaiementAConfirmer(null)}
           onEmettre={async (paiements) => {
             const pa = paiementAConfirmer;
-            if (pa.mode === "simple") await envoyerQb(pa.bonId, pa.courriels, paiements);
+            if (pa.mode === "libre") await emettreFactureLibre(pa.donnees, pa.courriels, paiements);
+            else if (pa.mode === "simple") await envoyerQb(pa.bonId, pa.courriels, paiements);
             else await emettreFacture(pa.bonId, pa.info, pa.courriels, paiements);
             setPaiementAConfirmer(null);
+          }}
+        />
+      )}
+
+      {/* ➕ FACTURE LIBRE — saisie, puis les DEUX mêmes fenêtres que
+          toutes les autres factures : destinataires, puis paiements. */}
+      {factureLibreOuverte && (
+        <ModalFactureLibre
+          clients={clientsFacturation}
+          projets={projets}
+          catalogue={catalogueFacturation}
+          configEnt={configEnt}
+          onFermer={() => setFactureLibreOuverte(false)}
+          onContinuer={(donnees) => {
+            setFactureLibreOuverte(false);
+            setCourrielFactureLibre(donnees);
+          }}
+        />
+      )}
+      {courrielFactureLibre && (
+        <ModalSelectionCourriel
+          client={courrielFactureLibre.client}
+          contexte="cette facture"
+          onFermer={() => setCourrielFactureLibre(null)}
+          onConfirmer={(choix) => {
+            const d = courrielFactureLibre;
+            setCourrielFactureLibre(null);
+            setPaiementAConfirmer({
+              mode: "libre",
+              donnees: d,
+              montant: d.sousTotal,
+              clientNom: d.client?.nom || "",
+              courriels: choix,
+            });
           }}
         />
       )}

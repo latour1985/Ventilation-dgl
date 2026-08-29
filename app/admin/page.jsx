@@ -3019,6 +3019,10 @@ export default function App() {
         <OngletFacturation
           bons={bons}
           setBons={setBons}
+          // ➕ Facture libre : la liste des projets (rattachement) et le
+          // nom de l'admin (traçabilité de l'attribution).
+          projets={projets}
+          nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
           // 👥 Courriel → nom : nomme le technicien manquant sur le badge
           // « équipe incomplète » (sinon on n'aurait que son courriel).
           nomsEmployes={Object.fromEntries(
