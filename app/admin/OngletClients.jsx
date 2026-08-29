@@ -1726,6 +1726,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
         <ModalDetailProjet
           inspections={inspections}
           onMajMateriel={(liste) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, materielStock: liste } : px)))}
+          onMajReprise={(reprise) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, reprise } : px)))}
           projet={projetOuvert}
           travaux={travaux}
           devisListe={devisListe}

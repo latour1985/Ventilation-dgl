@@ -3929,3 +3929,19 @@ as $$
   where b.jeton_public = p_jeton;
 $$;
 grant execute on function bon_travail_public(text) to anon, authenticated;
+
+-- ============================================================
+-- 101 - REPRISE DE CHANTIER (2026-08-28)
+-- ------------------------------------------------------------
+-- « J'ajoute Fluxya a mon infrastructure — est-ce qu'on pourrait
+-- ajouter des factures deja produites ou des heures dans le projet
+-- pour comptabiliser ? » Un chantier commence AVANT Fluxya affichait
+-- une rentabilite fausse : tout le travail et tout l'argent du debut
+-- manquaient. La colonne garde ce qui a ete fait avant, sans jamais
+-- le meler aux heures pointees ni aux factures QuickBooks :
+--   { heures:   [{id, qui, heures, taux, date, note}],
+--     factures: [{id, montant, date, note}] }
+-- Additive : les projets existants gardent {} et rien ne change.
+-- ============================================================
+alter table projets_app add column if not exists reprise jsonb not null default '{}'::jsonb;
+select count(*) as projets, count(*) filter (where reprise <> '{}'::jsonb) as avec_reprise from projets_app;

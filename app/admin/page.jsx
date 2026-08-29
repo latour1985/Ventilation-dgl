@@ -3023,6 +3023,11 @@ export default function App() {
           // nom de l'admin (traçabilité de l'attribution).
           projets={projets}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
+          // Synchronisation lancée TOUT DE SUITE après une facture libre
+          // rattachée à un projet : sans elle, le montant n'apparaissait
+          // qu'au prochain clic manuel et on croyait que rien n'avait
+          // marché (demande du propriétaire, 2026-08-28).
+          onSynchroniserQb={synchroniserQuickBooksProjets}
           // 👥 Courriel → nom : nomme le technicien manquant sur le badge
           // « équipe incomplète » (sinon on n'aurait que son courriel).
           nomsEmployes={Object.fromEntries(

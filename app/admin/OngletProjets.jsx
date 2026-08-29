@@ -9,7 +9,7 @@
 
 import React, { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { AlertCircle, AlertTriangle, BarChart3, Car, CheckCircle2, Clock, Cloud, LayoutGrid, List, Lock, MapPin, Plus, RefreshCw, Search, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, BarChart3, Car, CheckCircle2, Clock, Cloud, LayoutGrid, List, Lock, MapPin, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritBcSimple } from "@/lib/courriels";
@@ -235,6 +235,205 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQu
             )}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+// ============================================================
+// 📥 REPRISE DE CHANTIER (2026-08-28)
+// ------------------------------------------------------------
+// Demande du propriétaire : « j'ajoute Fluxya à mon infrastructure —
+// est-ce qu'on pourrait ajouter des factures déjà produites ou des
+// heures dans le projet pour comptabiliser ? »
+//
+// Un chantier commencé AVANT Fluxya affichait une rentabilité fausse :
+// tout le travail et tout l'argent du début manquaient. Ce bloc les
+// rentre à la main, une fois, et les garde IDENTIFIABLES (jamais mêlés
+// aux heures pointées ni aux factures QuickBooks) :
+//   • heures déjà travaillées → entrent dans le coût main-d'œuvre,
+//     SANS créer de fausse tâche dans l'agenda ni toucher aux paies ;
+//   • montants déjà facturés → entrent dans le facturé du projet.
+// Les deux vivent dans projets_app.reprise (snippet 101).
+// ============================================================
+function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
+  const reprise = projet.reprise || {};
+  const heures = reprise.heures || [];
+  const factures = reprise.factures || [];
+  const [formHeures, setFormHeures] = useState(null); // { qui, heures, taux, date, note }
+  const [formFacture, setFormFacture] = useState(null); // { montant, date, note }
+
+  const enregistrer = (suivant, texteJournal) => {
+    onMajReprise?.(suivant);
+    ajouterJournal?.(texteJournal);
+  };
+
+  const ajouterHeures = () => {
+    const f = formHeures;
+    if (!f || !(Number(f.heures) > 0)) return;
+    const entree = {
+      id: "rh-" + Date.now(),
+      qui: (f.qui || "").trim() || "Équipe",
+      heures: Number(f.heures) || 0,
+      taux: Number(f.taux) || 0,
+      date: f.date || todayISO(),
+      note: (f.note || "").trim(),
+    };
+    enregistrer(
+      { ...reprise, heures: [...heures, entree] },
+      `📥 Reprise — ${entree.heures} h de ${entree.qui} ajoutées au projet « ${projet.nom} » (${(entree.heures * entree.taux).toFixed(2)} $ de coût)${entree.note ? ` : ${entree.note}` : ""}`
+    );
+    setFormHeures(null);
+  };
+
+  const ajouterFacture = () => {
+    const f = formFacture;
+    if (!f || !(Number(f.montant) > 0)) return;
+    const entree = {
+      id: "rf-" + Date.now(),
+      montant: Number(f.montant) || 0,
+      date: f.date || todayISO(),
+      note: (f.note || "").trim(),
+    };
+    enregistrer(
+      { ...reprise, factures: [...factures, entree] },
+      `📥 Reprise — ${entree.montant.toFixed(2)} $ déjà facturés ajoutés au projet « ${projet.nom} »${entree.note ? ` : ${entree.note}` : ""}`
+    );
+    setFormFacture(null);
+  };
+
+  const retirerHeures = (id) => {
+    const cible = heures.find((h) => h.id === id);
+    enregistrer(
+      { ...reprise, heures: heures.filter((h) => h.id !== id) },
+      `📥 Reprise — ligne d'heures retirée du projet « ${projet.nom} »${cible ? ` (${cible.heures} h, ${cible.qui})` : ""}`
+    );
+  };
+  const retirerFacture = (id) => {
+    const cible = factures.find((x) => x.id === id);
+    enregistrer(
+      { ...reprise, factures: factures.filter((x) => x.id !== id) },
+      `📥 Reprise — montant déjà facturé retiré du projet « ${projet.nom} »${cible ? ` (${cible.montant.toFixed(2)} $)` : ""}`
+    );
+  };
+
+  const rien = heures.length === 0 && factures.length === 0;
+
+  return (
+    <div className="mb-4 rounded-xl border border-slate-200 p-3">
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+        📥 Reprise de chantier <span className="normal-case text-slate-400">— ce qui a été fait AVANT Fluxya</span>
+      </p>
+      {rien && !formHeures && !formFacture && (
+        <p className="mb-2 text-[11px] leading-snug text-slate-400">
+          Chantier commencé avant Fluxya ? Entre ici les heures déjà travaillées et les montants déjà
+          facturés : la rentabilité du projet devient complète. Rien n&apos;est envoyé au client ni aux paies.
+        </p>
+      )}
+
+      {/* ⏱️ HEURES DÉJÀ TRAVAILLÉES */}
+      {heures.length > 0 && (
+        <div className="mb-1.5 space-y-1">
+          {heures.map((h) => (
+            <div key={h.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px]">
+              <span className="min-w-0">
+                ⏱️ <span className="font-bold">{h.heures} h</span> · {h.qui}
+                <span className="text-slate-400"> · {h.date}{h.note ? ` · ${h.note}` : ""}</span>
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="font-bold tabular-nums text-slate-700">{(h.heures * h.taux).toFixed(2)} $</span>
+                <button onClick={() => retirerHeures(h.id)} title="Retirer" className="text-slate-300 hover:text-red-500"><Trash2 size={12} /></button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {formHeures ? (
+        <div className="mb-1.5 rounded-lg border border-slate-200 p-2">
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            <input value={formHeures.qui} onChange={(e) => setFormHeures({ ...formHeures, qui: e.target.value })}
+              placeholder="Qui ? (ex. : Équipe, Dominic)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+            <input type="date" value={formHeures.date} onChange={(e) => setFormHeures({ ...formHeures, date: e.target.value })}
+              className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold text-slate-400">Heures</span>
+            <InputNombreDecimal valeur={formHeures.heures} onChange={(v) => setFormHeures({ ...formHeures, heures: v })}
+              className="w-[74px] rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+            <span className="text-[10px] text-slate-400">×</span>
+            <span className="text-[10px] font-bold text-slate-400">Taux coûtant</span>
+            <InputNombreDecimal valeur={formHeures.taux} onChange={(v) => setFormHeures({ ...formHeures, taux: v })}
+              className="w-[86px] rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+            <span className="text-[10px] font-bold text-slate-400">$</span>
+            <span className="ml-auto text-xs font-bold tabular-nums text-slate-700">
+              {((Number(formHeures.heures) || 0) * (Number(formHeures.taux) || 0)).toFixed(2)} $
+            </span>
+          </div>
+          <input value={formHeures.note} onChange={(e) => setFormHeures({ ...formHeures, note: e.target.value })}
+            placeholder="Note (ex. : semaines du 3 au 21 juin, avant Fluxya)"
+            className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          <div className="mt-1.5 flex gap-1.5">
+            <Button onClick={ajouterHeures} disabled={!(Number(formHeures.heures) > 0)} className="min-h-0 px-3 py-1 text-[11px]">Ajouter</Button>
+            <Button variant="outline" onClick={() => setFormHeures(null)} className="min-h-0 px-3 py-1 text-[11px]">Annuler</Button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 🧾 MONTANTS DÉJÀ FACTURÉS */}
+      {factures.length > 0 && (
+        <div className="mb-1.5 space-y-1">
+          {factures.map((f) => (
+            <div key={f.id} className="flex items-center justify-between gap-2 rounded-lg bg-emerald-50 px-2 py-1.5 text-[11px]">
+              <span className="min-w-0">
+                🧾 <span className="font-bold">{f.montant.toFixed(2)} $</span> déjà facturés
+                <span className="text-slate-400"> · {f.date}{f.note ? ` · ${f.note}` : ""}</span>
+              </span>
+              <button onClick={() => retirerFacture(f.id)} title="Retirer" className="shrink-0 text-slate-300 hover:text-red-500"><Trash2 size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {formFacture ? (
+        <div className="mb-1.5 rounded-lg border border-slate-200 p-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold text-slate-400">Montant facturé (HT)</span>
+            <InputNombreDecimal valeur={formFacture.montant} onChange={(v) => setFormFacture({ ...formFacture, montant: v })}
+              className="w-[100px] rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+            <span className="text-[10px] font-bold text-slate-400">$</span>
+            <input type="date" value={formFacture.date} onChange={(e) => setFormFacture({ ...formFacture, date: e.target.value })}
+              className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          </div>
+          <input value={formFacture.note} onChange={(e) => setFormFacture({ ...formFacture, note: e.target.value })}
+            placeholder="Note (ex. : facture 1042 faite dans QuickBooks avant Fluxya)"
+            className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          <div className="mt-1.5 flex gap-1.5">
+            <Button onClick={ajouterFacture} disabled={!(Number(formFacture.montant) > 0)} className="min-h-0 px-3 py-1 text-[11px]">Ajouter</Button>
+            <Button variant="outline" onClick={() => setFormFacture(null)} className="min-h-0 px-3 py-1 text-[11px]">Annuler</Button>
+          </div>
+        </div>
+      ) : null}
+
+      {(r?.heuresReprise > 0 || r?.factureReprise > 0) && (
+        <p className="mb-1.5 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">
+          Compté dans ce projet : {r.heuresReprise > 0 ? `${r.heuresReprise} h reprises (${r.coutReprise.toFixed(2)} $ de coût)` : ""}
+          {r.heuresReprise > 0 && r.factureReprise > 0 ? " · " : ""}
+          {r.factureReprise > 0 ? `${r.factureReprise.toFixed(2)} $ déjà facturés` : ""}
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-1.5">
+        {!formHeures && (
+          <Button variant="outline" onClick={() => setFormHeures({ qui: "", heures: "", taux: "", date: todayISO(), note: "" })} className="min-h-0 gap-1 px-2.5 py-1 text-[11px]">
+            <Plus size={11} /> Heures déjà travaillées
+          </Button>
+        )}
+        {!formFacture && (
+          <Button variant="outline" onClick={() => setFormFacture({ montant: "", date: todayISO(), note: "" })} className="min-h-0 gap-1 px-2.5 py-1 text-[11px]">
+            <Plus size={11} /> Montant déjà facturé
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -703,7 +902,7 @@ export function OngletFacturationProjet({ r, devisDuClient }) {
 }
 
 
-export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onChangerStatut, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
+export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onMajReprise, onChangerStatut, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
   const [ongletActif, setOngletActif] = useState("apercu");
   const configProj = useEntreprise();
   const r = useMemo(
@@ -751,7 +950,14 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
             <OngletApercuProjet projet={projet} r={r} sante={sante} onChangerStatut={onChangerStatut} onSyncQuickBooks={onSyncQuickBooks} syncQbEnCours={syncQbEnCours} peutSyncQb={peutSyncQb} />
           )}
           {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} onMajMateriel={onMajMateriel} r={r} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
-          {ongletActif === "temps" && <OngletTempsProjet r={r} />}
+          {ongletActif === "temps" && (
+            <>
+              {/* 📥 La reprise vit avec les HEURES : c'est là qu'on vient
+                  quand on se demande « et tout ce qui a été fait avant ? ». */}
+              <BlocRepriseChantier projet={projet} r={r} onMajReprise={onMajReprise} ajouterJournal={ajouterJournal} />
+              <OngletTempsProjet r={r} />
+            </>
+          )}
           {ongletActif === "facturation" && <OngletFacturationProjet r={r} devisDuClient={devisDuClient} />}
         </div>
       </div>
@@ -1223,6 +1429,7 @@ export function OngletProjetsHub({ projets, setProjets, clients, travaux, devisL
         <ModalDetailProjet
           inspections={inspections}
           onMajMateriel={(liste) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, materielStock: liste } : px)))}
+          onMajReprise={(reprise) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, reprise } : px)))}
           projet={projetOuvert}
           travaux={travaux}
           devisListe={devisListe}

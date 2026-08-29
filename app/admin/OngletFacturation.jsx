@@ -1130,7 +1130,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
                   ? "Choisis d'abord le client — seuls SES chantiers en cours seront proposés."
                   : projetsOuverts.length === 0
                     ? `Aucun chantier en cours pour ${nomAffichageClient(client)}.`
-                    : "Son montant entrera dans la rentabilité du projet à la prochaine synchronisation QuickBooks."}
+                    : "Son montant entrera dans la rentabilité du projet — la synchronisation QuickBooks se fait toute seule après l'envoi."}
               </p>
             </div>
             <div>
@@ -1202,7 +1202,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null }) {
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
@@ -1848,10 +1848,18 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         );
       }
     }
+    // 🔄 SYNCHRO IMMÉDIATE quand la facture est rattachée à un projet :
+    // l'attribution vient d'être posée, il ne manque plus que la
+    // transaction elle-même pour que le montant apparaisse dans la
+    // rentabilité. Non bloquant — un échec ne perd rien (le prochain
+    // « Synchroniser QuickBooks » rattrape tout).
+    if (projetChoisi && onSynchroniserQb) {
+      await Promise.resolve(onSynchroniserQb()).catch(() => {});
+    }
     const envoyee = r?.envoiQb?.envoyee;
     ajouterJournal(
       `🧾 Facture libre ${numero} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
-        (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} » (son montant y entrera à la prochaine synchronisation QuickBooks)` : " · sans projet") +
+        (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} » (montant intégré à sa rentabilité)` : " · sans projet") +
         (configEnt?.envoiAutoFactureQb === true
           ? envoyee
             ? ` · envoyée par QuickBooks à ${destinataires.map((c) => c.email).join(", ")}`

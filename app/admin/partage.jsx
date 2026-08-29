@@ -882,7 +882,19 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
     return insp.coutCamionHoraire != null ? insp.coutCamionHoraire : coutCamionDefaut;
   };
   const coutCamion = travauxDuProjet.reduce((s, t) => s + (t.heures || 0) * coutCamionDe(t), 0);
-  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion;
+  // 📥 REPRISE DE CHANTIER (2026-08-28) — ce qui a été fait AVANT
+  // Fluxya : heures déjà travaillées et montants déjà facturés,
+  // saisis à la main sur le projet. Sans eux, un chantier repris en
+  // cours de route affiche une rentabilité fausse (tout le travail du
+  // début manque). Ils sont comptés à part pour rester identifiables.
+  const reprise = projet.reprise || {};
+  const heuresReprise = (reprise.heures || []).reduce((s, h) => s + (Number(h.heures) || 0), 0);
+  const coutReprise = (reprise.heures || []).reduce(
+    (s, h) => s + (Number(h.heures) || 0) * (Number(h.taux) || 0),
+    0
+  );
+  const factureReprise = (reprise.factures || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion + coutReprise;
   const profitReel = projet.budgetTotal - coutTotalReel;
   const pourcentageMarge = projet.budgetTotal > 0 ? (profitReel / projet.budgetTotal) * 100 : 0;
   const pourcentageDepense = projet.budgetTotal > 0 ? (coutTotalReel / projet.budgetTotal) * 100 : 0;
@@ -893,13 +905,20 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
     heuresChantier,
     heuresTransport,
     kilometrageTransport,
-    totalHeures,
+    // Total des heures : celles pointées dans Fluxya + celles reprises.
+    totalHeures: totalHeures + heuresReprise,
+    heuresPointees: totalHeures,
     coutMateriauxBC,
     coutMateriauxQb,
     coutMaterielStock,
     coutMateriaux,
     transactionsDuProjet,
-    totalFactureReel,
+    // Facturé réel = les factures QuickBooks du projet + ce qui avait
+    // déjà été facturé avant Fluxya (reprise).
+    totalFactureReel: totalFactureReel + factureReprise,
+    heuresReprise,
+    coutReprise,
+    factureReprise,
     coutMainOeuvre,
     coutMainOeuvreChantier,
     coutTransport,
