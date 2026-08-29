@@ -1130,7 +1130,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
                   ? "Choisis d'abord le client — seuls SES chantiers en cours seront proposés."
                   : projetsOuverts.length === 0
                     ? `Aucun chantier en cours pour ${nomAffichageClient(client)}.`
-                    : "Son montant comptera dans la rentabilité du projet."}
+                    : "Son montant entrera dans la rentabilité du projet à la prochaine synchronisation QuickBooks."}
               </p>
             </div>
             <div>
@@ -1851,7 +1851,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const envoyee = r?.envoiQb?.envoyee;
     ajouterJournal(
       `🧾 Facture libre ${numero} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
-        (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} »` : " · sans projet") +
+        (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} » (son montant y entrera à la prochaine synchronisation QuickBooks)` : " · sans projet") +
         (configEnt?.envoiAutoFactureQb === true
           ? envoyee
             ? ` · envoyée par QuickBooks à ${destinataires.map((c) => c.email).join(", ")}`
