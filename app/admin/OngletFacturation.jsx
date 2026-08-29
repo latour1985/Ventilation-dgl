@@ -974,9 +974,15 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
     return base.filter((c) => correspond(c, t)).slice(0, 8);
   }, [clients, recherche]);
 
-  // Projets ouverts seulement : rattacher à un chantier terminé n'a pas
-  // de sens, et la liste resterait polluée à vie.
-  const projetsOuverts = (projets || []).filter((p) => p.statut !== "Terminé" && p.statut !== "Annulé");
+  // Projets proposés : ceux DU CLIENT CHOISI, et ouverts seulement.
+  // (2026-08-28 — « ne pas montrer les projets de tous les clients,
+  // seulement ceux qui vont avec le nom du client ».) Rattacher une
+  // facture au chantier d'un autre client fausserait SA rentabilité.
+  // Rappel : un projet ne naît que d'un devis ACCEPTÉ (le bouton
+  // « Traiter le devis » n'apparaît pas avant) ou d'une tâche réelle.
+  const projetsOuverts = (projets || []).filter(
+    (p) => p.statut !== "Terminé" && p.statut !== "Annulé" && client && p.clientId === client.id
+  );
 
   const ajouterLigne = (item) =>
     setLignes((prev) => [
@@ -1020,7 +1026,9 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
             {client ? (
               <div className="flex items-center justify-between gap-2 rounded-lg border-2 border-[#FF6A13] bg-orange-50 px-3 py-2">
                 <span className="min-w-0 truncate text-sm font-bold text-slate-800">{nomAffichageClient(client)}</span>
-                <button onClick={() => { setClientId(""); setRecherche(""); }} className="shrink-0 text-[11px] font-bold text-slate-500 underline">changer</button>
+                {/* Changer de client remet le projet à zéro : un chantier
+                    d'un AUTRE client n'a plus de sens ici. */}
+                <button onClick={() => { setClientId(""); setRecherche(""); setProjetId(""); }} className="shrink-0 text-[11px] font-bold text-slate-500 underline">changer</button>
               </div>
             ) : (
               <>
@@ -1030,7 +1038,12 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
                   placeholder="🔍 Cherche un client par nom, entreprise ou téléphone…"
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
-                <div className="mt-1 max-h-[130px] overflow-y-auto rounded-lg border border-slate-200">
+                {/* ⚠️ Ces lignes ressemblaient à des champs remplis : on
+                    croyait le client DÉJÀ choisi, et « Continuer » restait
+                    gris sans dire pourquoi. Elles annoncent maintenant
+                    qu'elles se cliquent. */}
+                <p className="mt-1 text-[10px] font-semibold text-slate-400">👇 Clique sur le client pour le choisir</p>
+                <div className="mt-0.5 max-h-[130px] overflow-y-auto rounded-lg border border-slate-200">
                   {resultatsClients.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-slate-400">
                       Aucun client trouvé — crée sa fiche dans l&apos;onglet Clients d&apos;abord.
@@ -1040,9 +1053,10 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
                       <button
                         key={c.id}
                         onClick={() => setClientId(c.id)}
-                        className="block w-full border-b border-slate-100 px-3 py-1.5 text-left text-xs last:border-0 hover:bg-slate-50"
+                        className="flex w-full items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-left text-xs last:border-0 hover:bg-orange-50"
                       >
-                        {nomAffichageClient(c)}
+                        <span className="min-w-0 truncate">{nomAffichageClient(c)}</span>
+                        <span className="shrink-0 text-[10px] font-bold text-[#FF6A13]">choisir →</span>
                       </button>
                     ))
                   )}
@@ -1105,12 +1119,19 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
               <select
                 value={projetId}
                 onChange={(e) => setProjetId(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs"
+                disabled={!client}
+                className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs disabled:bg-slate-100 disabled:text-slate-400"
               >
                 <option value="">— aucun (facture indépendante) —</option>
                 {projetsOuverts.map((p) => <option key={p.id} value={p.id}>{p.nom}</option>)}
               </select>
-              <p className="mt-0.5 text-[10px] text-slate-400">Son montant comptera dans la rentabilité du projet.</p>
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                {!client
+                  ? "Choisis d'abord le client — seuls SES chantiers en cours seront proposés."
+                  : projetsOuverts.length === 0
+                    ? `Aucun chantier en cours pour ${nomAffichageClient(client)}.`
+                    : "Son montant comptera dans la rentabilité du projet."}
+              </p>
             </div>
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Référence (facultatif)</label>
@@ -1137,7 +1158,22 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-5 pt-3">
+        <div className="border-t border-slate-100 p-5 pt-3">
+          {/* CE QUI MANQUE, ÉCRIT NOIR SUR BLANC — un bouton gris sans
+              explication laisse croire qu'il est brisé (règle de la
+              maison, apprise sur le bouton « Ajouter une zone »). */}
+          {!peutContinuer && (
+            <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-800">
+              Pour continuer, il manque :{" "}
+              {[
+                !client ? "choisir un client dans la liste" : null,
+                lignesValides.length === 0 ? "au moins une ligne" : sousTotal <= 0 ? "un montant supérieur à 0 $" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={onFermer}>Annuler</Button>
           <Button
             disabled={!peutContinuer}
@@ -1158,6 +1194,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
           >
             Continuer →
           </Button>
+          </div>
         </div>
       </div>
     </div>
