@@ -72,15 +72,26 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQu
   return (
     <div>
       <div className="mb-4 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${sante.pastille}`} />
+        {/* Le statut (choisi par toi) et la SANTÉ (calculée) sont deux
+            choses différentes. La pastille nue collée au menu laissait
+            croire qu'elle suivait le statut — elle porte maintenant son
+            nom (retour du propriétaire, 2026-08-28). */}
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={projet.statut}
             onChange={(e) => onChangerStatut(projet.id, e.target.value)}
+            title="Étape du projet — sert aux colonnes du tableau et aux filtres. « Terminé » retire le projet des listes de sélection et arrête les alertes de retard."
             className="rounded-full border border-slate-300 px-3 py-1 text-xs font-bold text-slate-700"
           >
             {STATUTS_PROJET.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          <span
+            title="Calculée automatiquement : rouge si dépassement de budget, retard ou perte ; jaune si 75 % du budget est dépensé ou si l'échéance est dans moins de 7 jours."
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${sante.fond} ${sante.texte}`}
+          >
+            <span className={`h-2 w-2 shrink-0 rounded-full ${sante.pastille}`} />
+            {sante.niveau === "rouge" ? "Santé : à risque" : sante.niveau === "jaune" ? "Santé : à surveiller" : "Santé : bonne"}
+          </span>
         </div>
         <Button
           variant="outline"

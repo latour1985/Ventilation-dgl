@@ -981,7 +981,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       adresseTravaux: adresseTravaux || null,
       dateDebut: dateDebut || todayISO(),
       dateFin: dateFin || "",
-      statut: "a_planifier",
+      // ⚠️ Le statut d'un PROJET est une des 4 étiquettes de
+      // STATUTS_PROJET — pas le code technique « a_planifier » des
+      // TÂCHES (correctif 2026-08-28 : un projet créé depuis un devis
+      // portait ce code, donc il n'entrait dans AUCUNE colonne du
+      // tableau et restait invisible).
+      statut: "À planifier",
       budgetTotal: devis.totalVendant,
       // Filet historique : le taux du projet ne sert QUE si une heure
       // n'a ni taux figé, ni taux de fiche, ni grille CCQ (cas rare).
