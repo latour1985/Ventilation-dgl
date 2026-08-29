@@ -11,9 +11,10 @@ import { ChevronRight, FileText } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { camionIndisponible } from "@/lib/supabase/camions";
 import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
+import { BlocReponsesClients } from "./BlocReponsesClients";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], nomAdmin, ajouterJournal }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], nomAdmin, ajouterJournal, reponsesClients = [] }) {
   const configTdb = useEntreprise();
   const analyse = projets.map((p) => {
     const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
@@ -45,6 +46,18 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
       {/* 💬 Les retours de l'équipe vivent maintenant dans l'onglet
           « Aide & suggestions » du menu (2026-09-06) — un seul endroit,
           toujours visible, avec badge sur le menu. */}
+
+      {/* 💬 RÉPONSES DE CLIENTS — le premier écran du matin : un client
+          qui attend une réponse ne doit pas dormir au fond d'une carte
+          de devis (retour du propriétaire, 2026-08-28). En mode compact :
+          rien à traiter = rien d'affiché. */}
+      <BlocReponsesClients
+        reponses={reponsesClients}
+        compact
+        onOuvrirDevis={() => setOnglet("devis")}
+        onNouvelleVersion={() => setOnglet("devis")}
+        onTraiterDevis={() => setOnglet("devis")}
+      />
 
       {/* 📱 AUJOURD'HUI SUR LE TERRAIN — TÉLÉPHONE (2026-08-21)
           ------------------------------------------------------------

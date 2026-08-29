@@ -29,7 +29,7 @@ import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetr
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
-import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis } from "@/lib/supabase/devis";
+import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter } from "@/lib/supabase/devis";
 import { listerClients, sauvegarderClient, sAbonnerClients } from "@/lib/supabase/clients";
 import { listerProjets, sauvegarderProjet, sAbonnerProjets } from "@/lib/supabase/projets";
 import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbonnerTachesAttente } from "@/lib/supabase/taches";
@@ -338,7 +338,7 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
     ]},
     { titre: "Clients & ventes", items: [
       { id: "clients", label: "Clients", icone: Users },
-      { id: "devis", label: "Devis", icone: FileText },
+      { id: "devis", label: "Devis", icone: FileText, badge: badges?.devis },
       { id: "facturation", label: "Facturation", icone: Bell, badge: badges?.facturation },
     ]},
     { titre: "Opérations", items: [
@@ -1098,6 +1098,11 @@ export default function App() {
   const [inspections, setInspections] = useState([]);
   const [entretiens, setEntretiens] = useState([]);
   const [devisListe, setDevisListe] = useState([]);
+  // 💬 Reponses de clients qui attendent une action — sert a la pastille
+  // du menu ET au bloc du tableau de bord. ⚠️ DECLARE APRES devisListe :
+  // un etat reference avant sa declaration plante la page entiere
+  // (« Cannot access before initialization » — piege deja paye ici).
+  const reponsesClientsATraiter = useMemo(() => reponsesClientATraiter(devisListe), [devisListe]);
   // Cible d'une navigation venant de la RECHERCHE RAPIDE :
   // { clientId, numeroDevis } — ouvre le bon dossier et surligne le devis.
   const [cibleRecherche, setCibleRecherche] = useState(null);
@@ -2508,6 +2513,10 @@ export default function App() {
         permissions={permissions}
         badges={{
           facturation: compteAlertes,
+          // 💬 Reponses de clients a traiter (modification demandee ou
+          // devis accepte pas encore converti) — les refus, eux, sont
+          // pour information : ils ne font pas clignoter le menu.
+          devis: reponsesClientsATraiter.filter((r) => r.genre !== "refuse").length,
           agenda: tachesAttente.length,
           projets: compteRisqueProjets,
           // Propositions d'ajustement d'heures en attente de validation.
@@ -2691,6 +2700,7 @@ export default function App() {
 
       {vue === "tableau-de-bord" && (
         <OngletTableauDeBord
+          reponsesClients={reponsesClientsATraiter}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
           ajouterJournal={ajouterJournal}
           projets={projets}

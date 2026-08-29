@@ -4004,3 +4004,19 @@ select indexname, indexdef
   from pg_indexes
  where schemaname = 'public' and tablename = 'catalogue_items'
  order by indexname;
+
+-- ============================================================
+-- 104 - REPONSES DE CLIENTS CLASSEES (2026-08-28)
+-- ------------------------------------------------------------
+-- « La modification demandee peut se perdre rapidement si on a
+-- plusieurs devis envoyes en meme temps » : les reponses des clients
+-- (modification demandee, accepte, refuse) se retrouvent maintenant
+-- dans UN bloc en tete de l onglet Devis et sur le tableau de bord,
+-- avec une pastille sur le menu.
+-- La plupart se rangent TOUTES SEULES (une nouvelle version rend
+-- l ancienne inactive ; traiter un devis accepte le sort de la liste).
+-- Cette colonne sert aux cas regles autrement : « j ai appele le
+-- client », « refus pris en note ». Additive.
+-- ============================================================
+alter table devis_app add column if not exists reponse_traitee_le timestamptz;
+select count(*) as devis, count(reponse_traitee_le) as reponses_classees from devis_app;

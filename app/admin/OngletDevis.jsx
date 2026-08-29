@@ -14,7 +14,8 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
 import { genererJeton, lienDevisPublic, JOURS_VALIDITE_LIEN_DEVIS } from "@/lib/supabase/devisPublic";
-import { activerVersionDevis, supprimerDevis } from "@/lib/supabase/devis";
+import { activerVersionDevis, supprimerDevis, reponsesClientATraiter, classerReponseDevis } from "@/lib/supabase/devis";
+import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
 import { ModalNouveauClient } from "./OngletClients";
@@ -643,6 +644,19 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // Dossier ouvert (numeroBase) + version affichée dans ses onglets.
   const [dossierOuvert, setDossierOuvert] = useState(null);
   const [versionAffichee, setVersionAffichee] = useState(null);
+  // 💬 Ce à quoi les clients ont répondu et qui attend une action.
+  const reponsesATraiter = reponsesClientATraiter(devisListe);
+  // « J'ai répondu » / « Pris en note » — la ligne se range, en base
+  // (sinon elle reviendrait au prochain rechargement).
+  const classerReponse = async (d) => {
+    setDevisListe((prev) => prev.map((x) => (x.id === d.id ? { ...x, reponseTraiteeLe: new Date().toISOString() } : x)));
+    try {
+      await classerReponseDevis(d.id, true);
+      ajouterJournal(`✅ Réponse du client sur ${d.numero} classée${d.messageClient ? ` — « ${d.messageClient} »` : ""}`);
+    } catch {
+      ajouterJournal(`⚠️ Réponse de ${d.numero} classée à l'écran mais NON enregistrée — le snippet 104 est-il passé ?`);
+    }
+  };
   const [noteNouvelleVersion, setNoteNouvelleVersion] = useState("");
   const [creationVersionPour, setCreationVersionPour] = useState(null);
 
@@ -1045,6 +1059,22 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+      {/* 💬 CE À QUOI TES CLIENTS ONT RÉPONDU — en tête, avant tout le
+          reste : une demande de modification ne doit plus dormir au fond
+          d'une carte de devis (retour du propriétaire, 2026-08-28). */}
+      <BlocReponsesClients
+        reponses={reponsesATraiter}
+        onOuvrirDevis={(d) => { setDossierOuvert(d.numeroBase || d.numero); setVersionAffichee(d.numero); }}
+        onNouvelleVersion={(d) => {
+          setDossierOuvert(d.numeroBase || d.numero);
+          setVersionAffichee(d.numero);
+          setCreationVersionPour(d.numero);
+          setNoteNouvelleVersion(d.messageClient ? `Demande du client : ${d.messageClient}` : "");
+        }}
+        onTraiterDevis={(d) => setDevisATraiterId(d.id)}
+        onClasser={classerReponse}
+      />
+
       <div className="grid gap-6 md:grid-cols-5">
         {/* CONSTRUCTEUR DE DEVIS */}
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 md:col-span-3 md:p-5">
