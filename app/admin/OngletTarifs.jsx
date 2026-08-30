@@ -27,6 +27,8 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
   const [etatPrix, setEtatPrix] = useState("");
   // Confirmation avant d'appliquer la nouvelle liste de prix.
   const [confirmationPrixOuverte, setConfirmationPrixOuverte] = useState(false);
+  // Le message d'erreur EXACT de la base — pour ne plus jamais deviner.
+  const [erreurPrix, setErreurPrix] = useState("");
   const sauvegarderLesPrix = async () => {
     setConfirmationPrixOuverte(false);
     setEtatPrix("enregistrement");
@@ -35,7 +37,12 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
       setEtatPrix("ok");
       ajouterJournal("💰 Liste de prix des dépôts (zones) sauvegardée");
       setTimeout(() => setEtatPrix(""), 2500);
-    } catch {
+    } catch (e) {
+      // La VRAIE raison à l'écran — l'ancien message fixe (« vérifie le
+      // SQL 08 ») envoyait sur une fausse piste quand la table existait
+      // mais que l'écriture était refusée (vécu : clé « zone » partagée
+      // entre entreprises avant le snippet 107).
+      setErreurPrix(String(e?.message || ""));
       setEtatPrix("erreur");
     }
   };
@@ -44,6 +51,7 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
   // Fenêtre de confirmation avant d'appliquer la grille (les taux
   // touchent les coûts de main-d'œuvre — on valide avant d'écrire).
   const [confirmationTauxOuverte, setConfirmationTauxOuverte] = useState(false);
+  const [erreurTaux, setErreurTaux] = useState("");
   const sauvegarderLesTaux = async () => {
     setConfirmationTauxOuverte(false);
     setEtatTaux("enregistrement");
@@ -52,7 +60,8 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
       setEtatTaux("ok");
       ajouterJournal("💰 Grille des taux horaires coûtants sauvegardée");
       setTimeout(() => setEtatTaux(""), 2500);
-    } catch {
+    } catch (e) {
+      setErreurTaux(String(e?.message || ""));
       setEtatTaux("erreur");
     }
   };
@@ -291,7 +300,9 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
               <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><Check size={13} /> Enregistré</span>
             )}
             {etatTaux === "erreur" && (
-              <span className="text-xs font-bold text-red-600">Échec — vérifie que le SQL « 05 » a été lancé, puis réessaie.</span>
+              <span className="text-xs font-bold text-red-600">
+                Échec de la sauvegarde{erreurTaux ? ` — la base répond : « ${erreurTaux} »` : ""} — vérifie que le SQL « 107 - cles par entreprise » a été lancé, puis réessaie.
+              </span>
             )}
           </div>
         )}
@@ -507,7 +518,9 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
               <span className="flex items-center gap-1 text-xs font-bold text-emerald-600"><Check size={13} /> Enregistré</span>
             )}
             {etatPrix === "erreur" && (
-              <span className="text-xs font-bold text-red-600">Échec — vérifie que le SQL « 08 - prix depots » a été lancé, puis réessaie.</span>
+              <span className="text-xs font-bold text-red-600">
+                Échec de la sauvegarde{erreurPrix ? ` — la base répond : « ${erreurPrix} »` : ""} — vérifie que le SQL « 107 - cles par entreprise » a été lancé, puis réessaie.
+              </span>
             )}
           </div>
         )}

@@ -4073,3 +4073,122 @@ select indexname from pg_indexes where tablename = 'factures_libres';
 alter table devis_app add column if not exists annule_le timestamptz;
 alter table devis_app add column if not exists annule_raison text;
 select count(*) filter (where statut = 'annule') as devis_annules, count(*) as devis_total from devis_app;
+
+-- ============================================================
+-- 107 - CLES PAR ENTREPRISE (prix depots, taux, compteurs, fournisseurs habituels)
+--       (2026-08-30)
+-- ============================================================
+-- MEME LECON QUE LE SNIPPET 103 (catalogue) : une cle primaire
+-- s'applique a TOUTES les lignes de la base, RLS ou pas. Quatre tables
+-- avaient encore une cle SANS entreprise_id :
+--   prix_depots            (zone)            -> la « Zone 1 » de DGL bloquait
+--                                               la sauvegarde des tarifs de
+--                                               TOUTE autre entreprise
+--                                               (« Echec — verifie le SQL 08 »
+--                                               chez Ventilation Miroir) ;
+--   taux_metiers           (metier, niveau)  -> meme blocage sur la grille
+--                                               des taux horaires ;
+--   compteurs              (cle)             -> PIRE : le compteur de devis
+--                                               etait PARTAGE — Miroir a
+--                                               emis DEV-3518 en continuant
+--                                               la sequence de DGL ;
+--   articles_fournisseurs  (article)         -> memoire du « fournisseur
+--                                               habituel » partagee.
+-- Chaque cle devient (entreprise_id, ...). AUCUNE ligne n'est modifiee
+-- ni supprimee : on ne change que la regle d'unicite. Idempotent —
+-- chaque bloc verifie si entreprise_id fait deja partie de la cle.
+
+do $$
+declare pk text;
+begin
+  -- prix_depots : (zone) -> (entreprise_id, zone)
+  select tc.constraint_name into pk
+    from information_schema.table_constraints tc
+   where tc.table_schema = 'public' and tc.table_name = 'prix_depots'
+     and tc.constraint_type = 'PRIMARY KEY';
+  if pk is not null and not exists (
+      select 1 from information_schema.key_column_usage k
+       where k.table_schema = 'public' and k.table_name = 'prix_depots'
+         and k.constraint_name = pk and k.column_name = 'entreprise_id') then
+    execute format('alter table public.prix_depots drop constraint %I', pk);
+    alter table public.prix_depots add primary key (entreprise_id, zone);
+  end if;
+
+  -- taux_metiers : (metier, niveau) -> (entreprise_id, metier, niveau)
+  select tc.constraint_name into pk
+    from information_schema.table_constraints tc
+   where tc.table_schema = 'public' and tc.table_name = 'taux_metiers'
+     and tc.constraint_type = 'PRIMARY KEY';
+  if pk is not null and not exists (
+      select 1 from information_schema.key_column_usage k
+       where k.table_schema = 'public' and k.table_name = 'taux_metiers'
+         and k.constraint_name = pk and k.column_name = 'entreprise_id') then
+    execute format('alter table public.taux_metiers drop constraint %I', pk);
+    alter table public.taux_metiers add primary key (entreprise_id, metier, niveau);
+  end if;
+
+  -- compteurs : (cle) -> (entreprise_id, cle)
+  select tc.constraint_name into pk
+    from information_schema.table_constraints tc
+   where tc.table_schema = 'public' and tc.table_name = 'compteurs'
+     and tc.constraint_type = 'PRIMARY KEY';
+  if pk is not null and not exists (
+      select 1 from information_schema.key_column_usage k
+       where k.table_schema = 'public' and k.table_name = 'compteurs'
+         and k.constraint_name = pk and k.column_name = 'entreprise_id') then
+    execute format('alter table public.compteurs drop constraint %I', pk);
+    alter table public.compteurs add primary key (entreprise_id, cle);
+  end if;
+
+  -- articles_fournisseurs : (article) -> (entreprise_id, article)
+  select tc.constraint_name into pk
+    from information_schema.table_constraints tc
+   where tc.table_schema = 'public' and tc.table_name = 'articles_fournisseurs'
+     and tc.constraint_type = 'PRIMARY KEY';
+  if pk is not null and not exists (
+      select 1 from information_schema.key_column_usage k
+       where k.table_schema = 'public' and k.table_name = 'articles_fournisseurs'
+         and k.constraint_name = pk and k.column_name = 'entreprise_id') then
+    execute format('alter table public.articles_fournisseurs drop constraint %I', pk);
+    alter table public.articles_fournisseurs add primary key (entreprise_id, article);
+  end if;
+end $$;
+
+-- La numerotation des devis et bons de commande devient PAR ENTREPRISE.
+-- La fonction lit l'entreprise du jeton du demandeur ; les compteurs de
+-- DGL (etiquetes 'dgl' par defaut) continuent exactement ou ils sont.
+create or replace function prochain_numero(cle_compteur text)
+returns bigint
+language plpgsql
+security definer
+as $$
+declare
+  nouveau bigint;
+  ent text := coalesce(public.entreprise_du_jeton(), 'dgl');
+begin
+  insert into compteurs (entreprise_id, cle, valeur) values (ent, cle_compteur, 1)
+  on conflict (entreprise_id, cle) do update set valeur = compteurs.valeur + 1
+  returning valeur into nouveau;
+  return nouveau;
+end;
+$$;
+
+-- RATTRAPAGE : une entreprise qui a deja emis des devis sur le compteur
+-- partage (Miroir : DEV-3518) repart de SON plus grand numero, pas de 1.
+insert into compteurs (entreprise_id, cle, valeur)
+select d.entreprise_id, 'devis', max(((regexp_match(d.numero_base, '\d+'))[1])::bigint)
+  from devis_app d
+ where d.entreprise_id <> 'dgl' and coalesce(d.numero_base, '') ~ '\d'
+ group by d.entreprise_id
+on conflict (entreprise_id, cle) do nothing;
+
+-- Verification : les cles composites en place + un compteur par entreprise.
+select tc.table_name, string_agg(k.column_name, ', ' order by k.ordinal_position) as cle_primaire
+  from information_schema.table_constraints tc
+  join information_schema.key_column_usage k
+    on k.constraint_name = tc.constraint_name and k.table_schema = tc.table_schema
+ where tc.table_schema = 'public' and tc.constraint_type = 'PRIMARY KEY'
+   and tc.table_name in ('prix_depots', 'taux_metiers', 'compteurs', 'articles_fournisseurs')
+ group by tc.table_name
+union all
+select 'compteurs -> ' || entreprise_id || ' / ' || cle, valeur::text from compteurs order by 1;
