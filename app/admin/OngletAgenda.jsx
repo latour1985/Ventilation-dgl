@@ -373,7 +373,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -731,6 +731,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // cet envoi seulement (les Paramètres ne bougent pas).
   const [depotCarteChoix, setDepotCarteChoix] = useState(null);
   const [depotVirementChoix, setDepotVirementChoix] = useState(null);
+  // ✅ DÉPÔT DÉJÀ PAYÉ AILLEURS (2026-08-31, transfert de l'ancien
+  // système) : on enregistre le fait (mode + Nº de facture QuickBooks
+  // existante) — aucune facture créée, aucun courriel, tâche prête.
+  const [depotDejaPaye, setDepotDejaPaye] = useState(false);
+  const [depotDejaPayeMode, setDepotDejaPayeMode] = useState("Carte de crédit");
+  const [depotDejaPayeRef, setDepotDejaPayeRef] = useState("");
   const [depotExtra, setDepotExtra] = useState("");
   // 📌 « Autre adresse » AU DOSSIER (2026-08-24, demande du
   // propriétaire) : un courriel tapé ici partait avec la demande de
@@ -1269,6 +1275,16 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // Plus de « prospect » séparé : un client pas encore enregistré se
       // crée via « ➕ Nouveau client… » en haut de la liste Client — sa
       // fiche complète et validée sert au dépôt (et à QuickBooks).
+      if (depotDejaPaye) {
+        // ✅ Transfert : le dépôt est DÉJÀ payé — on enregistre le fait
+        // (mode + Nº de facture QuickBooks), aucune facture créée,
+        // aucun courriel. La tâche arrive directement dans « Prêtes ».
+        onCreerDepotDejaPaye?.(nouvelle.id, {
+          montantHT: montantDepot,
+          modePaiement: depotDejaPayeMode,
+          refFacture: depotDejaPayeRef.trim(),
+        });
+      } else {
       onCreerDepot?.(nouvelle.id, {
         montantHT: montantDepot,
         isProspect: false,
@@ -1293,6 +1309,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           (configEnt?.paiementCarteAppels === true && montantDepot <= (Number(configEnt?.seuilCarteAppels) || 2000)),
         paiementVirement: depotVirementChoix ?? (configEnt?.paiementVirementAppels === true),
       });
+      }
       // 📌 COURRIEL AU DOSSIER (2026-08-24) : l'« autre adresse » tapée
       // pour la demande de dépôt s'ajoute à la fiche du client — sinon
       // il fallait la retaper à chaque tâche. Anti-doublon, et jamais
@@ -1313,7 +1330,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       setTachesAttente((prev) => [nouvelle, ...prev]);
       const nomPrevu = nouveauEmployeId ? employes.find((e) => e.id === nouveauEmployeId)?.nom : "";
       ajouterJournal(
-        `📋 Tâche créée — ${libelleType} — EN ATTENTE DE DÉPÔT avant planification${nomPrevu ? ` (technicien prévu : ${nomPrevu})` : ""}`
+        depotDejaPaye
+          ? `📋 Tâche créée — ${libelleType} — dépôt DÉJÀ PAYÉ (transfert), prête à planifier${nomPrevu ? ` (technicien prévu : ${nomPrevu})` : ""}`
+          : `📋 Tâche créée — ${libelleType} — EN ATTENTE DE DÉPÔT avant planification${nomPrevu ? ` (technicien prévu : ${nomPrevu})` : ""}`
       );
     } else if (nouvelleDate && nouveauEmployeId) {
       // Positionnement direct dans la grille si DATE + TECHNICIEN sont
@@ -1343,6 +1362,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setDepotEmails([]);
     setDepotCarteChoix(null);
     setDepotVirementChoix(null);
+    setDepotDejaPaye(false);
+    setDepotDejaPayeMode("Carte de crédit");
+    setDepotDejaPayeRef("");
     setDepotExtra("");
     setNouveauTitre("");
     setNouvellesPiecesJointes([]);
@@ -3036,11 +3058,55 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                         );
                       })()}
                     </div>
+                    {/* ✅ DÉPÔT DÉJÀ PAYÉ AILLEURS (2026-08-31, demande du
+                        propriétaire : transfert des rendez-vous de son
+                        ancien système, dépôt déjà encaissé) : on note le
+                        fait avec le Nº de la facture QuickBooks — rien
+                        n'est facturé ni envoyé, la tâche est prête. */}
+                    <label className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${depotDejaPaye ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-white text-slate-600"}`}>
+                      <input
+                        type="checkbox"
+                        checked={depotDejaPaye}
+                        onChange={(e) => setDepotDejaPaye(e.target.checked)}
+                        className="h-4 w-4 accent-emerald-600"
+                      />
+                      ✅ Dépôt DÉJÀ payé (transfert / autre système)
+                    </label>
+                    {depotDejaPaye && (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-bold text-emerald-800">Payé par</label>
+                            <select
+                              value={depotDejaPayeMode}
+                              onChange={(e) => setDepotDejaPayeMode(e.target.value)}
+                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs"
+                            >
+                              {["Carte de crédit", "Virement", "Comptant", "Chèque", "Interac", "Autre"].map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="mb-0.5 block text-[10px] font-bold text-emerald-800">Nº facture QuickBooks (optionnel)</label>
+                            <input
+                              value={depotDejaPayeRef}
+                              onChange={(e) => setDepotDejaPayeRef(e.target.value)}
+                              placeholder="Ex : 4187"
+                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs"
+                            />
+                          </div>
+                        </div>
+                        <p className="mt-1.5 text-[10px] leading-snug text-emerald-800">
+                          Aucune facture ne sera créée et aucun courriel ne partira — la tâche arrive directement dans « ✅ Prêtes » avec la référence sur son badge.
+                        </p>
+                      </div>
+                    )}
                     {/* 💳 PAIEMENT EN LIGNE — ce que le courriel OFFRIRA
                         au client, sous les yeux AVANT d'envoyer. Cases
                         pré-cochées selon les Paramètres (+ seuil de
                         carte) ; modifiables pour CET envoi seulement. */}
-                    {(() => {
+                    {!depotDejaPaye && (() => {
                       const m = parseFloat(depotMontant) || 0;
                       const seuil = Number(configEnt?.seuilCarteAppels) || 2000;
                       const carteAuto = configEnt?.paiementCarteAppels === true && m <= seuil;
@@ -3080,8 +3146,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     {/* DESTINATAIRES DE LA DEMANDE DE DÉPÔT — le courriel
                         (avec le Nº de la facture QuickBooks) part à la
                         création de la tâche. Adresses par défaut du
-                        client précochées ; « autre adresse » en secours. */}
-                    {(() => {
+                        client précochées ; « autre adresse » en secours.
+                        Masqué quand le dépôt est DÉJÀ payé (rien ne part). */}
+                    {!depotDejaPaye && (() => {
                       const fiche = clients.find((c) => c.id === nouveauClientId);
                       const contacts = (fiche?.courriels || [])
                         .map((c) => (typeof c === "string" ? { email: c } : c))

@@ -37,7 +37,7 @@ import { listerProjets, sauvegarderProjet, sAbonnerProjets } from "@/lib/supabas
 import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbonnerTachesAttente } from "@/lib/supabase/taches";
 import { listerJournal, ajouterEntreeJournal } from "@/lib/supabase/journal";
 import { listerTaux, sauvegarderTaux } from "@/lib/supabase/tauxMetiers";
-import { listerDepots, creerDepot, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
+import { listerDepots, creerDepot, creerDepotDejaPaye, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
 import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots, zonesDepuis, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { listerCatalogue, sauvegarderItem, enregistrerItemsEnLot, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
@@ -1660,6 +1660,41 @@ function AppAdmin() {
     ajouterJournal(`🚚 Coût du camion mis à ${valeur.toFixed(2)} $/h — appliqué aux journées à venir (les passées gardent leur taux figé).`);
   };
 
+  // ✅ DÉPÔT DÉJÀ PAYÉ AILLEURS (2026-08-31, transfert de l'ancien
+  // système) : on ENREGISTRE le fait avec sa référence QuickBooks —
+  // aucune facture créée, aucun courriel, tâche planifiable tout de suite.
+  const creerDepotDejaPayePourTache = async (tacheId, infos) => {
+    const modeAffiche = infos.refFacture
+      ? `${infos.modePaiement} — facture QB Nº ${infos.refFacture}`
+      : infos.modePaiement;
+    setDepots((prev) => ({
+      ...prev,
+      [tacheId]: {
+        tacheId,
+        statut: "paye_manuellement",
+        montantHT: Number(infos.montantHT) || 0,
+        dateLimite: new Date().toISOString(),
+        modePaiement: modeAffiche,
+        payeLe: new Date().toISOString(),
+        payePar: "transfert d'un autre système",
+        qboDocNumber: infos.refFacture || null,
+      },
+    }));
+    try {
+      await creerDepotDejaPaye(tacheId, {
+        montantHT: infos.montantHT,
+        modePaiement: infos.modePaiement,
+        refFacture: infos.refFacture,
+        parNom: session?.user?.user_metadata?.nom || session?.user?.email || "transfert d'un autre système",
+      });
+      ajouterJournal(
+        `💰 Dépôt de ${(Number(infos.montantHT) || 0).toFixed(2)} $ DÉJÀ PAYÉ enregistré (${modeAffiche}) — transfert : aucune facture créée, aucun courriel envoyé, la tâche est planifiable.`
+      );
+    } catch (e) {
+      ajouterJournal(`⚠️ Dépôt déjà payé affiché localement mais NON enregistré — la base répond : « ${e?.message || "connexion impossible"} ».`);
+    }
+  };
+
   const creerDepotPourTache = async (tacheId, infos) => {
     // DÉLAI DE PAIEMENT : celui de l'entreprise (Paramètres), sauf si un
     // délai explicite arrive (pièces : 7 jours). Libellé humain : « 36 h »
@@ -3059,6 +3094,7 @@ function AppAdmin() {
           depots={depots}
           prixDepots={prixDepots}
           onCreerDepot={creerDepotPourTache}
+          onCreerDepotDejaPaye={creerDepotDejaPayePourTache}
           bons={bons}
           pieces={pieces}
           onDepotPaye={depotPayeManuel}
@@ -3468,6 +3504,7 @@ function AppAdmin() {
           depots={depots}
           prixDepots={prixDepots}
           onCreerDepot={creerDepotPourTache}
+          onCreerDepotDejaPaye={creerDepotDejaPayePourTache}
           fournisseurs={fournisseurs}
           setFournisseurs={setFournisseurs}
           ajouterJournal={ajouterJournal}
