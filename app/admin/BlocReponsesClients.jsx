@@ -55,7 +55,7 @@ function depuisQuand(iso) {
   return `il y a ${jours} jours`;
 }
 
-export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, onNouvelleVersion, onTraiterDevis, onRenvoyer, onClasser }) {
+export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, onNouvelleVersion, onTraiterDevis, onRenvoyer, onClasser, onEffacerErreur }) {
   const [replie, setReplie] = useState(false);
   if (!reponses || reponses.length === 0) {
     if (compact) return null; // tableau de bord : rien à dire, rien à montrer
@@ -141,6 +141,18 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       className="flex items-center gap-1 rounded-lg border border-[#131B2E] bg-white px-2.5 py-1 text-[10px] font-bold text-[#131B2E] active:scale-95"
                     >
                       <Mail size={11} /> Renvoyer le devis
+                    </button>
+                  )}
+                  {/* 🗑️ Envoyée PAR ERREUR (« salut ») : la demande
+                      s'efface — le devis redevient « envoyé » et le lien
+                      du client refonctionne. Trace gardée au journal. */}
+                  {genre === "modification" && onEffacerErreur && (
+                    <button
+                      onClick={() => onEffacerErreur(d)}
+                      title="Le client a envoyé ça par erreur : efface la demande — il pourra répondre de nouveau sur le même lien"
+                      className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-400 hover:text-red-500"
+                    >
+                      🗑️ Erreur du client
                     </button>
                   )}
                   {/* Classer : pour les cas réglés autrement (un appel au

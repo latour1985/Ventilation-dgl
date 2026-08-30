@@ -722,6 +722,41 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     ouvrirEnvoiDevis(maj);
   };
 
+  // 🗑️ EFFACER UNE DEMANDE ENVOYÉE PAR ERREUR (2026-08-29 — « si le
+  // client envoie par erreur, ça pollue »). Différent de « J'ai
+  // répondu » (qui CLASSE une vraie demande) : ici la réponse fautive
+  // est EFFACÉE — le devis redevient simplement « envoyé » et le lien
+  // du client fonctionne de nouveau (une réponse verrouille son lien).
+  // La demande effacée reste au JOURNAL. Jamais sur une acceptation
+  // (le garde de rouvrirReponseDevis s'en assure côté base).
+  const effacerDemandeErreur = async (d) => {
+    if (
+      !window.confirm(
+        `Effacer la demande de ${d.numero}${d.messageClient ? ` (« ${d.messageClient} »)` : ""} ?\n\nLe devis redevient « envoyé » et le client pourra répondre de nouveau sur le même lien. La demande reste au journal.`
+      )
+    )
+      return;
+    const question = d.messageClient;
+    try {
+      const rouvert = await rouvrirReponseDevis(d.id);
+      if (!rouvert) {
+        ajouterJournal(`⚠️ ${d.numero} : impossible d'effacer — une ACCEPTATION ne s'efface jamais.`);
+        return;
+      }
+    } catch {
+      ajouterJournal(`⚠️ ${d.numero} : l'effacement a échoué — réessaie.`);
+      return;
+    }
+    setDevisListe((prev) =>
+      prev.map((x) =>
+        x.id === d.id ? { ...x, reponseClient: null, reponduLe: null, reponduParNom: "", messageClient: "", reponseTraiteeLe: null } : x
+      )
+    );
+    ajouterJournal(
+      `🗑️ Demande du client sur ${d.numero} EFFACÉE (envoyée par erreur)${question ? ` — elle disait « ${question} »` : ""}. Le client peut répondre de nouveau.`
+    );
+  };
+
   // « J'ai répondu » / « Pris en note » — la ligne se range, en base
   // (sinon elle reviendrait au prochain rechargement).
   const classerReponse = async (d) => {
@@ -1149,6 +1184,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         onTraiterDevis={(d) => setDevisATraiterId(d.id)}
         onRenvoyer={renvoyerApresReponse}
         onClasser={classerReponse}
+        onEffacerErreur={effacerDemandeErreur}
       />
 
       <div className="grid gap-6 md:grid-cols-5">
