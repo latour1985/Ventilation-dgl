@@ -16,7 +16,7 @@ import { synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { ModalDetailProjet } from "./OngletProjets";
 import { Button, BarrePagination, ITEMS_PAR_PAGE, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
 
-export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }) {
+export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, onNouvelleVersion }) {
   const [dossierOuvert, setDossierOuvert] = useState(null);
   const [versionAffichee, setVersionAffichee] = useState(null);
   const [apercu, setApercu] = useState(null);
@@ -43,6 +43,21 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
       .sort((a, b) => (b.active.creeLe || b.active.date || "").localeCompare(a.active.creeLe || a.active.date || ""));
   })();
 
+  // 🎯 ARRIVÉE PAR LA RECHERCHE RAPIDE (2026-08-30, « arriver directement
+  // à la bonne place du dossier client pour le devis ») : bonne page,
+  // puis défilement jusqu'à la carte du devis cherché (surlignée).
+  useEffect(() => {
+    if (!surlignerNumero) return;
+    const i = dossiers.findIndex((x) => x.versions.some((v) => v.numero === surlignerNumero));
+    if (i < 0) return;
+    setPageDevisClient(Math.floor(i / ITEMS_PAR_PAGE) + 1);
+    const minuterie = setTimeout(() => {
+      document.getElementById(`devis-client-${surlignerNumero}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 200);
+    return () => clearTimeout(minuterie);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surlignerNumero]);
+
   if (dossiers.length === 0) {
     return <p className="text-xs text-slate-400">Aucun devis pour ce client.</p>;
   }
@@ -60,6 +75,7 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
         return (
           <div
             key={base}
+            id={cible ? `devis-client-${surlignerNumero}` : undefined}
             className={`rounded-lg border p-2.5 ${cible ? "border-[#FF6A13] bg-orange-50 ring-2 ring-orange-200" : "border-slate-200 bg-white"}`}
           >
             <div className="flex items-start justify-between gap-2">
@@ -132,9 +148,20 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
                 ✓ Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
               </p>
             )}
-            <Button variant="outline" onClick={() => setApercu(affichee)} className="mt-1.5 w-full min-h-0 gap-1 py-1.5 text-[11px]">
-              <FileText size={11} /> Voir version client
-            </Button>
+            <div className="mt-1.5 flex gap-1.5">
+              <Button variant="outline" onClick={() => setApercu(affichee)} className="min-h-0 flex-1 gap-1 py-1.5 text-[11px]">
+                <FileText size={11} /> Voir version client
+              </Button>
+              {/* ✏️ MODIFIER D'ICI (2026-08-30, « si un client appelle ou
+                  qu'on a un oubli ») : ouvre l'onglet Devis avec la
+                  fenêtre d'édition déjà chargée — nouvelle version, la
+                  version envoyée reste intacte. */}
+              {onNouvelleVersion && !active.traite && (
+                <Button onClick={() => onNouvelleVersion(active)} className="min-h-0 flex-1 gap-1 py-1.5 text-[11px]">
+                  ✏️ Modifier (nouvelle version)
+                </Button>
+              )}
+            </div>
           </div>
         );
       })}
@@ -518,7 +545,7 @@ export const LigneProjetClient = React.memo(function LigneProjetClient({ p, trav
 });
 
 
-export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, bons, inspections, achatsLibres = [] }) {
+export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [] }) {
   // Taux camion par défaut — pour le coût réel des travaux du client.
   const configClients = useEntreprise();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
@@ -1751,7 +1778,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                           <Plus size={10} /> Créer un devis
                         </Button>
                       </div>
-                      <DevisDuClient devisListe={devisListe} clientId={c.id} surlignerNumero={devisCible} compact />
+                      <DevisDuClient devisListe={devisListe} clientId={c.id} surlignerNumero={devisCible} compact onNouvelleVersion={onNouvelleVersionDevis} />
                     </div>
                   </div>
                 </div>

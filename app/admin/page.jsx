@@ -1121,6 +1121,9 @@ function AppAdmin() {
   // Cible d'une navigation venant de la RECHERCHE RAPIDE :
   // { clientId, numeroDevis } — ouvre le bon dossier et surligne le devis.
   const [cibleRecherche, setCibleRecherche] = useState(null);
+  // ✏️ Devis à réviser demandé depuis le dossier client (onglet Clients) —
+  // l'onglet Devis le prend et ouvre sa fenêtre d'édition.
+  const [devisAReviser, setDevisAReviser] = useState(null);
   // Client visé par le bouton « + Créer un devis » d'une fiche client :
   // l'éditeur de devis s'ouvre avec lui déjà sélectionné.
   const [clientPourNouveauDevis, setClientPourNouveauDevis] = useState(null);
@@ -2873,6 +2876,10 @@ function AppAdmin() {
           setFournisseurs={setFournisseurs}
           clientCible={cibleRecherche?.clientId}
           devisCible={cibleRecherche?.numeroDevis}
+          onNouvelleVersionDevis={(d) => {
+            setDevisAReviser(d);
+            setOnglet("devis");
+          }}
           onCreerDevis={(id) => { setClientPourNouveauDevis(id); setOnglet("devis"); }}
           bons={bons}
         />
@@ -2902,6 +2909,8 @@ function AppAdmin() {
 
       {vue === "devis" && (
         <OngletDevis
+          devisAReviser={devisAReviser}
+          onDevisReviserPris={() => setDevisAReviser(null)}
           clients={clients}
           setClients={setClients}
           // Grille CCQ : sert à pré-remplir le taux coûtant prévu d'un

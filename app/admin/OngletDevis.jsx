@@ -308,7 +308,7 @@ export function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, on
 }
 
 
-export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers }) {
+export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris }) {
   // Liste de prix (289 items) — sert au sélecteur de lignes de devis.
   const catalogue = useCatalogue();
   // Taux de taxes des Paramètres — pour afficher le total client.
@@ -524,7 +524,19 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
     // Pré-coche l'adresse par défaut ; à défaut la première ; sinon rien
     // (le champ libre prend le relais pour un client sans courriel).
-    setEnvoiDevis({ devisId: devis.id, choisis: defauts.length > 0 ? defauts : tous.slice(0, 1), extra: "", extraFiche: false });
+    setEnvoiDevis({
+      devisId: devis.id,
+      choisis: defauts.length > 0 ? defauts : tous.slice(0, 1),
+      extra: "",
+      extraFiche: false,
+      // ✉️ OBJET MODIFIABLE (2026-08-30, demande du propriétaire : il met
+      // l'adresse des travaux dans l'objet — le client retrouve le devis
+      // plus vite dans sa boîte).
+      objet:
+        devis.reponseClient === "accepte"
+          ? `Votre copie du devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`
+          : `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+    });
   };
   const envoyerDevisParCourriel = async (devis) => {
     const extra = (envoiDevis?.extra || "").trim();
@@ -565,9 +577,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     const dejaAccepte = devis.reponseClient === "accepte";
     const r = await envoyerCourriel({
       a: adresses,
-      sujet: dejaAccepte
-        ? `Votre copie du devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`
-        : `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      // L'objet ajusté dans le panneau d'envoi fait foi ; sinon le défaut.
+      sujet:
+        (envoiDevis?.objet || "").trim() ||
+        (dejaAccepte
+          ? `Votre copie du devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`
+          : `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`),
       html: gabaritDevis({
         config: configEnt,
         numero: devis.numero,
@@ -824,6 +839,16 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setDossierEnModale(null);
     setEditionEnFenetre(true);
   };
+
+  // ✏️ RÉVISION DEMANDÉE DEPUIS LE DOSSIER CLIENT (2026-08-30, « pouvoir
+  // modifier le devis à partir de là si un client appelle ») : l'onglet
+  // Devis s'ouvre avec la fenêtre d'édition déjà chargée sur ce devis.
+  useEffect(() => {
+    if (!devisAReviser) return;
+    demarrerNouvelleVersion(devisAReviser, "");
+    onDevisReviserPris?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devisAReviser]);
 
   const annulerEdition = () => {
     setEditionEnFenetre(false);
@@ -1391,6 +1416,15 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId === affichee.id && (
                   <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
                     <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">{affichee.reponseClient === "accepte" ? "Renvoyer la copie à :" : "Envoyer le devis à :"}</p>
+                    {/* ✉️ L'objet du courriel, modifiable — l'adresse des
+                        travaux dedans aide le client à retrouver le devis. */}
+                    <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Objet du courriel</label>
+                    <input
+                      value={envoiDevis.objet ?? ""}
+                      onChange={(e) => setEnvoiDevis((prev) => ({ ...prev, objet: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <p className="mb-1.5 mt-0.5 text-[9px] text-slate-400">💡 Ajoute l&apos;adresse des travaux — le client retrouve son devis plus vite.</p>
                     {(ficheClientDe(affichee)?.courriels || []).map((c) => {
                       const adresse = typeof c === "string" ? c : c.email;
                       if (!adresse) return null;
