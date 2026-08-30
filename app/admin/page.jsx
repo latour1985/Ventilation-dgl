@@ -50,7 +50,7 @@ import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaieme
 import { termesHtmlCourriel } from "@/lib/termes";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
-import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo } from "@/lib/quickbooksClient";
+import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo, refleterReponsesDevisQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
@@ -2494,6 +2494,37 @@ function AppAdmin() {
             `⚠️ Le sondage QuickBooks n'a pas pu mettre à jour le dépôt${x.docNumber ? ` de la facture Nº ${x.docNumber}` : ""} — la base répond : « ${x.erreur} ». Vérifie que le SQL « 108 - statut annule_qb » a été lancé.`
           );
         });
+      } catch {
+        // silencieux : réseau ou QuickBooks non connecté
+      }
+      // 1b) 🔁 Les RÉPONSES DE DEVIS redescendent dans QuickBooks
+      // (2026-08-30) : acceptation → estimate « Accepted » (nom + date),
+      // refus → « Rejected ». La preuve reste dans Fluxya ; QuickBooks
+      // n'est que le reflet, tenu à jour sans que personne y pense.
+      try {
+        const rd = await refleterReponsesDevisQbo();
+        if (annule) return;
+        (rd?.transmis || []).forEach((x) => {
+          ajouterJournal(
+            x.reponse === "accepte"
+              ? `📋 Estimate QuickBooks du devis ${x.numero} marqué « Accepté »${x.par ? ` (accepté par ${x.par})` : ""} — automatique.`
+              : `📋 Estimate QuickBooks du devis ${x.numero} marqué « Rejeté » (refus du client) — automatique.`
+          );
+        });
+        // Avertissements DÉDOUBLONNÉS par session : le sondage repasse
+        // toutes les 3 minutes — sans ce garde, un échec persistant
+        // remplirait le journal (qui est PERSISTÉ en base).
+        const avisReponses = (sondageQbRef.current.avisReponses = sondageQbRef.current.avisReponses || new Set());
+        (rd?.echecs || []).forEach((x) => {
+          const cle = `echec-${x.numero}`;
+          if (avisReponses.has(cle)) return;
+          avisReponses.add(cle);
+          ajouterJournal(`⚠️ Estimate du devis ${x.numero} : la réponse du client n'a pas pu être transmise à QuickBooks (${x.erreur}) — nouvel essai au prochain passage.`);
+        });
+        if (rd?.colonneAbsente && !avisReponses.has("colonne")) {
+          avisReponses.add("colonne");
+          ajouterJournal("⚠️ Reflet des réponses de devis vers QuickBooks INACTIF — passe le SQL « 110 - reponse transmise » dans Supabase.");
+        }
       } catch {
         // silencieux : réseau ou QuickBooks non connecté
       }

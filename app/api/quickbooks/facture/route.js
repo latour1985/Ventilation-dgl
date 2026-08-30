@@ -127,7 +127,14 @@ export async function POST(request) {
             },
           };
 
-    const corpsFacture = async (texteSeulement) => ({
+    const corpsFacture = async (texteSeulement, sansLienEstimate = false) => ({
+      // 🔗 LIEN VERS L'ESTIMATE (2026-08-30, GO du propriétaire) : une
+      // facture issue d'un devis RÉFÉRENCE son estimate — la comptable
+      // voit la chaîne devis → accepté → facturé dans QuickBooks, et
+      // l'estimate se ferme tout seul une fois tout facturé.
+      ...(corps?.qboEstimateId && !sansLienEstimate
+        ? { LinkedTxn: [{ TxnId: String(corps.qboEstimateId).replace(/[^0-9]/g, ""), TxnType: "Estimate" }] }
+        : {}),
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
       // 🍁 Nos montants sont HORS TAXES — QuickBooks ajoute TPS/TVQ.
@@ -183,11 +190,25 @@ export async function POST(request) {
     // se rend, et la facture part. Une facture bloquée coûte plus cher
     // qu'une ligne à zéro.
     let cree;
+    // Le lien vers l'estimate est un BONUS, jamais un bloqueur : si
+    // QuickBooks le refuse (estimate fermé, client différent…), la
+    // facture repart SANS lui — une facture bloquée coûte plus cher.
+    let lienEstimatePose = !!corps?.qboEstimateId;
     try {
       cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(false));
     } catch (e) {
-      if (!lignes.some((l) => l.montant === 0)) throw e;
-      cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true));
+      if (corps?.qboEstimateId) {
+        lienEstimatePose = false;
+        try {
+          cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(false, true));
+        } catch (e2) {
+          if (!lignes.some((l) => l.montant === 0)) throw e2;
+          cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true, true));
+        }
+      } else {
+        if (!lignes.some((l) => l.montant === 0)) throw e;
+        cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true));
+      }
     }
     const facture = cree?.Invoice;
 
@@ -209,6 +230,8 @@ export async function POST(request) {
       factureId: facture?.Id || null,
       docNumber: facture?.DocNumber || null,
       lienPaiement: facture?.InvoiceLink || null,
+      // null = aucun estimate fourni ; true/false = lien posé ou refusé.
+      lienEstimate: corps?.qboEstimateId ? lienEstimatePose : null,
       envoiQb,
       environnement: acces.environnement,
     });

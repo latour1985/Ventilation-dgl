@@ -4248,3 +4248,20 @@ alter table clients_app add column if not exists note text;
 -- Verification : la colonne existe.
 select column_name, data_type from information_schema.columns
  where table_schema = 'public' and table_name = 'clients_app' and column_name = 'note';
+
+-- ============================================================
+-- 110 - LA REPONSE DU CLIENT REDESCEND DANS QUICKBOOKS
+--       (2026-08-30)
+-- ============================================================
+-- GO du proprietaire : quand un client accepte ou refuse son devis sur
+-- le lien Fluxya, l'estimate QuickBooks du dossier doit suivre
+-- (« Accepted » avec nom + date, ou « Rejected »). Cette colonne se
+-- souvient de ce qui a deja ete transmis : le sondage des 3 minutes ne
+-- transmet chaque reponse qu'UNE fois, et reessaie tout seul tant
+-- qu'elle est nulle (QuickBooks injoignable, etc.). Additif, idempotent.
+
+alter table devis_app add column if not exists qbo_reponse_transmise_le timestamptz;
+
+-- Verification : la colonne existe.
+select column_name, data_type from information_schema.columns
+ where table_schema = 'public' and table_name = 'devis_app' and column_name = 'qbo_reponse_transmise_le';

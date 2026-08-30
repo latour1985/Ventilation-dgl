@@ -2138,6 +2138,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // l'entreprise a activé l'envoi automatique (Paramètres).
       envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
       adresseTravaux: b.adresseTravaux || null,
+      // 🔗 Le bon vient d'un devis ? La facture référence son estimate
+      // QuickBooks — la comptable voit devis → accepté → facturé.
+      qboEstimateId: (b.devisNumero && devisListe.find((d) => d.numero === b.devisNumero)?.qboEstimateId) || null,
     });
     if (r?.erreur) {
       ajouterJournal(`⚠️ Facture QuickBooks NON créée pour "${b.projet}" : ${r.erreur} — le bon reste en attente`);
@@ -2148,6 +2151,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       return;
     }
     const numeroReel = r?.docNumber || r?.factureId || `QBINV-${Math.floor(10000 + Math.random() * 90000)}`;
+    if (r?.lienEstimate === false) {
+      ajouterJournal(`⚠️ Facture ${numeroReel} créée, mais QuickBooks a refusé le lien vers l'estimate du devis ${b.devisNumero || ""} — relie-les à la main dans QuickBooks si nécessaire.`);
+    }
     // La PREUVE d'envoi — lue du registre QuickBooks par la route.
     const envoiQbSimple = r?.envoiQb
       ? r.envoiQb.envoyee
@@ -2234,6 +2240,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // activé l'envoi automatique. La route relit la preuve au registre.
       envoyerA: configEnt?.envoiAutoFactureQb === true ? destinataires.map((c) => c.email) : [],
       adresseTravaux: bons.find((x) => x.id === bonId)?.adresseTravaux || null,
+      // 🔗 Facturation progressive d'un devis : chaque facture référence
+      // l'estimate du dossier — devis → accepté → facturé, visible dans
+      // QuickBooks, et l'estimate se ferme quand tout est facturé.
+      qboEstimateId: devisCourant?.qboEstimateId || devisCourant?.estimateId || null,
     });
     if (rQbo?.erreur || rQbo?.nonConnecte) {
       ajouterJournal(
@@ -2244,6 +2254,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       return;
     }
     const numeroFactureQb = rQbo?.docNumber || rQbo?.factureId || `QBINV-${Math.floor(10000 + Math.random() * 90000)}`;
+    if (rQbo?.lienEstimate === false) {
+      ajouterJournal(`⚠️ Facture ${numeroFactureQb} créée, mais QuickBooks a refusé le lien vers l'estimate du devis ${numeroDevisBon || ""} — relie-les à la main dans QuickBooks si nécessaire.`);
+    }
     // La PREUVE d'envoi — lue du registre QuickBooks par la route.
     const envoiQb = rQbo?.envoiQb
       ? rQbo.envoiQb.envoyee
