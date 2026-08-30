@@ -790,7 +790,7 @@ alter table taches_assignees add column if not exists projet_id text;
 create table if not exists depots (
   tache_id             text primary key,
   statut               text not null default 'en_attente_paiement'
-                         check (statut in ('non_requis','en_attente_paiement','paye','paye_manuellement','annule_delai')),
+                         check (statut in ('non_requis','en_attente_paiement','paye','paye_manuellement','annule_delai','annule_qb')),
   montant_ht           numeric not null default 0,
   qbo_depot_invoice_id text,
   date_limite          timestamptz not null,
@@ -4192,3 +4192,41 @@ select tc.table_name, string_agg(k.column_name, ', ' order by k.ordinal_position
  group by tc.table_name
 union all
 select 'compteurs -> ' || entreprise_id || ' / ' || cle, valeur::text from compteurs order by 1;
+
+-- ============================================================
+-- 108 - STATUT « annule_qb » ACCEPTE PAR LA TABLE DES DEPOTS
+--       (2026-08-30)
+-- ============================================================
+-- Le pont VOID -> annulation de tache (2026-08-29) ecrit le statut
+-- 'annule_qb' sur le depot quand la facture est annulee dans
+-- QuickBooks. MAIS la liste fermee des statuts de la table `depots`
+-- date d'avant cette fonctionnalite : la base REFUSAIT le mot, le
+-- sondage avalait l'erreur en silence, et la tache restait « en
+-- attente de depot » malgre le VOID (vecu par le proprietaire sur la
+-- tache « test pour retour argent »). On elargit la liste — AUCUNE
+-- ligne n'est modifiee, on ne change que la regle. Idempotent : le
+-- bloc retire d'abord toute contrainte de verification sur `statut`,
+-- quel que soit son nom, puis pose la bonne.
+
+do $$
+declare c record;
+begin
+  for c in
+    select con.conname
+      from pg_constraint con
+      join pg_class rel on rel.oid = con.conrelid
+      join pg_namespace ns on ns.oid = rel.relnamespace
+     where ns.nspname = 'public' and rel.relname = 'depots'
+       and con.contype = 'c'
+       and pg_get_constraintdef(con.oid) ilike '%statut%'
+  loop
+    execute format('alter table public.depots drop constraint %I', c.conname);
+  end loop;
+  alter table public.depots add constraint depots_statut_check
+    check (statut in ('non_requis','en_attente_paiement','paye','paye_manuellement','annule_delai','annule_qb'));
+end $$;
+
+-- Verification : la contrainte en place avec la liste complete.
+select conname, pg_get_constraintdef(oid) as regle
+  from pg_constraint
+ where conrelid = 'public.depots'::regclass and contype = 'c';

@@ -104,6 +104,12 @@ export async function POST(request) {
 
   const payes = [];
   const annulees = [];
+  // ÉCHECS D'ÉCRITURE (2026-08-30) : quand la base refuse une mise à
+  // jour (vécu : la contrainte de statuts ne connaissait pas
+  // 'annule_qb' avant le snippet 108), le sondage continuait EN
+  // SILENCE — la tâche restait bloquée sans que personne sache
+  // pourquoi. On remonte désormais la vraie raison à l'écran.
+  const echecs = [];
   for (const d of enAttente) {
     const facture = facturesParId[String(d.qbo_depot_invoice_id)];
     // Facture introuvable : on ne touche à RIEN. Elle a pu être
@@ -128,7 +134,11 @@ export async function POST(request) {
         .eq("statut", "en_attente_paiement")
         .eq("entreprise_id", entrepriseId)
         .select("tache_id");
-      if (eA || !majA || majA.length === 0) continue;
+      if (eA) {
+        echecs.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null, erreur: eA.message });
+        continue;
+      }
+      if (!majA || majA.length === 0) continue;
       annulees.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null });
       continue;
     }
@@ -150,7 +160,11 @@ export async function POST(request) {
       .eq("statut", "en_attente_paiement")
       .eq("entreprise_id", entrepriseId)
       .select("tache_id");
-    if (e2 || !maj || maj.length === 0) continue;
+    if (e2) {
+      echecs.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null, erreur: e2.message });
+      continue;
+    }
+    if (!maj || maj.length === 0) continue;
 
     payes.push({
       tacheId: d.tache_id,
@@ -159,5 +173,5 @@ export async function POST(request) {
     });
   }
 
-  return Response.json({ verifies: enAttente.length, payes, annulees });
+  return Response.json({ verifies: enAttente.length, payes, annulees, echecs });
 }

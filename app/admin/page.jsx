@@ -2436,6 +2436,15 @@ function AppAdmin() {
             `🚫 Facture de dépôt${a.docNumber ? ` Nº ${a.docNumber}` : ""} ANNULÉE dans QuickBooks — la tâche liée est annulée dans Fluxya aussi (geste fait côté comptabilité).`
           );
         });
+        // ⚠️ ÉCHEC D'ÉCRITURE remonté par le sondage : la base a refusé
+        // la mise à jour d'un dépôt. La vraie raison au journal — plus
+        // jamais un blocage silencieux (vécu : contrainte de statuts
+        // d'avant le snippet 108).
+        (r?.echecs || []).forEach((x) => {
+          ajouterJournal(
+            `⚠️ Le sondage QuickBooks n'a pas pu mettre à jour le dépôt${x.docNumber ? ` de la facture Nº ${x.docNumber}` : ""} — la base répond : « ${x.erreur} ». Vérifie que le SQL « 108 - statut annule_qb » a été lancé.`
+          );
+        });
       } catch {
         // silencieux : réseau ou QuickBooks non connecté
       }
