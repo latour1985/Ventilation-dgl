@@ -150,6 +150,10 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   // 📇 CARNET DE CONTACTS SUR PLACE (SQL 72, 2026-08-17) — chargé de
   // projet, concierge, gérant… réutilisables de chantier en chantier.
   const [contacts, setContacts] = useState(() => (client.contacts || []).map((c) => ({ ...c })));
+  // 📌 NOTE GÉNÉRALE (2026-08-30) — « s'il y a un problème on peut le
+  // noter » : libre, interne au bureau, jamais vue du client ni du
+  // technicien.
+  const [note, setNote] = useState(client.note || "");
   const majContact = (id, champs) =>
     setContacts((prev) => prev.map((c) => (c.id === id ? { ...c, ...champs } : c)));
   const ajouterContact = () =>
@@ -171,6 +175,7 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
       entreprise: entreprise.trim(),
       nomAffichage: personneOk ? (entreprise.trim() ? nomAffichage : "nom") : "entreprise",
       telephone: telephone.trim(),
+      note: note.trim(),
       // Lignes vides écartées (un contact sans nom ne sert à rien).
       contacts: contacts
         .map((c) => ({ ...c, nom: (c.nom || "").trim(), role: (c.role || "").trim(), telephone: (c.telephone || "").trim() }))
@@ -240,6 +245,23 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
             />
             <p className="mt-0.5 text-[9px] text-slate-400">
               Cette adresse s'imprime sous « Facturé à » sur les devis, bons de travail et factures.
+            </p>
+          </div>
+
+          {/* 📌 NOTE GÉNÉRALE — l'aide-mémoire du bureau sur ce client
+              (paiements difficiles, code d'accès, chien dans la cour…).
+              Rappelée sur sa carte et à la création d'une tâche. */}
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">📌 Note générale (interne au bureau)</label>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={3}
+              placeholder="Ex : facture toujours en retard — demander un dépôt. Code d'accès du garage : 4523."
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+            <p className="mt-0.5 text-[9px] text-slate-400">
+              Visible au bureau seulement — jamais sur un document, jamais au client, jamais au technicien. Rappelée à la création d&apos;une tâche pour ce client.
             </p>
           </div>
 
@@ -1169,6 +1191,14 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                   )}
                   {c.termeFacturation && (
                     <div className="flex items-center gap-1.5"><CreditCard size={11} /> {c.termeFacturation}</div>
+                  )}
+                  {/* 📌 La note générale SAUTE AUX YEUX sur la carte —
+                      c'est sa raison d'être : le problème noté se voit
+                      sans ouvrir la fiche. */}
+                  {c.note && (
+                    <p className="mt-1 whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">
+                      📌 {c.note}
+                    </p>
                   )}
 
                   <div className="mt-2 border-t border-slate-100 pt-2">

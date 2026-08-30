@@ -4230,3 +4230,21 @@ end $$;
 select conname, pg_get_constraintdef(oid) as regle
   from pg_constraint
  where conrelid = 'public.depots'::regclass and contype = 'c';
+
+-- ============================================================
+-- 109 - NOTE GENERALE SUR LA FICHE CLIENT
+--       (2026-08-30)
+-- ============================================================
+-- Demande du proprietaire : « il serait interessant de pouvoir mettre
+-- une note generale sur les clients — s'il y a un probleme on peut le
+-- noter ». Une note LIBRE et INTERNE AU BUREAU sur la fiche client
+-- (mauvais payeur, code d'acces, particularite du batiment...) :
+-- affichee dans la fiche, sur la carte du client et rappelee a la
+-- creation d'une tache pour ce client. Jamais montree au client ni au
+-- technicien. Additif et idempotent.
+
+alter table clients_app add column if not exists note text;
+
+-- Verification : la colonne existe.
+select column_name, data_type from information_schema.columns
+ where table_schema = 'public' and table_name = 'clients_app' and column_name = 'note';

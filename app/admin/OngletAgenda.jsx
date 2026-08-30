@@ -2394,6 +2394,19 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </div>
                 )}
               </div>
+              {/* 📌 NOTE GÉNÉRALE DU CLIENT (2026-08-30) — l'aide-mémoire
+                  de la fiche ressurgit AU MOMENT DE DÉCIDER : c'est ici
+                  qu'un « mauvais payeur — exiger un dépôt » doit se lire,
+                  pas enfoui dans le dossier. */}
+              {!estTypeSansClient(nouveauType) && nouveauClientId && (() => {
+                const noteClient = clients.find((c) => c.id === nouveauClientId)?.note;
+                if (!noteClient) return null;
+                return (
+                  <p className="whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">
+                    📌 Note du dossier : {noteClient}
+                  </p>
+                );
+              })()}
               {/* 📇 CONTACT SUR PLACE — la personne à voir sur le
                   chantier, choisie dans le carnet du client ou créée ici
                   (et mémorisée au carnet). Le technicien la verra avec
