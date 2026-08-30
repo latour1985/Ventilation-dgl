@@ -30,6 +30,8 @@ import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fourn
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter } from "@/lib/supabase/devis";
+import { LangueProvider, useLangue } from "@/lib/i18n";
+import BoutonLangue from "@/components/BoutonLangue";
 import { listerClients, sauvegarderClient, sAbonnerClients } from "@/lib/supabase/clients";
 import { listerProjets, sauvegarderProjet, sAbonnerProjets } from "@/lib/supabase/projets";
 import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbonnerTachesAttente } from "@/lib/supabase/taches";
@@ -322,6 +324,7 @@ function sauvegarderJournal(journal) {
 }
 
 function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDeconnexion, ouvert, onFermer, reduit, onBasculerReduit }) {
+  const { t } = useLangue();
   // 🏢 SENTIMENT D'APPARTENANCE (retour du propriétaire, 2026-09-06) :
   // l'en-tête du menu porte le NOM et le LOGO de L'ENTREPRISE connectée
   // — « propulsé par Fluxya » en plus discret dessous. Le client se
@@ -391,7 +394,7 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
               ) : (
                 <>
                   <Logo variant="compact" sombre />
-                  <p className="text-[10px] text-slate-500">Administration</p>
+                  <p className="text-[10px] text-slate-500">{t("Administration")}</p>
                 </>
               )}
             </div>
@@ -415,7 +418,7 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
               <div className="mx-2 my-2 border-t border-white/10" />
             ) : (
               <div className="flex items-center justify-between pr-0.5">
-                <p className="px-2.5 pb-1 pt-3 text-[9px] font-extrabold uppercase tracking-widest text-slate-500">{g.titre}</p>
+                <p className="px-2.5 pb-1 pt-3 text-[9px] font-extrabold uppercase tracking-widest text-slate-500">{t(g.titre)}</p>
                 {gi === 0 && avecBascule && (
                   <button
                     onClick={onBasculerReduit}
@@ -435,13 +438,13 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
                 <button
                   key={o.id}
                   onClick={() => { onChoisir(o.id); onFermer?.(); }}
-                  title={o.label}
+                  title={t(o.label)}
                   className={`relative flex w-full items-center rounded-lg py-2 text-left text-[13px] font-semibold ${
                     estReduit ? "justify-center px-0" : "gap-2.5 px-2.5"
                   } ${actif ? "bg-[#FF6A13] font-extrabold text-white" : "text-slate-300 hover:bg-white/5"}`}
                 >
                   <Icone size={estReduit ? 17 : 15} className="shrink-0" />
-                  {!estReduit && <span className="min-w-0 flex-1 truncate">{o.label}</span>}
+                  {!estReduit && <span className="min-w-0 flex-1 truncate">{t(o.label)}</span>}
                   {o.badge > 0 && (
                     <span className={`rounded-full bg-red-500 font-extrabold text-white ${
                       estReduit ? "absolute right-1 top-0.5 px-1 text-[8px]" : "shrink-0 px-1.5 py-0.5 text-[9px]"
@@ -457,17 +460,17 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
         {!estReduit && (
           <>
             <p className="truncate text-[11px] font-bold text-slate-200">{courriel}</p>
-            <p className="text-[10px] text-slate-500">{role}</p>
+            <p className="text-[10px] text-slate-500">{t(role)}</p>
           </>
         )}
         <button
           onClick={onDeconnexion}
-          title="Déconnexion"
+          title={t("Déconnexion")}
           className={`mt-2 rounded-lg border border-white/20 text-slate-300 hover:bg-white/5 ${
             estReduit ? "p-1.5" : "px-3 py-1 text-[10px] font-bold"
           }`}
         >
-          {estReduit ? <LogOut size={14} /> : "Déconnexion"}
+          {estReduit ? <LogOut size={14} /> : t("Déconnexion")}
         </button>
       </div>
     </>
@@ -973,7 +976,19 @@ function JournalAutomatisation({ entrees }) {
 // ============================================================
 // APP PRINCIPALE
 // ============================================================
+// 🌎 Le fournisseur de langue enveloppe TOUTE l app : les hooks du
+// composant principal (en-tete, menu) peuvent ainsi le consommer —
+// rendu DANS le composant, il serait invisible pour ses propres hooks.
 export default function App() {
+  return (
+    <LangueProvider>
+      <AppAdmin />
+    </LangueProvider>
+  );
+}
+
+function AppAdmin() {
+  const { t: tEnTete } = useLangue();
   const [onglet, setOnglet] = useState("tableau-de-bord");
   // 💰/🤝 Drapeaux « facturable » par (tâche, technicien) — la clé est
   // `tacheId|courriel`. Rempli au chargement des assignations, mis à
@@ -2572,9 +2587,10 @@ export default function App() {
             title="Ouvrir mon horaire du jour (app terrain)"
             className="shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
           >
-            📱 <span className="hidden sm:inline">Mon horaire</span>
+            📱 <span className="hidden sm:inline">{tEnTete("Mon horaire")}</span>
           </button>
         )}
+        <BoutonLangue />
         {/* 🔍 RECHERCHE GLOBALE — accessible de partout, comme demandé
             par le propriétaire : la recherche est une PORTE D'ENTRÉE,
             pas une destination. Première frappe = la page Recherche
@@ -2604,7 +2620,7 @@ export default function App() {
                       setOnglet("recherche");
                     }
                   }}
-                  placeholder="Recherche rapide — client, adresse, devis, produit…"
+                  placeholder={tEnTete("Recherche rapide — client, adresse, devis, produit…")}
                   className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
                 />
                 {rechercheGlobale && (

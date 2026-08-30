@@ -29,6 +29,8 @@ import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/go
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, creerTravailShopTechnicien, listerProjetsPourTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue, travailDejaEnregistre, infoTravailEnregistre } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
+import { LangueProvider, useLangue } from "@/lib/i18n";
+import BoutonLangue from "@/components/BoutonLangue";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
 import { creerRetour, listerMesRetours, LIBELLES_STATUT_RETOUR } from "@/lib/supabase/retours";
@@ -2154,6 +2156,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 </button>
               </>
             )}
+            <BoutonLangue sombre />
             <button onClick={onDeconnexion} className="flex items-center gap-1 text-xs font-semibold text-slate-400">
               <LogOut size={13} /> Déconnexion
             </button>
@@ -5600,9 +5603,11 @@ export default function App() {
       });
   }, []);
   return (
+    <LangueProvider>
     <ContexteEntreprise.Provider value={configEntreprise}>
       <AppTechnicien />
     </ContexteEntreprise.Provider>
+    </LangueProvider>
   );
 }
 
