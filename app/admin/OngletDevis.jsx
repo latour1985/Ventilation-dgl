@@ -835,7 +835,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
 
   // Étape 2 : enregistrer la révision AVEC les lignes modifiées.
   // Incrémente le suffixe et archive les versions précédentes.
-  const enregistrerVersion = () => {
+  const enregistrerVersion = async (etEnvoyer = false) => {
     if (!editionVersion) return;
     const { source, note } = editionVersion;
     const base = source.numeroBase || source.numero;
@@ -866,9 +866,46 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       totalVendant: totaux.vendant,
       estContrat,
       frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
+      // La révision repart SANS réponse de client (le « ...source »
+      // copiait l'ancienne : le bloc des réponses aurait montré une
+      // demande fantôme sur la nouvelle version jusqu'au rechargement).
+      reponseClient: null,
+      reponduLe: null,
+      reponduParNom: null,
+      messageClient: null,
+      reponseTraiteeLe: null,
+      annuleLe: null,
+      annuleRaison: "",
     };
-    setDevisListe((prev) => [revision, ...prev.map((d) => ((d.numeroBase || d.numero) === base ? { ...d, versionActive: false } : d))]);
-    persisterDevis?.(revision);
+    // 🔑 LE LIEN DU CLIENT SUIT LA VERSION ACTIVE (bogue vécu par le
+    // propriétaire, 2026-08-30 : « les ajouts et le prix n'apparaissent
+    // pas ») : le jeton public est UNIQUE dans la base (idx_devis_jeton)
+    // — copié tel quel sur la révision, l'enregistrement était REFUSÉ
+    // pendant que l'originale se faisait archiver. On retire donc le
+    // jeton de l'ancienne version AVANT de le poser sur la nouvelle,
+    // et si quoi que ce soit échoue, on REMET tout comme avant.
+    if (source.jetonPublic) {
+      const libere = await persisterDevis?.({ ...source, versionActive: false, jetonPublic: null });
+      if (libere === false) {
+        ajouterJournal(`⚠️ Nouvelle version de ${source.numero} NON enregistrée (le lien du client n'a pas pu être transféré) — rien n'a changé, réessaie.`);
+        return;
+      }
+    }
+    const enregistre = await persisterDevis?.(revision);
+    if (enregistre === false) {
+      // Marche arrière : l'originale redevient exactement ce qu'elle était.
+      if (source.jetonPublic) persisterDevis?.({ ...source });
+      ajouterJournal(`⚠️ Nouvelle version de ${source.numero} NON enregistrée — rien n'a changé, réessaie.`);
+      return;
+    }
+    setDevisListe((prev) => [
+      revision,
+      ...prev.map((d) =>
+        (d.numeroBase || d.numero) === base
+          ? { ...d, versionActive: false, ...(d.id === source.id ? { jetonPublic: null } : {}) }
+          : d
+      ),
+    ]);
     activerVersionDevis(base, numero).catch(() => {});
     ajouterJournal(
       `📄 Version ${numero} enregistrée à partir de ${source.numero}${note ? ` — ${note}` : ""} · ${totaux.vendant.toFixed(2)} $ (les versions précédentes restent consultables)`
@@ -880,11 +917,17 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setFrequenceContrat(4);
     setDossierOuvert(base);
     setVersionAffichee(numero);
-    // 🪟 ENCHAÎNEMENT (2026-08-30, « est-ce que ça lui envoie
-    // automatiquement ? ») : rien ne part tout seul — mais la fenêtre
-    // du dossier s'ouvre sur la nouvelle version, le bouton
-    // « ✉️ Envoyer au client » sous les yeux. Un clic, pas une chasse.
-    setDossierEnModale(base);
+    // 🪟 ENCHAÎNEMENT (2026-08-30) : rien ne part jamais tout seul.
+    // « Enregistrer et envoyer » ouvre DIRECTEMENT la fenêtre des
+    // destinataires sur la révision (demande du propriétaire : « ça
+    // irait plus vite et on est sûr de ne pas oublier de l'envoyer ») ;
+    // « Enregistrer sans envoyer » ouvre la fenêtre du dossier, le
+    // bouton « ✉️ Envoyer au client » sous les yeux pour plus tard.
+    if (etEnvoyer) {
+      ouvrirEnvoiDevis(revision);
+    } else {
+      setDossierEnModale(base);
+    }
   };
 
   const demarrerCreationDevis = () => {
@@ -1996,17 +2039,24 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
               📝 Garder en brouillon {reprisBrouillonId ? "(mise à jour)" : "(sans numéro)"}
             </Button>
           )}
-          <Button
-            onClick={editionVersion ? enregistrerVersion : demarrerCreationDevis}
-            disabled={lignes.length === 0}
-            className="w-full"
-          >
-            {editionVersion
-              ? "Enregistrer la nouvelle version"
-              : estContrat
-              ? "Créer le contrat d'entretien périodique"
-              : "Créer le devis"}
-          </Button>
+          {editionVersion ? (
+            <div className="space-y-1.5">
+              {/* 📧 Le chemin RAPIDE demandé par le propriétaire : la
+                  version s'enregistre et la fenêtre des destinataires
+                  s'ouvre aussitôt — impossible d'oublier l'envoi. Le
+                  courriel ne part qu'après TA confirmation là-dedans. */}
+              <Button onClick={() => enregistrerVersion(true)} disabled={lignes.length === 0} className="w-full">
+                💾 Enregistrer et envoyer au client…
+              </Button>
+              <Button variant="outline" onClick={() => enregistrerVersion(false)} disabled={lignes.length === 0} className="w-full min-h-0 py-2 text-xs">
+                Enregistrer sans envoyer
+              </Button>
+            </div>
+          ) : (
+            <Button onClick={demarrerCreationDevis} disabled={lignes.length === 0} className="w-full">
+              {estContrat ? "Créer le contrat d'entretien périodique" : "Créer le devis"}
+            </Button>
+          )}
         </div>
   );
 
