@@ -2942,6 +2942,7 @@ function AppAdmin() {
         <OngletDevis
           devisAReviser={devisAReviser}
           onDevisReviserPris={() => setDevisAReviser(null)}
+          projets={projets}
           clients={clients}
           setClients={setClients}
           // Grille CCQ : sert à pré-remplir le taux coûtant prévu d'un

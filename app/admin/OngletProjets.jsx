@@ -947,7 +947,35 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
 
         <div className="overflow-y-auto p-5">
           {ongletActif === "apercu" && (
-            <OngletApercuProjet projet={projet} r={r} sante={sante} onChangerStatut={onChangerStatut} onSyncQuickBooks={onSyncQuickBooks} syncQbEnCours={syncQbEnCours} peutSyncQb={peutSyncQb} />
+            <>
+              <OngletApercuProjet projet={projet} r={r} sante={sante} onChangerStatut={onChangerStatut} onSyncQuickBooks={onSyncQuickBooks} syncQbEnCours={syncQbEnCours} peutSyncQb={peutSyncQb} />
+              {/* 📋 DEVIS RATTACHÉS (2026-08-30, devis multiples par
+                  projet) : l'original ET les extras — le budget du projet
+                  est leur somme, chacun reste consultable. */}
+              {(() => {
+                const rattaches = (devisListe || []).filter((d) => d.projetId === projet.id && d.versionActive !== false);
+                if (rattaches.length === 0) return null;
+                return (
+                  <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
+                    <p className="mb-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                      📋 Devis rattachés ({rattaches.length})
+                    </p>
+                    <div className="space-y-1">
+                      {rattaches.map((d) => (
+                        <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 text-xs">
+                          <span className="min-w-0 truncate font-bold text-slate-800">
+                            {d.numero}
+                            {d.lignes?.[0]?.nom ? <span className="ml-1.5 font-normal text-slate-500">📌 {d.lignes[0].nom}</span> : null}
+                          </span>
+                          <span className="shrink-0 font-bold tabular-nums text-slate-700">{(Number(d.totalVendant) || 0).toFixed(2)} $</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-slate-400">Le budget du projet est la somme de ces devis (extras compris).</p>
+                  </div>
+                );
+              })()}
+            </>
           )}
           {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} onMajMateriel={onMajMateriel} r={r} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
           {ongletActif === "temps" && (

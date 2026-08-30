@@ -34,10 +34,15 @@ export function tauxMoyenEquipe(tauxMetiers) {
   return Math.round((valeurs.reduce((s, n) => s + n, 0) / valeurs.length) * 100) / 100;
 }
 
-export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravail, onChoisirProjet, tauxMoyen = 45 }) {
-  const [option, setOption] = useState(null); // "bon_travail" | "projet" | null
+export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onChoisirBonTravail, onChoisirProjet, onChoisirProjetExistant, tauxMoyen = 45 }) {
+  const [option, setOption] = useState(null); // "bon_travail" | "projet" | "projet_existant" | null
   const client = clients.find((c) => c.id === devis.clientId);
   const [adresseTravauxId, setAdresseTravauxId] = useState("");
+  // ➕ DEVIS MULTIPLES PAR PROJET (2026-08-30, GO du propriétaire :
+  // « des fois pour des extras ou des ajouts supplémentaires ») — les
+  // projets DU CLIENT auxquels ce devis peut s'ajouter.
+  const projetsDuClient = (projets || []).filter((p) => p.clientId === devis.clientId && p.statut !== "Terminé");
+  const [projetExistantId, setProjetExistantId] = useState("");
   // 📅 Les DEUX dates (2026-08-28) : le projet partait d'office à la date
   // du jour — un chantier qui commence dans trois semaines était donc
   // « en retard » dès sa création.
@@ -82,6 +87,43 @@ export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravai
     return a ? `${a.nom} — ${libelleAdresse(a)}` : null;
   };
 
+  // 💰 Le bloc « coûtant prévu » sert aux DEUX chemins projet (nouveau
+  // ET existant) — même code, mêmes règles.
+  const blocCoutantPrevu = (
+    <div className="rounded-xl border border-slate-200 p-3">
+      <p className="mb-2 text-xs font-bold text-slate-500">Coûtant prévu</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[86px] flex-1">
+          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">⏱️ Heures prévues</label>
+          <InputNombreDecimal valeur={heuresPrevues} onChange={setHeuresPrevues} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+        <span className="pb-2 text-xs text-slate-400">×</span>
+        <div className="min-w-[86px] flex-1">
+          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Taux coûtant / h</label>
+          <InputNombreDecimal valeur={tauxPrevu} onChange={setTauxPrevu} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        </div>
+        <span className="pb-2 text-xs font-bold text-slate-500 tabular-nums">= {coutMainOeuvrePrevu.toFixed(2)} $</span>
+      </div>
+      <div className="mt-2">
+        <label className="mb-0.5 block text-[10px] font-bold text-slate-400">🧱 Matériaux prévus ($)</label>
+        <InputNombreDecimal valeur={materiauxPrevus} onChange={setMateriauxPrevus} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-200 pt-2">
+        <label className="text-[11px] font-bold text-slate-600">Total prévu</label>
+        {detailRempli ? (
+          <span className="text-sm font-extrabold tabular-nums text-slate-800">{coutantPrevu.toFixed(2)} $</span>
+        ) : (
+          <InputNombreDecimal valeur={totalSaisi} onChange={setTotalSaisi} className="w-[130px] rounded-lg border border-slate-300 px-2 py-1.5 text-right text-sm font-bold" />
+        )}
+      </div>
+      <p className="mt-1 text-[10px] leading-snug text-slate-400">
+        {detailRempli
+          ? "Total calculé depuis le détail — vide les deux lignes ci-dessus pour saisir un montant global à la place."
+          : "Pré-rempli depuis les lignes du devis. Remplis les heures et/ou les matériaux si tu veux suivre le dépassement par poste."}
+      </p>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5">
@@ -120,7 +162,24 @@ export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravai
                 <p className="text-xs text-slate-500">Le montant du devis devient le budget initial ; chaque ligne devient une étape/tâche du projet, dans le Hub Projets.</p>
               </div>
             </button>
-            <p className="text-[10px] text-slate-400">Dans les deux cas, le lien avec QuickBooks est conservé — la facturation finale se fait via l'onglet Facturation.</p>
+            {/* ➕ EXTRA SUR UN PROJET EXISTANT : le montant s'AJOUTE au
+                budget, le coûtant prévu s'ajoute au coûtant prévu — les
+                écarts restent justes, rien ne se perd. */}
+            {onChoisirProjetExistant && projetsDuClient.length > 0 && (
+              <button
+                onClick={() => setOption("projet_existant")}
+                className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3.5 text-left hover:border-slate-300"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-100">
+                  <Plus size={16} className="text-emerald-700" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Ajouter à un projet existant ({projetsDuClient.length})</p>
+                  <p className="text-xs text-slate-500">Un extra : le montant s&apos;ajoute au budget du projet, ses lignes deviennent des étapes — la facturation du projet voit le total.</p>
+                </div>
+              </button>
+            )}
+            <p className="text-[10px] text-slate-400">Dans tous les cas, le lien avec QuickBooks est conservé — la facturation finale se fait via l'onglet Facturation.</p>
           </div>
         )}
 
@@ -187,38 +246,7 @@ export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravai
             </div>
 
             {/* 💰 COÛTANT PRÉVU — au détail OU d'un coup */}
-            <div className="rounded-xl border border-slate-200 p-3">
-              <p className="mb-2 text-xs font-bold text-slate-500">Coûtant prévu</p>
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="min-w-[86px] flex-1">
-                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">⏱️ Heures prévues</label>
-                  <InputNombreDecimal valeur={heuresPrevues} onChange={setHeuresPrevues} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
-                </div>
-                <span className="pb-2 text-xs text-slate-400">×</span>
-                <div className="min-w-[86px] flex-1">
-                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Taux coûtant / h</label>
-                  <InputNombreDecimal valeur={tauxPrevu} onChange={setTauxPrevu} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
-                </div>
-                <span className="pb-2 text-xs font-bold text-slate-500 tabular-nums">= {coutMainOeuvrePrevu.toFixed(2)} $</span>
-              </div>
-              <div className="mt-2">
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">🧱 Matériaux prévus ($)</label>
-                <InputNombreDecimal valeur={materiauxPrevus} onChange={setMateriauxPrevus} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
-              </div>
-              <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-200 pt-2">
-                <label className="text-[11px] font-bold text-slate-600">Total prévu</label>
-                {detailRempli ? (
-                  <span className="text-sm font-extrabold tabular-nums text-slate-800">{coutantPrevu.toFixed(2)} $</span>
-                ) : (
-                  <InputNombreDecimal valeur={totalSaisi} onChange={setTotalSaisi} className="w-[130px] rounded-lg border border-slate-300 px-2 py-1.5 text-right text-sm font-bold" />
-                )}
-              </div>
-              <p className="mt-1 text-[10px] leading-snug text-slate-400">
-                {detailRempli
-                  ? "Total calculé depuis le détail — vide les deux lignes ci-dessus pour saisir un montant global à la place."
-                  : "Pré-rempli depuis les lignes du devis. Remplis les heures et/ou les matériaux si tu veux suivre le dépassement par poste."}
-              </p>
-            </div>
+            {blocCoutantPrevu}
             <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
               Budget initial du projet : <span className="font-bold text-slate-800">{devis.totalVendant.toFixed(2)} $</span>
               {" · coûtant prévu "}
@@ -253,6 +281,61 @@ export function ModalTraiterDevis({ devis, clients, onFermer, onChoisirBonTravai
             </div>
           </div>
         )}
+
+        {/* ➕ EXTRA SUR UN PROJET EXISTANT (2026-08-30) */}
+        {option === "projet_existant" && (() => {
+          const cible = projetsDuClient.find((p) => p.id === projetExistantId);
+          const budgetActuel = Number(cible?.budgetTotal) || 0;
+          return (
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-500">Projet du client</label>
+                <select
+                  value={projetExistantId}
+                  onChange={(e) => setProjetExistantId(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">— Choisis le projet —</option>
+                  {projetsDuClient.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nom} ({p.statut} · budget {(Number(p.budgetTotal) || 0).toFixed(2)} $)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {blocCoutantPrevu}
+              {cible && (
+                <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
+                  Budget du projet : <span className="font-bold text-slate-800">{budgetActuel.toFixed(2)} $</span>
+                  {" → "}
+                  <span className="font-bold text-emerald-700">{(budgetActuel + devis.totalVendant).toFixed(2)} $</span>
+                  {" · extra de "}
+                  <span className="font-bold text-slate-800">{devis.totalVendant.toFixed(2)} $</span>
+                  <br />
+                  Le coûtant prévu ({(Number(coutantPrevu) || 0).toFixed(2)} $) s&apos;ajoute au coûtant prévu du projet — les écarts par poste restent justes.
+                  <br />
+                  {devis.lignes.length} étape{devis.lignes.length > 1 ? "s" : ""} seront ajoutées à l&apos;agenda, rattachées à ce projet.
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setOption(null)}>Retour</Button>
+                <Button
+                  disabled={!cible}
+                  onClick={() =>
+                    onChoisirProjetExistant(devis, projetExistantId, {
+                      coutantPrevu,
+                      heuresPrevues: Number(heuresPrevues) || 0,
+                      tauxPrevu: Number(tauxPrevu) || 0,
+                      materiauxPrevus: coutMateriauxPrevu,
+                    })
+                  }
+                >
+                  Ajouter au projet
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -308,7 +391,7 @@ export function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, on
 }
 
 
-export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris }) {
+export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris }) {
   // Liste de prix (289 items) — sert au sélecteur de lignes de devis.
   const catalogue = useCatalogue();
   // Taux de taxes des Paramètres — pour afficher le total client.
@@ -1248,6 +1331,77 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     persisterDevis?.({ ...devis, traite: true, modeTraitement: "projet", projetId: nouveauProjetId });
     ajouterJournal(
       `🏗️ Devis ${devis.numero} converti en projet "${nouveauProjet.nom}" (budget initial ${devis.totalVendant.toFixed(2)} $, ${devis.lignes.length} étape${devis.lignes.length > 1 ? "s" : ""} ajoutée${devis.lignes.length > 1 ? "s" : ""} à l'agenda). Lien QuickBooks conservé (facturation progressive via l'onglet Facturation).`
+    );
+    setDevisATraiterId(null);
+    onDevisTraite?.("projets");
+  };
+
+  // ➕ EXTRA SUR UN PROJET EXISTANT (2026-08-30, GO du propriétaire :
+  // « joindre plusieurs devis sur le même projet, pour des extras »).
+  // Le montant du devis S'AJOUTE au budget du projet, son coûtant prévu
+  // s'ajoute au coûtant prévu (détail par poste compris) — les écarts
+  // restent justes. Ses lignes deviennent des étapes du projet, et le
+  // devis est marqué traité vers CE projet (la facturation progressive
+  // du devis continue de fonctionner devis par devis).
+  const traiterVersProjetExistant = (devis, projetCibleId, { coutantPrevu, heuresPrevues = 0, tauxPrevu = 0, materiauxPrevus = 0 }) => {
+    const cible = (projets || []).find((p) => p.id === projetCibleId);
+    if (!cible) return;
+    const coutantAttendu = Number(coutantPrevu) || 0;
+    setProjets((prev) =>
+      prev.map((p) => {
+        if (p.id !== projetCibleId) return p;
+        const bp = p.budgetPrevu || {};
+        const totalFacture = (Number(bp.totalFacture) || 0) + devis.totalVendant;
+        const totalCoutant = (Number(bp.totalCoutant) || 0) + coutantAttendu;
+        return {
+          ...p,
+          budgetTotal: (Number(p.budgetTotal) || 0) + devis.totalVendant,
+          budgetPrevu: {
+            ...bp,
+            mainOeuvreChantier: {
+              heures: (Number(bp.mainOeuvreChantier?.heures) || 0) + heuresPrevues,
+              facture: Number(bp.mainOeuvreChantier?.facture) || 0,
+              coutant: (Number(bp.mainOeuvreChantier?.coutant) || 0) + heuresPrevues * tauxPrevu,
+            },
+            transport: bp.transport || { heures: 0, facture: 0, coutant: 0 },
+            materiaux: {
+              facture: Number(bp.materiaux?.facture) || 0,
+              coutant: (Number(bp.materiaux?.coutant) || 0) + materiauxPrevus,
+            },
+            tauxPrevu: bp.tauxPrevu || tauxPrevu,
+            detaille: !!bp.detaille || heuresPrevues > 0 || materiauxPrevus > 0,
+            sousTraitants: bp.sousTraitants || [],
+            totalFacture,
+            totalCoutant,
+            marge: totalFacture > 0 ? ((totalFacture - totalCoutant) / totalFacture) * 100 : 0,
+            source: [bp.source, `devis ${devis.numero}`].filter(Boolean).join(" + "),
+          },
+        };
+      })
+    );
+    // Les lignes du devis deviennent des étapes du projet — même
+    // mécanique que la création d'un projet depuis un devis.
+    devis.lignes.forEach((ligne, i) => {
+      ajouterTacheAgenda({
+        id: `tache-${devis.id}-etape-${i}`,
+        clientId: devis.clientId,
+        clientNom: devis.clientNom,
+        titre: `${devis.numero} — ${ligne.nom}`,
+        description: `${ligne.quantite} × ${ligne.nom}`,
+        statut: "a_planifier",
+        heures: 1,
+        jours: 0,
+        sauterWeekend: false,
+        typeTache: "devis",
+        devisNumero: devis.numero,
+        projetId: projetCibleId,
+        adresseTravaux: cible.adresseTravaux || null,
+      });
+    });
+    setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? { ...d, traite: true, modeTraitement: "projet", projetId: projetCibleId } : d)));
+    persisterDevis?.({ ...devis, traite: true, modeTraitement: "projet", projetId: projetCibleId });
+    ajouterJournal(
+      `🏗️➕ Devis ${devis.numero} AJOUTÉ au projet « ${cible.nom} » (extra de ${devis.totalVendant.toFixed(2)} $) — budget du projet porté à ${((Number(cible.budgetTotal) || 0) + devis.totalVendant).toFixed(2)} $, ${devis.lignes.length} étape${devis.lignes.length > 1 ? "s" : ""} ajoutée${devis.lignes.length > 1 ? "s" : ""} à l'agenda.`
     );
     setDevisATraiterId(null);
     onDevisTraite?.("projets");
@@ -2353,6 +2507,8 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           onFermer={() => setDevisATraiterId(null)}
           onChoisirBonTravail={traiterCommeBonDeTravail}
           onChoisirProjet={traiterCommeProjet}
+          onChoisirProjetExistant={traiterVersProjetExistant}
+          projets={projets}
           tauxMoyen={tauxMoyenEquipe(tauxMetiers)}
         />
       )}
