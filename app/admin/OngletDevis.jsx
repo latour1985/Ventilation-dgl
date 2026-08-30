@@ -924,7 +924,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     // « Enregistrer sans envoyer » ouvre la fenêtre du dossier, le
     // bouton « ✉️ Envoyer au client » sous les yeux pour plus tard.
     if (etEnvoyer) {
+      // Le panneau « Envoyer le devis à : » vit DANS la carte du
+      // dossier — on ouvre donc la fenêtre du dossier AVEC le panneau
+      // déplié (vécu : « ça n'envoie pas, je dois retourner là » — le
+      // panneau s'ouvrait sur la carte de la liste, hors du regard).
       ouvrirEnvoiDevis(revision);
+      setDossierEnModale(base);
     } else {
       setDossierEnModale(base);
     }
@@ -1296,6 +1301,27 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                   {affichee.date}
                   {affichee.noteVersion ? ` · ${affichee.noteVersion}` : ""}
                 </p>
+                {/* 📋 LE DEVIS AU COMPLET dans la fenêtre (2026-08-30,
+                    « je ne vois pas le devis au complet quand cette
+                    fenêtre ouvre ») : les lignes en lecture seule —
+                    la liste, elle, garde ses cartes courtes. */}
+                {enModale && (affichee.lignes || []).length > 0 && (
+                  <div className="mt-2 overflow-hidden rounded-lg border border-slate-200">
+                    {affichee.lignes.map((l, i) => (
+                      <div key={l.uid || i} className="flex items-start justify-between gap-2 border-b border-slate-100 px-2.5 py-1.5 text-[11px] last:border-0">
+                        <div className="min-w-0">
+                          <p className="font-bold text-slate-800">{l.nom || "Ligne"}</p>
+                          {l.description && (
+                            <p className="whitespace-pre-wrap text-[10px] leading-snug text-slate-500">{l.description}</p>
+                          )}
+                        </div>
+                        <p className="shrink-0 tabular-nums text-slate-700">
+                          {Number(l.quantite) || 0} × {(Number(l.prix_vendant) || 0).toFixed(2)} $
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {!estActive && (
                   <p className="mt-1.5 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-bold text-slate-500">
