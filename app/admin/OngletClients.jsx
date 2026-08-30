@@ -20,6 +20,10 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
   const [dossierOuvert, setDossierOuvert] = useState(null);
   const [versionAffichee, setVersionAffichee] = useState(null);
   const [apercu, setApercu] = useState(null);
+  // 📚 10 par page ICI AUSSI (2026-08-30, question du propriétaire) —
+  // même règle que la liste principale des devis.
+  const [pageDevisClient, setPageDevisClient] = useState(1);
+  const refHautListe = useRef(null);
 
   // Regroupement par dossier : une entrée par devis, ses révisions dedans.
   const dossiers = (() => {
@@ -43,9 +47,12 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
     return <p className="text-xs text-slate-400">Aucun devis pour ce client.</p>;
   }
 
+  const pageCourante = Math.min(pageDevisClient, Math.max(1, Math.ceil(dossiers.length / ITEMS_PAR_PAGE)));
+  const dossiersPage = dossiers.slice((pageCourante - 1) * ITEMS_PAR_PAGE, pageCourante * ITEMS_PAR_PAGE);
+
   return (
-    <div className="space-y-1.5">
-      {dossiers.map(({ base, versions, active }) => {
+    <div ref={refHautListe} className="space-y-1.5">
+      {dossiersPage.map(({ base, versions, active }) => {
         const ouvert = dossierOuvert === base;
         const affichee = ouvert ? versions.find((v) => v.numero === versionAffichee) || active : active;
         // Devis ciblé par la recherche : mis en évidence à l'ouverture.
@@ -73,6 +80,16 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
                   {affichee.noteVersion ? ` · ${affichee.noteVersion}` : ""}
                   {!compact && affichee.clientNom ? ` · ${affichee.clientNom}` : ""}
                 </p>
+                {/* 📌 CE QUE VEND CE DEVIS (2026-08-30, « plus facile de
+                    les reconnaître ») : la première ligne fait office
+                    d'étiquette — le devis n'a pas d'adresse propre,
+                    elle se choisit seulement quand on le traite. */}
+                {affichee.lignes?.[0]?.nom && (
+                  <p className="truncate text-[10px] text-slate-500">
+                    📌 {affichee.lignes[0].nom}
+                    {affichee.lignes.length > 1 ? ` (+${affichee.lignes.length - 1})` : ""}
+                  </p>
+                )}
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-xs font-bold tabular-nums text-slate-800">{affichee.totalVendant.toFixed(2)} $</p>
@@ -121,6 +138,7 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact }
           </div>
         );
       })}
+      <BarrePagination total={dossiers.length} page={pageDevisClient} onPage={setPageDevisClient} refHaut={refHautListe} libelle="devis" />
       {apercu && <ApercuDevisClient devis={apercu} onFermer={() => setApercu(null)} />}
     </div>
   );

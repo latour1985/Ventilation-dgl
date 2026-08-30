@@ -1261,6 +1261,14 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                       )}
                     </p>
                     <p className="text-xs text-slate-500">{affichee.clientNom}</p>
+                    {/* 📌 Étiquette du devis : sa première ligne — pour le
+                        reconnaître d'un coup d'œil dans la liste. */}
+                    {affichee.lignes?.[0]?.nom && (
+                      <p className="truncate text-[11px] text-slate-500">
+                        📌 {affichee.lignes[0].nom}
+                        {affichee.lignes.length > 1 ? ` (+${affichee.lignes.length - 1})` : ""}
+                      </p>
+                    )}
                   </div>
                   <span
                     className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
