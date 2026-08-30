@@ -119,7 +119,7 @@ export async function POST(request) {
   // arrière-plan, il doit rester léger. QuickBooks plafonne à 1000
   // résultats — largement au-dessus du nombre de dépôts en attente
   // qu'une entreprise peut avoir.
-  const ids = [...enAttente, ...aReverifier].map((d) => `'${echapperQbo(d.qbo_depot_invoice_id)}'`).join(",");
+  const ids = [...(enAttente || []), ...aReverifier].map((d) => `'${echapperQbo(d.qbo_depot_invoice_id)}'`).join(",");
   let facturesParId = {};
   try {
     const lu = await requeteQbo(
