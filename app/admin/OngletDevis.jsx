@@ -898,6 +898,10 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // directement dans la fenêtre contextuelle »). Fermer la fenêtre ne
   // perd RIEN : l'édition reste chargée dans la colonne de la page.
   const [editionEnFenetre, setEditionEnFenetre] = useState(false);
+  // 🔒 Anti double-clic (audit 2026-08-30) : l'enregistrement d'une
+  // version est devenu ASYNCHRONE (transfert du lien) — deux clics
+  // rapides auraient créé DEUX versions.
+  const [enregistrementVersionEnCours, setEnregistrementVersionEnCours] = useState(false);
   // 📄 Pagination (2026-08-26) : avant, la liste était COUPÉE aux 10
   // premiers — le 11e devis était invisible. 10 par page, tout visible.
   const [pageDevis, setPageDevis] = useState(1);
@@ -944,7 +948,15 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // Étape 2 : enregistrer la révision AVEC les lignes modifiées.
   // Incrémente le suffixe et archive les versions précédentes.
   const enregistrerVersion = async (etEnvoyer = false) => {
-    if (!editionVersion) return;
+    if (!editionVersion || enregistrementVersionEnCours) return;
+    setEnregistrementVersionEnCours(true);
+    try {
+      await enregistrerVersionInterne(etEnvoyer);
+    } finally {
+      setEnregistrementVersionEnCours(false);
+    }
+  };
+  const enregistrerVersionInterne = async (etEnvoyer) => {
     const { source, note } = editionVersion;
     const base = source.numeroBase || source.numero;
     const versions = versionsDuDossier(base);
@@ -2267,10 +2279,10 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                   version s'enregistre et la fenêtre des destinataires
                   s'ouvre aussitôt — impossible d'oublier l'envoi. Le
                   courriel ne part qu'après TA confirmation là-dedans. */}
-              <Button onClick={() => enregistrerVersion(true)} disabled={lignes.length === 0} className="w-full">
+              <Button onClick={() => enregistrerVersion(true)} disabled={lignes.length === 0 || enregistrementVersionEnCours} loading={enregistrementVersionEnCours} className="w-full">
                 💾 Enregistrer et envoyer au client…
               </Button>
-              <Button variant="outline" onClick={() => enregistrerVersion(false)} disabled={lignes.length === 0} className="w-full min-h-0 py-2 text-xs">
+              <Button variant="outline" onClick={() => enregistrerVersion(false)} disabled={lignes.length === 0 || enregistrementVersionEnCours} className="w-full min-h-0 py-2 text-xs">
                 Enregistrer sans envoyer
               </Button>
             </div>
