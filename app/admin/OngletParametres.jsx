@@ -198,6 +198,30 @@ export function CarteConnexionQuickbooks({ estAdminPrincipal }) {
               <Lock size={12} /> Connexion réservée à l&apos;Admin principal.
             </p>
           )}
+          {/* 🧪 SANDBOX (2026-08-31, « sur l'essai je n'ai pas accès au
+              sandbox ») : relier un FICHIER DE TEST Intuit — pour une
+              entreprise d'essai comme Miroir, jamais pour la vraie
+              comptabilité. Exige les clés de développement dans Vercel. */}
+          {estAdminPrincipal && (
+            <button
+              onClick={async () => {
+                const { data } = await supabase.auth.getSession();
+                const jeton = data?.session?.access_token;
+                if (!jeton) return;
+                try {
+                  const r = await fetch("/api/quickbooks/connexion?environnement=sandbox", { headers: { Authorization: `Bearer ${jeton}` } });
+                  const rep = await r.json();
+                  if (rep?.url) window.location.href = rep.url;
+                  else window.alert(rep?.erreur || "Connexion impossible — réessaie.");
+                } catch {
+                  window.alert("Réseau indisponible — réessaie.");
+                }
+              }}
+              className="block text-[11px] font-semibold text-slate-400 underline underline-offset-2 hover:text-slate-600"
+            >
+              🧪 Connecter un fichier de TEST Intuit (Sandbox) — pour une entreprise d&apos;essai seulement
+            </button>
+          )}
         </div>
       )}
     </div>

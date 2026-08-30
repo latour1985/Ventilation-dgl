@@ -42,7 +42,10 @@ export async function GET(request) {
   // connexion (jamais d'un paramètre d'URL forgeable). Les jetons se
   // rangent dans SA case.
   const brutCookie = /(?:^|;\s*)qb_state=([^;]+)/.exec(cookies)?.[1] || "";
-  const [stateAttendu, entrepriseId] = brutCookie.split(":");
+  // `state:entreprise:environnement` — le 3e segment (2026-08-31) dit
+  // dans quel environnement la connexion a été DEMANDÉE (sandbox de
+  // test ou production). Absent (vieux cookie) : défaut plateforme.
+  const [stateAttendu, entrepriseId, envDemande] = brutCookie.split(":");
 
   if (!code || !realmId) {
     return pageRetour("Connexion annulée", "Intuit n'a pas fourni de code d'autorisation. Réessaie depuis l'application.", false);
@@ -52,9 +55,9 @@ export async function GET(request) {
   }
 
   try {
-    // Une NOUVELLE connexion part dans l'environnement par défaut de la
-    // plateforme (variable Vercel) — chaque connexion mémorise le sien.
-    const env = environnementQb();
+    // L'environnement DEMANDÉ au départ (cookie) fait foi — sinon le
+    // défaut de la plateforme. Chaque connexion mémorise le sien.
+    const env = envDemande === "sandbox" ? "sandbox" : environnementQb();
     const jetons = await echangerJetonsIntuit({
       grant_type: "authorization_code",
       code,

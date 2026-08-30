@@ -19,7 +19,7 @@
 // ne correspondent pas au retour, quelqu'un a fabriqué la demande —
 // on refuse.
 
-import { configQuickbooksPresente, urlRedirectionQb, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { configQuickbooksPresente, urlRedirectionQb, utilisateurDepuisJeton, entrepriseDuCompte, environnementQb, clesIntuit } from "@/lib/quickbooksServeur";
 
 export async function GET(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -41,9 +41,22 @@ export async function GET(request) {
       { status: 503 }
     );
   }
+  // 🧪 CONNEXION SANDBOX SUR DEMANDE (2026-08-31, retour du
+  // propriétaire : « sur l'essai je n'ai pas accès au sandbox ») —
+  // depuis la bascule production, toute nouvelle connexion partait en
+  // production. `?environnement=sandbox` permet de relier une entreprise
+  // de TEST (Miroir) à un fichier Sandbox Intuit — à condition que les
+  // clés de développement soient posées dans Vercel.
+  const envDemande = new URL(request.url).searchParams.get("environnement") === "sandbox" ? "sandbox" : environnementQb();
+  if (envDemande === "sandbox" && environnementQb() === "production" && !process.env.QB_CLIENT_ID_SANDBOX) {
+    return Response.json(
+      { erreur: "Clés Sandbox absentes — pose QB_CLIENT_ID_SANDBOX et QB_CLIENT_SECRET_SANDBOX (clés de développement Intuit) dans Vercel d'abord." },
+      { status: 503 }
+    );
+  }
   const state = crypto.randomUUID();
   const url = new URL("https://appcenter.intuit.com/connect/oauth2");
-  url.searchParams.set("client_id", process.env.QB_CLIENT_ID);
+  url.searchParams.set("client_id", clesIntuit(envDemande).id);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", "com.intuit.quickbooks.accounting");
   url.searchParams.set("redirect_uri", urlRedirectionQb(request));
@@ -59,7 +72,9 @@ export async function GET(request) {
       // porte `state:entreprise` — le state venant d'Intuit doit
       // correspondre, ET l'entreprise vient du cookie HttpOnly (jamais
       // d'un paramètre que quelqu'un pourrait forger).
-      "Set-Cookie": `qb_state=${state}:${entrepriseId}; Path=/api/quickbooks; HttpOnly; SameSite=Lax; Max-Age=600`,
+      // Le cookie porte `state:entreprise:environnement` — le callback
+      // rangera la connexion dans le BON environnement, jamais deviné.
+      "Set-Cookie": `qb_state=${state}:${entrepriseId}:${envDemande}; Path=/api/quickbooks; HttpOnly; SameSite=Lax; Max-Age=600`,
     },
   });
 }
