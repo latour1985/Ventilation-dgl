@@ -13,8 +13,9 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
+import { rejeterEstimateQbo } from "@/lib/quickbooksClient";
 import { genererJeton, lienDevisPublic, JOURS_VALIDITE_LIEN_DEVIS } from "@/lib/supabase/devisPublic";
-import { activerVersionDevis, supprimerDevis, reponsesClientATraiter, classerReponseDevis, rouvrirReponseDevis } from "@/lib/supabase/devis";
+import { activerVersionDevis, annulerDevisAccepte, supprimerDevis, reponsesClientATraiter, classerReponseDevis, rouvrirReponseDevis } from "@/lib/supabase/devis";
 import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
@@ -665,6 +666,35 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       document.getElementById(`dossier-${base}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 60);
     setTimeout(() => setDossierSurligne((actuel) => (actuel === base ? null : actuel)), 2500);
+  };
+
+  // ❌ ANNULATION D'UN DEVIS ACCEPTÉ — état + exécution.
+  const [annulationDevis, setAnnulationDevis] = useState(null); // le devis | null
+  const [raisonAnnulationDevis, setRaisonAnnulationDevis] = useState("");
+  const executerAnnulationDevis = async () => {
+    const d = annulationDevis;
+    const raison = raisonAnnulationDevis.trim();
+    if (!d || raison.length < 3) return;
+    setAnnulationDevis(null);
+    try {
+      await annulerDevisAccepte(d.id, raison);
+    } catch {
+      ajouterJournal(`⚠️ Annulation de ${d.numero} NON enregistrée (le snippet 106 est-il passé ?) — rien n'a changé.`);
+      return;
+    }
+    setDevisListe((prev) =>
+      prev.map((x) => (x.id === d.id ? { ...x, statut: "annule", annuleLe: new Date().toISOString(), annuleRaison: raison } : x))
+    );
+    ajouterJournal(`❌ Devis ${d.numero} (${d.clientNom}) ANNULÉ après acceptation — raison : ${raison}. La preuve d'acceptation est conservée.`);
+    // L'estimate QuickBooks suit — « Rejeté », jamais supprimé.
+    if (d.qboEstimateId) {
+      const r = await rejeterEstimateQbo(d.qboEstimateId).catch(() => null);
+      ajouterJournal(
+        r?.rejete
+          ? `🧾 Estimate QuickBooks du devis ${d.numero} marqué « Rejeté ».`
+          : `⚠️ L'estimate QuickBooks de ${d.numero} n'a PAS pu être marqué « Rejeté »${r?.erreur ? ` (${r.erreur})` : r?.nonConnecte ? " (QuickBooks non connecté)" : ""} — fais-le à la main dans QuickBooks.`
+      );
+    }
   };
 
   // 📧 RENVOYER APRÈS AVOIR RÉPONDU (2026-08-28) : le client avait une
@@ -1926,6 +1956,27 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     <ClipboardList size={13} /> Traiter le devis
                   </Button>
                 )}
+                {/* ❌ ANNULER UN DEVIS ACCEPTÉ (2026-08-29) — le client
+                    s'est désisté après coup. Raison obligatoire, preuve
+                    d'acceptation conservée, et l'estimate QuickBooks
+                    passe à « Rejeté » automatiquement. */}
+                {estActive && affichee.statut === "accepte" && (
+                  <button
+                    onClick={() => { setAnnulationDevis(affichee); setRaisonAnnulationDevis(""); }}
+                    className="mt-1.5 w-full text-center text-[10px] font-semibold text-red-400 underline underline-offset-2 hover:text-red-600"
+                  >
+                    ❌ Le client annule — annuler ce devis accepté…
+                  </button>
+                )}
+                {affichee.statut === "annule" && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">
+                    ❌ ANNULÉ{affichee.annuleLe ? ` le ${String(affichee.annuleLe).slice(0, 10)}` : ""}
+                    {affichee.annuleRaison ? ` — ${affichee.annuleRaison}` : ""}
+                    <span className="mt-0.5 block text-[10px] font-normal text-red-500">
+                      La preuve d&apos;acceptation du client est conservée. L&apos;estimate QuickBooks est marqué « Rejeté ».
+                    </span>
+                  </p>
+                )}
 
                 {/* NOUVELLE VERSION — depuis la version affichée. C'est ce
                     qui permet de « repartir d'une ancienne version ». */}
@@ -2012,6 +2063,47 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           onSelection={(id) => setClientId(id)}
         />
       )}
+      {/* ❌ CONFIRMATION D'ANNULATION D'UN DEVIS ACCEPTÉ */}
+      {annulationDevis && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+          onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setAnnulationDevis(null); }}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-extrabold text-red-700">❌ Annuler le devis {annulationDevis.numero} ?</h3>
+            <p className="mt-1 text-xs text-slate-600">
+              {annulationDevis.clientNom} · {(Number(annulationDevis.totalVendant) || 0).toFixed(2)} $ —
+              accepté{annulationDevis.reponduParNom ? ` par ${annulationDevis.reponduParNom}` : ""}.
+            </p>
+            <ul className="mt-2 space-y-1 rounded-xl bg-slate-50 p-2.5 text-[11px] leading-snug text-slate-600">
+              <li>• La <span className="font-bold">preuve d&apos;acceptation</span> (nom, date, conditions signées) est <span className="font-bold">conservée</span> — l&apos;annulation s&apos;ajoute par-dessus.</li>
+              <li>• L&apos;estimate <span className="font-bold">QuickBooks</span> passera à « Rejeté » automatiquement.</li>
+              {annulationDevis.traite && (
+                <li className="font-bold text-amber-700">
+                  ⚠️ Ce devis a DÉJÀ été converti ({annulationDevis.modeTraitement === "projet" ? "un projet existe" : "un bon de travail existe"}) —
+                  l&apos;annulation ne touche PAS à ce qui a été créé ni aux factures parties : à gérer toi-même ensuite.
+                </li>
+              )}
+            </ul>
+            <label className="mb-1 mt-3 block text-xs font-bold text-slate-500">Raison (obligatoire — consignée au journal)</label>
+            <input
+              value={raisonAnnulationDevis}
+              onChange={(e) => setRaisonAnnulationDevis(e.target.value)}
+              placeholder="Ex. : le client s'est désisté, projet reporté…"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setAnnulationDevis(null)}>Retour</Button>
+              <button
+                onClick={executerAnnulationDevis}
+                disabled={raisonAnnulationDevis.trim().length < 3}
+                className="min-h-[40px] rounded-xl bg-red-600 text-sm font-extrabold text-white disabled:opacity-40"
+              >
+                Annuler ce devis
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {devisATraiter && (
         <ModalTraiterDevis
           devis={devisATraiter}

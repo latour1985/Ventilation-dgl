@@ -4059,3 +4059,17 @@ create trigger trg_entreprise_factures_libres before insert on factures_libres
   for each row execute function public.poser_entreprise_id();
 
 select indexname from pg_indexes where tablename = 'factures_libres';
+
+-- ============================================================
+-- 106 - ANNULER UN DEVIS ACCEPTE (2026-08-29)
+-- ------------------------------------------------------------
+-- « Si un devis revient accepte et que finalement le client annule »
+-- : statut « annule » + raison + date, la PREUVE d acceptation
+-- (reponse_client, nom, conditions signees) reste INTACTE — meme
+-- philosophie que VOID, jamais Delete. L estimate QuickBooks passe a
+-- « Rejected » automatiquement (route estimate, action rejeter).
+-- Colonnes additives.
+-- ============================================================
+alter table devis_app add column if not exists annule_le timestamptz;
+alter table devis_app add column if not exists annule_raison text;
+select count(*) filter (where statut = 'annule') as devis_annules, count(*) as devis_total from devis_app;

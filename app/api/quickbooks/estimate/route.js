@@ -57,6 +57,38 @@ export async function POST(request) {
   // Introuvable ≠ erreur : on répond { trouve: false } — l'appelant le
   // dit à l'humain au lieu de faire semblant.
   // ============================================================
+  // ============================================================
+  // ACTION « REJETER » (2026-08-29) — le devis accepté que le client
+  // annule finalement. L'estimate QuickBooks passe à TxnStatus
+  // « Rejected » (mise à jour partielle : Id + SyncToken relus juste
+  // avant — jamais de suppression, la comptable garde la trace).
+  // ============================================================
+  if (corps?.action === "rejeter") {
+    const estimateId = String(corps?.estimateId || "").replace(/[^0-9]/g, "");
+    if (!estimateId) return Response.json({ erreur: "Identifiant d'estimate requis." }, { status: 400 });
+    let acces3;
+    try {
+      acces3 = await jetonAccesValide(entrepriseId);
+    } catch (e) {
+      return Response.json({ erreur: `Jeton QuickBooks : ${e?.message || "erreur"}` }, { status: 502 });
+    }
+    if (!acces3) return Response.json({ nonConnecte: true });
+    try {
+      const lu = await requeteQbo(acces3, `select Id, SyncToken from Estimate where Id = '${estimateId}'`);
+      const est = lu?.Estimate?.[0];
+      if (!est) return Response.json({ trouve: false });
+      const maj = await ecrireQbo(acces3, "estimate", {
+        Id: est.Id,
+        SyncToken: est.SyncToken,
+        sparse: true,
+        TxnStatus: "Rejected",
+      });
+      return Response.json({ rejete: maj?.Estimate?.TxnStatus === "Rejected" });
+    } catch (e) {
+      return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });
+    }
+  }
+
   if (corps?.action === "lire") {
     const numeroCherche = String(corps?.numero || "").trim();
     if (!numeroCherche) return Response.json({ erreur: "Numéro requis." }, { status: 400 });

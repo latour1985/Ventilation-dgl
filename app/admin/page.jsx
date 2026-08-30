@@ -2417,6 +2417,25 @@ function AppAdmin() {
             `💰 Dépôt PAYÉ détecté dans QuickBooks${p.docNumber ? ` (facture Nº ${p.docNumber})` : ""} — ${Number(p.montant || 0).toFixed(2)} $ : la tâche est maintenant planifiable.`
           );
         });
+        // 🚫 FACTURE DE DÉPÔT ANNULÉE (VOID) DANS QUICKBOOKS (2026-08-29,
+        // demande du propriétaire : « si on annule la facture côté
+        // QuickBooks, la tâche doit s'annuler sur Fluxya aussi »).
+        // Avant, un VOID mettait le solde à zéro et la tâche devenait
+        // « prête » comme si le client avait payé — l'inverse du geste.
+        (r?.annulees || []).forEach((a) => {
+          setDepots((prev) => ({
+            ...prev,
+            [a.tacheId]: { ...(prev[a.tacheId] || {}), statut: "annule_qb" },
+          }));
+          // La tâche en attente de dépôt n'est assignée à personne : la
+          // retirer de la file suffit (la persistance Supabase supprime
+          // la ligne automatiquement — même mécanique que l'annulation
+          // manuelle).
+          setTachesAttente((prev) => prev.filter((t) => t.id !== a.tacheId));
+          ajouterJournal(
+            `🚫 Facture de dépôt${a.docNumber ? ` Nº ${a.docNumber}` : ""} ANNULÉE dans QuickBooks — la tâche liée est annulée dans Fluxya aussi (geste fait côté comptabilité).`
+          );
+        });
       } catch {
         // silencieux : réseau ou QuickBooks non connecté
       }

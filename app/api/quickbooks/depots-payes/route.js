@@ -103,6 +103,7 @@ export async function POST(request) {
   }
 
   const payes = [];
+  const annulees = [];
   for (const d of enAttente) {
     const facture = facturesParId[String(d.qbo_depot_invoice_id)];
     // Facture introuvable : on ne touche à RIEN. Elle a pu être
@@ -111,9 +112,29 @@ export async function POST(request) {
     // que de débloquer une tâche sur une supposition.
     if (!facture) continue;
     const solde = Number(facture.Balance) || 0;
+    const total = Number(facture.TotalAmt) || 0;
+
+    // ⚠️ FACTURE ANNULÉE (VOID) DANS QUICKBOOKS (2026-08-29) : un VOID
+    // met le TOTAL à zéro — donc le solde aussi. L'ancien test « solde
+    // à zéro = payé » DÉBLOQUAIT alors la tâche comme si le client
+    // avait payé (vécu par le propriétaire : deux tâches devenues
+    // « prêtes » après annulation des factures). Un vrai dépôt facturé
+    // est TOUJOURS > 0 : total à zéro = annulée, jamais payée.
+    if (total <= 0) {
+      const { data: majA, error: eA } = await admin
+        .from("depots")
+        .update({ statut: "annule_qb" })
+        .eq("tache_id", d.tache_id)
+        .eq("statut", "en_attente_paiement")
+        .eq("entreprise_id", entrepriseId)
+        .select("tache_id");
+      if (eA || !majA || majA.length === 0) continue;
+      annulees.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null });
+      continue;
+    }
     if (solde > 0) continue;
 
-    // Solde à zéro = le client a payé. On débloque.
+    // Solde à zéro sur un total réel = le client a payé. On débloque.
     // Garde anti-course : la mise à jour ne s'applique QUE si le dépôt
     // est toujours « en attente » — si un admin vient de le débloquer à
     // la main entre-temps, son geste (et son mode de paiement) reste.
@@ -138,5 +159,5 @@ export async function POST(request) {
     });
   }
 
-  return Response.json({ verifies: enAttente.length, payes });
+  return Response.json({ verifies: enAttente.length, payes, annulees });
 }

@@ -1655,12 +1655,31 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // 3. Retirer de la file d'attente — la persistance Supabase supprime
     //    la ligne automatiquement (voir l'effet de synchronisation).
     setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
-    // 4. La trace : qui (rôle), quoi, pourquoi — et les suites à donner.
+    // 4. La FACTURE DE DÉPÔT suit l'annulation (2026-08-29, demande du
+    //    propriétaire : « est-ce que ça annule aussi la facture dans
+    //    QuickBooks ? » — avant, elle restait VIVANTE, le journal disait
+    //    seulement « à traiter »). Dépôt NON payé → VOID automatique
+    //    (jamais Delete, règle gelée). Dépôt DÉJÀ PAYÉ → on ne touche à
+    //    rien : de l'argent reçu se rembourse, ça ne s'efface pas.
     const depot = depotDe(tache.id);
+    if (depot?.qboInvoiceId && depot.statut !== "paye" && depot.statut !== "paye_manuellement") {
+      annulerFactureDepot(depot.qboInvoiceId)
+        .then((rv) =>
+          ajouterJournal(
+            rv?.annulee
+              ? `🧾 Facture de dépôt${depot.qboDocNumber ? ` Nº ${depot.qboDocNumber}` : ""} annulée par VOID dans QuickBooks (tâche annulée).`
+              : `⚠️ VOID de la facture de dépôt REFUSÉ (${rv?.erreur || rv?.nonConnecte ? "QuickBooks non connecté" : "?"}) — annule-la à la main dans QuickBooks.`
+          )
+        )
+        .catch(() => ajouterJournal("⚠️ VOID de la facture de dépôt injoignable — annule-la à la main dans QuickBooks."));
+    }
+    // 5. La trace : qui (rôle), quoi, pourquoi — et les suites à donner.
     const piece = pieceLieeATache(tache.id);
     ajouterJournal(
       `🗑️ Tâche "${tache.titre || tache.clientNom}" ANNULÉE définitivement (${role}) — raison : ${raison}` +
-        (depot ? " · ⚠️ un dépôt y était rattaché : à traiter" : "") +
+        (depot && (depot.statut === "paye" || depot.statut === "paye_manuellement")
+          ? " · ⚠️ un dépôt DÉJÀ PAYÉ y était rattaché — remboursement à gérer"
+          : "") +
         (piece ? ` · ⚠️ pièce liée « ${piece.pieceRequise} » : voir l'onglet Pièces` : "")
     );
   };
