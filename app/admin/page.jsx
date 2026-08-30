@@ -2457,6 +2457,27 @@ function AppAdmin() {
             `🚫 Facture de dépôt${a.docNumber ? ` Nº ${a.docNumber}` : ""} ANNULÉE dans QuickBooks — la tâche liée est annulée dans Fluxya aussi (geste fait côté comptabilité).`
           );
         });
+        // 🔄 PAIEMENT DE DÉPÔT ANNULÉ dans QuickBooks (la facture, elle,
+        // existe toujours) : l'argent n'a jamais été perçu — le dépôt
+        // RETOURNE « en attente de paiement » et la tâche quitte
+        // « Prêtes » (vécu : paiement de test annulé après coup, la
+        // tâche restait planifiable sans dépôt).
+        (r?.reouvertes || []).forEach((x) => {
+          setDepots((prev) => ({
+            ...prev,
+            [x.tacheId]: {
+              ...(prev[x.tacheId] || {}),
+              statut: "en_attente_paiement",
+              modePaiement: null,
+              payeLe: null,
+              payePar: null,
+              dateLimite: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            },
+          }));
+          ajouterJournal(
+            `⚠️ Paiement du dépôt${x.docNumber ? ` (facture Nº ${x.docNumber})` : ""} ANNULÉ dans QuickBooks — la tâche RETOURNE en attente de dépôt (nouveau délai de 24 h). Renvoie la demande ou annule la tâche.`
+          );
+        });
         // ⚠️ ÉCHEC D'ÉCRITURE remonté par le sondage : la base a refusé
         // la mise à jour d'un dépôt. La vraie raison au journal — plus
         // jamais un blocage silencieux (vécu : contrainte de statuts

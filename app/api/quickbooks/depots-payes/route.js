@@ -27,7 +27,8 @@
 // Réponses possibles :
 //   { simule: true }      — variables d'environnement absentes
 //   { nonConnecte: true } — config posée mais OAuth pas encore fait
-//   { verifies, payes: [{ tacheId, docNumber, montant }] }
+//   { verifies, payes: [{ tacheId, docNumber, montant }],
+//     annulees, reouvertes, echecs } — voir les passages plus bas.
 
 import {
   clientSupabaseService,
@@ -73,7 +74,37 @@ export async function POST(request) {
     .eq("entreprise_id", entrepriseId)
     .not("qbo_depot_invoice_id", "is", null);
   if (error) return Response.json({ erreur: error.message }, { status: 502 });
-  if (!enAttente || enAttente.length === 0) return Response.json({ verifies: 0, payes: [] });
+
+  // 🔄 DÉPÔTS DÉJÀ PAYÉS À REVÉRIFIER (2026-08-30, vécu par le
+  // propriétaire) : il avait payé une facture de dépôt pour tester (la
+  // tâche est passée « prête »), PUIS annulé le paiement ET la facture
+  // dans QuickBooks — et rien ne bougeait : un dépôt marqué « payé »
+  // n'était plus jamais revérifié. On surveille donc AUSSI les dépôts
+  // payés VIA QUICKBOOKS dont la tâche attend encore dans la file —
+  // ensemble petit et borné (une fois la tâche planifiée ou sortie de
+  // la file, la comptabilité redevient une affaire d'humains).
+  // Un dépôt payé COMPTANT/CHÈQUE (confirmé à la main) n'est jamais
+  // touché : annuler sa facture dans QuickBooks est du ménage
+  // comptable, pas un désistement du client.
+  let aReverifier = [];
+  {
+    const [{ data: fils }, { data: payesAvant }] = await Promise.all([
+      admin.from("taches_attente").select("id").eq("entreprise_id", entrepriseId),
+      admin
+        .from("depots")
+        .select("tache_id, statut, montant_ht, qbo_depot_invoice_id, qbo_depot_doc_number")
+        .eq("statut", "paye")
+        .eq("mode_paiement", "QuickBooks")
+        .eq("entreprise_id", entrepriseId)
+        .not("qbo_depot_invoice_id", "is", null),
+    ]);
+    const dansLaFile = new Set((fils || []).map((t) => t.id));
+    aReverifier = (payesAvant || []).filter((d) => dansLaFile.has(d.tache_id));
+  }
+
+  if ((!enAttente || enAttente.length === 0) && aReverifier.length === 0) {
+    return Response.json({ verifies: 0, payes: [] });
+  }
 
   let acces;
   try {
@@ -88,7 +119,7 @@ export async function POST(request) {
   // arrière-plan, il doit rester léger. QuickBooks plafonne à 1000
   // résultats — largement au-dessus du nombre de dépôts en attente
   // qu'une entreprise peut avoir.
-  const ids = enAttente.map((d) => `'${echapperQbo(d.qbo_depot_invoice_id)}'`).join(",");
+  const ids = [...enAttente, ...aReverifier].map((d) => `'${echapperQbo(d.qbo_depot_invoice_id)}'`).join(",");
   let facturesParId = {};
   try {
     const lu = await requeteQbo(
@@ -110,7 +141,7 @@ export async function POST(request) {
   // SILENCE — la tâche restait bloquée sans que personne sache
   // pourquoi. On remonte désormais la vraie raison à l'écran.
   const echecs = [];
-  for (const d of enAttente) {
+  for (const d of enAttente || []) {
     const facture = facturesParId[String(d.qbo_depot_invoice_id)];
     // Facture introuvable : on ne touche à RIEN. Elle a pu être
     // supprimée ou appartenir à un autre environnement (Sandbox vs
@@ -173,5 +204,57 @@ export async function POST(request) {
     });
   }
 
-  return Response.json({ verifies: enAttente.length, payes, annulees, echecs });
+  // Second passage : les dépôts déjà PAYÉS via QuickBooks (tâche encore
+  // dans la file). Deux gestes comptables possibles après coup :
+  //   facture ANNULÉE (total à 0)  -> même chemin que le VOID : dépôt
+  //                                   « annule_qb », la tâche s'annule ;
+  //   paiement ANNULÉ seulement    -> la facture redevient IMPAYÉE
+  //                                   (solde > 0) : le dépôt RETOURNE
+  //                                   « en attente de paiement » — la
+  //                                   tâche ne doit plus être « prête »,
+  //                                   l'argent n'a jamais été perçu.
+  const reouvertes = [];
+  for (const d of aReverifier) {
+    const facture = facturesParId[String(d.qbo_depot_invoice_id)];
+    if (!facture) continue; // introuvable : on ne touche à rien (même prudence qu'en haut)
+    const solde = Number(facture.Balance) || 0;
+    const total = Number(facture.TotalAmt) || 0;
+    if (total <= 0) {
+      const { data: majA, error: eA } = await admin
+        .from("depots")
+        .update({ statut: "annule_qb" })
+        .eq("tache_id", d.tache_id)
+        .eq("statut", "paye")
+        .eq("entreprise_id", entrepriseId)
+        .select("tache_id");
+      if (eA) {
+        echecs.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null, erreur: eA.message });
+        continue;
+      }
+      if (majA && majA.length > 0) annulees.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null });
+      continue;
+    }
+    if (solde <= 0) continue; // toujours payée : rien à faire
+    const { data: majR, error: eR } = await admin
+      .from("depots")
+      .update({
+        statut: "en_attente_paiement",
+        mode_paiement: null,
+        paye_le: null,
+        paye_par: null,
+        // Nouveau délai de 24 h : l'ancien est probablement déjà échu.
+        date_limite: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      })
+      .eq("tache_id", d.tache_id)
+      .eq("statut", "paye")
+      .eq("entreprise_id", entrepriseId)
+      .select("tache_id");
+    if (eR) {
+      echecs.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null, erreur: eR.message });
+      continue;
+    }
+    if (majR && majR.length > 0) reouvertes.push({ tacheId: d.tache_id, docNumber: d.qbo_depot_doc_number || null });
+  }
+
+  return Response.json({ verifies: (enAttente || []).length + aReverifier.length, payes, annulees, reouvertes, echecs });
 }
