@@ -1445,9 +1445,13 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         reponses={reponsesATraiter}
         onOuvrirDevis={allerAuDossier}
         onNouvelleVersion={(d) => {
-          allerAuDossier(d);
-          setCreationVersionPour(d.numero);
-          setNoteNouvelleVersion(d.messageClient ? `Demande du client : ${d.messageClient}` : "");
+          // 🎯 DIRECT AU CONSTRUCTEUR (2026-08-30, retour du
+          // propriétaire : « je ne peux pas faire le devis à partir de
+          // là ») — plus d'étape intermédiaire : les lignes du devis se
+          // chargent tout de suite dans le constructeur, la raison
+          // pré-remplie avec la demande du client. L'enregistrement
+          // créera la nouvelle version, l'originale reste intacte.
+          demarrerNouvelleVersion(d, d.messageClient ? `Demande du client : ${d.messageClient}` : "");
         }}
         onTraiterDevis={(d) => setDevisATraiterId(d.id)}
         onRenvoyer={renvoyerApresReponse}
