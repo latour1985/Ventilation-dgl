@@ -4020,3 +4020,42 @@ select indexname, indexdef
 -- ============================================================
 alter table devis_app add column if not exists reponse_traitee_le timestamptz;
 select count(*) as devis, count(reponse_traitee_le) as reponses_classees from devis_app;
+
+-- ============================================================
+-- 105 - REGISTRE DES FACTURES SANS CHANTIER (2026-08-29)
+-- ------------------------------------------------------------
+-- « J'ai cree 2 factures et elles n'apparaissent pas » : la facture
+-- LIBRE ne vivait que dans QuickBooks et au journal — invisible dans
+-- Fluxya, donc impossible a retrouver, verifier ou RENVOYER. Cette
+-- table garde la trace locale ; la section « Factures sans chantier »
+-- de l'onglet Facturation s'en sert (preuve d'envoi + bouton Renvoyer).
+-- Nouvelle table = SES cloisons : policy d'isolation + trigger
+-- d'etiquette, memes patrons que le grand soir (snippet 88).
+-- ============================================================
+create table if not exists factures_libres (
+  id             uuid primary key default gen_random_uuid(),
+  entreprise_id  text not null default 'dgl',
+  qbo_invoice_id text,
+  doc_number     text,
+  client_id      text,
+  client_nom     text,
+  montant_ht     numeric,
+  courriels      jsonb not null default '[]'::jsonb,
+  projet_id      text,
+  reference      text,
+  envoi_statut   text,
+  envoyee_le     timestamptz,
+  created_at     timestamptz not null default now()
+);
+
+alter table factures_libres enable row level security;
+drop policy if exists "iso_factures_libres" on factures_libres;
+create policy "iso_factures_libres" on factures_libres
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton())
+  with check (entreprise_id = public.entreprise_du_jeton());
+drop trigger if exists trg_entreprise_factures_libres on factures_libres;
+create trigger trg_entreprise_factures_libres before insert on factures_libres
+  for each row execute function public.poser_entreprise_id();
+
+select indexname from pg_indexes where tablename = 'factures_libres';

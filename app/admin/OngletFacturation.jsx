@@ -14,6 +14,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { creerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
+import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre } from "@/lib/supabase/facturesLibres";
 import { majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
@@ -1222,6 +1223,30 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // paiements : le même enchaînement que toutes les autres factures.
   const [factureLibreOuverte, setFactureLibreOuverte] = useState(false);
   const [courrielFactureLibre, setCourrielFactureLibre] = useState(null);
+  // 🧾 Le registre des factures sans chantier — visibles, vérifiables,
+  // renvoyables (la table est vide tant que le snippet 105 n'est pas passé).
+  const [facturesLibres, setFacturesLibres] = useState([]);
+  useEffect(() => {
+    listerFacturesLibres().then(setFacturesLibres).catch(() => {});
+  }, []);
+  const renvoyerFactureLibre = async (fl, choix) => {
+    const adresses = listeDestinataires(choix).map((c) => c.email);
+    if (adresses.length === 0 || !fl.qboInvoiceId) return;
+    const r = await envoyerFactureQbo(fl.qboInvoiceId, adresses);
+    const maj = {
+      courriels: adresses,
+      envoiStatut: r?.envoyee ? "envoyee" : "non_confirme",
+      envoyeeLe: r?.envoyee ? r.envoyeeLe || new Date().toISOString() : null,
+    };
+    setFacturesLibres((prev) => prev.map((x) => (x.id === fl.id ? { ...x, ...maj } : x)));
+    majEnvoiFactureLibre(fl.id, maj).catch(() => {});
+    ajouterJournal(
+      r?.envoyee
+        ? `✉️ Facture ${fl.docNumber} RENVOYÉE par QuickBooks à ${adresses.join(", ")}.`
+        : `⚠️ Facture ${fl.docNumber} : renvoi NON confirmé${r?.erreur ? ` (${r.erreur})` : ""} — réessaie.`
+    );
+  };
+  const [renvoiLibre, setRenvoiLibre] = useState(null); // facture libre à renvoyer
   // 📅 Facture groupée : le groupe choisi passe par les deux mêmes
   // fenêtres que les autres factures (destinataires, puis paiements).
   const [groupeAFacturer, setGroupeAFacturer] = useState(null);
@@ -1974,6 +1999,25 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       await Promise.resolve(onSynchroniserQb()).catch(() => {});
     }
     const envoyee = r?.envoiQb?.envoyee;
+    // 🧾 REGISTRE LOCAL (2026-08-29) : sans lui, la facture libre ne
+    // vivait que dans QuickBooks — invisible ici, impossible à renvoyer.
+    try {
+      const enregistree = await enregistrerFactureLibre({
+        qboInvoiceId: r?.factureId || null,
+        docNumber: numero,
+        clientId: donnees.client?.id || null,
+        clientNom: nomClient,
+        montantHT: total,
+        courriels: destinataires.map((c) => c.email),
+        projetId: projetChoisi?.id || null,
+        reference: donnees.reference || "",
+        envoiStatut: envoyee ? "envoyee" : "non_confirme",
+        envoyeeLe: envoyee ? r?.envoiQb?.envoyeeLe || new Date().toISOString() : null,
+      });
+      setFacturesLibres((prev) => [enregistree, ...prev]);
+    } catch {
+      ajouterJournal(`⚠️ Facture ${numero} créée dans QuickBooks, mais NON inscrite au registre local (le snippet 105 est-il passé ?) — elle n'apparaîtra pas dans « Factures sans chantier ».`);
+    }
     ajouterJournal(
       `🧾 Facture libre ${numero} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
         (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} » (montant intégré à sa rentabilité)` : " · sans projet") +
@@ -2473,6 +2517,60 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             <Plus size={13} /> Nouvelle facture
           </Button>
         </div>
+      )}
+
+      {/* 🧾 FACTURES SANS CHANTIER — le registre des factures libres :
+          visibles, vérifiables, renvoyables (2026-08-29 : « j'ai créé
+          2 factures et elles n'apparaissent pas »). */}
+      {facturesLibres.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+            🧾 Factures sans chantier ({facturesLibres.length})
+          </p>
+          <div className="mt-1.5 space-y-1">
+            {facturesLibres.slice(0, 15).map((fl) => (
+              <div key={fl.id} className="rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <span className="min-w-0">
+                    <span className="font-bold text-slate-800">{fl.docNumber || "—"}</span> · {fl.clientNom}
+                    <span className="font-bold tabular-nums"> · {fl.montantHT.toFixed(2)} $</span>
+                    {fl.reference && <span className="text-slate-400"> · {fl.reference}</span>}
+                    <span className="text-slate-400"> · {fl.creeLe ? new Date(fl.creeLe).toLocaleDateString("fr-CA") : ""}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    {fl.envoiStatut === "envoyee" ? (
+                      <span className="text-[10px] font-bold text-emerald-600">✉️ Envoyée ✓</span>
+                    ) : (
+                      <span className="text-[10px] font-bold text-red-600">⚠️ Envoi non confirmé</span>
+                    )}
+                    {fl.qboInvoiceId && (
+                      <button
+                        onClick={() => setRenvoiLibre(fl)}
+                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 active:scale-95"
+                      >
+                        📧 Renvoyer
+                      </button>
+                    )}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Renvoi d'une facture libre — choix des destinataires. */}
+      {renvoiLibre && (
+        <ModalSelectionCourriel
+          client={(clientsFacturation || []).find((c) => c.id === renvoiLibre.clientId || c.nom === renvoiLibre.clientNom)}
+          contexte={`le renvoi de la facture ${renvoiLibre.docNumber}`}
+          onFermer={() => setRenvoiLibre(null)}
+          onConfirmer={(choix) => {
+            const fl = renvoiLibre;
+            setRenvoiLibre(null);
+            renvoyerFactureLibre(fl, choix);
+          }}
+        />
       )}
 
       {/* GARANTIE D'ENVOI — le filet : compare nos factures au registre

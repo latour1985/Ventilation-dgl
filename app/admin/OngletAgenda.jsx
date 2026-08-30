@@ -20,10 +20,10 @@ import { envoyerPushA } from "@/lib/notificationsPush";
 import { pieceBloqueLaTache } from "@/lib/supabase/piecesCommandees";
 import { enregistrerBonTravailBureau, rattacherAuBon } from "@/lib/supabase/bonsTravail";
 import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxHeures } from "@/lib/supabase/travauxEffectues";
-import { annulerFactureDepot, lireEstimateQbo } from "@/lib/quickbooksClient";
+import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { AutocompleteAdresse, Button, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
+import { AutocompleteAdresse, Button, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -429,6 +429,25 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // Statut du dépôt d'une tâche : bloque la planification tant que le
   // dépôt n'est pas payé (ou payé manuellement) — annulé après 24 h.
   const depotDe = (tacheId) => depots?.[tacheId];
+  // 📧 RENVOYER LA DEMANDE DE DÉPÔT (2026-08-29) — la MÊME facture
+  // QuickBooks repart (route /send par identifiant : jamais une
+  // nouvelle). Destinataire : le prospect s'il y en a un, sinon le
+  // courriel par défaut de la fiche client.
+  const renvoyerDemandeDepot = async (t, d) => {
+    const fiche = (clients || []).find((c) => c.id === t.clientId || c.nom === t.clientNom);
+    const defaut = courrielDefautClient(fiche);
+    const courriel = (d.prospectCourriel || "").trim() || defaut?.email || null;
+    if (!courriel) {
+      ajouterJournal(`⚠️ Aucun courriel connu pour « ${t.clientNom || t.titre} » — ajoute-le à sa fiche avant de renvoyer la demande de dépôt.`);
+      return;
+    }
+    const r = await envoyerFactureQbo(d.qboInvoiceId, [courriel]);
+    ajouterJournal(
+      r?.envoyee
+        ? `📧 Demande de dépôt (${d.qboDocNumber || d.qboInvoiceId}) RENVOYÉE à ${courriel} — même facture QuickBooks, aucune nouvelle créée.`
+        : `⚠️ Renvoi de la demande de dépôt refusé${r?.erreur ? ` : ${r.erreur}` : r?.nonConnecte ? " — QuickBooks non connecté" : ""} — réessaie.`
+    );
+  };
   const depotBloque = (tacheId) => {
     const d = depotDe(tacheId);
     return !!d && (d.statut === "en_attente_paiement" || d.statut === "annule_delai");
@@ -3278,9 +3297,23 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   }
                   const heuresRestantes = Math.max(0, Math.round((new Date(d.dateLimite).getTime() - Date.now()) / 3600000));
                   return (
-                    <p className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">
+                    <span className="mt-1 inline-flex flex-wrap items-center gap-1">
+                    <p className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-800">
                       🔒 EN ATTENTE DE DÉPÔT — {tD.total.toFixed(2)} $ · expire dans ~{heuresRestantes} h
                     </p>
+                    {/* 📧 RENVOYER LA DEMANDE (2026-08-29 — « le client ne
+                        l a pas recue ») : la MEME facture QuickBooks repart
+                        (jamais une nouvelle — route /send par identifiant). */}
+                    {d.qboInvoiceId && (
+                      <button
+                        onClick={() => renvoyerDemandeDepot(t, d)}
+                        title="Renvoie la meme facture de depot par QuickBooks — au cas ou le client ne l a pas recue"
+                        className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[9px] font-bold text-amber-800 active:scale-95"
+                      >
+                        📧 Renvoyer la demande
+                      </button>
+                    )}
+                    </span>
                   );
                 })()}
                 {/* TECHNICIEN RÉSERVÉ D'AVANCE (choisi à la création,
