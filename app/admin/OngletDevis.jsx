@@ -795,6 +795,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // source sont chargées dans le constructeur pour être modifiées
   // (ajout/retrait de produits, quantités, prix) avant enregistrement.
   const [editionVersion, setEditionVersion] = useState(null);
+  // 🪟 L'édition d'une révision se fait dans une FENÊTRE par-dessus la
+  // liste (2026-08-30, demande du propriétaire : « modifier le devis
+  // directement dans la fenêtre contextuelle »). Fermer la fenêtre ne
+  // perd RIEN : l'édition reste chargée dans la colonne de la page.
+  const [editionEnFenetre, setEditionEnFenetre] = useState(false);
   // 📄 Pagination (2026-08-26) : avant, la liste était COUPÉE aux 10
   // premiers — le 11e devis était invisible. 10 par page, tout visible.
   const [pageDevis, setPageDevis] = useState(1);
@@ -813,14 +818,15 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEditionVersion({ source, note: (note || "").trim() });
     setCreationVersionPour(null);
     setNoteNouvelleVersion("");
-    // La fenêtre contextuelle se ferme : le travail continue dans le
-    // constructeur, qui serait autrement caché derrière elle.
+    // La fenêtre du DOSSIER se ferme et celle de l'ÉDITION s'ouvre :
+    // toute révision se fait désormais dans la fenêtre, la demande du
+    // client sous les yeux — un devis NEUF, lui, se bâtit dans la page.
     setDossierEnModale(null);
-    // Remonte au constructeur (il est en haut de la colonne de gauche).
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+    setEditionEnFenetre(true);
   };
 
   const annulerEdition = () => {
+    setEditionEnFenetre(false);
     setEditionVersion(null);
     setLignes([]);
     setEstContrat(false);
@@ -868,6 +874,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       `📄 Version ${numero} enregistrée à partir de ${source.numero}${note ? ` — ${note}` : ""} · ${totaux.vendant.toFixed(2)} $ (les versions précédentes restent consultables)`
     );
     setEditionVersion(null);
+    setEditionEnFenetre(false);
     setLignes([]);
     setEstContrat(false);
     setFrequenceContrat(4);
@@ -1436,31 +1443,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
             );
   };
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
-      {/* 💬 CE À QUOI TES CLIENTS ONT RÉPONDU — en tête, avant tout le
-          reste : une demande de modification ne doit plus dormir au fond
-          d'une carte de devis (retour du propriétaire, 2026-08-28). */}
-      <BlocReponsesClients
-        reponses={reponsesATraiter}
-        onOuvrirDevis={allerAuDossier}
-        onNouvelleVersion={(d) => {
-          // 🎯 DIRECT AU CONSTRUCTEUR (2026-08-30, retour du
-          // propriétaire : « je ne peux pas faire le devis à partir de
-          // là ») — plus d'étape intermédiaire : les lignes du devis se
-          // chargent tout de suite dans le constructeur, la raison
-          // pré-remplie avec la demande du client. L'enregistrement
-          // créera la nouvelle version, l'originale reste intacte.
-          demarrerNouvelleVersion(d, d.messageClient ? `Demande du client : ${d.messageClient}` : "");
-        }}
-        onTraiterDevis={(d) => setDevisATraiterId(d.id)}
-        onRenvoyer={renvoyerApresReponse}
-        onClasser={classerReponse}
-        onEffacerErreur={effacerDemandeErreur}
-      />
-
-      <div className="grid gap-6 md:grid-cols-5">
-        {/* CONSTRUCTEUR DE DEVIS */}
+  // 🪟 CONSTRUCTEUR — rendu dans la COLONNE (devis neuf) ou dans la
+  // FENÊTRE d'édition (nouvelle version, la demande du client sous les
+  // yeux — demande du propriétaire, 2026-08-30). Même technique que la
+  // carte de dossier : une seule source de vérité, rendue où il faut.
+  const rendreConstructeur = () => (
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 md:col-span-3 md:p-5">
           <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">
             {editionVersion ? "Modification en cours" : "Nouveau devis"}
@@ -2016,6 +2003,40 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
               : "Créer le devis"}
           </Button>
         </div>
+  );
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-6">
+      {/* 💬 CE À QUOI TES CLIENTS ONT RÉPONDU — en tête, avant tout le
+          reste : une demande de modification ne doit plus dormir au fond
+          d'une carte de devis (retour du propriétaire, 2026-08-28). */}
+      <BlocReponsesClients
+        reponses={reponsesATraiter}
+        onOuvrirDevis={allerAuDossier}
+        onNouvelleVersion={(d) => {
+          // 🎯 DIRECT AU CONSTRUCTEUR (2026-08-30, retour du
+          // propriétaire : « je ne peux pas faire le devis à partir de
+          // là ») — plus d'étape intermédiaire : les lignes du devis se
+          // chargent tout de suite dans le constructeur, la raison
+          // pré-remplie avec la demande du client. L'enregistrement
+          // créera la nouvelle version, l'originale reste intacte.
+          demarrerNouvelleVersion(d, d.messageClient ? `Demande du client : ${d.messageClient}` : "");
+        }}
+        onTraiterDevis={(d) => setDevisATraiterId(d.id)}
+        onRenvoyer={renvoyerApresReponse}
+        onClasser={classerReponse}
+        onEffacerErreur={effacerDemandeErreur}
+      />
+
+      <div className="grid gap-6 md:grid-cols-5">
+        {/* CONSTRUCTEUR DE DEVIS */}
+        {editionEnFenetre && editionVersion ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs font-semibold text-slate-500 md:col-span-3">
+            🪟 Modification en cours dans la fenêtre…
+          </div>
+        ) : (
+          rendreConstructeur()
+        )}
 
         {/* LISTE DES DEVIS */}
         <div className="space-y-2 md:col-span-2">
@@ -2066,6 +2087,38 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         </div>
       </div>
 
+      {/* 🪟 FENÊTRE D'ÉDITION D'UNE RÉVISION — le VRAI constructeur,
+          par-dessus la liste, avec la demande du client sous les yeux.
+          Fermer ne perd rien : l'édition reste chargée dans la page. */}
+      {editionEnFenetre && editionVersion && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-2 md:p-6" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; setEditionEnFenetre(false); }}>
+          <div className="max-h-[94vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-2 md:p-3" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-2 flex items-start justify-between gap-2 px-1 pt-1">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                  🪟 Nouvelle version de {editionVersion.source?.numero}
+                </p>
+                {/* ✏️ LA DEMANDE DU CLIENT, en toutes lettres — on modifie
+                    en la lisant, sans rien mémoriser. */}
+                {editionVersion.source?.messageClient && (
+                  <p className="mt-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] italic leading-snug text-amber-800">
+                    ✏️ Demande du client{editionVersion.source?.reponduParNom ? ` (${editionVersion.source.reponduParNom})` : ""} : « {editionVersion.source.messageClient} »
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setEditionEnFenetre(false)}
+                aria-label="Fermer"
+                title="Ferme la fenêtre sans rien perdre — la modification reste chargée dans la page"
+                className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-100"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {rendreConstructeur()}
+          </div>
+        </div>
+      )}
       {/* 🪟 FENÊTRE CONTEXTUELLE DU DOSSIER — la même carte que dans la
           liste, par-dessus l'écran. Se ferme au ✕ ou au clic à côté. */}
       {dossierEnModale && (() => {
