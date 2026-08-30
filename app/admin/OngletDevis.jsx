@@ -880,6 +880,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setFrequenceContrat(4);
     setDossierOuvert(base);
     setVersionAffichee(numero);
+    // 🪟 ENCHAÎNEMENT (2026-08-30, « est-ce que ça lui envoie
+    // automatiquement ? ») : rien ne part tout seul — mais la fenêtre
+    // du dossier s'ouvre sur la nouvelle version, le bouton
+    // « ✉️ Envoyer au client » sous les yeux. Un clic, pas une chasse.
+    setDossierEnModale(base);
   };
 
   const demarrerCreationDevis = () => {
