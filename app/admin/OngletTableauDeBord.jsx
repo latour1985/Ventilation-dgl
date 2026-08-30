@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, FileText } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { useLangue } from "@/lib/i18n";
 import { camionIndisponible } from "@/lib/supabase/camions";
 import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { BlocReponsesClients } from "./BlocReponsesClients";
@@ -16,6 +17,9 @@ import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, coule
 
 export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], nomAdmin, ajouterJournal, reponsesClients = [] }) {
   const configTdb = useEntreprise();
+  // 🌎 Tranche 2 de la version anglaise : cet écran est traduit AU
+  // COMPLET (repli français sur tout le reste de l'application).
+  const { t } = useLangue();
   const analyse = projets.map((p) => {
     const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
     return { p, r, sante: evaluerSanteProjet(p, r) };
@@ -39,8 +43,8 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-4 md:p-6">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-extrabold text-slate-900">Tableau de bord</h2>
-        <span className="text-xs text-slate-400">Vue d'ensemble</span>
+        <h2 className="text-lg font-extrabold text-slate-900">{t("Tableau de bord")}</h2>
+        <span className="text-xs text-slate-400">{t("Vue d'ensemble")}</span>
       </div>
 
       {/* 💬 Les retours de l'équipe vivent maintenant dans l'onglet
@@ -96,7 +100,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         return (
           <div className="rounded-2xl border border-slate-200 bg-white md:hidden">
             <p className="border-b border-slate-100 px-3 py-2 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
-              👷 Aujourd&apos;hui sur le terrain
+              👷 {t("Aujourd'hui sur le terrain")}
             </p>
             <div className="divide-y divide-slate-100">
               {lignes.map(({ u, taches, enCours, finies, heuresDuJour }) => (
@@ -116,7 +120,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
                       </span>
                     ) : (
                       <span className="mt-0.5 block truncate text-[11px] text-slate-400">
-                        {finies >= taches.length ? "journée terminée" : `${taches.length - finies} tâche${taches.length - finies > 1 ? "s" : ""} à faire`}
+                        {finies >= taches.length ? t("journée terminée") : `${taches.length - finies} ${t(taches.length - finies > 1 ? "tâches à faire" : "tâche à faire")}`}
                       </span>
                     )}
                   </span>
@@ -139,9 +143,9 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
       {/* TUILES KPI */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <button onClick={() => setOnglet("agenda")} className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-left active:scale-[0.99]">
-          <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-400">Heures aujourd'hui</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-400">{t("Heures aujourd'hui")}</p>
           <p className="mt-1 text-3xl font-extrabold tabular-nums text-blue-700">{heuresAujourdhui.toFixed(1)} h</p>
-          <p className="mt-1 text-[11px] text-blue-400">saisies par les techniciens</p>
+          <p className="mt-1 text-[11px] text-blue-400">{t("saisies par les techniciens")}</p>
         </button>
         <button
           onClick={() => setOnglet("inspections")}
@@ -150,7 +154,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
           }`}
         >
           <p className={`text-[10px] font-extrabold uppercase tracking-wide ${entretiensDus.length > 0 || (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) ? "text-orange-500" : "text-slate-400"}`}>
-            Entretiens camions
+            {t("Entretiens camions")}
           </p>
           <p className={`mt-1 text-3xl font-extrabold tabular-nums ${entretiensDus.length > 0 || (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) ? "text-orange-600" : "text-[#131B2E]"}`}>
             {entretiensDus.length + (parcCamions || []).filter((c) => c.actif && camionIndisponible(c)).length}
@@ -158,29 +162,29 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
           <p className={`mt-1 truncate text-[11px] ${entretiensDus.length > 0 || (parcCamions || []).some((c) => c.actif && camionIndisponible(c)) ? "text-orange-500" : "text-slate-400"}`}>
             {[
               ...entretiensDus,
-              ...(parcCamions || []).filter((c) => c.actif && camionIndisponible(c)).map((c) => `🔧 ${c.nom} indisponible`),
-            ].join(", ") || "aucun entretien dû"}
+              ...(parcCamions || []).filter((c) => c.actif && camionIndisponible(c)).map((c) => `🔧 ${c.nom} ${t("indisponible")}`),
+            ].join(", ") || t("aucun entretien dû")}
           </p>
         </button>
         <button onClick={() => setOnglet("projets")} className="rounded-2xl border border-red-200 bg-red-50 p-4 text-left active:scale-[0.99]">
-          <p className="text-[10px] font-extrabold uppercase tracking-wide text-red-400">Projets à risque</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-red-400">{t("Projets à risque")}</p>
           <p className="mt-1 text-3xl font-extrabold tabular-nums text-red-600">{aRisque.length}</p>
-          <p className="mt-1 text-[11px] text-red-400">dépassement ou en perte</p>
+          <p className="mt-1 text-[11px] text-red-400">{t("dépassement ou en perte")}</p>
         </button>
         <button onClick={() => setOnglet("facturation")} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-left active:scale-[0.99]">
-          <p className="text-[10px] font-extrabold uppercase tracking-wide text-amber-500">Factures en attente</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-amber-500">{t("Factures en attente")}</p>
           <p className="mt-1 text-3xl font-extrabold tabular-nums text-amber-700">{compteAlertes}</p>
-          <p className="mt-1 text-[11px] text-amber-600">à émettre / réviser</p>
+          <p className="mt-1 text-[11px] text-amber-600">{t("à émettre / réviser")}</p>
         </button>
         <button onClick={() => setOnglet("agenda")} className="rounded-2xl border border-slate-200 bg-white p-4 text-left active:scale-[0.99]">
-          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Tâches à planifier</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">{t("Tâches à planifier")}</p>
           <p className="mt-1 text-3xl font-extrabold tabular-nums text-[#131B2E]">{compteAttente}</p>
-          <p className="mt-1 text-[11px] text-slate-400">non assignées</p>
+          <p className="mt-1 text-[11px] text-slate-400">{t("non assignées")}</p>
         </button>
         <button onClick={() => setAnalyseOuverte(true)} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-left active:scale-[0.99]">
-          <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-500">Marge moyenne</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-500">{t("Marge moyenne")}</p>
           <p className="mt-1 text-3xl font-extrabold tabular-nums text-emerald-700">{margeMoyenne.toFixed(0)}%</p>
-          <p className="mt-1 text-[11px] text-emerald-600">projets actifs · cliquer pour l'analyse</p>
+          <p className="mt-1 text-[11px] text-emerald-600">{t("projets actifs · cliquer pour l'analyse")}</p>
         </button>
       </div>
 
@@ -208,7 +212,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         {(soumissionsSansDevis || []).length > 0 && (
           <div className="rounded-2xl border-2 border-indigo-300 bg-indigo-50 p-4">
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-indigo-700">
-              <FileText size={13} /> {soumissionsSansDevis.length} visite{soumissionsSansDevis.length > 1 ? "s" : ""} de soumission sans devis
+              <FileText size={13} /> {soumissionsSansDevis.length} {t(soumissionsSansDevis.length > 1 ? "visites de soumission sans devis" : "visite de soumission sans devis")}
             </h3>
             <div className="space-y-1.5">
               {soumissionsSansDevis.map((v) => {
@@ -222,30 +226,30 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
                   >
                     <div className="min-w-0">
                       <p className="text-[12px] font-bold text-slate-800">{v.clientNom || v.titre}</p>
-                      <p className="text-[10px] text-slate-500">Visite du {v.date}</p>
+                      <p className="text-[10px] text-slate-500">{t("Visite du")} {v.date}</p>
                     </div>
                     <span
                       className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
                         urgent ? "bg-red-500 text-white" : "bg-indigo-100 text-indigo-700"
                       }`}
                     >
-                      {v.jours === 0 ? "aujourd'hui" : `${v.jours} jour${v.jours > 1 ? "s" : ""}`}
+                      {v.jours === 0 ? t("aujourd'hui") : `${v.jours} ${t(v.jours > 1 ? "jours" : "jour")}`}
                     </span>
                   </div>
                 );
               })}
             </div>
             <p className="mt-2 text-[10px] leading-snug text-indigo-700">
-              Ces visites disparaîtront d'ici dès qu'un devis sera créé pour le client.
+              {t("Ces visites disparaîtront d'ici dès qu'un devis sera créé pour le client.")}
             </p>
           </div>
         )}
 
         {/* PROJETS À SURVEILLER */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Projets à surveiller</h3>
+          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">{t("Projets à surveiller")}</h3>
           {aSurveiller.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">Aucun projet à risque — tout est au vert. 🎉</p>
+            <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-sm text-slate-400">{t("Aucun projet à risque — tout est au vert. 🎉")}</p>
           ) : (
             <div className="space-y-1">
               {aSurveiller.map(({ p, r, sante }) => (
@@ -256,7 +260,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
                     <p className="truncate text-[11px] text-slate-400">{clients.find((c) => c.id === p.clientId)?.nom} · {p.statut}</p>
                   </div>
                   <div className="w-24 shrink-0">
-                    <div className="mb-0.5 flex justify-between text-[9px] font-bold text-slate-400"><span>Budget</span><span className="tabular-nums">{r.pourcentageDepense.toFixed(0)}%</span></div>
+                    <div className="mb-0.5 flex justify-between text-[9px] font-bold text-slate-400"><span>{t("Budget")}</span><span className="tabular-nums">{r.pourcentageDepense.toFixed(0)}%</span></div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
                       <div className={`h-full rounded-full ${couleurSanteBudget(r.pourcentageDepense).barre}`} style={{ width: `${Math.min(100, r.pourcentageDepense)}%` }} />
                     </div>
@@ -270,9 +274,9 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
 
         {/* ACTIVITÉ RÉCENTE */}
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">Activité récente</h3>
+          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-slate-500">{t("Activité récente")}</h3>
           {journal.length === 0 ? (
-            <p className="text-sm text-slate-400">Aucune activité pour le moment.</p>
+            <p className="text-sm text-slate-400">{t("Aucune activité pour le moment.")}</p>
           ) : (
             <div className="space-y-2">
               {journal.slice(0, 6).map((e) => (

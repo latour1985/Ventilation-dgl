@@ -24,6 +24,7 @@
 
 import { useState } from "react";
 import { Check, FileText, Mail, Plus } from "lucide-react";
+import { useLangue } from "@/lib/i18n";
 
 const GENRES = {
   modification: {
@@ -47,23 +48,24 @@ const GENRES = {
 };
 
 // « il y a 3 jours » — un client qui attend depuis une semaine, ça se voit.
-function depuisQuand(iso) {
+function depuisQuand(iso, t) {
   if (!iso) return "";
   const jours = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-  if (jours <= 0) return "aujourd'hui";
-  if (jours === 1) return "hier";
-  return `il y a ${jours} jours`;
+  if (jours <= 0) return t("aujourd'hui");
+  if (jours === 1) return t("hier");
+  return t("il y a {n} jours").replace("{n}", jours);
 }
 
 export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, onNouvelleVersion, onTraiterDevis, onRenvoyer, onClasser, onEffacerErreur }) {
   const [replie, setReplie] = useState(false);
+  const { t } = useLangue();
   if (!reponses || reponses.length === 0) {
     if (compact) return null; // tableau de bord : rien à dire, rien à montrer
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-3">
-        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">💬 Réponses de tes clients</p>
+        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">💬 {t("Réponses de tes clients")}</p>
         <p className="mt-1 text-[11px] text-slate-400">
-          Aucune réponse en attente. Dès qu&apos;un client accepte, refuse ou demande une modification, ça apparaît ici.
+          {t("Aucune réponse en attente. Dès qu'un client accepte, refuse ou demande une modification, ça apparaît ici.")}
         </p>
       </div>
     );
@@ -73,10 +75,10 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
     <div className={`rounded-2xl border bg-white p-3 ${aRepondre > 0 ? "border-amber-300" : "border-slate-200"}`}>
       <button onClick={() => setReplie(!replie)} className="flex w-full items-center justify-between gap-2 text-left">
         <p className={`text-xs font-extrabold uppercase tracking-wide ${aRepondre > 0 ? "text-amber-700" : "text-slate-500"}`}>
-          💬 Réponses de tes clients ({reponses.length})
-          {aRepondre > 0 && <span className="ml-1.5 normal-case">— {aRepondre} attend{aRepondre > 1 ? "ent" : ""} ta réponse</span>}
+          💬 {t("Réponses de tes clients")} ({reponses.length})
+          {aRepondre > 0 && <span className="ml-1.5 normal-case">— {aRepondre} {t(aRepondre > 1 ? "attendent ta réponse" : "attend ta réponse")}</span>}
         </p>
-        <span className="shrink-0 text-[11px] font-bold text-slate-400">{replie ? "▼ Ouvrir" : "▲ Replier"}</span>
+        <span className="shrink-0 text-[11px] font-bold text-slate-400">{t(replie ? "▼ Ouvrir" : "▲ Replier")}</span>
       </button>
 
       {!replie && (
@@ -88,13 +90,13 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <p className={`text-[11px] font-extrabold ${g.texte}`}>
-                      {g.icone} {g.titre}
+                      {g.icone} {t(g.titre)}
                       <span className="ml-1.5 font-normal text-slate-500">
                         {d.numero} · {d.clientNom} · {(Number(d.totalVendant) || 0).toFixed(2)} $
                       </span>
                     </p>
                     <p className="mt-0.5 text-[10px] text-slate-400">
-                      {d.reponduParNom ? `${d.reponduParNom} · ` : ""}{depuisQuand(d.reponduLe)}
+                      {d.reponduParNom ? `${d.reponduParNom} · ` : ""}{depuisQuand(d.reponduLe, t)}
                     </p>
                     {/* LE MESSAGE DU CLIENT, en toutes lettres — c'est
                         l'information qu'on venait chercher. */}
@@ -111,7 +113,7 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       onClick={() => onOuvrirDevis(d)}
                       className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-700 active:scale-95"
                     >
-                      <FileText size={11} /> Voir le devis
+                      <FileText size={11} /> {t("Voir le devis")}
                     </button>
                   )}
                   {genre === "modification" && onNouvelleVersion && (
@@ -119,7 +121,7 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       onClick={() => onNouvelleVersion(d)}
                       className="flex items-center gap-1 rounded-lg bg-[#131B2E] px-2.5 py-1 text-[10px] font-bold text-white active:scale-95"
                     >
-                      <Plus size={11} /> Nouvelle version
+                      <Plus size={11} /> {t("Nouvelle version")}
                     </button>
                   )}
                   {genre === "accepte" && onTraiterDevis && (
@@ -127,7 +129,7 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       onClick={() => onTraiterDevis(d)}
                       className="rounded-lg bg-[#131B2E] px-2.5 py-1 text-[10px] font-bold text-white active:scale-95"
                     >
-                      Traiter le devis →
+                      {t("Traiter le devis →")}
                     </button>
                   )}
                   {/* 📧 RENVOYER — le geste après avoir répondu à sa
@@ -140,7 +142,7 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       title="Le devis repart au client, qui pourra répondre de nouveau (accepter, refuser…)"
                       className="flex items-center gap-1 rounded-lg border border-[#131B2E] bg-white px-2.5 py-1 text-[10px] font-bold text-[#131B2E] active:scale-95"
                     >
-                      <Mail size={11} /> Renvoyer le devis
+                      <Mail size={11} /> {t("Renvoyer le devis")}
                     </button>
                   )}
                   {/* 🗑️ Envoyée PAR ERREUR (« salut ») : la demande
@@ -152,7 +154,7 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       title="Le client a envoyé ça par erreur : efface la demande — il pourra répondre de nouveau sur le même lien"
                       className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-400 hover:text-red-500"
                     >
-                      🗑️ Erreur du client
+                      🗑️ {t("Erreur du client")}
                     </button>
                   )}
                   {/* Classer : pour les cas réglés autrement (un appel au
@@ -164,7 +166,7 @@ export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, 
                       title={genre === "modification" ? "J'ai répondu au client (par téléphone, par courriel…)" : "Pris en note"}
                       className="flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-600 active:scale-95"
                     >
-                      <Check size={11} /> {genre === "modification" ? "J'ai répondu" : "Pris en note"}
+                      <Check size={11} /> {t(genre === "modification" ? "J'ai répondu" : "Pris en note")}
                     </button>
                   )}
                 </div>

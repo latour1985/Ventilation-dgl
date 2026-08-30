@@ -654,18 +654,15 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // dossier ouvert, défilement centré, et un surlignage de 2,5 s pour
   // que l'œil la retrouve tout de suite.
   const [dossierSurligne, setDossierSurligne] = useState(null);
+  // 🪟 FENÊTRE CONTEXTUELLE (2026-08-30, demande du propriétaire) :
+  // « Voir le devis » et « Nouvelle version » ouvrent maintenant le
+  // dossier PAR-DESSUS la liste — plus de descente jusqu'à la carte.
+  const [dossierEnModale, setDossierEnModale] = useState(null);
   const allerAuDossier = (d) => {
     const base = d.numeroBase || d.numero;
-    const index = dossiersDevis.findIndex((x) => x.base === base);
-    if (index >= 0) setPageDevis(Math.floor(index / ITEMS_PAR_PAGE) + 1);
     setDossierOuvert(base);
     setVersionAffichee(d.numero);
-    setDossierSurligne(base);
-    // Laisse React afficher la bonne page AVANT de faire défiler.
-    setTimeout(() => {
-      document.getElementById(`dossier-${base}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 60);
-    setTimeout(() => setDossierSurligne((actuel) => (actuel === base ? null : actuel)), 2500);
+    setDossierEnModale(base);
   };
 
   // ❌ ANNULATION D'UN DEVIS ACCEPTÉ — état + exécution.
@@ -816,6 +813,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEditionVersion({ source, note: (note || "").trim() });
     setCreationVersionPour(null);
     setNoteNouvelleVersion("");
+    // La fenêtre contextuelle se ferme : le travail continue dans le
+    // constructeur, qui serait autrement caché derrière elle.
+    setDossierEnModale(null);
     // Remonte au constructeur (il est en haut de la colonne de gauche).
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1166,6 +1166,274 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     );
     setDevisATraiterId(null);
     onDevisTraite?.("projets");
+  };
+
+  // 🪟 CARTE DE DOSSIER — rendue à DEUX endroits : la liste paginée
+  // et la FENÊTRE CONTEXTUELLE (demande du propriétaire, 2026-08-28 :
+  // « Voir le devis » ouvre une fenêtre au lieu de descendre). Fonction
+  // locale (fermeture sur tous les états) plutôt qu'un composant à
+  // quinze props — strictement le même code aux deux endroits.
+  const rendreCarteDossier = ({ base, versions, active }, enModale = false) => {
+            const ouvert = dossierOuvert === base;
+            const affichee = ouvert ? versions.find((v) => v.numero === versionAffichee) || active : active;
+            const estActive = affichee.numero === active.numero;
+            return (
+              <div
+                key={base}
+                id={enModale ? undefined : `dossier-${base}`}
+                className={`rounded-xl border bg-white p-3.5 transition-shadow ${
+                  dossierSurligne === base ? "border-[#FF6A13] ring-2 ring-orange-300" : "border-slate-200"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
+                      {affichee.numero}
+                      {versions.length > 1 && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">
+                          {versions.length} versions
+                        </span>
+                      )}
+                      {affichee.estContrat && (
+                        <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700">
+                          CONTRAT · {affichee.frequenceFacturationAnnuelle}×/an
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-500">{affichee.clientNom}</p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      affichee.statut === "accepte" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-black"
+                    }`}
+                  >
+                    {affichee.statut === "accepte" ? "ACCEPTÉ" : "ENVOYÉ"}
+                  </span>
+                </div>
+
+                {/* ONGLETS DES VERSIONS — visibles dès qu'il y a une révision. */}
+                {versions.length > 1 && (
+                  <div className="mt-2 flex flex-wrap gap-1 rounded-lg border border-slate-200 p-0.5">
+                    {versions.map((v) => {
+                      const selectionne = v.numero === affichee.numero;
+                      return (
+                        <button
+                          key={v.numero}
+                          onClick={() => {
+                            setDossierOuvert(base);
+                            setVersionAffichee(v.numero);
+                          }}
+                          className={`rounded-md px-2 py-1 text-[10px] font-extrabold ${
+                            selectionne ? "bg-[#131B2E] text-white" : "text-slate-500 hover:bg-slate-50"
+                          }`}
+                          title={v.noteVersion || undefined}
+                        >
+                          {v.version === 0 ? "Originale" : `v${v.version}`}
+                          {v.numero === active.numero ? " ★" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <p className="mt-1.5 text-sm font-bold tabular-nums text-slate-800">{affichee.totalVendant.toFixed(2)} $</p>
+                <p className="text-[10px] text-slate-400">
+                  {affichee.date}
+                  {affichee.noteVersion ? ` · ${affichee.noteVersion}` : ""}
+                </p>
+
+                {!estActive && (
+                  <p className="mt-1.5 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-bold text-slate-500">
+                    🔒 Version archivée — lecture seule. La version courante est {active.numero}.
+                  </p>
+                )}
+                {affichee.traite && (
+                  <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                    <CheckCircle2 size={11} /> Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
+                  </span>
+                )}
+
+                <Button variant="outline" onClick={() => setDevisAperçu(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                  <FileText size={13} /> Voir version client
+                </Button>
+
+                {/* RÉPONSE DU CLIENT — la preuve. Nom saisi, date, heure,
+                    et la version des conditions qu'il a lues ce jour-là.
+                    C'est ce qui répond à « je n'ai jamais été avisé ». */}
+                {affichee.reponseClient && (
+                  <div className={`mt-2 rounded-lg border p-2.5 ${
+                    affichee.reponseClient === "accepte" ? "border-emerald-300 bg-emerald-50"
+                      : affichee.reponseClient === "modification" ? "border-blue-300 bg-blue-50"
+                      : "border-slate-300 bg-slate-50"
+                  }`}>
+                    <p className="text-[11px] font-extrabold text-slate-800">
+                      {affichee.reponseClient === "accepte" ? "✅ Accepté par le client"
+                        : affichee.reponseClient === "modification" ? "✏️ Modification demandée"
+                        : "❌ Refusé par le client"}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-slate-600">
+                      {affichee.reponduParNom}
+                      {affichee.reponduLe ? ` · ${new Date(affichee.reponduLe).toLocaleString("fr-CA")}` : ""}
+                    </p>
+                    {affichee.messageClient && (
+                      <p className="mt-1 whitespace-pre-line rounded bg-white/70 px-2 py-1 text-[10px] italic text-slate-700">
+                        « {affichee.messageClient} »
+                      </p>
+                    )}
+                    {affichee.conditionsVersion && (
+                      <p className="mt-1 text-[9px] text-slate-400">
+                        Conditions version {affichee.conditionsVersion} — texte exact conservé
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* ENVOI AU CLIENT — le courriel avec le lien d'acceptation.
+                    « Copier le lien » reste là comme plan B (téléphone,
+                    texto, ou service d'envoi pas encore configuré). */}
+                {/* ENVOI / RENVOI — disponible tant que le client n'a pas
+                    répondu, ET aussi pour un devis DÉJÀ ACCEPTÉ (le client
+                    a perdu sa copie et la redemande). */}
+                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId !== affichee.id && (
+                  <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                    {affichee.reponseClient === "accepte" ? "✉️ Renvoyer la copie au client" : "✉️ Envoyer au client"}
+                  </Button>
+                )}
+                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId === affichee.id && (
+                  <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
+                    <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">{affichee.reponseClient === "accepte" ? "Renvoyer la copie à :" : "Envoyer le devis à :"}</p>
+                    {(ficheClientDe(affichee)?.courriels || []).map((c) => {
+                      const adresse = typeof c === "string" ? c : c.email;
+                      if (!adresse) return null;
+                      const coche = envoiDevis.choisis.includes(adresse);
+                      return (
+                        <label key={adresse} className="mb-1 flex items-center gap-1.5 text-xs text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={coche}
+                            onChange={() =>
+                              setEnvoiDevis((prev) => ({
+                                ...prev,
+                                choisis: coche ? prev.choisis.filter((a) => a !== adresse) : [...prev.choisis, adresse],
+                              }))
+                            }
+                          />
+                          {adresse}
+                          {typeof c === "object" && c.label ? <span className="text-[10px] text-slate-400">({c.label})</span> : null}
+                        </label>
+                      );
+                    })}
+                    <input
+                      value={envoiDevis.extra}
+                      onChange={(e) => setEnvoiDevis((prev) => ({ ...prev, extra: e.target.value }))}
+                      placeholder="Autre adresse (optionnel)"
+                      className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    {envoiDevis.extra.trim() !== "" && (
+                      <label className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
+                        <input
+                          type="checkbox"
+                          checked={!!envoiDevis.extraFiche}
+                          onChange={(e) => setEnvoiDevis((prev) => ({ ...prev, extraFiche: e.target.checked }))}
+                          className="h-4 w-4 accent-[#FF6A13]"
+                        />
+                        💾 Ajouter cette adresse à la fiche du client
+                      </label>
+                    )}
+                    <div className="flex gap-1.5">
+                      <Button
+                        onClick={() => envoyerDevisParCourriel(affichee)}
+                        disabled={envoiDevisEnCours || (envoiDevis.choisis.length === 0 && !envoiDevis.extra.trim())}
+                        className="min-h-0 flex-1 py-1.5 text-xs"
+                      >
+                        {envoiDevisEnCours ? "Envoi…" : "Envoyer"}
+                      </Button>
+                      <Button variant="outline" onClick={() => setEnvoiDevis(null)} className="min-h-0 py-1.5 text-xs">
+                        Annuler
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && (
+                  <Button
+                    variant="outline"
+                    onClick={() => creerLienAcceptation(affichee)}
+                    className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
+                  >
+                    <Copy size={13} /> {lienCopie === affichee.id ? "Lien copié ✓" : affichee.reponseClient === "accepte" ? "Copier le lien du devis" : "Copier le lien d'acceptation"}
+                  </Button>
+                )}
+
+                {/* Actions réservées à la version ACTIVE — on ne traite
+                    jamais une révision archivée par erreur. */}
+                {estActive && affichee.statut !== "accepte" && (
+                  <Button onClick={() => accepterDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                    <Check size={13} /> Marquer accepté
+                  </Button>
+                )}
+                {estActive && affichee.statut === "accepte" && !affichee.traite && (
+                  <Button onClick={() => setDevisATraiterId(affichee.id)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
+                    <ClipboardList size={13} /> Traiter le devis
+                  </Button>
+                )}
+                {/* ❌ ANNULER UN DEVIS ACCEPTÉ (2026-08-29) — le client
+                    s'est désisté après coup. Raison obligatoire, preuve
+                    d'acceptation conservée, et l'estimate QuickBooks
+                    passe à « Rejeté » automatiquement. */}
+                {estActive && affichee.statut === "accepte" && (
+                  <button
+                    onClick={() => { setAnnulationDevis(affichee); setRaisonAnnulationDevis(""); }}
+                    className="mt-1.5 w-full text-center text-[10px] font-semibold text-red-400 underline underline-offset-2 hover:text-red-600"
+                  >
+                    ❌ Le client annule — annuler ce devis accepté…
+                  </button>
+                )}
+                {affichee.statut === "annule" && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">
+                    ❌ ANNULÉ{affichee.annuleLe ? ` le ${String(affichee.annuleLe).slice(0, 10)}` : ""}
+                    {affichee.annuleRaison ? ` — ${affichee.annuleRaison}` : ""}
+                    <span className="mt-0.5 block text-[10px] font-normal text-red-500">
+                      La preuve d&apos;acceptation du client est conservée. L&apos;estimate QuickBooks est marqué « Rejeté ».
+                    </span>
+                  </p>
+                )}
+
+                {/* NOUVELLE VERSION — depuis la version affichée. C'est ce
+                    qui permet de « repartir d'une ancienne version ». */}
+                {creationVersionPour === affichee.numero ? (
+                  <div className="mt-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5">
+                    <p className="text-[11px] font-bold text-slate-800">Nouvelle version à partir de {affichee.numero}</p>
+                    <input
+                      value={noteNouvelleVersion}
+                      onChange={(e) => setNoteNouvelleVersion(e.target.value)}
+                      placeholder="Raison (ex : le client retire le rooftop)"
+                      className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <div className="mt-1.5 flex gap-1.5">
+                      <Button onClick={() => demarrerNouvelleVersion(affichee, noteNouvelleVersion)} className="min-h-0 flex-1 py-1.5 text-[11px]">
+                        Modifier et créer
+                      </Button>
+                      <Button variant="outline" onClick={() => setCreationVersionPour(null)} className="min-h-0 py-1.5 text-[11px]">
+                        Annuler
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  !affichee.traite && (
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setCreationVersionPour(affichee.numero);
+                        setNoteNouvelleVersion("");
+                      }}
+                      className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
+                    >
+                      <Plus size={13} /> {estActive ? "Nouvelle version" : "Repartir de cette version"}
+                    </Button>
+                  )
+                )}
+              </div>
+            );
   };
 
   return (
@@ -1789,272 +2057,30 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           {dossiersDevis.length === 0 && <p className="px-1 text-xs text-slate-400">Aucun devis pour le moment.</p>}
           {/* UNE CARTE PAR DOSSIER — la version active est affichée ; les
               révisions précédentes s'atteignent par les onglets. */}
-          {dossiersDevis.slice((Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map(({ base, versions, active }) => {
-            const ouvert = dossierOuvert === base;
-            const affichee = ouvert ? versions.find((v) => v.numero === versionAffichee) || active : active;
-            const estActive = affichee.numero === active.numero;
-            return (
-              <div
-                key={base}
-                id={`dossier-${base}`}
-                className={`rounded-xl border bg-white p-3.5 transition-shadow ${
-                  dossierSurligne === base ? "border-[#FF6A13] ring-2 ring-orange-300" : "border-slate-200"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-1.5 text-sm font-bold text-slate-900">
-                      {affichee.numero}
-                      {versions.length > 1 && (
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-600">
-                          {versions.length} versions
-                        </span>
-                      )}
-                      {affichee.estContrat && (
-                        <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700">
-                          CONTRAT · {affichee.frequenceFacturationAnnuelle}×/an
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-xs text-slate-500">{affichee.clientNom}</p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      affichee.statut === "accepte" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-black"
-                    }`}
-                  >
-                    {affichee.statut === "accepte" ? "ACCEPTÉ" : "ENVOYÉ"}
-                  </span>
-                </div>
-
-                {/* ONGLETS DES VERSIONS — visibles dès qu'il y a une révision. */}
-                {versions.length > 1 && (
-                  <div className="mt-2 flex flex-wrap gap-1 rounded-lg border border-slate-200 p-0.5">
-                    {versions.map((v) => {
-                      const selectionne = v.numero === affichee.numero;
-                      return (
-                        <button
-                          key={v.numero}
-                          onClick={() => {
-                            setDossierOuvert(base);
-                            setVersionAffichee(v.numero);
-                          }}
-                          className={`rounded-md px-2 py-1 text-[10px] font-extrabold ${
-                            selectionne ? "bg-[#131B2E] text-white" : "text-slate-500 hover:bg-slate-50"
-                          }`}
-                          title={v.noteVersion || undefined}
-                        >
-                          {v.version === 0 ? "Originale" : `v${v.version}`}
-                          {v.numero === active.numero ? " ★" : ""}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                <p className="mt-1.5 text-sm font-bold tabular-nums text-slate-800">{affichee.totalVendant.toFixed(2)} $</p>
-                <p className="text-[10px] text-slate-400">
-                  {affichee.date}
-                  {affichee.noteVersion ? ` · ${affichee.noteVersion}` : ""}
-                </p>
-
-                {!estActive && (
-                  <p className="mt-1.5 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-bold text-slate-500">
-                    🔒 Version archivée — lecture seule. La version courante est {active.numero}.
-                  </p>
-                )}
-                {affichee.traite && (
-                  <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                    <CheckCircle2 size={11} /> Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
-                  </span>
-                )}
-
-                <Button variant="outline" onClick={() => setDevisAperçu(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                  <FileText size={13} /> Voir version client
-                </Button>
-
-                {/* RÉPONSE DU CLIENT — la preuve. Nom saisi, date, heure,
-                    et la version des conditions qu'il a lues ce jour-là.
-                    C'est ce qui répond à « je n'ai jamais été avisé ». */}
-                {affichee.reponseClient && (
-                  <div className={`mt-2 rounded-lg border p-2.5 ${
-                    affichee.reponseClient === "accepte" ? "border-emerald-300 bg-emerald-50"
-                      : affichee.reponseClient === "modification" ? "border-blue-300 bg-blue-50"
-                      : "border-slate-300 bg-slate-50"
-                  }`}>
-                    <p className="text-[11px] font-extrabold text-slate-800">
-                      {affichee.reponseClient === "accepte" ? "✅ Accepté par le client"
-                        : affichee.reponseClient === "modification" ? "✏️ Modification demandée"
-                        : "❌ Refusé par le client"}
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-slate-600">
-                      {affichee.reponduParNom}
-                      {affichee.reponduLe ? ` · ${new Date(affichee.reponduLe).toLocaleString("fr-CA")}` : ""}
-                    </p>
-                    {affichee.messageClient && (
-                      <p className="mt-1 whitespace-pre-line rounded bg-white/70 px-2 py-1 text-[10px] italic text-slate-700">
-                        « {affichee.messageClient} »
-                      </p>
-                    )}
-                    {affichee.conditionsVersion && (
-                      <p className="mt-1 text-[9px] text-slate-400">
-                        Conditions version {affichee.conditionsVersion} — texte exact conservé
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* ENVOI AU CLIENT — le courriel avec le lien d'acceptation.
-                    « Copier le lien » reste là comme plan B (téléphone,
-                    texto, ou service d'envoi pas encore configuré). */}
-                {/* ENVOI / RENVOI — disponible tant que le client n'a pas
-                    répondu, ET aussi pour un devis DÉJÀ ACCEPTÉ (le client
-                    a perdu sa copie et la redemande). */}
-                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId !== affichee.id && (
-                  <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                    {affichee.reponseClient === "accepte" ? "✉️ Renvoyer la copie au client" : "✉️ Envoyer au client"}
-                  </Button>
-                )}
-                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId === affichee.id && (
-                  <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
-                    <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">{affichee.reponseClient === "accepte" ? "Renvoyer la copie à :" : "Envoyer le devis à :"}</p>
-                    {(ficheClientDe(affichee)?.courriels || []).map((c) => {
-                      const adresse = typeof c === "string" ? c : c.email;
-                      if (!adresse) return null;
-                      const coche = envoiDevis.choisis.includes(adresse);
-                      return (
-                        <label key={adresse} className="mb-1 flex items-center gap-1.5 text-xs text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={coche}
-                            onChange={() =>
-                              setEnvoiDevis((prev) => ({
-                                ...prev,
-                                choisis: coche ? prev.choisis.filter((a) => a !== adresse) : [...prev.choisis, adresse],
-                              }))
-                            }
-                          />
-                          {adresse}
-                          {typeof c === "object" && c.label ? <span className="text-[10px] text-slate-400">({c.label})</span> : null}
-                        </label>
-                      );
-                    })}
-                    <input
-                      value={envoiDevis.extra}
-                      onChange={(e) => setEnvoiDevis((prev) => ({ ...prev, extra: e.target.value }))}
-                      placeholder="Autre adresse (optionnel)"
-                      className="mb-2 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                    />
-                    {envoiDevis.extra.trim() !== "" && (
-                      <label className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-slate-600">
-                        <input
-                          type="checkbox"
-                          checked={!!envoiDevis.extraFiche}
-                          onChange={(e) => setEnvoiDevis((prev) => ({ ...prev, extraFiche: e.target.checked }))}
-                          className="h-4 w-4 accent-[#FF6A13]"
-                        />
-                        💾 Ajouter cette adresse à la fiche du client
-                      </label>
-                    )}
-                    <div className="flex gap-1.5">
-                      <Button
-                        onClick={() => envoyerDevisParCourriel(affichee)}
-                        disabled={envoiDevisEnCours || (envoiDevis.choisis.length === 0 && !envoiDevis.extra.trim())}
-                        className="min-h-0 flex-1 py-1.5 text-xs"
-                      >
-                        {envoiDevisEnCours ? "Envoi…" : "Envoyer"}
-                      </Button>
-                      <Button variant="outline" onClick={() => setEnvoiDevis(null)} className="min-h-0 py-1.5 text-xs">
-                        Annuler
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && (
-                  <Button
-                    variant="outline"
-                    onClick={() => creerLienAcceptation(affichee)}
-                    className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
-                  >
-                    <Copy size={13} /> {lienCopie === affichee.id ? "Lien copié ✓" : affichee.reponseClient === "accepte" ? "Copier le lien du devis" : "Copier le lien d'acceptation"}
-                  </Button>
-                )}
-
-                {/* Actions réservées à la version ACTIVE — on ne traite
-                    jamais une révision archivée par erreur. */}
-                {estActive && affichee.statut !== "accepte" && (
-                  <Button onClick={() => accepterDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                    <Check size={13} /> Marquer accepté
-                  </Button>
-                )}
-                {estActive && affichee.statut === "accepte" && !affichee.traite && (
-                  <Button onClick={() => setDevisATraiterId(affichee.id)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                    <ClipboardList size={13} /> Traiter le devis
-                  </Button>
-                )}
-                {/* ❌ ANNULER UN DEVIS ACCEPTÉ (2026-08-29) — le client
-                    s'est désisté après coup. Raison obligatoire, preuve
-                    d'acceptation conservée, et l'estimate QuickBooks
-                    passe à « Rejeté » automatiquement. */}
-                {estActive && affichee.statut === "accepte" && (
-                  <button
-                    onClick={() => { setAnnulationDevis(affichee); setRaisonAnnulationDevis(""); }}
-                    className="mt-1.5 w-full text-center text-[10px] font-semibold text-red-400 underline underline-offset-2 hover:text-red-600"
-                  >
-                    ❌ Le client annule — annuler ce devis accepté…
-                  </button>
-                )}
-                {affichee.statut === "annule" && (
-                  <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">
-                    ❌ ANNULÉ{affichee.annuleLe ? ` le ${String(affichee.annuleLe).slice(0, 10)}` : ""}
-                    {affichee.annuleRaison ? ` — ${affichee.annuleRaison}` : ""}
-                    <span className="mt-0.5 block text-[10px] font-normal text-red-500">
-                      La preuve d&apos;acceptation du client est conservée. L&apos;estimate QuickBooks est marqué « Rejeté ».
-                    </span>
-                  </p>
-                )}
-
-                {/* NOUVELLE VERSION — depuis la version affichée. C'est ce
-                    qui permet de « repartir d'une ancienne version ». */}
-                {creationVersionPour === affichee.numero ? (
-                  <div className="mt-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5">
-                    <p className="text-[11px] font-bold text-slate-800">Nouvelle version à partir de {affichee.numero}</p>
-                    <input
-                      value={noteNouvelleVersion}
-                      onChange={(e) => setNoteNouvelleVersion(e.target.value)}
-                      placeholder="Raison (ex : le client retire le rooftop)"
-                      className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                    />
-                    <div className="mt-1.5 flex gap-1.5">
-                      <Button onClick={() => demarrerNouvelleVersion(affichee, noteNouvelleVersion)} className="min-h-0 flex-1 py-1.5 text-[11px]">
-                        Modifier et créer
-                      </Button>
-                      <Button variant="outline" onClick={() => setCreationVersionPour(null)} className="min-h-0 py-1.5 text-[11px]">
-                        Annuler
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  !affichee.traite && (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setCreationVersionPour(affichee.numero);
-                        setNoteNouvelleVersion("");
-                      }}
-                      className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
-                    >
-                      <Plus size={13} /> {estActive ? "Nouvelle version" : "Repartir de cette version"}
-                    </Button>
-                  )
-                )}
-              </div>
-            );
-          })}
+          {dossiersDevis.slice((Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((dossier) => rendreCarteDossier(dossier))}
           <BarrePagination total={dossiersDevis.length} page={pageDevis} onPage={setPageDevis} refHaut={refListeDevis} libelle="devis" />
         </div>
       </div>
 
+      {/* 🪟 FENÊTRE CONTEXTUELLE DU DOSSIER — la même carte que dans la
+          liste, par-dessus l'écran. Se ferme au ✕ ou au clic à côté. */}
+      {dossierEnModale && (() => {
+        const dossier = dossiersDevis.find((x) => x.base === dossierEnModale);
+        if (!dossier) return null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; setDossierEnModale(null); }}>
+            <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-2" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-2 pt-1">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">🪟 Dossier {dossierEnModale}</p>
+                <button onClick={() => setDossierEnModale(null)} aria-label="Fermer" className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+                  <X size={16} />
+                </button>
+              </div>
+              {rendreCarteDossier(dossier, true)}
+            </div>
+          </div>
+        );
+      })()}
       {pdfAperçu && <ApercuBonCommande data={pdfAperçu} onFermer={() => setPdfAperçu(null)} />}
       {devisAperçu && <ApercuDevisClient devis={devisAperçu} onFermer={() => setDevisAperçu(null)} />}
       {courrielModalOuvert && (
