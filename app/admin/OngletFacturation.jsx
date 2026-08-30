@@ -77,7 +77,7 @@ export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
 // (registre QuickBooks), son PDF officiel et, au besoin, son bouton
 // « Renvoyer ». Rien ne se perd : pas de preuve = alerte rouge.
 // ============================================================
-export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, envoiAuto = true }) {
+export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, onRenvoyerVers = null, envoiAuto = true }) {
   return (
     <div className="mt-1.5 space-y-1">
       {(bon.facturesEmises || []).map((f) => (
@@ -87,7 +87,19 @@ export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, envoiAuto = true }
           </p>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {f.envoiQb?.statut === "envoyee" ? (
-              <span className="font-bold text-emerald-600">✉️ Envoyée par QuickBooks ✓</span>
+              <>
+                <span className="font-bold text-emerald-600">✉️ Envoyée par QuickBooks ✓</span>
+                {/* 📧 RENVOYER MÊME SI ENVOYÉE (2026-08-29, demande du
+                    propriétaire) : « au cas où le client ne la reçoit
+                    pas » — pourriel, mauvaise adresse. Ouvre le CHOIX des
+                    destinataires : le cas classique est justement une
+                    adresse à corriger. */}
+                {onRenvoyerVers && (
+                  <button onClick={() => onRenvoyerVers(bon, f)} className="rounded border border-slate-300 bg-white px-1.5 py-0.5 font-bold text-slate-600 active:scale-95">
+                    📧 Renvoyer
+                  </button>
+                )}
+              </>
             ) : f.qboInvoiceId && !envoiAuto ? (
               <>
                 <span className="font-bold text-slate-500">📄 Créée — envoi manuel</span>
@@ -1787,6 +1799,39 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       return { ...x, facturesEmises: liste };
     }));
   };
+  // 📧 RENVOI AVEC CHOIX DES DESTINATAIRES (2026-08-29) — « au cas où le
+  // client ne la reçoit pas » : la fenêtre habituelle s'ouvre avec les
+  // courriels de la fiche (adresse à corriger, adresse à ajouter), la
+  // facture repart par QuickBooks, et la fiche de la facture retient les
+  // NOUVEAUX destinataires.
+  const [renvoiVers, setRenvoiVers] = useState(null); // { bon, f } | null
+  const executerRenvoiVers = async (choix) => {
+    const { bon: b, f } = renvoiVers;
+    setRenvoiVers(null);
+    const adresses = listeDestinataires(choix).map((c) => c.email);
+    if (adresses.length === 0) return;
+    const r = await envoyerFactureQbo(f.qboInvoiceId, adresses);
+    if (r?.envoyee) {
+      setBons((prev) =>
+        prev.map((x) => {
+          if (x.id !== b.id) return x;
+          const liste = (x.facturesEmises || []).map((fx) =>
+            fx.id === f.id
+              ? { ...fx, courrielsEnvoi: adresses, courrielEnvoi: adresses[0] || null, envoiQb: { statut: "envoyee", date: r.envoyeeLe || new Date().toISOString() } }
+              : fx
+          );
+          if (String(x.id).startsWith("sbb-")) {
+            majFacturesEmises(String(x.id).slice(4), liste, x.statutQb === "envoye" ? "envoye" : "a_facturer").catch(() => {});
+          }
+          return { ...x, facturesEmises: liste };
+        })
+      );
+      ajouterJournal(`✉️ Facture ${f.numeroFactureQb} RENVOYÉE par QuickBooks à ${adresses.join(", ")}.`);
+    } else {
+      ajouterJournal(`⚠️ Facture ${f.numeroFactureQb} : le renvoi a échoué${r?.erreur ? ` (${r.erreur})` : r?.nonConnecte ? " (QuickBooks non connecté)" : ""} — réessaie.`);
+    }
+  };
+
   const renvoyerFactureQb = async (b, f) => {
     const adresses = (f.courrielsEnvoi || []).filter(Boolean);
     if (adresses.length === 0) {
@@ -2729,7 +2774,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                         </div>
                       </>
                     )}
-                    <FacturesEmisesListe bon={b} onPdf={ouvrirPdfFacture} onRenvoyer={renvoyerFactureQb} envoiAuto={configEnt?.envoiAutoFactureQb === true} />
+                    <FacturesEmisesListe bon={b} onPdf={ouvrirPdfFacture} onRenvoyer={renvoyerFactureQb} onRenvoyerVers={(bn, fx) => setRenvoiVers({ bon: bn, f: fx })} envoiAuto={configEnt?.envoiAutoFactureQb === true} />
                   </div>
                 )}
               </div>
@@ -2996,6 +3041,16 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             else await emettreFacture(pa.bonId, pa.info, pa.courriels, paiements);
             setPaiementAConfirmer(null);
           }}
+        />
+      )}
+
+      {/* 📧 RENVOI D'UNE FACTURE — choix des destinataires. */}
+      {renvoiVers && (
+        <ModalSelectionCourriel
+          client={trouverClientDuBon(renvoiVers.bon)}
+          contexte={`le renvoi de la facture ${renvoiVers.f.numeroFactureQb}`}
+          onFermer={() => setRenvoiVers(null)}
+          onConfirmer={executerRenvoiVers}
         />
       )}
 
