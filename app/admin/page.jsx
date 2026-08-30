@@ -1982,6 +1982,27 @@ function AppAdmin() {
     return () => clearTimeout(t);
   }, [clients, projets, tachesAttente, session, persistanceActive]);
 
+  // 🚫 RATTRAPAGE DES DÉPÔTS ANNULÉS CÔTÉ QUICKBOOKS (2026-08-30). Le
+  // retrait « en direct » du sondage ne suffisait pas : il ne touchait
+  // que l'écran, et au rechargement la tâche revenait de la base — et
+  // comme son dépôt n'était plus « en attente », elle se classait dans
+  // « Prêtes » (vécu : « pourquoi la demande en attente de dépôt a été
+  // transférée à prête ? »). Ici, dès que tâches et dépôts sont connus,
+  // toute tâche en attente dont le dépôt est annulé côté QuickBooks est
+  // retirée POUR DE BON — base comprise — avec sa ligne au journal.
+  const depotsAnnulesTraites = useRef(new Set());
+  useEffect(() => {
+    if (!session) return;
+    (tachesAttente || []).forEach((t) => {
+      if (depots?.[t.id]?.statut !== "annule_qb") return;
+      if (depotsAnnulesTraites.current.has(t.id)) return;
+      depotsAnnulesTraites.current.add(t.id);
+      retirerTacheAttente(t.id).catch(() => {});
+      setTachesAttente((prev) => prev.filter((x) => x.id !== t.id));
+      ajouterJournal(`🚫 Tâche « ${t.titre || t.id} » retirée de la file d'attente : sa facture de dépôt a été annulée dans QuickBooks.`);
+    });
+  }, [tachesAttente, depots, session]);
+
   // JOURNAL D'ACTIVITÉ — piste d'audit partagée (avant : navigateur seul).
   useEffect(() => {
     if (!session) return;

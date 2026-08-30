@@ -450,7 +450,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   };
   const depotBloque = (tacheId) => {
     const d = depotDe(tacheId);
-    return !!d && (d.statut === "en_attente_paiement" || d.statut === "annule_delai");
+    return !!d && (d.statut === "en_attente_paiement" || d.statut === "annule_delai" || d.statut === "annule_qb");
   };
   // Modale « Dépôt reçu manuellement » : { tacheId } ou null.
   const [depotModal, setDepotModal] = useState(null);
@@ -3304,6 +3304,16 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     return (
                       <p className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-700">
                         ⏰ ANNULÉE — dépôt non payé sous 24 h
+                      </p>
+                    );
+                  }
+                  if (d.statut === "annule_qb") {
+                    // Cas transitoire : le rattrapage de page.jsx retire
+                    // la tâche — mais si elle s'affiche une seconde, elle
+                    // dit la vérité au lieu de « en attente de dépôt ».
+                    return (
+                      <p className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-bold text-red-700">
+                        🚫 ANNULÉE — facture de dépôt annulée dans QuickBooks
                       </p>
                     );
                   }
