@@ -72,10 +72,22 @@ export function CarteConnexionQuickbooks({ estAdminPrincipal }) {
     }
     setSyncClients({ fait: totalFait, erreurs: toutesErreurs });
   };
+  // ⚠️ ÉCHEC ≠ « pas configuré » (correctif 2026-08-28) : quand l'appel
+  // échouait (session expirée, réseau), la réponse ne portait pas
+  // `configure` — et l'écran annonçait « Mode simulé » alors que les
+  // clés étaient bien là et que QuickBooks tournait en PRODUCTION.
+  // On distingue maintenant les deux, avec un bouton pour revérifier.
+  const [verifQbEnCours, setVerifQbEnCours] = useState(false);
+  const verifierEtatQb = async () => {
+    setVerifQbEnCours(true);
+    const e = await etatQuickbooks();
+    setEtatQb(e && typeof e === "object" ? e : { erreur: "Réponse illisible." });
+    setVerifQbEnCours(false);
+  };
   useEffect(() => {
     let actif = true;
     etatQuickbooks().then((e) => {
-      if (actif) setEtatQb(e || {});
+      if (actif) setEtatQb(e && typeof e === "object" ? e : { erreur: "Réponse illisible." });
     });
     return () => {
       actif = false;
@@ -85,12 +97,34 @@ export function CarteConnexionQuickbooks({ estAdminPrincipal }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">QuickBooks</p>
+      {/* Le texte suit l'environnement RÉEL de la connexion — annoncer
+          « Sandbox » alors que la vraie comptabilité est branchée était
+          trompeur (2026-08-28). */}
       <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
-        Synchronise les factures et dépenses de la comptabilité vers la rentabilité des projets. Sandbox
-        (entreprise de test Intuit) tant que tout n&apos;est pas validé — la vraie comptabilité n&apos;est jamais touchée.
+        Synchronise les factures et dépenses de la comptabilité vers la rentabilité des projets.
+        {etatQb?.environnement === "production" ? (
+          <span className="font-bold text-emerald-700"> Branché sur la VRAIE comptabilité (production).</span>
+        ) : (
+          " Sandbox (entreprise de test Intuit) tant que tout n'est pas validé — la vraie comptabilité n'est jamais touchée."
+        )}
       </p>
       {etatQb === null ? (
         <p className="text-xs text-slate-400">Vérification de la connexion…</p>
+      ) : etatQb.erreur ? (
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p className="font-bold">⚠️ Impossible de vérifier la connexion QuickBooks</p>
+          <p className="mt-0.5 text-[11px]">
+            {etatQb.erreur} — ça ne veut PAS dire que QuickBooks est débranché : la vérification elle-même n&apos;a pas
+            abouti (session expirée, réseau). Reconnecte-toi ou revérifie.
+          </p>
+          <button
+            onClick={verifierEtatQb}
+            disabled={verifQbEnCours}
+            className="mt-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-bold text-amber-800 disabled:opacity-50"
+          >
+            {verifQbEnCours ? "Vérification…" : "🔄 Revérifier"}
+          </button>
+        </div>
       ) : !etatQb.configure ? (
         <p className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600">
           🧪 <span className="font-bold">Mode simulé</span> — les clés QuickBooks ne sont pas encore posées sur le

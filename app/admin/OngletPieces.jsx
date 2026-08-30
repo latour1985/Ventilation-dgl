@@ -635,16 +635,46 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
           )}
           {bcLibreOuvert && (
             <div className="mt-2 space-y-1.5 rounded-xl bg-slate-50 p-2.5">
-              <input
-                list="bc-libre-fournisseurs"
-                value={bcLibre.fournisseurNom}
-                onChange={(e) => setBcLibre((f) => ({ ...f, fournisseurNom: e.target.value }))}
-                placeholder="Fournisseur"
-                className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-              />
-              <datalist id="bc-libre-fournisseurs">
-                {(fournisseurs || []).map((f) => <option key={f.id || f.nom} value={f.nom} />)}
-              </datalist>
+              {/* 🏭 VRAIE LISTE DÉROULANTE (2026-08-28) : c'était un champ
+                  « datalist » — le navigateur n'affichait la liste qu'en
+                  tapant, jamais au clic, et on croyait le répertoire vide
+                  alors que le fournisseur était juste au-dessus. Un
+                  <select> montre TOUJOURS ce qu'il contient. « Autre »
+                  garde la saisie libre pour un fournisseur de passage. */}
+              <select
+                value={
+                  (fournisseurs || []).some((f) => f.nom === bcLibre.fournisseurNom)
+                    ? bcLibre.fournisseurNom
+                    : bcLibre.fournisseurNom
+                      ? "__autre__"
+                      : ""
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setBcLibre((f) => ({ ...f, fournisseurNom: v === "__autre__" ? " " : v === "" ? "" : v }));
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+              >
+                <option value="">— Choisir un fournisseur —</option>
+                {(fournisseurs || []).map((f) => (
+                  <option key={f.id || f.nom} value={f.nom}>{f.nom}</option>
+                ))}
+                <option value="__autre__">Autre (taper le nom)…</option>
+              </select>
+              {bcLibre.fournisseurNom !== "" && !(fournisseurs || []).some((f) => f.nom === bcLibre.fournisseurNom) && (
+                <input
+                  autoFocus
+                  value={bcLibre.fournisseurNom.trim()}
+                  onChange={(e) => setBcLibre((f) => ({ ...f, fournisseurNom: e.target.value }))}
+                  placeholder="Nom du fournisseur"
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                />
+              )}
+              {(fournisseurs || []).length === 0 && (
+                <p className="text-[10px] text-amber-700">
+                  Aucun fournisseur au répertoire — ajoute-le avec « ➕ Nouveau fournisseur » ci-dessus pour pouvoir lui envoyer le bon.
+                </p>
+              )}
               <textarea
                 rows={2}
                 value={bcLibre.description}
