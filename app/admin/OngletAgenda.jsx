@@ -722,6 +722,15 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // Destinataires de la DEMANDE DE DÉPÔT (courriel avec facture QBO) —
   // les adresses par défaut du client sont précochées au choix du client.
   const [depotEmails, setDepotEmails] = useState([]);
+  // 💳 CHOIX VISIBLE carte/virement pour CETTE demande de dépôt
+  // (2026-08-30, retour du propriétaire : « je n'ai pas l'option des
+  // cartes quand on envoie la demande »). Avant, le choix était
+  // automatique (Paramètres + seuil) mais INVISIBLE — impossible de
+  // savoir, au moment d'envoyer, si le courriel offrirait un bouton de
+  // paiement. null = automatique ; true/false = choix de l'admin pour
+  // cet envoi seulement (les Paramètres ne bougent pas).
+  const [depotCarteChoix, setDepotCarteChoix] = useState(null);
+  const [depotVirementChoix, setDepotVirementChoix] = useState(null);
   const [depotExtra, setDepotExtra] = useState("");
   // 📌 « Autre adresse » AU DOSSIER (2026-08-24, demande du
   // propriétaire) : un courriel tapé ici partait avec la demande de
@@ -1277,6 +1286,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         // tâche voyagent jusqu'à la ligne de facture et au courriel.
         titre: nouvelle.titre || "",
         descriptionTravaux: nouvelle.description || "",
+        // 💳 Le choix affiché dans la fenêtre part AVEC la demande —
+        // même règle automatique qu'avant si l'admin n'a rien touché.
+        paiementCarte:
+          depotCarteChoix ??
+          (configEnt?.paiementCarteAppels === true && montantDepot <= (Number(configEnt?.seuilCarteAppels) || 2000)),
+        paiementVirement: depotVirementChoix ?? (configEnt?.paiementVirementAppels === true),
       });
       // 📌 COURRIEL AU DOSSIER (2026-08-24) : l'« autre adresse » tapée
       // pour la demande de dépôt s'ajoute à la fiche du client — sinon
@@ -1326,6 +1341,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setDepotMontant("");
     setZoneAppelChoix("");
     setDepotEmails([]);
+    setDepotCarteChoix(null);
+    setDepotVirementChoix(null);
     setDepotExtra("");
     setNouveauTitre("");
     setNouvellesPiecesJointes([]);
@@ -3006,6 +3023,47 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                         );
                       })()}
                     </div>
+                    {/* 💳 PAIEMENT EN LIGNE — ce que le courriel OFFRIRA
+                        au client, sous les yeux AVANT d'envoyer. Cases
+                        pré-cochées selon les Paramètres (+ seuil de
+                        carte) ; modifiables pour CET envoi seulement. */}
+                    {(() => {
+                      const m = parseFloat(depotMontant) || 0;
+                      const seuil = Number(configEnt?.seuilCarteAppels) || 2000;
+                      const carteAuto = configEnt?.paiementCarteAppels === true && m <= seuil;
+                      const carte = depotCarteChoix ?? carteAuto;
+                      const virement = depotVirementChoix ?? (configEnt?.paiementVirementAppels === true);
+                      return (
+                        <div className="rounded-lg border border-amber-200 bg-white p-2">
+                          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                            💳 Paiement en ligne offert dans le courriel :
+                          </p>
+                          <label className="mb-0.5 flex items-center gap-1.5 text-[11px] text-slate-700">
+                            <input type="checkbox" checked={carte} onChange={(e) => setDepotCarteChoix(e.target.checked)} />
+                            Carte de crédit <span className="text-[10px] text-slate-400">(frais ≈ 2,9 % + 0,25 $ — à ta charge)</span>
+                          </label>
+                          {configEnt?.paiementCarteAppels === true && m > seuil && depotCarteChoix === null && (
+                            <p className="mb-0.5 text-[10px] font-semibold text-amber-700">
+                              La carte s&apos;est éteinte toute seule : montant au-dessus de ton seuil de {seuil.toFixed(0)} $ HT (Paramètres) — coche-la si tu la veux quand même.
+                            </p>
+                          )}
+                          <label className="flex items-center gap-1.5 text-[11px] text-slate-700">
+                            <input type="checkbox" checked={virement} onChange={(e) => setDepotVirementChoix(e.target.checked)} />
+                            Virement bancaire <span className="text-[10px] text-slate-400">(frais ≈ 1 % — à ta charge)</span>
+                          </label>
+                          {!carte && !virement && (
+                            <p className="mt-1 text-[10px] font-bold text-red-600">
+                              ⚠️ Aucun paiement en ligne ne sera offert — le client devra payer autrement (comptant, chèque, virement direct) et tu débloqueras la tâche à la main.
+                            </p>
+                          )}
+                          {(carte || virement) && (
+                            <p className="mt-1 text-[9px] leading-snug text-slate-400">
+                              Le bouton « payer » n&apos;apparaît chez le client que si QuickBooks Payments est actif sur ton compte Intuit. Ton choix ici ne vaut que pour cette demande — les Paramètres ne bougent pas.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {/* DESTINATAIRES DE LA DEMANDE DE DÉPÔT — le courriel
                         (avec le Nº de la facture QuickBooks) part à la
                         création de la tâche. Adresses par défaut du

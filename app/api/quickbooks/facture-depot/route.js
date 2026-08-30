@@ -117,8 +117,15 @@ export async function POST(request) {
     // ne se refile JAMAIS au client (LPC), donc on le gère à la source.
     const reglages = entreprise?.data || {};
     const seuilCarte = reglages.seuil_carte_appels != null ? Number(reglages.seuil_carte_appels) : 2000;
-    const carteOfferte = reglages.paiement_carte_appels === true && montantHT <= seuilCarte;
-    const virementOffert = reglages.paiement_virement_appels === true;
+    // 💳 CHOIX EXPLICITE DE LA FENÊTRE (2026-08-30) : l'admin voit et
+    // ajuste carte/virement au moment d'envoyer — son choix l'emporte
+    // sur la règle automatique (Paramètres + seuil), pour CETTE facture
+    // seulement. Absent (anciens appels) : la règle automatique, comme
+    // avant.
+    const carteAuto = reglages.paiement_carte_appels === true && montantHT <= seuilCarte;
+    const virementAuto = reglages.paiement_virement_appels === true;
+    const carteOfferte = typeof corps?.paiementCarte === "boolean" ? corps.paiementCarte : carteAuto;
+    const virementOffert = typeof corps?.paiementVirement === "boolean" ? corps.paiementVirement : virementAuto;
 
     const echeance = new Date(Date.now() + joursLimite * 24 * 60 * 60 * 1000);
     const dateLocale = `${echeance.getFullYear()}-${String(echeance.getMonth() + 1).padStart(2, "0")}-${String(echeance.getDate()).padStart(2, "0")}`;

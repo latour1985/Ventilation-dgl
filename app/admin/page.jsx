@@ -1734,6 +1734,10 @@ function AppAdmin() {
       envoyerA: adressesDepot,
       messageClient: messageClientDepot,
       envoyerAuto: configEntreprise?.envoiAutoFactureQb === true,
+      // 💳 Le choix carte/virement fait DANS LA FENÊTRE (2026-08-30) —
+      // absent = la route applique la règle automatique, comme avant.
+      ...(typeof infos.paiementCarte === "boolean" ? { paiementCarte: infos.paiementCarte } : {}),
+      ...(typeof infos.paiementVirement === "boolean" ? { paiementVirement: infos.paiementVirement } : {}),
     });
     if (r?.creee) {
       facture = r;
