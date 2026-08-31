@@ -515,9 +515,15 @@ export default function PageDevisPublic({ params }) {
                     >
                       {envoi === "envoi" ? "Envoi…" : "✓ Accepter ce devis"}
                     </button>
-                    {!accepte && (
+                    {/* L'aide nomme TOUJOURS ce qui manque (vécu : « JF »
+                        cochée mais 2 lettres — bouton grisé sans un mot). */}
+                    {(!accepte || nom.trim().length < 3) && (
                       <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                        Coche la case et écris ton nom pour accepter.
+                        {!accepte && nom.trim().length < 3
+                          ? "Coche la case et écris ton nom complet (au moins 3 lettres) pour accepter."
+                          : !accepte
+                          ? "Coche la case ci-dessus pour accepter."
+                          : "Écris ton nom complet (au moins 3 lettres) — c'est ta signature."}
                       </p>
                     )}
                   </>
