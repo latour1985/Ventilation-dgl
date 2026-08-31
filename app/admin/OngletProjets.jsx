@@ -262,8 +262,12 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
   const reprise = projet.reprise || {};
   const heures = reprise.heures || [];
   const factures = reprise.factures || [];
+  // 🧱 Matériaux déjà achetés (2026-08-31, demande du propriétaire :
+  // « il manque matériaux avant Fluxya ou sans bon de commande »).
+  const materiaux = reprise.materiaux || [];
   const [formHeures, setFormHeures] = useState(null); // { qui, heures, taux, date, note }
   const [formFacture, setFormFacture] = useState(null); // { montant, date, note }
+  const [formMateriau, setFormMateriau] = useState(null); // { fournisseur, montant, date, note }
 
   const enregistrer = (suivant, texteJournal) => {
     onMajReprise?.(suivant);
@@ -304,6 +308,30 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
     setFormFacture(null);
   };
 
+  const ajouterMateriau = () => {
+    const f = formMateriau;
+    if (!f || !(Number(f.montant) > 0)) return;
+    const entree = {
+      id: "rm-" + Date.now(),
+      fournisseur: (f.fournisseur || "").trim(),
+      montant: Number(f.montant) || 0,
+      date: f.date || todayISO(),
+      note: (f.note || "").trim(),
+    };
+    enregistrer(
+      { ...reprise, materiaux: [...materiaux, entree] },
+      `📥 Reprise — ${entree.montant.toFixed(2)} $ de matériaux${entree.fournisseur ? ` (${entree.fournisseur})` : ""} ajoutés au coût du projet « ${projet.nom} »${entree.note ? ` : ${entree.note}` : ""}`
+    );
+    setFormMateriau(null);
+  };
+  const retirerMateriau = (id) => {
+    const cible = materiaux.find((m) => m.id === id);
+    enregistrer(
+      { ...reprise, materiaux: materiaux.filter((m) => m.id !== id) },
+      `📥 Reprise — matériaux retirés du projet « ${projet.nom} »${cible ? ` (${cible.montant.toFixed(2)} $${cible.fournisseur ? `, ${cible.fournisseur}` : ""})` : ""}`
+    );
+  };
+
   const retirerHeures = (id) => {
     const cible = heures.find((h) => h.id === id);
     enregistrer(
@@ -319,17 +347,18 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
     );
   };
 
-  const rien = heures.length === 0 && factures.length === 0;
+  const rien = heures.length === 0 && factures.length === 0 && materiaux.length === 0;
 
   return (
     <div className="mb-4 rounded-xl border border-slate-200 p-3">
       <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
         📥 Reprise de chantier <span className="normal-case text-slate-400">— ce qui a été fait AVANT Fluxya</span>
       </p>
-      {rien && !formHeures && !formFacture && (
+      {rien && !formHeures && !formFacture && !formMateriau && (
         <p className="mb-2 text-[11px] leading-snug text-slate-400">
-          Chantier commencé avant Fluxya ? Entre ici les heures déjà travaillées et les montants déjà
-          facturés : la rentabilité du projet devient complète. Rien n&apos;est envoyé au client ni aux paies.
+          Chantier commencé avant Fluxya ? Entre ici les heures déjà travaillées, les matériaux déjà achetés
+          et les montants déjà facturés : la rentabilité du projet devient complète. Rien n&apos;est envoyé au
+          client ni aux paies.
         </p>
       )}
 
@@ -381,6 +410,44 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
         </div>
       ) : null}
 
+      {/* 🧱 MATÉRIAUX DÉJÀ ACHETÉS (avant Fluxya, ou sans BC) */}
+      {materiaux.length > 0 && (
+        <div className="mb-1.5 space-y-1">
+          {materiaux.map((m) => (
+            <div key={m.id} className="flex items-center justify-between gap-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px]">
+              <span className="min-w-0">
+                🧱 <span className="font-bold">{m.montant.toFixed(2)} $</span> de matériaux{m.fournisseur ? ` · ${m.fournisseur}` : ""}
+                <span className="text-slate-400"> · {m.date}{m.note ? ` · ${m.note}` : ""}</span>
+              </span>
+              <button onClick={() => retirerMateriau(m.id)} title="Retirer" className="shrink-0 text-slate-300 hover:text-red-500"><Trash2 size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {formMateriau ? (
+        <div className="mb-1.5 rounded-lg border border-slate-200 p-2">
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            <input value={formMateriau.fournisseur} onChange={(e) => setFormMateriau({ ...formMateriau, fournisseur: e.target.value })}
+              placeholder="Fournisseur (ex. : Descair)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+            <input type="date" value={formMateriau.date} onChange={(e) => setFormMateriau({ ...formMateriau, date: e.target.value })}
+              className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          </div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold text-slate-400">Montant (HT)</span>
+            <InputNombreDecimal valeur={formMateriau.montant} onChange={(v) => setFormMateriau({ ...formMateriau, montant: v })}
+              className="w-[100px] rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+            <span className="text-[10px] font-bold text-slate-400">$</span>
+          </div>
+          <input value={formMateriau.note} onChange={(e) => setFormMateriau({ ...formMateriau, note: e.target.value })}
+            placeholder="Note (ex. : acheté avant Fluxya, ou payé sans bon de commande)"
+            className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+          <div className="mt-1.5 flex gap-1.5">
+            <Button onClick={ajouterMateriau} disabled={!(Number(formMateriau.montant) > 0)} className="min-h-0 px-3 py-1 text-[11px]">Ajouter</Button>
+            <Button variant="outline" onClick={() => setFormMateriau(null)} className="min-h-0 px-3 py-1 text-[11px]">Annuler</Button>
+          </div>
+        </div>
+      ) : null}
+
       {/* 🧾 MONTANTS DÉJÀ FACTURÉS */}
       {factures.length > 0 && (
         <div className="mb-1.5 space-y-1">
@@ -415,11 +482,14 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
         </div>
       ) : null}
 
-      {(r?.heuresReprise > 0 || r?.factureReprise > 0) && (
+      {(r?.heuresReprise > 0 || r?.factureReprise > 0 || r?.coutMateriauxReprise > 0) && (
         <p className="mb-1.5 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">
-          Compté dans ce projet : {r.heuresReprise > 0 ? `${r.heuresReprise} h reprises (${r.coutReprise.toFixed(2)} $ de coût)` : ""}
-          {r.heuresReprise > 0 && r.factureReprise > 0 ? " · " : ""}
-          {r.factureReprise > 0 ? `${r.factureReprise.toFixed(2)} $ déjà facturés` : ""}
+          Compté dans ce projet :{" "}
+          {[
+            r.heuresReprise > 0 ? `${r.heuresReprise} h reprises (${r.coutReprise.toFixed(2)} $ de coût)` : null,
+            r.coutMateriauxReprise > 0 ? `${r.coutMateriauxReprise.toFixed(2)} $ de matériaux repris` : null,
+            r.factureReprise > 0 ? `${r.factureReprise.toFixed(2)} $ déjà facturés` : null,
+          ].filter(Boolean).join(" · ")}
         </p>
       )}
 
@@ -427,6 +497,11 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
         {!formHeures && (
           <Button variant="outline" onClick={() => setFormHeures({ qui: "", heures: "", taux: "", date: todayISO(), note: "" })} className="min-h-0 gap-1 px-2.5 py-1 text-[11px]">
             <Plus size={11} /> Heures déjà travaillées
+          </Button>
+        )}
+        {!formMateriau && (
+          <Button variant="outline" onClick={() => setFormMateriau({ fournisseur: "", montant: "", date: todayISO(), note: "" })} className="min-h-0 gap-1 px-2.5 py-1 text-[11px]">
+            <Plus size={11} /> Matériaux déjà achetés
           </Button>
         )}
         {!formFacture && (

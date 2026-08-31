@@ -894,7 +894,10 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
     0
   );
   const factureReprise = (reprise.factures || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
-  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion + coutReprise;
+  // 🧱 Matériaux déjà achetés (avant Fluxya, ou sans bon de commande) —
+  // saisis à la main sur le projet, comptés dans le coût réel.
+  const coutMateriauxReprise = (reprise.materiaux || []).reduce((s, m) => s + (Number(m.montant) || 0), 0);
+  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion + coutReprise + coutMateriauxReprise;
   const profitReel = projet.budgetTotal - coutTotalReel;
   const pourcentageMarge = projet.budgetTotal > 0 ? (profitReel / projet.budgetTotal) * 100 : 0;
   const pourcentageDepense = projet.budgetTotal > 0 ? (coutTotalReel / projet.budgetTotal) * 100 : 0;
@@ -919,6 +922,7 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
     heuresReprise,
     coutReprise,
     factureReprise,
+    coutMateriauxReprise,
     coutMainOeuvre,
     coutMainOeuvreChantier,
     coutTransport,
