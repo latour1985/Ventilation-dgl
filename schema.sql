@@ -4491,3 +4491,30 @@ grant execute on function repondre_devis(text,text,text,text,text,text) to anon,
 -- Verification : les deux fonctions repondent au patron « porteur ->
 -- version active ».
 select proname from pg_proc where proname in ('devis_public', 'repondre_devis');
+
+-- ============================================================
+-- 114 - LES OPTIONS DEJA REPONDUES NE S'OFFRENT PLUS
+--       (2026-08-31)
+-- ============================================================
+-- Vecu par le proprietaire : il feuillette « Option 2 », qui portait une
+-- VIEILLE reponse (refus d'un essai passe) — la page se verrouillait
+-- comme si le devis etait repondu, impossible de revenir. Une version
+-- archivee deja repondue ne peut de toute facon pas etre choisie
+-- (garde de choisir_version_devis) : elle ne doit plus apparaitre dans
+-- les onglets. Seules les options VIERGES (et l'active) s'offrent.
+
+create or replace function devis_public_options(p_jeton text)
+returns table (numero text, version int, total_vendant numeric, note_version text, est_active boolean)
+language sql security definer set search_path = public as $$
+  select d.numero, coalesce(d.version, 0)::int, d.total_vendant, d.note_version, d.version_active
+  from devis_app d
+  join devis_app porteur on porteur.jeton_public = p_jeton
+    and (porteur.jeton_expire_le is null or porteur.jeton_expire_le > now())
+  where coalesce(d.numero_base, d.numero) = coalesce(porteur.numero_base, porteur.numero)
+    and d.entreprise_id = porteur.entreprise_id
+    and (d.version_active or (d.offerte_comparaison and d.reponse_client is null))
+  order by coalesce(d.version, 0);
+$$;
+
+-- Verification.
+select proname from pg_proc where proname = 'devis_public_options';

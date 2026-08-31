@@ -93,13 +93,41 @@ export default function PageDevisPublic({ params }) {
     try {
       const v = await chargerVersionDevis(jeton, numero);
       if (v) {
-        setDevis((prev) => ({ ...prev, numero: v.numero, lignes: v.lignes, totalVendant: v.totalVendant, reponseClient: v.reponseClient }));
+        // ⚠️ On ne touche PAS à reponseClient (vécu : une option qui
+        // portait une VIEILLE réponse verrouillait la page — impossible
+        // de revenir). L'état « répondu » appartient au DOSSIER, pas à
+        // l'option feuilletée.
+        setDevis((prev) => ({ ...prev, numero: v.numero, lignes: v.lignes, totalVendant: v.totalVendant }));
       }
     } catch {
       // on reste sur l'option affichée
     }
     setChargeOption("");
   };
+
+  // ⚖️ COMPARAISON CÔTE À CÔTE (2026-08-31, demande du propriétaire :
+  // « coller 2 devis un à côté de l'autre pour voir les différences »).
+  // Les lignes qui DIFFÈRENT de l'autre option sont surlignées.
+  const [modeComparaison, setModeComparaison] = useState(false);
+  const [choixComparaison, setChoixComparaison] = useState([]);
+  const [contenusComparaison, setContenusComparaison] = useState({});
+  const basculerComparaison = async (numero) => {
+    if (choixComparaison.includes(numero)) {
+      setChoixComparaison((prev) => prev.filter((n) => n !== numero));
+      return;
+    }
+    // Deux au maximum : le troisième choix remplace le plus ancien.
+    setChoixComparaison((prev) => [...prev.slice(-1), numero]);
+    if (!contenusComparaison[numero]) {
+      try {
+        const v = await chargerVersionDevis(jeton, numero);
+        if (v) setContenusComparaison((prev) => ({ ...prev, [numero]: v }));
+      } catch {
+        setChoixComparaison((prev) => prev.filter((n) => n !== numero));
+      }
+    }
+  };
+  const cleLigne = (l) => `${l.nom || ""}|${l.quantite}|${l.prix_vendant}`;
 
   const repondre = async (reponse) => {
     if (reponse === "accepte" && (!accepte || nom.trim().length < 3)) return;
@@ -218,12 +246,12 @@ export default function PageDevisPublic({ params }) {
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {options.map((o) => {
-                const sel = o.numero === devis.numero;
+                const sel = modeComparaison ? choixComparaison.includes(o.numero) : o.numero === devis.numero;
                 return (
                   <button
                     key={o.numero}
-                    onClick={() => voirOption(o.numero)}
-                    disabled={chargeOption !== ""}
+                    onClick={() => (modeComparaison ? basculerComparaison(o.numero) : voirOption(o.numero))}
+                    disabled={!modeComparaison && chargeOption !== ""}
                     className={`rounded-xl border px-3 py-2 text-left text-xs font-bold ${sel ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-700"}`}
                   >
                     {o.version === 0 ? "Option originale" : `Option ${o.version}`}
@@ -235,6 +263,67 @@ export default function PageDevisPublic({ params }) {
                 );
               })}
             </div>
+            {/* ⚖️ Le mode côte à côte : choisis 2 options, la page
+                s'ajuste toute seule et surligne ce qui diffère. */}
+            <button
+              onClick={() => {
+                setModeComparaison((m) => !m);
+                setChoixComparaison([]);
+              }}
+              className="mt-2 text-[11px] font-bold text-slate-500 underline underline-offset-2"
+            >
+              {modeComparaison ? "✕ Fermer la comparaison" : "⚖️ Comparer 2 options côte à côte"}
+            </button>
+            {modeComparaison && choixComparaison.length < 2 && (
+              <p className="mt-1 text-[11px] text-slate-400">Touche {choixComparaison.length === 0 ? "deux options" : "une deuxième option"} ci-dessus pour les voir côte à côte.</p>
+            )}
+            {modeComparaison && choixComparaison.length === 2 && (() => {
+              const [nA, nB] = choixComparaison;
+              const cA = contenusComparaison[nA];
+              const cB = contenusComparaison[nB];
+              if (!cA || !cB) return <p className="mt-2 text-[11px] text-slate-400">Chargement des deux options…</p>;
+              const clesA = new Set((cA.lignes || []).map(cleLigne));
+              const clesB = new Set((cB.lignes || []).map(cleLigne));
+              const colonne = (c, clesAutre) => (
+                <div className="rounded-xl border border-slate-200 p-2.5">
+                  <p className="text-xs font-extrabold text-slate-800">
+                    {c.version === 0 ? "Option originale" : `Option ${c.version}`}
+                    <span className="ml-1.5 font-bold tabular-nums text-slate-600">{argent(c.totalVendant)}</span>
+                  </p>
+                  {c.noteVersion && <p className="text-[10px] text-slate-400">{c.noteVersion}</p>}
+                  <div className="mt-1.5 space-y-1">
+                    {(c.lignes || []).map((l, i) => {
+                      const differe = !clesAutre.has(cleLigne(l));
+                      return (
+                        <div key={l.uid || i} className={`rounded-lg px-2 py-1 text-[11px] ${differe ? "bg-amber-50 font-semibold text-amber-900" : "text-slate-600"}`}>
+                          <span className="block">{l.nom}</span>
+                          <span className="tabular-nums text-[10px] opacity-70">{l.quantite} × {argent(l.prix_vendant)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => {
+                      voirOption(c.numero);
+                      setModeComparaison(false);
+                      setChoixComparaison([]);
+                    }}
+                    className="mt-2 w-full rounded-lg bg-[#131B2E] py-2 text-[11px] font-bold text-white active:scale-[0.99]"
+                  >
+                    Continuer avec celle-ci
+                  </button>
+                </div>
+              );
+              return (
+                <div className="mt-2">
+                  <p className="text-[10px] text-slate-400">Ce qui est <span className="rounded bg-amber-50 px-1 font-semibold text-amber-900">surligné</span> diffère de l&apos;autre option.</p>
+                  <div className="mt-1.5 grid gap-2 md:grid-cols-2">
+                    {colonne(cA, clesB)}
+                    {colonne(cB, clesA)}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
