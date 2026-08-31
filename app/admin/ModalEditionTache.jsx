@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
+import { useEntreprise } from "@/lib/contexteEntreprise";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
@@ -25,6 +26,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [heures, setHeures] = useState(tache.heures ?? 1);
   const [jours, setJours] = useState(tache.jours ?? 1);
   const [sauterWeekend, setSauterWeekend] = useState(!!tache.sauterWeekend);
+  // 📅 Sauter les fériés CCQ — offert quand l'entreprise suit le
+  // calendrier de la construction (Paramètres → Paie & heures).
+  const configEntCcq = useEntreprise();
+  const [sauterFeries, setSauterFeries] = useState(!!tache.sauterFeries);
   const [employeId, setEmployeId] = useState(employeIdInitial || "");
   const [description, setDescription] = useState(tache.description || "");
   // 📇 Contact sur place — repris du carnet du client ; « actuel »
@@ -157,6 +162,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       heures: Math.max(0, heures),
       jours: Math.max(0, jours),
       sauterWeekend,
+      sauterFeries,
       // Assignation immédiate seulement si un/des technicien(s) choisis —
       // sinon la tâche reste "en attente" avec sa durée mise à jour.
       employeId: dejaPlanifiee ? employeId || null : employeIds[0] || null,
@@ -355,6 +361,12 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
             <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
               <input type="checkbox" checked={sauterWeekend} onChange={(e) => setSauterWeekend(e.target.checked)} className="h-3.5 w-3.5 accent-[#FF6A13]" />
               Sauter les samedis et dimanches
+            </label>
+          )}
+          {jours >= 1 && configEntCcq?.calendrierCcq === true && (
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+              <input type="checkbox" checked={sauterFeries} onChange={(e) => setSauterFeries(e.target.checked)} className="h-3.5 w-3.5 accent-[#FF6A13]" />
+              Sauter les jours fériés (calendrier CCQ)
             </label>
           )}
 
@@ -680,7 +692,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
           {dejaPlanifiee && onRetirerHoraire && (
             <Button
               variant="outline"
-              onClick={() => onRetirerHoraire({ heures: Math.max(0, heures), jours: Math.max(0, jours), sauterWeekend, description })}
+              onClick={() => onRetirerHoraire({ heures: Math.max(0, heures), jours: Math.max(0, jours), sauterWeekend, sauterFeries, description })}
               className="min-h-0 w-full py-2 text-xs"
             >
               ↩️ Retirer de l&apos;horaire — la tâche retourne dans « Tâches en attente »

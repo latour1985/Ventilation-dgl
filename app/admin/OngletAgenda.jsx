@@ -14,6 +14,7 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { estCourrielST } from "@/lib/supabase/sousTraitants";
+import { estFerieCcq, marqueurCcq } from "@/lib/calendrierCcq";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
@@ -161,13 +162,17 @@ export function joursDuMois(date) {
 }
 
 
-export function calculerJoursCibles(dateDepart, nbJours, sauterWeekend) {
+export function calculerJoursCibles(dateDepart, nbJours, sauterWeekend, sauterFeries = false) {
   const resultat = [];
   let curseur = new Date(dateDepart);
   let securite = 0;
   while (resultat.length < Math.max(1, nbJours) && securite < 60) {
     const jourSemaine = curseur.getDay(); // 0 = dimanche, 6 = samedi
-    if (!sauterWeekend || (jourSemaine !== 0 && jourSemaine !== 6)) {
+    const weekendSaute = sauterWeekend && (jourSemaine === 0 || jourSemaine === 6);
+    // 📅 Calendrier CCQ (2026-08-31) : la tâche enjambe aussi les jours
+    // fériés chômés — même mécanique que les fins de semaine.
+    const ferieSaute = sauterFeries && estFerieCcq(dateISO(curseur));
+    if (!weekendSaute && !ferieSaute) {
       resultat.push(new Date(curseur));
     }
     curseur = ajouterJours(curseur, 1);
@@ -895,6 +900,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const [nouvelleDureeHeures, setNouvelleDureeHeures] = useState(1);
   const [nouvelleDureeJours, setNouvelleDureeJours] = useState(0);
   const [nouveauSauterWeekend, setNouveauSauterWeekend] = useState(false);
+  // 📅 « Sauter les jours fériés » (CCQ) — offert seulement quand
+  // l'entreprise suit le calendrier de la construction ; coché d'office
+  // dans ce cas (c'est la norme de l'industrie, décocher est l'exception).
+  const [nouveauSauterFeries, setNouveauSauterFeries] = useState(() => configEnt?.calendrierCcq === true);
   // Description des travaux — saisissable dès la création (avant, il
   // fallait rouvrir la fenêtre d'édition pour en écrire une).
   const [nouvelleDescription, setNouvelleDescription] = useState("");
@@ -1070,6 +1079,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       heures: nouvelleDureeHeures,
       jours: nouvelleDureeJours,
       sauterWeekend: nouveauSauterWeekend,
+      sauterFeries: configEnt?.calendrierCcq === true && nouveauSauterFeries,
       description: nouvelleDescription.trim(),
       // 📎 Photos et plans joints par le bureau — le technicien les
       // ouvre sur son téléphone, sans rappeler pour « c'est où déjà ? ».
@@ -1451,7 +1461,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // blocage partiel (seulement N heures) ne s'applique que si jours
     // est explicitement mis à 0.
     const blocageJourComplet = nbJoursSpecifie >= 1;
-    const joursCibles = calculerJoursCibles(dateDepart, nbJoursSpecifie, tache.sauterWeekend);
+    const joursCibles = calculerJoursCibles(dateDepart, nbJoursSpecifie, tache.sauterWeekend, tache.sauterFeries);
     const indexDepart = heureDepart ? Math.max(0, indexCaseHeure(heureDepart)) : 0;
     // ⏰ BOGUE DE MINUIT (corrigé 2026-08-17, vécu) : « journée complète »
     // partait de la case 00:00 — la barre commençait à minuit hors de
@@ -1487,7 +1497,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     });
     setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
     const derniereDate = joursCibles[joursCibles.length - 1];
-    const detailJours = joursCibles.length > 1 ? `du ${dateISO(dateDepart)} au ${dateISO(derniereDate)}${tache.sauterWeekend ? " (fins de semaine sautées)" : ""}` : `le ${dateISO(dateDepart)}`;
+    const detailJours = joursCibles.length > 1 ? `du ${dateISO(dateDepart)} au ${dateISO(derniereDate)}${tache.sauterWeekend ? " (fins de semaine sautées)" : ""}${tache.sauterFeries ? " (fériés CCQ sautés)" : ""}` : `le ${dateISO(dateDepart)}`;
+    // 📅 Avertissement doux (jamais bloquant) : la 1re journée tombe sur
+    // un jour marqué du calendrier CCQ — on le DIT, l'humain décide.
+    const marqueDepart = configEnt?.calendrierCcq ? marqueurCcq(dateISO(dateDepart)) : null;
+    if (marqueDepart) {
+      ajouterJournal(`📅 Attention : « ${tache.titre || tache.type} » démarre le ${dateISO(dateDepart)} — ${marqueDepart.nom}.`);
+    }
     const detailHeures = blocageJourComplet
       ? `journée bloquée à partir de ${heureDepart || heuresCibles[0] || "07:00"}`
       : nbHeures > 0
@@ -1829,6 +1845,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       heures: champs.heures,
       jours: champs.jours,
       sauterWeekend: champs.sauterWeekend,
+      ...(champs.sauterFeries !== undefined ? { sauterFeries: champs.sauterFeries } : {}),
       description: champs.description,
       // Contact sur place : suit la modification (null = retiré) ; si la
       // modale ne l'a pas touché (undefined), l'existant est conservé.
@@ -1859,7 +1876,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, employeId, employeIds, date, heureDebut, description, contactSurPlace }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -1868,6 +1885,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       heures,
       jours,
       sauterWeekend,
+      ...(sauterFeries !== undefined ? { sauterFeries } : {}),
       description: description ?? tache.description,
       contactSurPlace: contactSurPlace !== undefined ? contactSurPlace : tache.contactSurPlace || null,
     };
@@ -1926,6 +1944,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       heures: tache.heures,
       jours: tache.jours,
       sauterWeekend: tache.sauterWeekend,
+      sauterFeries: tache.sauterFeries,
       description: tache.description,
       employeId: employeCibleId,
       date: dateStr,
@@ -2094,20 +2113,44 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
 
       {vue === "jour" && (
         <div className="mb-4 flex gap-1.5 overflow-x-auto">
-          {semaine.map((d) => (
-            <button
-              key={dateISO(d)}
-              onClick={() => setJourAffiche(d)}
-              className={`flex min-w-[52px] flex-col items-center rounded-xl px-2 py-1.5 text-xs font-bold ${
-                dateISO(d) === jourKey ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-500"
-              }`}
-            >
-              <span>{d.toLocaleDateString("fr-CA", { weekday: "short" })}</span>
-              <span className="tabular-nums">{d.getDate()}</span>
-            </button>
-          ))}
+          {semaine.map((d) => {
+            // 📅 Calendrier CCQ : le jour marqué se voit AVANT le clic —
+            // pastille ambrée (férié) ou grise (vacances construction).
+            const marque = configEnt?.calendrierCcq === true ? marqueurCcq(dateISO(d)) : null;
+            return (
+              <button
+                key={dateISO(d)}
+                onClick={() => setJourAffiche(d)}
+                title={marque?.nom || undefined}
+                className={`flex min-w-[52px] flex-col items-center rounded-xl px-2 py-1.5 text-xs font-bold ${
+                  dateISO(d) === jourKey
+                    ? "bg-[#131B2E] text-white"
+                    : marque?.type === "ferie"
+                      ? "bg-amber-100 text-amber-700"
+                      : marque?.type === "vacances"
+                        ? "bg-slate-200 text-slate-500"
+                        : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                <span>{d.toLocaleDateString("fr-CA", { weekday: "short" })}</span>
+                <span className="tabular-nums">{d.getDate()}</span>
+                {marque && <span className="text-[9px] leading-none">{marque.type === "ferie" ? "🎌" : "🏖️"}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
+      {/* 📅 Bandeau du jour affiché : férié ou vacances de la
+          construction — dit POURQUOI ne pas céduler ici. */}
+      {vue === "jour" && configEnt?.calendrierCcq === true && (() => {
+        const marque = marqueurCcq(jourKey);
+        if (!marque) return null;
+        return (
+          <div className={`mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold ${marque.type === "ferie" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-500"}`}>
+            {marque.type === "ferie" ? "🎌" : "🏖️"} {marque.nom} — calendrier de la construction (CCQ)
+          </div>
+        );
+      })()}
 
       <div className="flex flex-col gap-4 lg:flex-row">
         {/* PANNEAU TÂCHES EN ATTENTE */}
@@ -2853,6 +2896,19 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     Sauter les samedis et dimanches
                   </label>
                 )}
+                {/* 📅 Offerte seulement aux entreprises qui suivent le
+                    calendrier CCQ (Paramètres → Paie & heures). */}
+                {nouvelleDureeJours > 1 && configEnt?.calendrierCcq === true && (
+                  <label className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={nouveauSauterFeries}
+                      onChange={(e) => setNouveauSauterFeries(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-[#FF6A13]"
+                    />
+                    Sauter les jours fériés (calendrier CCQ)
+                  </label>
+                )}
                 <div className="mt-1.5">
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Technicien attribué</label>
                   <select
@@ -3565,6 +3621,17 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     Sauter les samedis et dimanches
                   </label>
                 )}
+                {(t.jours ?? 1) > 1 && configEnt?.calendrierCcq === true && (
+                  <label className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                    <input
+                      type="checkbox"
+                      checked={!!t.sauterFeries}
+                      onChange={(e) => majDureeTache(t.id, { sauterFeries: e.target.checked })}
+                      className="h-3.5 w-3.5 accent-[#FF6A13]"
+                    />
+                    Sauter les jours fériés (calendrier CCQ)
+                  </label>
+                )}
 
                 {/* DÉBLOCAGE MANUEL DU DÉPÔT (admin) */}
                 {!lectureSeule && depotDe(t.id)?.statut === "en_attente_paiement" && (
@@ -4160,10 +4227,19 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 <div className="sticky left-0 z-10 bg-white" />
                 {joursAffiches.map((d) => {
                   const weekend = d.getDay() === 0 || d.getDay() === 6;
+                  // 📅 Jour marqué CCQ : l'en-tête l'annonce (couleur +
+                  // infobulle) pour qu'on ne cédule pas dessus par erreur.
+                  const marque = configEnt?.calendrierCcq === true ? marqueurCcq(dateISO(d)) : null;
                   return (
-                    <div key={dateISO(d)} className={`border-b border-slate-200 px-1 py-2 text-center text-[10px] font-semibold tabular-nums ${weekend ? "text-orange-400" : "text-slate-400"}`}>
+                    <div
+                      key={dateISO(d)}
+                      title={marque?.nom || undefined}
+                      className={`border-b border-slate-200 px-1 py-2 text-center text-[10px] font-semibold tabular-nums ${
+                        marque?.type === "ferie" ? "bg-amber-50 text-amber-600" : marque?.type === "vacances" ? "bg-slate-100 text-slate-400" : weekend ? "text-orange-400" : "text-slate-400"
+                      }`}
+                    >
                       {vue === "semaine" ? d.toLocaleDateString("fr-CA", { weekday: "short" }) : ""}
-                      <div>{d.getDate()}</div>
+                      <div>{marque ? `${marque.type === "ferie" ? "🎌" : "🏖️"}${d.getDate()}` : d.getDate()}</div>
                     </div>
                   );
                 })}
@@ -4211,15 +4287,23 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     entreesJour.sort((a, b) => minutesDe(a) - minutesDe(b));
                     const tachesJour = entreesJour.map((e) => e.tache);
                     const weekend = d.getDay() === 0 || d.getDay() === 6;
+                    // 📅 Case vide d'un jour CCQ : teintée comme les fins
+                    // de semaine — le vide se lit « congé », pas « libre ».
+                    const marqueCase = configEnt?.calendrierCcq === true ? marqueurCcq(dateISO(d)) : null;
                     return (
                       <div
                         key={dateISO(d)}
+                        title={marqueCase?.nom || undefined}
                         onDragOver={(ev) => { ev.preventDefault(); setTacheSurvolee(cleSurvol); }}
                         onDragLeave={() => setTacheSurvolee(null)}
                         onDrop={(ev) => { onDropJour(ev, emp.id, d); setTacheSurvolee(null); }}
                         onMouseLeave={() => setSurvol(null)}
                         className={`min-h-[44px] border-l border-slate-100 p-1 ${
-                          tacheSurvolee === cleSurvol ? "bg-orange-50" : tachesJour.length === 0 && weekend ? "bg-slate-50" : ""
+                          tacheSurvolee === cleSurvol
+                            ? "bg-orange-50"
+                            : tachesJour.length === 0 && marqueCase
+                              ? marqueCase.type === "ferie" ? "bg-amber-50" : "bg-slate-100"
+                              : tachesJour.length === 0 && weekend ? "bg-slate-50" : ""
                         } ${vue === "mois" ? "flex flex-wrap content-center items-center justify-center gap-0.5" : "space-y-0.5"}`}
                       >
                         {tachesJour.map((tache) =>

@@ -4615,3 +4615,20 @@ alter table factures_libres add column if not exists annulee_par text;
 select column_name, data_type from information_schema.columns
  where table_schema = 'public' and table_name = 'factures_libres'
    and column_name in ('statut', 'annulee_le', 'annulation_note', 'annulee_par');
+
+-- ============================================================
+-- 118 - CALENDRIER DE LA CONSTRUCTION (CCQ) EN OPTION (2026-08-31)
+-- ------------------------------------------------------------
+-- Demande du proprietaire : feries et vacances de la construction
+-- VISIBLES dans l'agenda (pour ne pas ceduler dessus par erreur) +
+-- case « sauter les jours feries » a la creation d'horaire. EN OPTION
+-- par entreprise : bon pour les compagnies de construction seulement.
+-- Les dates se CALCULENT (lib/calendrierCcq.js — verifie contre les
+-- periodes publiees 2022-2025) : aucune table de dates a entretenir.
+-- Additif, idempotent : defaut decoche, rien ne change pour personne.
+-- ============================================================
+alter table entreprises add column if not exists calendrier_ccq boolean not null default false;
+
+-- Verification : la colonne existe.
+select column_name, data_type from information_schema.columns
+ where table_schema = 'public' and table_name = 'entreprises' and column_name = 'calendrier_ccq';

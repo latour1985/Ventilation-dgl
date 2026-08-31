@@ -853,7 +853,7 @@ function reconstruirePlanning(rows, employesRef, config) {
     };
     const nbJours = Math.max(0, tache.jours);
     const blocJourComplet = nbJours >= 1;
-    const joursCibles = calculerJoursCibles(new Date(`${r.date_debut}T00:00:00`), nbJours, !!tache.sauterWeekend);
+    const joursCibles = calculerJoursCibles(new Date(`${r.date_debut}T00:00:00`), nbJours, !!tache.sauterWeekend, !!tache.sauterFeries);
     const indexDepart = r.heure_debut ? Math.max(0, indexCaseHeure(r.heure_debut)) : 0;
     const nbHeures = Math.max(0, Math.min(tache.heures ?? 1, HEURES.length - indexDepart));
     // Même correction que dans assigner() : le bloc « journée complète »

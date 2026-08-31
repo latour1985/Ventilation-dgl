@@ -656,6 +656,30 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               </span>
             </span>
           </label>
+          {/* 📅 CALENDRIER CCQ (2026-08-31) — EN OPTION : bon pour les
+              compagnies de construction seulement. Coché : fériés et
+              vacances de la construction MARQUÉS dans l'agenda (pour ne
+              pas céduler dessus par erreur) + case « sauter les jours
+              fériés » à la création d'horaire. */}
+          <label className="mb-3 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-semibold text-slate-700">
+            <input
+              type="checkbox"
+              checked={brouillon.calendrierCcq === true}
+              onChange={(e) => champ("calendrierCcq", e.target.checked)}
+              disabled={!estAdminPrincipal}
+              className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+            />
+            <span>
+              📅 Suivre le calendrier de la construction (CCQ)
+              <span className="block text-[10px] font-normal leading-snug text-slate-400">
+                Pour les compagnies de construction. Coché : les jours fériés chômés et les vacances de la construction
+                (2 semaines l'été, 2 l'hiver) apparaissent automatiquement dans l'agenda — impossible de les oublier en
+                cédulant — et l'horaire d'une tâche peut « sauter les jours fériés » comme il saute déjà les fins de
+                semaine. Les dates se calculent toutes seules, année après année. Rien n'est bloqué : l'agenda marque,
+                tu décides.
+              </span>
+            </span>
+          </label>
           <div className="grid gap-2.5 sm:grid-cols-2">
             <ChampParametre
               {...propsChamp}
