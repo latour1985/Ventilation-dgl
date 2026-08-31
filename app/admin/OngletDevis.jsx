@@ -34,10 +34,19 @@ export function tauxMoyenEquipe(tauxMetiers) {
   return Math.round((valeurs.reduce((s, n) => s + n, 0) / valeurs.length) * 100) / 100;
 }
 
+// 📄 5 dossiers par page dans « Devis récents » (2026-08-31, retour du
+// propriétaire : « ça descend longtemps à 10 » — les cartes de devis
+// sont hautes ; les listes compactes, elles, restent à 10).
+const DEVIS_PAR_PAGE = 5;
+
 export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onChoisirBonTravail, onChoisirProjet, onChoisirProjetExistant, tauxMoyen = 45 }) {
   const [option, setOption] = useState(null); // "bon_travail" | "projet" | "projet_existant" | null
   const client = clients.find((c) => c.id === devis.clientId);
-  const [adresseTravauxId, setAdresseTravauxId] = useState("");
+  // 🏠 Pré-choisie depuis le DEVIS quand il porte son adresse des
+  // travaux (2026-08-31) — plus à la resélectionner au traitement.
+  const [adresseTravauxId, setAdresseTravauxId] = useState(
+    () => (client?.adresses || []).find((a) => `${a.nom} — ${libelleAdresse(a)}` === devis.adresseTravaux)?.id || ""
+  );
   // ➕ DEVIS MULTIPLES PAR PROJET (2026-08-30, GO du propriétaire :
   // « des fois pour des extras ou des ajouts supplémentaires ») — les
   // projets DU CLIENT auxquels ce devis peut s'ajouter.
@@ -84,7 +93,7 @@ export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onCh
 
   const adresseChoisie = () => {
     const a = client?.adresses?.find((x) => x.id === adresseTravauxId);
-    return a ? `${a.nom} — ${libelleAdresse(a)}` : null;
+    return a ? `${a.nom} — ${libelleAdresse(a)}` : devis.adresseTravaux || null;
   };
 
   // 💰 Le bloc « coûtant prévu » sert aux DEUX chemins projet (nouveau
@@ -399,6 +408,19 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // AUCUN client présélectionné + recherche rapide (2026-08-17) —
   // même mécanique que le formulaire de tâche.
   const [clientId, setClientId] = useState("");
+  // 🏠 ADRESSE DES TRAVAUX SUR LE DEVIS (2026-08-31, demande du
+  // propriétaire) — choisie parmi les adresses du dossier client, elle
+  // identifie le devis dans les listes, part dans l'objet du courriel
+  // et suit jusqu'à la tâche ou au projet. Texte figé sur le devis.
+  const [adresseTravauxDevis, setAdresseTravauxDevis] = useState("");
+  useEffect(() => {
+    // Changement de client : une adresse qui ne lui appartient pas se
+    // vide (une révision du même client garde la sienne).
+    const c = clients.find((x) => x.id === clientId);
+    const valide = (c?.adresses || []).some((a) => `${a.nom} — ${libelleAdresse(a)}` === adresseTravauxDevis);
+    if (adresseTravauxDevis && !valide) setAdresseTravauxDevis("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
   const [filtreClientDevis, setFiltreClientDevis] = useState("");
   // 📋 LISTE OUVERTE AU CLIC (2026-08-25, demande du propriétaire) : la
   // liste n'apparaissait qu'après la première lettre — quand on a
@@ -615,10 +637,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // ✉️ OBJET MODIFIABLE (2026-08-30, demande du propriétaire : il met
       // l'adresse des travaux dans l'objet — le client retrouve le devis
       // plus vite dans sa boîte).
+      // L'adresse des travaux, quand elle existe, part D'OFFICE dans
+      // l'objet — c'était sa pratique manuelle, maintenant automatique.
       objet:
         devis.reponseClient === "accepte"
-          ? `Votre copie du devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`
-          : `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+          ? `Votre copie du devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
+          : `Devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
     });
   };
   const envoyerDevisParCourriel = async (devis) => {
@@ -918,6 +942,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEstContrat(!!source.estContrat);
     setFrequenceContrat(source.frequenceFacturationAnnuelle || 4);
     setEditionVersion({ source, note: (note || "").trim() });
+    setAdresseTravauxDevis(source.adresseTravaux || "");
     setCreationVersionPour(null);
     setNoteNouvelleVersion("");
     // La fenêtre du DOSSIER se ferme et celle de l'ÉDITION s'ouvre :
@@ -940,6 +965,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const annulerEdition = () => {
     setEditionEnFenetre(false);
     setEditionVersion(null);
+    setAdresseTravauxDevis("");
     setLignes([]);
     setEstContrat(false);
     setFrequenceContrat(4);
@@ -999,6 +1025,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // Une révision fraîche n'est pas offerte à la comparaison — le
       // bureau coche lui-même les options qu'il veut montrer au client.
       offerteComparaison: false,
+      adresseTravaux: adresseTravauxDevis || null,
     };
     // 🔑 LE LIEN DU CLIENT SUIT LA VERSION ACTIVE (bogue vécu par le
     // propriétaire, 2026-08-30 : « les ajouts et le prix n'apparaissent
@@ -1162,9 +1189,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // reprise automatiquement à la création de la tâche.
       estContrat,
       frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
+      adresseTravaux: adresseTravauxDevis || null,
     };
     setDevisListe((prev) => [nouveauDevis, ...prev]);
     setLignes([]);
+    setAdresseTravauxDevis("");
     setEstContrat(false);
     setFrequenceContrat(4);
     setCourrielModalOuvert(false);
@@ -1514,6 +1543,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                       )}
                     </p>
                     <p className="text-xs text-slate-500">{affichee.clientNom}</p>
+                    {/* 🏠 L'adresse des travaux — l'identifiant le plus
+                        parlant quand elle est là. */}
+                    {affichee.adresseTravaux && (
+                      <p className="truncate text-[11px] font-semibold text-slate-600">🏠 {affichee.adresseTravaux}</p>
+                    )}
                     {/* 📌 Étiquette du devis : sa première ligne — pour le
                         reconnaître d'un coup d'œil dans la liste. */}
                     {affichee.lignes?.[0]?.nom && (
@@ -1957,6 +1991,28 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
               <p className="mt-1 text-[11px] text-slate-400">Choisir un résultat enregistre l&apos;adresse au dossier de {client.nom} (avec le petit nom s&apos;il est rempli).</p>
+            </div>
+          )}
+
+          {/* 🏠 ADRESSE DES TRAVAUX DU DEVIS (2026-08-31) — pour le
+              reconnaître d'un coup d'œil, et elle suit partout. */}
+          {client && (client.adresses || []).length > 0 && (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">🏠 Adresse des travaux (sur ce devis)</label>
+              <select
+                value={adresseTravauxDevis}
+                onChange={(e) => setAdresseTravauxDevis(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">— Aucune (adresse de facturation par défaut) —</option>
+                {client.adresses.map((a) => {
+                  const t = `${a.nom} — ${libelleAdresse(a)}`;
+                  return <option key={a.id} value={t}>{t}</option>;
+                })}
+              </select>
+              <p className="mt-1 text-[10px] text-slate-400">
+                Elle identifie le devis dans les listes, part dans l&apos;objet du courriel et suit jusqu&apos;à la tâche ou au projet.
+              </p>
             </div>
           )}
 
@@ -2456,14 +2512,14 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
 
           <h2 ref={refListeDevis} className="px-1 text-sm font-extrabold uppercase tracking-wide text-slate-500">Devis récents</h2>
           <p className="px-1 text-[11px] text-slate-400">
-            10 par page. Tous les devis d'un client sont dans <span className="font-bold">son dossier</span> (onglet Clients), et la{" "}
+            5 par page. Tous les devis d'un client sont dans <span className="font-bold">son dossier</span> (onglet Clients), et la{" "}
             <span className="font-bold">recherche rapide</span> les trouve par numéro, client ou produit.
           </p>
           {dossiersDevis.length === 0 && <p className="px-1 text-xs text-slate-400">Aucun devis pour le moment.</p>}
           {/* UNE CARTE PAR DOSSIER — la version active est affichée ; les
               révisions précédentes s'atteignent par les onglets. */}
-          {dossiersDevis.slice((Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((dossier) => rendreCarteDossier(dossier))}
-          <BarrePagination total={dossiersDevis.length} page={pageDevis} onPage={setPageDevis} refHaut={refListeDevis} libelle="devis" />
+          {dossiersDevis.slice((Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / DEVIS_PAR_PAGE))) - 1) * DEVIS_PAR_PAGE, Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / DEVIS_PAR_PAGE))) * DEVIS_PAR_PAGE).map((dossier) => rendreCarteDossier(dossier))}
+          <BarrePagination total={dossiersDevis.length} page={pageDevis} onPage={setPageDevis} refHaut={refListeDevis} libelle="devis" parPage={DEVIS_PAR_PAGE} />
         </div>
       </div>
 

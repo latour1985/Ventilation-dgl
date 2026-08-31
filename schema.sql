@@ -4367,3 +4367,20 @@ select 'colonne' as quoi, count(*)::text as etat from information_schema.columns
 union all
 select 'fonctions', count(*)::text from pg_proc
  where proname in ('devis_public_options', 'devis_public_version', 'choisir_version_devis');
+
+-- ============================================================
+-- 112 - ADRESSE DES TRAVAUX SUR LE DEVIS
+--       (2026-08-31)
+-- ============================================================
+-- Demande du proprietaire : « oui ajoute l'adresse des travaux » — des
+-- la creation du devis, choisie parmi les adresses du dossier client.
+-- Elle identifie le devis dans les listes (🏠), part D'OFFICE dans
+-- l'objet du courriel (sa pratique manuelle, automatisee) et pre-remplit
+-- le traitement en tache ou en projet. Texte fige sur le devis.
+-- Additif, idempotent.
+
+alter table devis_app add column if not exists adresse_travaux text;
+
+-- Verification : la colonne existe.
+select column_name, data_type from information_schema.columns
+ where table_schema = 'public' and table_name = 'devis_app' and column_name = 'adresse_travaux';

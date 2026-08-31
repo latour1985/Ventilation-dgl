@@ -100,6 +100,9 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, 
                     les reconnaître ») : la première ligne fait office
                     d'étiquette — le devis n'a pas d'adresse propre,
                     elle se choisit seulement quand on le traite. */}
+                {affichee.adresseTravaux && (
+                  <p className="truncate text-[10px] font-semibold text-slate-600">🏠 {affichee.adresseTravaux}</p>
+                )}
                 {affichee.lignes?.[0]?.nom && (
                   <p className="truncate text-[10px] text-slate-500">
                     📌 {affichee.lignes[0].nom}

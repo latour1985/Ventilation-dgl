@@ -259,8 +259,8 @@ export const STATUTS_PIECE = {
 // ============================================================
 export const ITEMS_PAR_PAGE = 10;
 
-export function BarrePagination({ total, page, onPage, refHaut = null, libelle = "items" }) {
-  const nbPages = Math.max(1, Math.ceil(total / ITEMS_PAR_PAGE));
+export function BarrePagination({ total, page, onPage, refHaut = null, libelle = "items", parPage = ITEMS_PAR_PAGE }) {
+  const nbPages = Math.max(1, Math.ceil(total / parPage));
   if (nbPages <= 1) return null;
   const courante = Math.min(page, nbPages);
   const numeros = [];
