@@ -350,6 +350,15 @@ export default function PageDevisPublic({ params }) {
                     Refuser ce devis
                   </button>
                 </div>
+                {/* Règle maison : un bouton grisé SANS explication laisse
+                    croire que c'est brisé (vécu — le propriétaire lui-même
+                    a cru le refus inutilisable). Le refus exige le nom :
+                    c'est une réponse signée, comme l'acceptation. */}
+                {nom.trim().length < 3 && (
+                  <p className="mt-1.5 text-center text-[11px] text-slate-400">
+                    Pour refuser, écris d&apos;abord ton nom plus haut — un refus est une réponse signée, comme une acceptation.
+                  </p>
+                )}
               </>
             )}
 
