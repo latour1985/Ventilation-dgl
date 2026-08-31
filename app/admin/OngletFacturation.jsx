@@ -13,8 +13,8 @@ import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
-import { creerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
-import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre } from "@/lib/supabase/facturesLibres";
+import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
+import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
 import { majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
@@ -897,6 +897,57 @@ export function ApercuFactureClient({ bon, onFermer }) {
 // (2,9 % sur 8 450 $, ça se juge mieux en voyant « ≈ 245 $ »).
 // Ces frais ne s'ajoutent JAMAIS à la facture du client (LPC Québec).
 // ============================================================
+// ❌ ANNULER UNE FACTURE LIBRE — la note est OBLIGATOIRE : c'est elle
+// qui devient la preuve comptable dans QuickBooks (qui, quand, pourquoi
+// — la comptable la lira dans le mémo interne de la facture annulée).
+export function ModalAnnulationFactureLibre({ facture, onFermer, onAnnuler }) {
+  const [note, setNote] = useState("");
+  const [enCours, setEnCours] = useState(false);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+        <div className="mb-2 flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">❌ Annuler la facture {facture.docNumber}</h3>
+            <p className="text-xs text-slate-500">{facture.clientNom} · {facture.montantHT.toFixed(2)} $ HT</p>
+          </div>
+          <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          La facture sera annulée dans QuickBooks (VOID — elle reste au registre à 0 $, jamais supprimée), et ta
+          raison sera écrite dans son mémo interne : la preuve comptable voyage avec elle.
+        </p>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Raison de l'annulation (obligatoire) — ex : facturée en double, erreur de montant…"
+          rows={3}
+          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#FF6A13]"
+        />
+        {note.trim().length < 5 && (
+          <p className="mt-1 text-[10px] text-slate-400">Écris la raison (au moins quelques mots) — elle sert de preuve comptable.</p>
+        )}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <Button variant="outline" onClick={onFermer} className="min-h-0 py-2 text-xs">Retour</Button>
+          <Button
+            variant="danger"
+            disabled={note.trim().length < 5}
+            loading={enCours}
+            loadingText="Annulation…"
+            onClick={async () => {
+              setEnCours(true);
+              await onAnnuler(note.trim());
+            }}
+            className="min-h-0 py-2 text-xs"
+          >
+            Annuler la facture
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmettre }) {
   const [carte, setCarte] = useState(false);
   const [virement, setVirement] = useState(false);
@@ -1229,6 +1280,33 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   useEffect(() => {
     listerFacturesLibres().then(setFacturesLibres).catch(() => {});
   }, []);
+  // ❌ ANNULATION D'UNE FACTURE LIBRE (2026-08-31, demande du
+  // propriétaire) : VOID dans QuickBooks + NOTE COMPTABLE transférée
+  // (mémo interne : qui, quand, pourquoi) + statut « annulée » ici.
+  const [annulationLibre, setAnnulationLibre] = useState(null);
+  const annulerFactureLibre = async (fl, note) => {
+    const r = await annulerFactureQbo(fl.qboInvoiceId, note);
+    if (r?.erreur) {
+      ajouterJournal(`⚠️ Annulation de la facture ${fl.docNumber} REFUSÉE : ${r.erreur}`);
+      return;
+    }
+    const patch = {
+      statut: "annulee",
+      annuleeLe: new Date().toISOString(),
+      annulationNote: note || "",
+      annuleePar: nomAdmin || "",
+    };
+    try {
+      const maj = await majFactureLibre(fl.id, patch);
+      setFacturesLibres((prev) => prev.map((x) => (x.id === fl.id ? maj : x)));
+    } catch {
+      setFacturesLibres((prev) => prev.map((x) => (x.id === fl.id ? { ...x, ...patch } : x)));
+    }
+    ajouterJournal(
+      `❌ Facture ${fl.docNumber} (${fl.clientNom} · ${fl.montantHT.toFixed(2)} $ HT) ANNULÉE dans QuickBooks (VOID, trace comptable conservée)${note ? ` — raison : ${note}` : ""}.`
+    );
+  };
+
   const renvoyerFactureLibre = async (fl, choix) => {
     const adresses = listeDestinataires(choix).map((c) => c.email);
     if (adresses.length === 0 || !fl.qboInvoiceId) return;
@@ -1950,6 +2028,49 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const lignes = (donnees.lignes || []).filter((l) => l.description && l.montant > 0);
     if (lignes.length === 0) return;
     const nomClient = donnees.client?.nom || "";
+    const totalDemande = lignes.reduce((s, l) => s + l.montant, 0);
+
+    // 🔒 VERROU ANTI-DOUBLON (2026-08-31 — factures 4251/4252 créées en
+    // double chez un client) : si une facture IDENTIQUE (même client,
+    // même montant) est encore « en création » ou « à vérifier », ou a
+    // été confirmée il y a moins de 3 minutes, on REFUSE de réémettre —
+    // le premier envoi a peut-être réussi côté QuickBooks sans que sa
+    // réponse nous soit revenue.
+    const jumelle = (facturesLibres || []).find(
+      (fl) =>
+        fl.clientNom === nomClient &&
+        Math.abs(fl.montantHT - totalDemande) < 0.005 &&
+        (fl.statut === "en_creation" ||
+          fl.statut === "a_verifier" ||
+          (fl.statut !== "annulee" && fl.creeLe && Date.now() - new Date(fl.creeLe).getTime() < 3 * 60 * 1000))
+    );
+    if (jumelle) {
+      ajouterJournal(
+        `🔒 Facture NON réémise pour ${nomClient} (${totalDemande.toFixed(2)} $ HT) : une facture identique ${jumelle.statut === "en_creation" || jumelle.statut === "a_verifier" ? "est peut-être déjà rendue chez QuickBooks — vérifie « Factures sans chantier » et QuickBooks avant de recommencer" : `vient d'être créée (nº ${jumelle.docNumber || "?"})`}.`
+      );
+      return;
+    }
+
+    // 1er temps : la facture s'INSCRIT AU REGISTRE avant de partir —
+    // si la réponse de QuickBooks se perd en route, il reste une trace
+    // « à vérifier » au lieu d'un doublon invisible.
+    let brouillon = null;
+    try {
+      brouillon = await enregistrerFactureLibre({
+        statut: "en_creation",
+        clientId: donnees.client?.id || null,
+        clientNom: nomClient,
+        montantHT: totalDemande,
+        courriels: destinataires.map((c) => c.email),
+        projetId: (projets || []).find((p) => p.id === donnees.projetId)?.id || null,
+        reference: donnees.reference || "",
+      });
+      setFacturesLibres((prev) => [brouillon, ...prev]);
+    } catch {
+      // Registre indisponible (snippet pas passé ?) — on continue sans
+      // verrou plutôt que de bloquer la facturation.
+    }
+
     const r = await creerFactureQbo({
       clientId: donnees.client?.id || null,
       clientNom: nomClient,
@@ -1966,12 +2087,28 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       envoyerA: destinataires.map((c) => c.email),
       adresseTravaux: null,
     });
-    if (r?.erreur) {
-      ajouterJournal(`⚠️ Facture libre NON créée pour ${nomClient} : ${r.erreur}`);
-      return;
-    }
-    if (r?.nonConnecte) {
-      ajouterJournal("🔌 QuickBooks non connecté — facture libre NON créée (Paramètres → Connexions).");
+    // Le sort du brouillon suit la RÉPONSE : refus clair de QuickBooks =
+    // rien n'a été créé là-bas, le brouillon s'efface ; réponse JAMAIS
+    // revenue (réseau coupé, délai) = la facture existe PEUT-ÊTRE — le
+    // brouillon devient « à vérifier » et le verrou bloque toute
+    // réémission aveugle.
+    const reponsePerdue = r?.erreur === "Réseau indisponible — réessaie.";
+    if (r?.erreur || r?.nonConnecte) {
+      if (brouillon) {
+        if (reponsePerdue) {
+          majFactureLibre(brouillon.id, { statut: "a_verifier" }).catch(() => {});
+          setFacturesLibres((prev) => prev.map((fl) => (fl.id === brouillon.id ? { ...fl, statut: "a_verifier" } : fl)));
+        } else {
+          supprimerFactureLibreEnCreation(brouillon.id).catch(() => {});
+          setFacturesLibres((prev) => prev.filter((fl) => fl.id !== brouillon.id));
+        }
+      }
+      if (r?.nonConnecte) ajouterJournal("🔌 QuickBooks non connecté — facture libre NON créée (Paramètres → Connexions).");
+      else if (reponsePerdue)
+        ajouterJournal(
+          `⚠️ Facture pour ${nomClient} : la réponse de QuickBooks n'est PAS revenue — elle est marquée « à vérifier » dans « Factures sans chantier ». VÉRIFIE dans QuickBooks avant de la refaire.`
+        );
+      else ajouterJournal(`⚠️ Facture libre NON créée pour ${nomClient} : ${r.erreur}`);
       return;
     }
     const total = lignes.reduce((s, l) => s + l.montant, 0);
@@ -1999,24 +2136,33 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       await Promise.resolve(onSynchroniserQb()).catch(() => {});
     }
     const envoyee = r?.envoiQb?.envoyee;
-    // 🧾 REGISTRE LOCAL (2026-08-29) : sans lui, la facture libre ne
-    // vivait que dans QuickBooks — invisible ici, impossible à renvoyer.
+    // 🧾 REGISTRE LOCAL (2026-08-29, 2 temps depuis 2026-08-31) : le
+    // brouillon inscrit AVANT l'appel devient la facture confirmée.
     try {
-      const enregistree = await enregistrerFactureLibre({
+      const confirmee = {
         qboInvoiceId: r?.factureId || null,
         docNumber: numero,
-        clientId: donnees.client?.id || null,
-        clientNom: nomClient,
-        montantHT: total,
-        courriels: destinataires.map((c) => c.email),
-        projetId: projetChoisi?.id || null,
-        reference: donnees.reference || "",
         envoiStatut: envoyee ? "envoyee" : "non_confirme",
         envoyeeLe: envoyee ? r?.envoiQb?.envoyeeLe || new Date().toISOString() : null,
-      });
-      setFacturesLibres((prev) => [enregistree, ...prev]);
+        statut: "creee",
+      };
+      if (brouillon) {
+        const enregistree = await majFactureLibre(brouillon.id, confirmee);
+        setFacturesLibres((prev) => prev.map((fl) => (fl.id === brouillon.id ? enregistree : fl)));
+      } else {
+        const enregistree = await enregistrerFactureLibre({
+          ...confirmee,
+          clientId: donnees.client?.id || null,
+          clientNom: nomClient,
+          montantHT: total,
+          courriels: destinataires.map((c) => c.email),
+          projetId: projetChoisi?.id || null,
+          reference: donnees.reference || "",
+        });
+        setFacturesLibres((prev) => [enregistree, ...prev]);
+      }
     } catch {
-      ajouterJournal(`⚠️ Facture ${numero} créée dans QuickBooks, mais NON inscrite au registre local (le snippet 105 est-il passé ?) — elle n'apparaîtra pas dans « Factures sans chantier ».`);
+      ajouterJournal(`⚠️ Facture ${numero} créée dans QuickBooks, mais NON inscrite au registre local (le snippet 117 est-il passé ?) — elle n'apparaîtra pas dans « Factures sans chantier ».`);
     }
     ajouterJournal(
       `🧾 Facture libre ${numero} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
@@ -2542,27 +2688,45 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           </p>
           <div className="mt-1.5 space-y-1">
             {facturesLibres.slice(0, 15).map((fl) => (
-              <div key={fl.id} className="rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+              <div key={fl.id} className={`rounded-lg px-2 py-1.5 text-[11px] text-slate-600 ${fl.statut === "annulee" ? "bg-slate-100 opacity-70" : fl.statut === "a_verifier" ? "border border-amber-300 bg-amber-50" : "bg-slate-50"}`}>
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span className="min-w-0">
-                    <span className="font-bold text-slate-800">{fl.docNumber || "—"}</span> · {fl.clientNom}
+                    <span className={`font-bold text-slate-800 ${fl.statut === "annulee" ? "line-through" : ""}`}>{fl.docNumber || "—"}</span> · {fl.clientNom}
                     <span className="font-bold tabular-nums"> · {fl.montantHT.toFixed(2)} $</span>
                     {fl.reference && <span className="text-slate-400"> · {fl.reference}</span>}
                     <span className="text-slate-400"> · {fl.creeLe ? new Date(fl.creeLe).toLocaleDateString("fr-CA") : ""}</span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
-                    {fl.envoiStatut === "envoyee" ? (
-                      <span className="text-[10px] font-bold text-emerald-600">✉️ Envoyée ✓</span>
+                    {fl.statut === "annulee" ? (
+                      <span className="text-[10px] font-bold text-slate-500" title={fl.annulationNote || ""}>❌ Annulée{fl.annuleeLe ? ` le ${new Date(fl.annuleeLe).toLocaleDateString("fr-CA")}` : ""}</span>
+                    ) : fl.statut === "en_creation" || fl.statut === "a_verifier" ? (
+                      /* La réponse de QuickBooks n'est jamais revenue : la
+                         facture y existe PEUT-ÊTRE — on le dit, on ne devine pas. */
+                      <span className="text-[10px] font-bold text-amber-700">⏳ À vérifier dans QuickBooks — réponse jamais reçue</span>
                     ) : (
-                      <span className="text-[10px] font-bold text-red-600">⚠️ Envoi non confirmé</span>
-                    )}
-                    {fl.qboInvoiceId && (
-                      <button
-                        onClick={() => setRenvoiLibre(fl)}
-                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 active:scale-95"
-                      >
-                        📧 Renvoyer
-                      </button>
+                      <>
+                        {fl.envoiStatut === "envoyee" ? (
+                          <span className="text-[10px] font-bold text-emerald-600">✉️ Envoyée ✓</span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-red-600">⚠️ Envoi non confirmé</span>
+                        )}
+                        {fl.qboInvoiceId && (
+                          <button
+                            onClick={() => setRenvoiLibre(fl)}
+                            className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 active:scale-95"
+                          >
+                            📧 Renvoyer
+                          </button>
+                        )}
+                        {fl.qboInvoiceId && estAdminPrincipal && (
+                          <button
+                            onClick={() => setAnnulationLibre(fl)}
+                            className="rounded border border-red-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-red-600 active:scale-95"
+                          >
+                            ❌ Annuler
+                          </button>
+                        )}
+                      </>
                     )}
                   </span>
                 </div>
@@ -2570,6 +2734,20 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             ))}
           </div>
         </div>
+      )}
+
+      {/* ❌ Annulation d'une facture libre — note comptable OBLIGATOIRE :
+          elle part dans QuickBooks (mémo interne) avant le VOID. */}
+      {annulationLibre && (
+        <ModalAnnulationFactureLibre
+          facture={annulationLibre}
+          onFermer={() => setAnnulationLibre(null)}
+          onAnnuler={async (note) => {
+            const fl = annulationLibre;
+            setAnnulationLibre(null);
+            await annulerFactureLibre(fl, note);
+          }}
+        />
       )}
 
       {/* Renvoi d'une facture libre — choix des destinataires. */}

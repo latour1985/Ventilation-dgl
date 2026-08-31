@@ -12,6 +12,7 @@ import { AlertCircle, BarChart3, Briefcase, Camera, Check, ChevronRight, Clipboa
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { sauvegarderClient } from "@/lib/supabase/clients";
+import { listerFacturesLibres } from "@/lib/supabase/facturesLibres";
 import { synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { ModalDetailProjet } from "./OngletProjets";
 import { Button, BarrePagination, ITEMS_PAR_PAGE, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
@@ -597,6 +598,18 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
           .filter(Boolean)
           .some((champ) => String(champ).toLowerCase().includes(qClients))
       );
+  // 🧾 FACTURES SANS CHANTIER du dossier (2026-08-31, demande du
+  // propriétaire : « il faudrait que les factures apparaissent dans les
+  // dossiers clients »). Chargées quand un dossier s'ouvre — toujours
+  // fraîches, même si l'onglet Facturation vient d'en créer une.
+  const [facturesLibresClients, setFacturesLibresClients] = useState([]);
+  useEffect(() => {
+    if (!clientOuvertId) return;
+    listerFacturesLibres()
+      .then(setFacturesLibresClients)
+      .catch(() => {});
+  }, [clientOuvertId]);
+
   // Recherche rapide dans « Travaux (passés et à venir) » du client ouvert.
   const [rechercheTravaux, setRechercheTravaux] = useState("");
   const [filtreTravauxStatut, setFiltreTravauxStatut] = useState("tous"); // "tous" | "a_venir" | "complete"
@@ -1783,6 +1796,55 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       </div>
                       <DevisDuClient devisListe={devisListe} clientId={c.id} surlignerNumero={devisCible} compact onNouvelleVersion={onNouvelleVersionDevis} />
                     </div>
+
+                    {/* 🧾 FACTURES SANS CHANTIER DU CLIENT (2026-08-31) —
+                        celles émises depuis « Nouvelle facture » : la
+                        fiche raconte TOUT ce qui a été facturé à ce
+                        client, pas seulement les chantiers. */}
+                    {(() => {
+                      const facturesDuClient = (facturesLibresClients || []).filter(
+                        (fl) => (fl.clientId && fl.clientId === c.id) || (!fl.clientId && fl.clientNom === c.nom)
+                      );
+                      if (facturesDuClient.length === 0) return null;
+                      return (
+                        <div className="mt-4 border-t border-slate-100 pt-3">
+                          <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                            Factures sans chantier ({facturesDuClient.length})
+                          </p>
+                          <div className="space-y-1">
+                            {facturesDuClient.slice(0, 10).map((fl) => (
+                              <div
+                                key={fl.id}
+                                className={`flex flex-wrap items-center justify-between gap-1.5 rounded-lg px-2 py-1.5 text-[11px] text-slate-600 ${fl.statut === "annulee" ? "bg-slate-100 opacity-70" : "bg-slate-50"}`}
+                              >
+                                <span className="min-w-0">
+                                  <span className={`font-bold text-slate-800 ${fl.statut === "annulee" ? "line-through" : ""}`}>
+                                    {fl.docNumber || "—"}
+                                  </span>
+                                  <span className="font-bold tabular-nums"> · {fl.montantHT.toFixed(2)} $ HT</span>
+                                  {fl.reference && <span className="text-slate-400"> · {fl.reference}</span>}
+                                  <span className="text-slate-400"> · {fl.creeLe ? new Date(fl.creeLe).toLocaleDateString("fr-CA") : ""}</span>
+                                </span>
+                                <span className="shrink-0 text-[10px] font-bold">
+                                  {fl.statut === "annulee" ? (
+                                    <span className="text-slate-500" title={fl.annulationNote || ""}>❌ Annulée</span>
+                                  ) : fl.statut === "en_creation" || fl.statut === "a_verifier" ? (
+                                    <span className="text-amber-700">⏳ À vérifier</span>
+                                  ) : fl.envoiStatut === "envoyee" ? (
+                                    <span className="text-emerald-600">✉️ Envoyée ✓</span>
+                                  ) : (
+                                    <span className="text-red-600">⚠️ Envoi non confirmé</span>
+                                  )}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="mt-1 text-[9px] text-slate-400">
+                            Renvoi et annulation : onglet Facturation → « Factures sans chantier ».
+                          </p>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}

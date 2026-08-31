@@ -4591,3 +4591,27 @@ alter table entreprises add column if not exists achats_seulement_bc boolean not
 -- Verification : la colonne existe.
 select column_name, data_type from information_schema.columns
  where table_schema = 'public' and table_name = 'entreprises' and column_name = 'achats_seulement_bc';
+
+-- ============================================================
+-- 117 - CYCLE DE VIE DES FACTURES SANS CHANTIER (2026-08-31)
+-- ------------------------------------------------------------
+-- Deux demandes du proprietaire apres les premieres vraies factures :
+-- (1) une facture creee EN DOUBLE dans QuickBooks (4251/4252) : la
+--     reponse du premier appel s'etait perdue en route — la facture
+--     existait la-bas sans que Fluxya le sache, et le 2e essai a
+--     duplique. Remede : la facture s'inscrit au registre AVANT de
+--     partir (statut « en_creation ») ; reponse perdue -> « a_verifier »
+--     (et le verrou bloque toute reemission identique) ;
+-- (2) annuler une facture DEPUIS Fluxya : VOID dans QuickBooks + note
+--     comptable transferee (memo interne) + trace ici.
+-- Additif, idempotent : les lignes existantes restent « creee ».
+-- ============================================================
+alter table factures_libres add column if not exists statut text not null default 'creee';
+alter table factures_libres add column if not exists annulee_le timestamptz;
+alter table factures_libres add column if not exists annulation_note text;
+alter table factures_libres add column if not exists annulee_par text;
+
+-- Verification : les colonnes existent.
+select column_name, data_type from information_schema.columns
+ where table_schema = 'public' and table_name = 'factures_libres'
+   and column_name in ('statut', 'annulee_le', 'annulation_note', 'annulee_par');

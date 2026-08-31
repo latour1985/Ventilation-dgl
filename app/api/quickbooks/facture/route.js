@@ -23,6 +23,7 @@ import {
   jetonAccesValide,
   utilisateurDepuisJeton,
   ecrireQbo,
+  requeteQbo,
   clientQboPour,
   articleServiceQboPour,
   codeTaxeVente,
@@ -47,6 +48,48 @@ export async function POST(request) {
     corps = await request.json();
   } catch {
     return Response.json({ erreur: "Demande illisible." }, { status: 400 });
+  }
+
+  // ---------- ANNULATION PAR VOID, AVEC NOTE COMPTABLE ----------
+  // Demande du propriétaire (2026-08-31) : annuler une facture depuis
+  // Fluxya ET laisser une preuve dans QuickBooks. La note est ÉCRITE sur
+  // la facture (mémo interne) AVANT le VOID : la comptable voit qui a
+  // annulé, quand et pourquoi — jamais de Delete (règle gelée). AVANT la
+  // validation client+lignes : une annulation n'a ni l'un ni l'autre.
+  if (corps?.action === "void") {
+    const factureId = String(corps?.factureId || "").replace(/[^0-9]/g, "");
+    if (!factureId) return Response.json({ erreur: "factureId requis." }, { status: 400 });
+    let acces;
+    try {
+      acces = await jetonAccesValide(entrepriseId);
+    } catch (e) {
+      return Response.json({ erreur: `Jeton QuickBooks : ${e?.message || "erreur"}` }, { status: 502 });
+    }
+    if (!acces) return Response.json({ nonConnecte: true });
+    const note = String(corps?.note || "").trim().slice(0, 800);
+    const par = String(utilisateur.user_metadata?.nom || utilisateur.email || "").trim();
+    try {
+      const lu = await requeteQbo(acces, `select Id, SyncToken, PrivateNote from Invoice where Id = '${factureId}' maxresults 1`);
+      const facture = lu?.Invoice?.[0];
+      if (!facture) return Response.json({ annulee: true, note: "Facture introuvable — probablement déjà annulée." });
+      // 1. La preuve d'abord : le mémo interne reçoit la raison.
+      const quand = new Date().toLocaleDateString("fr-CA");
+      const trace = `❌ Annulée depuis Fluxya le ${quand}${par ? ` par ${par}` : ""}${note ? ` — ${note}` : ""}`;
+      const apresNote = await ecrireQbo(acces, "invoice", {
+        Id: facture.Id,
+        SyncToken: facture.SyncToken,
+        sparse: true,
+        PrivateNote: [String(facture.PrivateNote || "").trim(), trace].filter(Boolean).join("\n").slice(0, 4000),
+      });
+      // 2. Puis le VOID, avec le SyncToken FRAIS retourné par l'étape 1.
+      await ecrireQbo(acces, "invoice?operation=void", {
+        Id: facture.Id,
+        SyncToken: apresNote?.Invoice?.SyncToken ?? facture.SyncToken,
+      });
+      return Response.json({ annulee: true });
+    } catch (e) {
+      return Response.json({ erreur: `Annulation refusée : ${e?.message || "erreur"}` }, { status: 502 });
+    }
   }
 
   const clientNom = String(corps?.clientNom || "").trim();
