@@ -4384,3 +4384,110 @@ alter table devis_app add column if not exists adresse_travaux text;
 -- Verification : la colonne existe.
 select column_name, data_type from information_schema.columns
  where table_schema = 'public' and table_name = 'devis_app' and column_name = 'adresse_travaux';
+
+-- ============================================================
+-- 113 - TOUS LES LIENS DE DEVIS RESTENT VIVANTS
+--       (2026-08-31)
+-- ============================================================
+-- Retour du proprietaire : « il devrait garder tous les liens ouverts »
+-- — un lien envoye par courriel montrait « Ce lien n'est pas valide »
+-- apres des changements de versions. Cause : devis_public et
+-- repondre_devis exigeaient que le jeton soit SUR la ligne active ; si
+-- le jeton etait reste sur une version archivee (sequelles du bogue des
+-- revisions, vieux dossiers), le lien mourait.
+-- Desormais : le jeton IDENTIFIE LE DOSSIER, ou qu'il soit — la page
+-- publique sert TOUJOURS la version active du dossier, et la reponse du
+-- client s'ecrit TOUJOURS sur elle. Un lien envoye ne meurt que par
+-- expiration (1 an), jamais par un changement de version.
+
+drop function if exists devis_public(text);
+create function devis_public(p_jeton text)
+returns table (
+  numero text, client_nom text, date_emission date,
+  lignes jsonb, total_vendant numeric,
+  statut text, reponse_client text, repondu_le timestamptz, expire boolean,
+  entreprise_id text,
+  entreprise_nom text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_taux_tps numeric,
+  entreprise_taux_tvq numeric,
+  entreprise_logo text,
+  entreprise_rbq text,
+  entreprise_associations jsonb,
+  entreprise_adresse text,
+  entreprise_site_web text,
+  entreprise_numero_tps text,
+  entreprise_numero_tvq text,
+  entreprise_neq text
+)
+language sql security definer set search_path = public as $$
+  select
+    d.numero, d.client_nom, d.date_emission,
+    (select coalesce(jsonb_agg(jsonb_build_object(
+        'uid', l->>'uid', 'nom', l->>'nom', 'description', l->>'description',
+        'quantite', l->'quantite', 'prix_vendant', l->'prix_vendant')), '[]'::jsonb)
+     from jsonb_array_elements(d.lignes) l),
+    d.total_vendant, d.statut, d.reponse_client, d.repondu_le,
+    (porteur.jeton_expire_le is not null and porteur.jeton_expire_le < now()),
+    d.entreprise_id,
+    coalesce(e.nom_commercial, e.nom_legal),
+    e.telephone,
+    e.courriel,
+    e.taux_tps,
+    e.taux_tvq,
+    e.logo_donnees,
+    e.numero_rbq,
+    coalesce(e.associations, case when e.membre_cmmtq then '["cmmtq"]'::jsonb else '[]'::jsonb end),
+    e.adresse,
+    e.site_web,
+    e.numero_tps,
+    e.numero_tvq,
+    e.numero_neq
+  from devis_app porteur
+  join devis_app d
+    on coalesce(d.numero_base, d.numero) = coalesce(porteur.numero_base, porteur.numero)
+   and d.entreprise_id = porteur.entreprise_id
+   and d.version_active
+  left join entreprises e on e.id = d.entreprise_id
+  where porteur.jeton_public = p_jeton;
+$$;
+revoke all on function devis_public(text) from public;
+grant execute on function devis_public(text) to anon, authenticated;
+
+create or replace function repondre_devis(
+  p_jeton text, p_reponse text, p_nom text,
+  p_message text default null, p_version text default null, p_texte text default null
+) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare v_ok boolean;
+begin
+  if p_reponse not in ('accepte','refuse','modification') then return false; end if;
+  if coalesce(trim(p_nom), '') = '' then return false; end if;
+  update devis_app d set
+    reponse_client = p_reponse,
+    repondu_le = now(),
+    repondu_par_nom = trim(p_nom),
+    message_client = nullif(trim(coalesce(p_message,'')), ''),
+    conditions_version = p_version,
+    conditions_texte = p_texte,
+    statut = case when p_reponse = 'accepte' then 'accepte' else d.statut end
+  where d.version_active
+    and d.reponse_client is null                    -- jamais deux fois
+    and exists (
+      select 1 from devis_app porteur
+       where porteur.jeton_public = p_jeton
+         and coalesce(porteur.numero_base, porteur.numero) = coalesce(d.numero_base, d.numero)
+         and porteur.entreprise_id = d.entreprise_id
+         and (porteur.jeton_expire_le is null or porteur.jeton_expire_le > now())
+    )
+  returning true into v_ok;
+  return coalesce(v_ok, false);
+end;
+$$;
+revoke all on function repondre_devis(text,text,text,text,text,text) from public;
+grant execute on function repondre_devis(text,text,text,text,text,text) to anon, authenticated;
+
+-- Verification : les deux fonctions repondent au patron « porteur ->
+-- version active ».
+select proname from pg_proc where proname in ('devis_public', 'repondre_devis');

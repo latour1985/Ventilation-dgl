@@ -578,13 +578,13 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const [lienCopie, setLienCopie] = useState(null);
   const creerLienAcceptation = async (devis) => {
     let jeton = devis.jetonPublic;
-    // ON REGÉNÈRE AUSSI UN JETON EXPIRÉ. Sans ça, recopier le lien d'un
-    // vieux devis redonnait l'ancien jeton : le client cliquait et
-    // tombait sur « Ce devis est expiré ». Quand on clique pour envoyer
-    // un lien, on veut un lien qui MARCHE.
+    // ⏳ JETON EXPIRÉ : on le PROLONGE au lieu de le remplacer (2026-08-31,
+    // « il devrait garder tous les liens ouverts ») — un nouveau jeton
+    // aurait TUÉ tous les courriels déjà envoyés. Même adresse, nouvelle
+    // durée : les vieux liens revivent en même temps.
     const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
     if (!jeton || perime) {
-      jeton = genererJeton();
+      if (!jeton) jeton = genererJeton();
       const expire = new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString();
       const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
@@ -665,11 +665,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     }
     if (adresses.length === 0) return;
     setEnvoiDevisEnCours(true);
-    // Jeton valide — régénéré s'il est expiré, comme pour la copie.
+    // Jeton valide — PROLONGÉ s'il est expiré (jamais remplacé : les
+    // courriels déjà envoyés portent cette adresse-là).
     let jeton = devis.jetonPublic;
     const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
     if (!jeton || perime) {
-      jeton = genererJeton();
+      if (!jeton) jeton = genererJeton();
       const expire = new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString();
       const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
@@ -1842,7 +1843,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                       }}
                       className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
                     >
-                      <Plus size={13} /> {estActive ? "Nouvelle version" : "Repartir de cette version"}
+                      <Plus size={13} /> {estActive ? "Nouvelle version" : "Copier vers une nouvelle version"}
                     </Button>
                   )
                 )}
