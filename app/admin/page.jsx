@@ -1695,6 +1695,40 @@ function AppAdmin() {
     }
   };
 
+  // 📋 MIROIR QUICKBOOKS D'UN DEVIS (extrait de persisterDevis pour
+  // servir AUSSI au rattrapage ci-dessous) : un estimate par dossier,
+  // mis à jour aux révisions. Un échec ne bloque jamais rien.
+  const mirroirEstimateDevis = (d) => {
+    const ficheClient = clients.find((c) => (c.nom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase());
+    creerEstimateQbo({
+      clientId: ficheClient?.id || null,
+      clientNom: d.clientNom,
+      numero: d.numeroBase || d.numero,
+      estimateId: d.qboEstimateId || null,
+      lignes: d.lignes.map((l) => ({
+        nom: undefined,
+        description: l.nom || l.description || "",
+        quantite: Number(l.quantite) || 1,
+        prixUnitaire: Number(l.prix_vendant) || 0,
+      })),
+    })
+      .then(async (r) => {
+        if (r?.creee) {
+          if (r.estimateId && r.estimateId !== d.qboEstimateId) {
+            const avecEstimate = { ...d, qboEstimateId: r.estimateId };
+            setDevisListe((prev) => prev.map((x) => (x.id === d.id ? { ...x, qboEstimateId: r.estimateId } : x)));
+            await sauvegarderDevis(avecEstimate).catch(() => {});
+          }
+          if (!r.misAJour) ajouterJournal(`📋 Devis ${d.numeroBase || d.numero} créé dans QuickBooks (estimate Nº ${r.docNumber})`);
+        } else if (r?.erreur) {
+          ajouterJournal(`⚠️ Devis ${d.numero} : miroir QuickBooks non fait (${r.erreur})`);
+        }
+        // simule / nonConnecte : silencieux — le devis de l'app reste la
+        // référence, le RATTRAPAGE ci-dessous refera le miroir plus tard.
+      })
+      .catch(() => {});
+  };
+
   const creerDepotPourTache = async (tacheId, infos) => {
     // DÉLAI DE PAIEMENT : celui de l'entreprise (Paramètres), sauf si un
     // délai explicite arrive (pièces : 7 jours). Libellé humain : « 36 h »
@@ -2023,6 +2057,37 @@ function AppAdmin() {
     }, 600); // regroupe les modifications rapprochées en une seule écriture
     return () => clearTimeout(t);
   }, [clients, projets, tachesAttente, session, persistanceActive]);
+
+  // 📋 RATTRAPAGE DU MIROIR DES DEVIS (2026-08-31, vécu : « le devis
+  // arrive par courriel mais n'est pas dans QuickBooks » — DEV-3526
+  // créé pendant que Miroir n'était pas connecté : le miroir répondait
+  // « non connecté » et RIEN ne le refaisait jamais). Au chargement, les
+  // devis RÉCENTS (7 jours), actifs, non traités et sans estimate
+  // retentent leur miroir. Bornes de prudence : 10 au maximum, jamais
+  // les vieux devis (on n'inonde pas un QuickBooks d'historique), et
+  // toujours silencieux si la connexion manque encore.
+  const rattrapageMiroirFait = useRef(false);
+  useEffect(() => {
+    if (!session || rattrapageMiroirFait.current) return;
+    if (!devisListe || devisListe.length === 0 || !clients || clients.length === 0) return;
+    rattrapageMiroirFait.current = true;
+    const seuil = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    devisListe
+      .filter(
+        (d) =>
+          d.versionActive !== false &&
+          !d.qboEstimateId &&
+          !d.traite &&
+          d.statut !== "annule" &&
+          d.statut !== "brouillon" &&
+          Array.isArray(d.lignes) &&
+          d.lignes.length > 0 &&
+          new Date(d.creeLe || d.date || 0).getTime() >= seuil
+      )
+      .slice(0, 10)
+      .forEach((d) => mirroirEstimateDevis(d));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devisListe, clients, session]);
 
   // 🚫 RATTRAPAGE DES DÉPÔTS ANNULÉS CÔTÉ QUICKBOOKS (2026-08-30). Le
   // retrait « en direct » du sondage ne suffisait pas : il ne touchait
@@ -3009,34 +3074,7 @@ function AppAdmin() {
             // numéro officiel, pas d'estimate — c'est une feuille de
             // travail. Le miroir se fera à la vraie création.
             if (d.statut === "brouillon") return true;
-            const ficheClient = clients.find((c) => (c.nom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase());
-            creerEstimateQbo({
-              clientId: ficheClient?.id || null,
-              clientNom: d.clientNom,
-              numero: d.numeroBase || d.numero,
-              estimateId: d.qboEstimateId || null,
-              lignes: d.lignes.map((l) => ({
-                nom: undefined,
-                description: l.nom || l.description || "",
-                quantite: Number(l.quantite) || 1,
-                prixUnitaire: Number(l.prix_vendant) || 0,
-              })),
-            })
-              .then(async (r) => {
-                if (r?.creee) {
-                  if (r.estimateId && r.estimateId !== d.qboEstimateId) {
-                    const avecEstimate = { ...d, qboEstimateId: r.estimateId };
-                    setDevisListe((prev) => prev.map((x) => (x.id === d.id ? { ...x, qboEstimateId: r.estimateId } : x)));
-                    await sauvegarderDevis(avecEstimate).catch(() => {});
-                  }
-                  if (!r.misAJour) ajouterJournal(`📋 Devis ${d.numeroBase || d.numero} créé dans QuickBooks (Sandbox — estimate Nº ${r.docNumber})`);
-                } else if (r?.erreur) {
-                  ajouterJournal(`⚠️ Devis ${d.numero} : miroir QuickBooks non fait (${r.erreur})`);
-                }
-                // simule / nonConnecte : silencieux — le devis de l'app
-                // reste la référence, le miroir se fera plus tard.
-              })
-              .catch(() => {});
+            mirroirEstimateDevis(d);
             // Le devis est enregistré — le miroir QuickBooks ci-dessus
             // tourne en arrière-plan sans bloquer ce retour.
             return true;

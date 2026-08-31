@@ -11,6 +11,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { supabase } from "@/lib/supabase/client";
 import { etatQuickbooks, synchroniserClientsQbo } from "@/lib/quickbooksClient";
+import { listerCompteurs, reglerProchainNumero } from "@/lib/supabase/compteurs";
 import { Button, tauxAffiche } from "./partage";
 
 export function ChampParametre({ brouillon, champ, estAdminPrincipal, cle, libelle, aide, placeholder, type = "text", pas, unite }) {
@@ -228,6 +229,105 @@ export function CarteConnexionQuickbooks({ estAdminPrincipal }) {
   );
 }
 
+
+// ============================================================
+// 🔢 NUMÉROTATION DES DOCUMENTS (2026-08-31, demande du propriétaire)
+// ------------------------------------------------------------
+// Une entreprise qui arrive d'un autre système veut CONTINUER sa
+// numérotation (reprendre à DEV-4880, pas à DEV-1). Chaque entreprise
+// règle SES compteurs (clé composite du snippet 107). On ne RECULE
+// jamais : des numéros déjà émis existeraient en double. Les numéros de
+// FACTURE ne sont pas ici — c'est QuickBooks qui les attribue (séquence
+// comptable officielle).
+// ============================================================
+function BlocNumerotation({ estAdminPrincipal, ajouterJournal }) {
+  const [compteurs, setCompteurs] = useState(null); // null = chargement
+  const [saisies, setSaisies] = useState({});
+  const [etatCle, setEtatCle] = useState({});
+  useEffect(() => {
+    listerCompteurs().then(setCompteurs).catch(() => setCompteurs([]));
+  }, []);
+  const LIGNES = [
+    { cle: "devis", libelle: "Prochain numéro de devis", prefixe: "DEV" },
+    { cle: "bon_commande", libelle: "Prochain numéro de bon de commande", prefixe: "BC" },
+  ];
+  const valeurDe = (cle) => Number((compteurs || []).find((c) => c.cle === cle)?.valeur) || 0;
+  const appliquer = async (cle, prefixe) => {
+    const prochain = Math.floor(Number(saisies[cle]));
+    if (!Number.isFinite(prochain) || prochain < 1) return;
+    if (prochain <= valeurDe(cle)) {
+      setEtatCle((p) => ({
+        ...p,
+        [cle]: `Impossible de reculer : ${prefixe}-${valeurDe(cle)} est déjà émis — des numéros en double seraient créés.`,
+      }));
+      return;
+    }
+    try {
+      await reglerProchainNumero(cle, prochain);
+      setCompteurs((prev) => {
+        const liste = prev || [];
+        return liste.some((c) => c.cle === cle)
+          ? liste.map((c) => (c.cle === cle ? { ...c, valeur: prochain - 1 } : c))
+          : [...liste, { cle, valeur: prochain - 1 }];
+      });
+      setSaisies((p) => ({ ...p, [cle]: "" }));
+      setEtatCle((p) => ({ ...p, [cle]: "ok" }));
+      ajouterJournal?.(`🔢 Numérotation réglée : le prochain sera ${prefixe}-${prochain}.`);
+    } catch (e) {
+      setEtatCle((p) => ({ ...p, [cle]: `Échec — la base répond : « ${e?.message || "connexion impossible"} »` }));
+    }
+  };
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 p-3">
+      <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">🔢 Numérotation des documents</p>
+      <p className="mt-0.5 text-[10px] text-slate-400">
+        Pour continuer la séquence d&apos;un ancien système. Les numéros de FACTURE, eux, viennent de QuickBooks (séquence comptable officielle).
+      </p>
+      {compteurs === null ? (
+        <p className="mt-2 text-xs text-slate-400">Chargement…</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {LIGNES.map(({ cle, libelle, prefixe }) => (
+            <div key={cle} className="flex flex-wrap items-end gap-2">
+              <div className="min-w-[180px] flex-1">
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{libelle}</label>
+                <p className="text-[10px] text-slate-400">
+                  Actuellement, le prochain sera <span className="font-bold text-slate-600">{prefixe}-{valeurDe(cle) + 1}</span>
+                </p>
+              </div>
+              <input
+                type="number"
+                min="1"
+                value={saisies[cle] ?? ""}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => setSaisies((p) => ({ ...p, [cle]: e.target.value }))}
+                placeholder={`Ex : ${valeurDe(cle) + 1}`}
+                className="w-[120px] rounded-lg border border-slate-300 px-2 py-1.5 text-xs disabled:bg-slate-50"
+              />
+              <Button
+                variant="outline"
+                disabled={!estAdminPrincipal || !String(saisies[cle] ?? "").trim()}
+                onClick={() => appliquer(cle, prefixe)}
+                className="min-h-0 px-3 py-1.5 text-xs"
+              >
+                Appliquer
+              </Button>
+              {etatCle[cle] === "ok" && <span className="text-[11px] font-bold text-emerald-600">✓ Réglé</span>}
+              {etatCle[cle] && etatCle[cle] !== "ok" && (
+                <span className="w-full text-[10px] font-semibold text-red-600">{etatCle[cle]}</span>
+              )}
+            </div>
+          ))}
+          {!estAdminPrincipal && (
+            <p className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
+              <Lock size={11} /> Réglage réservé à l&apos;Admin principal.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJournal }) {
   const [brouillon, setBrouillon] = useState(config);
@@ -525,6 +625,7 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               />
             </div>
           </div>
+          <BlocNumerotation estAdminPrincipal={estAdminPrincipal} ajouterJournal={ajouterJournal} />
         </div>
       )}
 
