@@ -297,6 +297,12 @@ export default function PageDevisPublic({ params }) {
                       return (
                         <div key={l.uid || i} className={`rounded-lg px-2 py-1 text-[11px] ${differe ? "bg-amber-50 font-semibold text-amber-900" : "text-slate-600"}`}>
                           <span className="block">{l.nom}</span>
+                          {/* La DESCRIPTION complète — c'est elle qui dit
+                              ce qui est inclus (« on ne voit pas la
+                              description des deux »). */}
+                          {l.description && (
+                            <span className="mt-0.5 block whitespace-pre-line text-[10px] font-normal leading-snug opacity-80">{l.description}</span>
+                          )}
                           <span className="tabular-nums text-[10px] opacity-70">{l.quantite} × {argent(l.prix_vendant)}</span>
                         </div>
                       );
@@ -307,6 +313,11 @@ export default function PageDevisPublic({ params }) {
                       voirOption(c.numero);
                       setModeComparaison(false);
                       setChoixComparaison([]);
+                      // Directement à la zone de réponse : le client vient
+                      // de choisir, on l'amène signer.
+                      setTimeout(() => {
+                        document.getElementById("zone-reponse")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }, 250);
                     }}
                     className="mt-2 w-full rounded-lg bg-[#131B2E] py-2 text-[11px] font-bold text-white active:scale-[0.99]"
                   >
@@ -414,7 +425,22 @@ export default function PageDevisPublic({ params }) {
             {config.telephone && <p className="mt-2 text-sm font-bold text-slate-700">{config.telephone}</p>}
           </div>
         ) : (
-          <div className="rounded-2xl bg-white p-5">
+          <div id="zone-reponse" className="rounded-2xl bg-white p-5">
+            {/* 🧾 QUELLE OPTION est en train d'être répondue — quand il y
+                en a plusieurs, on le dit en toutes lettres (demande du
+                propriétaire : « le choix d'accepter celle qu'on veut »). */}
+            {options.length > 1 && (() => {
+              const oSel = options.find((o) => o.numero === devis.numero);
+              if (!oSel) return null;
+              return (
+                <p className="mb-3 rounded-xl border border-[#131B2E]/20 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800">
+                  🧾 Tu réponds sur : {oSel.version === 0 ? "l'option originale" : `l'option ${oSel.version}`} — {argent(oSel.totalVendant)}
+                  <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
+                    Pour en choisir une autre, remonte aux options et touche-la — la page suit.
+                  </span>
+                </p>
+              );
+            })()}
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
               Votre nom {modeModif ? "" : "(signature électronique)"}
             </label>
