@@ -29,6 +29,10 @@ import {
   echapperQbo,
   utilisateurDepuisJeton,
   entrepriseDuCompte,
+  clientQboPour,
+  articleServiceQboPour,
+  codeTaxeVente,
+  proprietesTaxe,
 } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
@@ -49,7 +53,7 @@ export async function POST(request) {
   // Les réponses de clients pas encore reflétées dans QuickBooks.
   const { data: aTransmettre, error } = await admin
     .from("devis_app")
-    .select("id, numero, qbo_estimate_id, reponse_client, repondu_par_nom, repondu_le")
+    .select("id, numero, numero_base, client_id, client_nom, lignes, qbo_estimate_id, reponse_client, repondu_par_nom, repondu_le")
     .eq("entreprise_id", entrepriseId)
     .neq("version_active", false)
     .neq("statut", "annule")
@@ -98,21 +102,72 @@ export async function POST(request) {
         continue;
       }
       const accepte = d.reponse_client === "accepte";
-      await ecrireQbo(acces, "estimate", {
-        Id: est.Id,
-        SyncToken: est.SyncToken,
-        sparse: true,
-        TxnStatus: accepte ? "Accepted" : "Rejected",
-        // Le NOM du client et la DATE de sa réponse — les champs prévus
-        // par QuickBooks pour ça. La preuve complète (conditions signées)
-        // reste dans Fluxya.
-        ...(accepte
-          ? {
-              AcceptedBy: String(d.repondu_par_nom || "").slice(0, 100) || undefined,
-              AcceptedDate: d.repondu_le ? String(d.repondu_le).slice(0, 10) : undefined,
-            }
-          : {}),
-      });
+      const champsAcceptation = accepte
+        ? {
+            // Le NOM du client et la DATE de sa réponse — les champs
+            // prévus par QuickBooks. La preuve complète (conditions
+            // signées) reste dans Fluxya.
+            AcceptedBy: String(d.repondu_par_nom || "").slice(0, 100) || undefined,
+            AcceptedDate: d.repondu_le ? String(d.repondu_le).slice(0, 10) : undefined,
+          }
+        : {};
+      // ✅ ACCEPTATION : l'estimate est RÉÉCRIT avec les LIGNES de la
+      // version acceptée (2026-08-31 — avec les OPTIONS comparables, le
+      // client peut choisir une version DIFFÉRENTE de la dernière
+      // enregistrée : QuickBooks doit montrer « Accepté » sur les BONS
+      // montants, jamais sur ceux d'une autre option).
+      let reecritAvecLignes = false;
+      if (accepte) {
+        const lignesQbo = (Array.isArray(d.lignes) ? d.lignes : [])
+          .map((l) => ({
+            description: String(l?.nom || l?.description || "").slice(0, 2000),
+            quantite: Number(l?.quantite) || 1,
+            prixUnitaire: Number(l?.prix_vendant) || 0,
+          }))
+          .filter((l) => l.description && l.prixUnitaire !== 0);
+        if (lignesQbo.length > 0) {
+          const [customerId, itemId, codeTaxe] = await Promise.all([
+            clientQboPour(acces, admin, { clientId: d.client_id || null, clientNom: d.client_nom || "" }),
+            articleServiceQboPour(acces),
+            codeTaxeVente(acces),
+          ]);
+          if (customerId && itemId) {
+            await ecrireQbo(acces, "estimate", {
+              Id: est.Id,
+              SyncToken: est.SyncToken,
+              CustomerRef: { value: customerId },
+              DocNumber: String(d.numero_base || d.numero).slice(0, 21),
+              PrivateNote: `Devis ${d.numero_base || d.numero} — accepté par le client via Fluxya`,
+              ...proprietesTaxe(codeTaxe),
+              TxnStatus: "Accepted",
+              ...champsAcceptation,
+              Line: lignesQbo.map((l) => ({
+                DetailType: "SalesItemLineDetail",
+                Amount: Math.round(l.quantite * l.prixUnitaire * 100) / 100,
+                Description: l.description,
+                SalesItemLineDetail: {
+                  ItemRef: { value: itemId },
+                  Qty: l.quantite,
+                  UnitPrice: l.prixUnitaire,
+                  ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
+                },
+              })),
+            });
+            reecritAvecLignes = true;
+          }
+        }
+      }
+      if (!reecritAvecLignes) {
+        // Refus, ou repli si la réécriture complète est impossible
+        // (client QBO introuvable…) : au moins le STATUT, en partiel.
+        await ecrireQbo(acces, "estimate", {
+          Id: est.Id,
+          SyncToken: est.SyncToken,
+          sparse: true,
+          TxnStatus: accepte ? "Accepted" : "Rejected",
+          ...champsAcceptation,
+        });
+      }
       await marquerFait();
       transmis.push({ numero: d.numero, reponse: d.reponse_client, par: d.repondu_par_nom || null });
     } catch (e) {
