@@ -994,7 +994,10 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white">
+      {/* max-w-2xl (2026-08-31) : avec 5 onglets, la fenêtre max-w-lg
+          forçait un défilement horizontal des onglets — tout doit se
+          voir d'un coup (retour du propriétaire). */}
+      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white">
         <div className="p-5 pb-0">
           <div className="mb-3 flex items-start justify-between gap-2">
             <div>
