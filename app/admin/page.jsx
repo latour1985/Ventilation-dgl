@@ -1705,6 +1705,9 @@ function AppAdmin() {
       clientNom: d.clientNom,
       numero: d.numeroBase || d.numero,
       estimateId: d.qboEstimateId || null,
+      // 🚦 Un devis PAS accepté (nouvelle version, envoyé…) remet
+      // l'estimate « en attente » ; un devis accepté garde son statut.
+      reinitialiserStatut: d.statut !== "accepte",
       lignes: d.lignes.map((l) => ({
         nom: undefined,
         description: l.nom || l.description || "",

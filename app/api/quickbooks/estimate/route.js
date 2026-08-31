@@ -189,10 +189,19 @@ export async function POST(request) {
     // avec le SyncToken courant.
     const estimateId = String(corps?.estimateId || "").trim();
     if (estimateId) {
-      const lu = await requeteQbo(acces, `select Id, SyncToken from Estimate where Id = '${echapperQbo(estimateId)}' maxresults 1`);
+      const lu = await requeteQbo(acces, `select Id, SyncToken, TxnStatus from Estimate where Id = '${echapperQbo(estimateId)}' maxresults 1`);
       const existant = lu?.Estimate?.[0];
       if (existant) {
-        const maj = await ecrireQbo(acces, "estimate", { ...corpsEstimate, Id: existant.Id, SyncToken: existant.SyncToken });
+        // 🚦 STATUT EXPLICITE À LA MISE À JOUR (2026-08-31) : une mise à
+        // jour complète QBO remettrait les champs absents à leur défaut.
+        //   • RÉVISION (reinitialiserStatut) : l'estimate REDEVIENT « en
+        //     attente » — l'ancienne acceptation ne vaut plus pour les
+        //     nouveaux montants, le client doit accepter de nouveau ;
+        //   • autre sauvegarde (traiter, re-enregistrer) : le statut
+        //     EXISTANT est CONSERVÉ — un « Accepté » ne se perd jamais
+        //     par accident.
+        const statut = corps?.reinitialiserStatut ? "Pending" : existant.TxnStatus || "Pending";
+        const maj = await ecrireQbo(acces, "estimate", { ...corpsEstimate, Id: existant.Id, SyncToken: existant.SyncToken, TxnStatus: statut });
         return Response.json({ creee: true, misAJour: true, estimateId: maj?.Estimate?.Id || existant.Id, docNumber: maj?.Estimate?.DocNumber || numero });
       }
       // Introuvable (supprimé côté QBO ?) — on retombe sur la création.
