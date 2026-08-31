@@ -4518,3 +4518,57 @@ $$;
 
 -- Verification.
 select proname from pg_proc where proname = 'devis_public_options';
+
+-- ============================================================
+-- 115 - LE CHOIX D'OPTION N'EST BLOQUE QUE PAR UNE ACCEPTATION ACTIVE
+--       (2026-08-31)
+-- ============================================================
+-- Vecu par le proprietaire : « Cette option ne peut plus etre choisie »
+-- en acceptant l'option 4 — son dossier de test portait une VIEILLE
+-- acceptation ARCHIVEE (essai d'hier, remplacee par une revision). Le
+-- garde de choisir_version_devis bloquait des qu'une acceptation
+-- existait N'IMPORTE OU dans l'historique du dossier. Or une
+-- acceptation archivee est une PREUVE du passe, pas l'etat du dossier :
+-- seule une acceptation sur la version ACTIVE (le devis est accepte,
+-- point) doit empecher de changer d'option.
+
+create or replace function choisir_version_devis(p_jeton text, p_numero text)
+returns boolean
+language plpgsql security definer set search_path = public as $$
+declare
+  v_porteur devis_app%rowtype;
+  v_cible devis_app%rowtype;
+begin
+  select * into v_porteur from devis_app where jeton_public = p_jeton;
+  if not found then return false; end if;
+  if v_porteur.jeton_expire_le is not null and v_porteur.jeton_expire_le < now() then return false; end if;
+  select * into v_cible from devis_app
+   where numero = p_numero
+     and coalesce(numero_base, numero) = coalesce(v_porteur.numero_base, v_porteur.numero)
+     and entreprise_id = v_porteur.entreprise_id;
+  if not found then return false; end if;
+  if v_cible.id = v_porteur.id then return true; end if;
+  if not (v_cible.offerte_comparaison or v_cible.version_active) then return false; end if;
+  -- Seule une acceptation sur la version ACTIVE bloque — les
+  -- acceptations archivees (versions remplacees) sont des preuves du
+  -- passe, jamais un verrou.
+  if exists (select 1 from devis_app
+              where coalesce(numero_base, numero) = coalesce(v_porteur.numero_base, v_porteur.numero)
+                and entreprise_id = v_porteur.entreprise_id
+                and version_active
+                and reponse_client = 'accepte') then return false; end if;
+  if v_cible.reponse_client is not null then return false; end if;
+  update devis_app set version_active = false, jeton_public = null where id = v_porteur.id;
+  update devis_app set version_active = false
+   where coalesce(numero_base, numero) = coalesce(v_porteur.numero_base, v_porteur.numero)
+     and entreprise_id = v_porteur.entreprise_id and id <> v_cible.id;
+  update devis_app set version_active = true, jeton_public = p_jeton, jeton_expire_le = v_porteur.jeton_expire_le
+   where id = v_cible.id;
+  return true;
+end;
+$$;
+revoke all on function choisir_version_devis(text, text) from public;
+grant execute on function choisir_version_devis(text, text) to anon, authenticated;
+
+-- Verification.
+select proname from pg_proc where proname = 'choisir_version_devis';
