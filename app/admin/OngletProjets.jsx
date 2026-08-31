@@ -39,6 +39,11 @@ export const ONGLETS_PROJET = [
   { id: "apercu", label: "Vue d'ensemble" },
   { id: "achats", label: "Bons de commande" },
   { id: "temps", label: "Feuille de temps" },
+  // 📥 Onglet à part (2026-08-31, retour du propriétaire : « matériaux
+  // déjà facturés n'a pas rapport dans Feuille de temps ») — regroupe
+  // heures travaillées, matériaux achetés et montants facturés d'AVANT
+  // Fluxya (ou sans bon de commande). Tout se cumule dans le projet.
+  { id: "reprise", label: "Avant Fluxya" },
   { id: "facturation", label: "Facturation" },
 ];
 
@@ -1069,13 +1074,9 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
             </>
           )}
           {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} onMajMateriel={onMajMateriel} r={r} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
-          {ongletActif === "temps" && (
-            <>
-              {/* 📥 La reprise vit avec les HEURES : c'est là qu'on vient
-                  quand on se demande « et tout ce qui a été fait avant ? ». */}
-              <BlocRepriseChantier projet={projet} r={r} onMajReprise={onMajReprise} ajouterJournal={ajouterJournal} />
-              <OngletTempsProjet r={r} />
-            </>
+          {ongletActif === "temps" && <OngletTempsProjet r={r} />}
+          {ongletActif === "reprise" && (
+            <BlocRepriseChantier projet={projet} r={r} onMajReprise={onMajReprise} ajouterJournal={ajouterJournal} />
           )}
           {ongletActif === "facturation" && <OngletFacturationProjet r={r} devisDuClient={devisDuClient} />}
         </div>
