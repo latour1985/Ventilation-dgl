@@ -1805,6 +1805,11 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
           inspections={inspections}
           onMajMateriel={(liste) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, materielStock: liste } : px)))}
           onMajReprise={(reprise) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, reprise } : px)))}
+          onRenommer={(nom) => {
+            const ancien = projetOuvert.nom;
+            setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, nom } : px)));
+            ajouterJournal(`✏️ Projet renommé : « ${ancien} » → « ${nom} ».`);
+          }}
           projet={projetOuvert}
           travaux={travaux}
           devisListe={devisListe}

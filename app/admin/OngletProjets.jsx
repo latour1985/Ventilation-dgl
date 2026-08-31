@@ -902,7 +902,7 @@ export function OngletFacturationProjet({ r, devisDuClient }) {
 }
 
 
-export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onMajReprise, onChangerStatut, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
+export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onMajReprise, onChangerStatut, onRenommer, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
   const [ongletActif, setOngletActif] = useState("apercu");
   const configProj = useEntreprise();
   const r = useMemo(
@@ -918,7 +918,23 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
         <div className="p-5 pb-0">
           <div className="mb-3 flex items-start justify-between gap-2">
             <div>
-              <h3 className="text-sm font-extrabold text-slate-900">{projet.nom}</h3>
+              <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
+                {projet.nom}
+                {/* ✏️ RENOMMER (2026-08-31, « j'ai fait une erreur sur le
+                    nom ») — tout se corrige après coup, comme les fiches. */}
+                {onRenommer && (
+                  <button
+                    onClick={() => {
+                      const nouveau = window.prompt("Nouveau nom du projet :", projet.nom);
+                      if (nouveau && nouveau.trim() && nouveau.trim() !== projet.nom) onRenommer(nouveau.trim());
+                    }}
+                    title="Corriger le nom du projet"
+                    className="shrink-0 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  >
+                    ✏️
+                  </button>
+                )}
+              </h3>
               <p className="text-xs text-slate-500">{projet.dateDebut} → {projet.dateFin}</p>
               {projet.adresseTravaux && (
                 <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400">
@@ -1473,6 +1489,11 @@ export function OngletProjetsHub({ projets, setProjets, clients, travaux, devisL
           inspections={inspections}
           onMajMateriel={(liste) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, materielStock: liste } : px)))}
           onMajReprise={(reprise) => setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, reprise } : px)))}
+          onRenommer={(nom) => {
+            const ancien = projetOuvert.nom;
+            setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, nom } : px)));
+            ajouterJournal(`✏️ Projet renommé : « ${ancien} » → « ${nom} ».`);
+          }}
           projet={projetOuvert}
           travaux={travaux}
           devisListe={devisListe}
