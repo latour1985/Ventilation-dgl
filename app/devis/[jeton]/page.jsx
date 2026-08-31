@@ -22,7 +22,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
-import { chargerDevisPublic, repondreDevis, JOURS_VALIDITE_PRIX_DEVIS, ligneAccreditations } from "@/lib/supabase/devisPublic";
+import { chargerDevisPublic, repondreDevis, chargerOptionsDevis, chargerVersionDevis, choisirVersionDevis, JOURS_VALIDITE_PRIX_DEVIS, ligneAccreditations } from "@/lib/supabase/devisPublic";
 import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
 import { CONFIG_DEFAUT, calculerTaxes } from "@/lib/supabase/entreprise";
 
@@ -40,6 +40,13 @@ export default function PageDevisPublic({ params }) {
   const [modeModif, setModeModif] = useState(false);
   const [envoi, setEnvoi] = useState("");
   const [fait, setFait] = useState(null);
+  // 🧾 OPTIONS À COMPARER (2026-08-31) : les versions que le bureau
+  // offre sur CE lien. Le client feuillette ; celle qu'il accepte
+  // devient la version du dossier. `numeroActif` = celle que la base
+  // considère active en ce moment.
+  const [options, setOptions] = useState([]);
+  const [numeroActif, setNumeroActif] = useState(null);
+  const [chargeOption, setChargeOption] = useState("");
 
   useEffect(() => {
     // 🏢 L'IDENTITÉ DE L'ENTREPRISE VOYAGE AVEC LE DEVIS (snippet 92) :
@@ -49,7 +56,13 @@ export default function PageDevisPublic({ params }) {
     chargerDevisPublic(jeton)
       .then((d) => {
         if (!d) setErreur("Ce lien n'est pas valide. Vérifie l'adresse ou communique avec nous.");
-        else setDevis(d);
+        else {
+          setDevis(d);
+          setNumeroActif(d.numero);
+          // Les options offertes à la comparaison — absentes (snippet
+          // 111 pas passé, ou une seule version) : pas d'onglets.
+          chargerOptionsDevis(jeton).then(setOptions).catch(() => {});
+        }
       })
       .catch(() => setErreur("Impossible de charger ce devis. Réessaie dans quelques minutes."))
       .finally(() => setChargement(false));
@@ -72,11 +85,38 @@ export default function PageDevisPublic({ params }) {
   const logoSrc = devis?.entrepriseLogo
     || (!devis?.entrepriseId || devis.entrepriseId === "dgl" ? "/logo-dgl.png" : null);
 
+  // 👁️ FEUILLETER UNE OPTION — lecture seule : rien ne change en base
+  // tant que le client ne RÉPOND pas.
+  const voirOption = async (numero) => {
+    if (!devis || numero === devis.numero || chargeOption) return;
+    setChargeOption(numero);
+    try {
+      const v = await chargerVersionDevis(jeton, numero);
+      if (v) {
+        setDevis((prev) => ({ ...prev, numero: v.numero, lignes: v.lignes, totalVendant: v.totalVendant, reponseClient: v.reponseClient }));
+      }
+    } catch {
+      // on reste sur l'option affichée
+    }
+    setChargeOption("");
+  };
+
   const repondre = async (reponse) => {
     if (reponse === "accepte" && (!accepte || nom.trim().length < 3)) return;
     if (reponse !== "accepte" && nom.trim().length < 3) return;
     setEnvoi("envoi");
     try {
+      // 🧾 L'OPTION AFFICHÉE devient LA version du dossier avant que la
+      // réponse s'y écrive — le même lien continue de la montrer.
+      if (numeroActif && devis.numero !== numeroActif) {
+        const choisi = await choisirVersionDevis(jeton, devis.numero);
+        if (!choisi) {
+          setErreur("Cette option ne peut plus être choisie (déjà répondue ou lien expiré). Recharge la page.");
+          setEnvoi("");
+          return;
+        }
+        setNumeroActif(devis.numero);
+      }
       const ok = await repondreDevis({
         jeton,
         reponse,
@@ -164,6 +204,39 @@ export default function PageDevisPublic({ params }) {
           <p className="mt-2 text-xs text-slate-500">Préparé pour</p>
           <p className="text-sm font-bold text-slate-800">{devis.clientNom}</p>
         </div>
+
+        {/* 🧾 OPTIONS À COMPARER — visibles seulement quand le bureau en
+            a offert plusieurs. Feuilleter ne change RIEN : c'est la
+            réponse qui fixe le choix. */}
+        {options.length > 1 && !dejaRepondu && (
+          <div className="rounded-2xl bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+              🧾 {options.length} options à comparer
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              Feuillette les options ci-dessous — celle que tu acceptes deviendra ton devis.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {options.map((o) => {
+                const sel = o.numero === devis.numero;
+                return (
+                  <button
+                    key={o.numero}
+                    onClick={() => voirOption(o.numero)}
+                    disabled={chargeOption !== ""}
+                    className={`rounded-xl border px-3 py-2 text-left text-xs font-bold ${sel ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-700"}`}
+                  >
+                    {o.version === 0 ? "Option originale" : `Option ${o.version}`}
+                    <span className={`block text-[10px] font-semibold ${sel ? "text-slate-300" : "text-slate-400"}`}>
+                      {argent(o.totalVendant)}
+                      {o.noteVersion ? ` · ${o.noteVersion.slice(0, 40)}` : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* LIGNES */}
         <div className="rounded-2xl bg-white p-5">

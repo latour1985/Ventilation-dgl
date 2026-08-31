@@ -996,6 +996,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       reponseTraiteeLe: null,
       annuleLe: null,
       annuleRaison: "",
+      // Une révision fraîche n'est pas offerte à la comparaison — le
+      // bureau coche lui-même les options qu'il veut montrer au client.
+      offerteComparaison: false,
     };
     // 🔑 LE LIEN DU CLIENT SUIT LA VERSION ACTIVE (bogue vécu par le
     // propriétaire, 2026-08-30 : « les ajouts et le prix n'apparaissent
@@ -1348,6 +1351,65 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     onDevisTraite?.("projets");
   };
 
+  // ⭐ RENDRE UNE VERSION ACTIVE (niveau 1, 2026-08-31, GO du
+  // propriétaire) : « sélectionner celle qu'on veut faire accepter ».
+  // Le LIEN DU CLIENT (toujours le même) montre la version active — le
+  // jeton la suit, dans le même ordre prudent que l'enregistrement d'une
+  // révision (index unique oblige) : on le retire du porteur AVANT de le
+  // poser sur la cible, et on restaure tout si quoi que ce soit échoue.
+  const rendreVersionActive = async (versions, cible) => {
+    const base = cible.numeroBase || cible.numero;
+    const active = versions.find((v) => v.versionActive !== false);
+    if (active?.id === cible.id) return;
+    if (versions.some((v) => v.reponseClient === "accepte")) {
+      if (!window.confirm("Une version de ce dossier est ACCEPTÉE. La rendre inactive archive l'acceptation (la preuve est conservée) et le client devra accepter la version choisie. Continuer ?")) return;
+    }
+    const porteur = versions.find((v) => v.jetonPublic);
+    if (porteur && porteur.id !== cible.id) {
+      const libere = await persisterDevis?.({ ...porteur, versionActive: false, jetonPublic: null });
+      if (libere === false) {
+        ajouterJournal(`⚠️ Version ${cible.numero} NON activée (le lien du client n'a pas pu être transféré) — rien n'a changé.`);
+        return;
+      }
+    }
+    const ok = await persisterDevis?.({
+      ...cible,
+      versionActive: true,
+      jetonPublic: porteur ? porteur.jetonPublic : cible.jetonPublic || null,
+      jetonExpireLe: porteur ? porteur.jetonExpireLe : cible.jetonExpireLe || null,
+    });
+    if (ok === false) {
+      if (porteur && porteur.id !== cible.id) persisterDevis?.({ ...porteur });
+      ajouterJournal(`⚠️ Version ${cible.numero} NON activée — rien n'a changé, réessaie.`);
+      return;
+    }
+    activerVersionDevis(base, cible.numero).catch(() => {});
+    setDevisListe((prev) =>
+      prev.map((d) => {
+        if ((d.numeroBase || d.numero) !== base) return d;
+        if (d.id === cible.id) {
+          return { ...d, versionActive: true, jetonPublic: porteur ? porteur.jetonPublic : d.jetonPublic, jetonExpireLe: porteur ? porteur.jetonExpireLe : d.jetonExpireLe };
+        }
+        return { ...d, versionActive: false, ...(porteur && d.id === porteur.id ? { jetonPublic: null } : {}) };
+      })
+    );
+    setVersionAffichee(cible.numero);
+    ajouterJournal(`⭐ ${cible.numero} est maintenant la version ACTIVE du dossier ${base} — le lien du client la montre.`);
+  };
+
+  // 🧾 OFFRIR UNE VERSION À LA COMPARAISON — elle apparaît en onglet sur
+  // le lien du client, qui peut la choisir en répondant.
+  const basculerOfferte = (v) => {
+    const maj = { ...v, offerteComparaison: !v.offerteComparaison };
+    setDevisListe((prev) => prev.map((d) => (d.id === v.id ? maj : d)));
+    persisterDevis?.(maj);
+    ajouterJournal(
+      maj.offerteComparaison
+        ? `🧾 ${v.numero} OFFERTE à la comparaison — le client la voit en option sur son lien.`
+        : `🧾 ${v.numero} retirée de la comparaison.`
+    );
+  };
+
   // ➕ EXTRA SUR UN PROJET EXISTANT (2026-08-30, GO du propriétaire :
   // « joindre plusieurs devis sur le même projet, pour des extras »).
   // Le montant du devis S'AJOUTE au budget du projet, son coûtant prévu
@@ -1525,6 +1587,35 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 {!estActive && (
                   <p className="mt-1.5 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-bold text-slate-500">
                     🔒 Version archivée — lecture seule. La version courante est {active.numero}.
+                  </p>
+                )}
+                {/* ⭐🧾 CHOIX DES OPTIONS (2026-08-31, GO du propriétaire) :
+                    rendre CETTE version active (le lien du client la
+                    montre), ou l'OFFRIR en option comparable — le client
+                    feuillette et choisit en répondant, sur le même lien. */}
+                {!estActive && !active.traite && affichee.statut !== "annule" && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => rendreVersionActive(versions, affichee)}
+                      title="Le lien du client (toujours le même) montrera cette version — c'est elle qu'il pourra accepter"
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-700 active:scale-95"
+                    >
+                      ⭐ Rendre cette version active
+                    </button>
+                    <label className="flex cursor-pointer items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={!!affichee.offerteComparaison}
+                        onChange={() => basculerOfferte(affichee)}
+                        className="h-3.5 w-3.5 accent-[#131B2E]"
+                      />
+                      🧾 Offrir au client (option à comparer)
+                    </label>
+                  </div>
+                )}
+                {estActive && versions.some((v) => v.offerteComparaison && v.id !== affichee.id) && (
+                  <p className="mt-1.5 text-[10px] font-semibold text-slate-500">
+                    🧾 {versions.filter((v) => v.offerteComparaison && v.id !== affichee.id).length + 1} options sur le lien du client — il compare et choisit en répondant.
                   </p>
                 )}
                 {affichee.traite && (

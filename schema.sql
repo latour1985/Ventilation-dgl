@@ -4265,3 +4265,105 @@ alter table devis_app add column if not exists qbo_reponse_transmise_le timestam
 -- Verification : la colonne existe.
 select column_name, data_type from information_schema.columns
  where table_schema = 'public' and table_name = 'devis_app' and column_name = 'qbo_reponse_transmise_le';
+
+-- ============================================================
+-- 111 - OPTIONS DE DEVIS COMPARABLES PAR LE CLIENT
+--       (2026-08-31)
+-- ============================================================
+-- GO du proprietaire : « si on envoie plusieurs versions du meme devis,
+-- selectionner celle qu'on veut faire accepter — des fois le client
+-- veut juste comparer quelques details avant de faire son choix », avec
+-- la regle : LE MEME LIEN vit a travers tous les changements de version.
+--
+-- Mecanique : l'admin coche « offerte au client » sur les versions a
+-- comparer. La page publique montre alors des ONGLETS d'options ; le
+-- client feuillette (lecture seule, aucun cout ne voyage jamais), et
+-- au moment de REPONDRE, la version choisie devient l'active (le jeton
+-- la suit — index unique oblige) puis la reponse s'y ecrit.
+-- GARDE-FOUS : jamais de bascule si une version du dossier est deja
+-- ACCEPTEE ; jamais vers une version deja repondue ; jeton expire refuse.
+
+alter table devis_app add column if not exists offerte_comparaison boolean not null default false;
+
+-- ---- La liste des options d'un dossier (pour les onglets) ----
+create or replace function devis_public_options(p_jeton text)
+returns table (numero text, version int, total_vendant numeric, note_version text, est_active boolean)
+language sql security definer set search_path = public as $$
+  select d.numero, coalesce(d.version, 0)::int, d.total_vendant, d.note_version, d.version_active
+  from devis_app d
+  join devis_app porteur on porteur.jeton_public = p_jeton
+    and (porteur.jeton_expire_le is null or porteur.jeton_expire_le > now())
+  where coalesce(d.numero_base, d.numero) = coalesce(porteur.numero_base, porteur.numero)
+    and d.entreprise_id = porteur.entreprise_id
+    and (d.version_active or d.offerte_comparaison)
+  order by coalesce(d.version, 0);
+$$;
+
+-- ---- Le CONTENU d'une option (memes retraits que devis_public :
+--      les couts sont enleves A LA SOURCE) ----
+create or replace function devis_public_version(p_jeton text, p_numero text)
+returns table (numero text, version int, note_version text, lignes jsonb, total_vendant numeric, reponse_client text)
+language sql security definer set search_path = public as $$
+  select d.numero, coalesce(d.version, 0)::int, d.note_version,
+    (select coalesce(jsonb_agg(jsonb_build_object(
+        'uid', l->>'uid', 'nom', l->>'nom', 'description', l->>'description',
+        'quantite', l->'quantite', 'prix_vendant', l->'prix_vendant')), '[]'::jsonb)
+     from jsonb_array_elements(d.lignes) l),
+    d.total_vendant, d.reponse_client
+  from devis_app d
+  join devis_app porteur on porteur.jeton_public = p_jeton
+    and (porteur.jeton_expire_le is null or porteur.jeton_expire_le > now())
+  where d.numero = p_numero
+    and coalesce(d.numero_base, d.numero) = coalesce(porteur.numero_base, porteur.numero)
+    and d.entreprise_id = porteur.entreprise_id
+    and (d.version_active or d.offerte_comparaison);
+$$;
+
+-- ---- Le client CHOISIT son option : elle devient l'active et le
+--      jeton la suit (transaction unique, index unique respecte) ----
+create or replace function choisir_version_devis(p_jeton text, p_numero text)
+returns boolean
+language plpgsql security definer set search_path = public as $$
+declare
+  v_porteur devis_app%rowtype;
+  v_cible devis_app%rowtype;
+begin
+  select * into v_porteur from devis_app where jeton_public = p_jeton;
+  if not found then return false; end if;
+  if v_porteur.jeton_expire_le is not null and v_porteur.jeton_expire_le < now() then return false; end if;
+  select * into v_cible from devis_app
+   where numero = p_numero
+     and coalesce(numero_base, numero) = coalesce(v_porteur.numero_base, v_porteur.numero)
+     and entreprise_id = v_porteur.entreprise_id;
+  if not found then return false; end if;
+  if v_cible.id = v_porteur.id then return true; end if;
+  if not (v_cible.offerte_comparaison or v_cible.version_active) then return false; end if;
+  -- Jamais par-dessus une acceptation, jamais vers une version repondue.
+  if exists (select 1 from devis_app
+              where coalesce(numero_base, numero) = coalesce(v_porteur.numero_base, v_porteur.numero)
+                and entreprise_id = v_porteur.entreprise_id
+                and reponse_client = 'accepte') then return false; end if;
+  if v_cible.reponse_client is not null then return false; end if;
+  update devis_app set version_active = false, jeton_public = null where id = v_porteur.id;
+  update devis_app set version_active = false
+   where coalesce(numero_base, numero) = coalesce(v_porteur.numero_base, v_porteur.numero)
+     and entreprise_id = v_porteur.entreprise_id and id <> v_cible.id;
+  update devis_app set version_active = true, jeton_public = p_jeton, jeton_expire_le = v_porteur.jeton_expire_le
+   where id = v_cible.id;
+  return true;
+end;
+$$;
+
+revoke all on function devis_public_options(text) from public;
+revoke all on function devis_public_version(text, text) from public;
+revoke all on function choisir_version_devis(text, text) from public;
+grant execute on function devis_public_options(text) to anon, authenticated;
+grant execute on function devis_public_version(text, text) to anon, authenticated;
+grant execute on function choisir_version_devis(text, text) to anon, authenticated;
+
+-- Verification : colonne + les 3 fonctions en place.
+select 'colonne' as quoi, count(*)::text as etat from information_schema.columns
+ where table_schema = 'public' and table_name = 'devis_app' and column_name = 'offerte_comparaison'
+union all
+select 'fonctions', count(*)::text from pg_proc
+ where proname in ('devis_public_options', 'devis_public_version', 'choisir_version_devis');
