@@ -4572,3 +4572,22 @@ grant execute on function choisir_version_devis(text, text) to anon, authenticat
 
 -- Verification.
 select proname from pg_proc where proname = 'choisir_version_devis';
+
+-- ============================================================
+-- 116 - NE REMONTER QUE LES DEPENSES AVEC UN Nº DE BON DE COMMANDE
+--       (2026-08-31)
+-- ============================================================
+-- Demande du proprietaire : « une compagnie qui a 200 transactions par
+-- mois autres que des materiaux va passer son temps a faire ca pour
+-- rien ». Reglage PAR ENTREPRISE (Parametres -> Connexions) : quand il
+-- est actif, la liste « a rattacher » ne montre que les depenses
+-- QuickBooks portant un Nº de BC (champ reference, memo ou description)
+-- — les assurances, paiements d'auto et frais restent a QuickBooks.
+-- Le nombre de depenses laissees de cote s'affiche (jamais de silence).
+-- Defaut : desactive (comportement actuel). Additif, idempotent.
+
+alter table entreprises add column if not exists achats_seulement_bc boolean not null default false;
+
+-- Verification : la colonne existe.
+select column_name, data_type from information_schema.columns
+ where table_schema = 'public' and table_name = 'entreprises' and column_name = 'achats_seulement_bc';

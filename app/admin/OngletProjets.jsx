@@ -1125,10 +1125,22 @@ export function OngletProjetsHub({ projets, setProjets, clients, travaux, devisL
   }, [bonsTravail]);
 
   const transactionsSansProjet = transactionsQb.filter((t) => !t.cible);
+  // 📦 FILTRE PAR BC (2026-08-31, demande du propriétaire : « une
+  // compagnie qui a 200 transactions par mois autres que des matériaux
+  // va passer son temps à faire ça pour rien ») : quand le réglage est
+  // actif (Paramètres → Connexions), seules les dépenses qui PORTENT un
+  // Nº de bon de commande remontent — les autres restent à QuickBooks.
+  const configHub = useEntreprise();
+  const filtreBcActif = configHub?.achatsSeulementBc === true;
+  const porteUnBc = (t) =>
+    !!String(t.poNumber || "").trim() || /\bBC[\s-]?\d{2,}\b/i.test(String(t.referenceTexte || ""));
   const transactionsNonAssignees = transactionsSansProjet.filter(
-    (t) => Math.abs(Number(t.amountHT) || 0) > 0
+    (t) => Math.abs(Number(t.amountHT) || 0) > 0 && (!filtreBcActif || porteUnBc(t))
   );
-  const nbQbMontantNul = transactionsSansProjet.length - transactionsNonAssignees.length;
+  const nbFiltreesSansBc = filtreBcActif
+    ? transactionsSansProjet.filter((t) => Math.abs(Number(t.amountHT) || 0) > 0 && !porteUnBc(t)).length
+    : 0;
+  const nbQbMontantNul = transactionsSansProjet.filter((t) => Math.abs(Number(t.amountHT) || 0) === 0).length;
   // 🚫 Transactions marquées « Hors Fluxya » — sorties de la liste mais
   // jamais perdues : un petit tiroir permet de les remettre à classer.
   const transactionsHorsFluxya = transactionsQb.filter((t) => t.cible?.type === "hors");
@@ -1251,6 +1263,9 @@ export function OngletProjetsHub({ projets, setProjets, clients, travaux, devisL
               <span className="font-bold">client</span>. Rien d&apos;urgent : tant qu&apos;une facture n&apos;est pas
               rattachée, elle ne fausse aucun chiffre — elle n&apos;est simplement comptée nulle part.
               {nbQbMontantNul > 0 && ` (${nbQbMontantNul} facture${nbQbMontantNul > 1 ? "s" : ""} à 0,00 $ écartée${nbQbMontantNul > 1 ? "s" : ""} — un montant nul ne change aucune marge.)`}
+              {/* Le filtre ne cache JAMAIS en silence : le compte des
+                  laissées-de-côté s'affiche (règle maison). */}
+              {nbFiltreesSansBc > 0 && ` 📦 Filtre actif : ${nbFiltreesSansBc} dépense${nbFiltreesSansBc > 1 ? "s" : ""} sans Nº de BC laissée${nbFiltreesSansBc > 1 ? "s" : ""} à QuickBooks (Paramètres → Connexions).`}
             </p>
           )}
           {blocQbOuvert && (

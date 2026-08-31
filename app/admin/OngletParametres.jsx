@@ -823,6 +823,28 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               Sans date : l&apos;application lit les 12 derniers mois (le maximum). La date ne peut que resserrer cette
               fenêtre. N&apos;oublie pas « 💾 Enregistrer les paramètres » en bas.
             </p>
+            {/* 📦 FILTRE PAR BC (2026-08-31, demande du propriétaire :
+                « une compagnie qui a 200 transactions par mois autres que
+                des matériaux va passer son temps à faire ça pour rien »). */}
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              <label className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${brouillon.achatsSeulementBc ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}>
+                <input
+                  type="checkbox"
+                  checked={!!brouillon.achatsSeulementBc}
+                  disabled={!estAdminPrincipal}
+                  onChange={(e) => champ("achatsSeulementBc", e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+                />
+                <span>
+                  📦 Ne remonter que les dépenses portant un Nº de bon de commande
+                  <span className="mt-0.5 block text-[10px] font-normal leading-snug text-slate-500">
+                    Les dépenses SANS Nº de BC (assurances, paiements d&apos;auto, frais bancaires…) restent dans QuickBooks — la liste
+                    « à rattacher » ne montre plus que le matériel des chantiers. ⚠️ Le revers : un achat de matériel dont le Nº de BC a
+                    été oublié ne sera pas vu — la discipline du « Nº de référence » devient la règle.
+                  </span>
+                </span>
+              </label>
+            </div>
           </div>
         </div>
       )}
