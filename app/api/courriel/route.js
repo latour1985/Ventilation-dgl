@@ -101,29 +101,59 @@ export async function POST(request) {
   // celle du domaine vérifié (variable COURRIEL_ADRESSE_EXPEDITION —
   // passera à notifications@fluxya.ca quand son DNS sera vérifié), et
   // les RÉPONSES vont à l'adresse choisie par l'entreprise.
+  // 🏢 L'ENTREPRISE DU DEMANDEUR — et aucune autre (2026-09-03, vécu :
+  // le « .limit(1) » prenait la PREMIÈRE compagnie de la table, et les
+  // courriels de Miroir partaient signés « Ventilation DGL inc. »).
+  // Même règle que les routes QuickBooks : l'entreprise vient du JETON.
+  const entrepriseId = String(utilisateur.app_metadata?.entreprise_id || "dgl");
   let nomEntreprise = "";
   let repondreEntreprise = "";
+  let expediteurVerifie = "";
   try {
     const { data: ent } = await clientSupabaseService()
       .from("entreprises")
-      .select("nom_commercial, nom_legal, courriel_facturation, courriel")
-      .order("created_at")
-      .limit(1);
-    nomEntreprise = ent?.[0]?.nom_commercial || ent?.[0]?.nom_legal || "";
-    repondreEntreprise = ent?.[0]?.courriel_facturation || ent?.[0]?.courriel || "";
+      .select("nom_commercial, nom_legal, courriel_facturation, courriel, courriel_expediteur_verifie")
+      .eq("id", entrepriseId)
+      .maybeSingle();
+    nomEntreprise = ent?.nom_commercial || ent?.nom_legal || "";
+    repondreEntreprise = ent?.courriel_facturation || ent?.courriel || "";
+    // 🥇 ÉTAGE 2 (par compagnie, plus tard) : une entreprise dont le
+    // domaine est vérifié chez Resend envoie de SA vraie adresse —
+    // consignée en base par NOUS (jamais saisie librement : Resend
+    // refuserait, et on ne laisse personne se faire passer pour un
+    // domaine qu'il ne contrôle pas).
+    expediteurVerifie = ent?.courriel_expediteur_verifie || "";
   } catch {
-    // fiche indisponible — les valeurs de repli s'appliquent
+    // fiche indisponible (ou colonne du snippet 122 pas encore passée)
+    // — repli : relire sans la colonne pour garder le nom et la réponse.
+    try {
+      const { data: ent } = await clientSupabaseService()
+        .from("entreprises")
+        .select("nom_commercial, nom_legal, courriel_facturation, courriel")
+        .eq("id", entrepriseId)
+        .maybeSingle();
+      nomEntreprise = ent?.nom_commercial || ent?.nom_legal || "";
+      repondreEntreprise = ent?.courriel_facturation || ent?.courriel || "";
+    } catch {
+      // vraiment indisponible — les valeurs de repli s'appliquent
+    }
   }
+  // 🌐 ÉTAGE 1 (toutes les compagnies) : « Nom de la compagnie »
+  // <notifications@fluxya.ca> — le nom affiché est le sien, le domaine
+  // est celui de la plateforme (vérifié chez Resend), et les réponses
+  // vont à SA boîte. Une adresse vérifiée par compagnie (étage 2)
+  // l'emporte quand elle existe.
   const adresseExpedition =
+    expediteurVerifie ||
     process.env.COURRIEL_ADRESSE_EXPEDITION ||
     (process.env.COURRIEL_EXPEDITEUR || "").match(/<([^>]+)>/)?.[1] ||
-    "info@ventilationdgl.com";
+    "notifications@fluxya.ca";
   // Guillemets autour du nom : certains noms d'entreprise contiennent
   // une virgule ou un point — sans guillemets, l'en-tête serait invalide.
   const expediteur = nomEntreprise
     ? `"${nomEntreprise.replace(/"/g, "'")}" <${adresseExpedition}>`
-    : process.env.COURRIEL_EXPEDITEUR || `Ventilation DGL inc. <${adresseExpedition}>`;
-  const adresseReponse = repondreEntreprise || process.env.COURRIEL_REPONSE || "info@ventilationdgl.com";
+    : process.env.COURRIEL_EXPEDITEUR || `Fluxya <${adresseExpedition}>`;
+  const adresseReponse = repondreEntreprise || process.env.COURRIEL_REPONSE || adresseExpedition;
   try {
     const reponse = await fetch("https://api.resend.com/emails", {
       method: "POST",

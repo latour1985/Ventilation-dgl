@@ -741,6 +741,17 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const supprimerLigne = (uid) => setLignes((prev) => prev.filter((l) => l.uid !== uid));
 
   const enregistrerAdresse = (place) => {
+    // 🚫 ANTI-DOUBLON (2026-09-03, vécu : la même adresse choisie deux
+    // fois apparaissait deux fois dans le dossier ET dans le sélecteur).
+    // Même règle que partout ailleurs : la ligne1 normalisée décide.
+    const dejaLa = (client?.adresses || []).some(
+      (a) => (a.ligne1 || "").trim().toLowerCase() === String(place.label || "").trim().toLowerCase()
+    );
+    if (dejaLa) {
+      ajouterJournal(`📍 Adresse déjà au dossier de ${client.nom} — rien à ajouter, choisis-la dans « Adresse des travaux ».`);
+      setNouvelleAdresseNom("");
+      return;
+    }
     // Le petit nom est FACULTATIF (correctif 2026-09-06 : quand il était
     // vide, choisir une suggestion Google ne faisait RIEN, en silence —
     // « l'adresse n'apparaît pas »). Sans petit nom : l'adresse elle-même.

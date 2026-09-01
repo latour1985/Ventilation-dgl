@@ -4885,3 +4885,19 @@ select string_agg(k.column_name, ', ' order by k.ordinal_position) as cle_primai
     on k.constraint_name = tc.constraint_name and k.table_schema = tc.table_schema
  where tc.table_schema = 'public' and tc.table_name = 'devis_app'
    and tc.constraint_type = 'PRIMARY KEY';
+
+-- ============================================================
+-- 122 - EXPEDITEUR COURRIEL PAR ENTREPRISE (2026-09-03, etage 1)
+-- ------------------------------------------------------------
+-- Demande du proprietaire : « chaque client aura une adresse courriel
+-- differente ». Etage 1 (toutes) : « Nom de la compagnie »
+-- <notifications@fluxya.ca> + reponses vers SA boite. Etage 2 (au cas
+-- par cas) : cette colonne porte l'adresse VERIFIEE chez Resend d'une
+-- compagnie qui a configure son DNS — remplie par NOUS seulement,
+-- jamais un champ libre (anti-usurpation). DGL garde son domaine.
+-- ============================================================
+alter table entreprises add column if not exists courriel_expediteur_verifie text;
+update entreprises set courriel_expediteur_verifie = 'info@ventilationdgl.com' where id = 'dgl';
+
+-- Verification : DGL a son adresse, les autres restent au modele plateforme.
+select id, courriel_expediteur_verifie from entreprises order by id;
