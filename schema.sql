@@ -4862,3 +4862,26 @@ $$;
 
 -- Verification rapide : la fonction recompile sans erreur.
 select proname from pg_proc where proname = 'creer_facture_maison';
+
+-- ============================================================
+-- 121 - CLE COMPOSEE SUR LES DEVIS : (entreprise_id, id) (2026-09-03)
+-- ------------------------------------------------------------
+-- Vecu par le proprietaire : son DEV-3523 (DGL) refusait de
+-- s'enregistrer (« new row violates row-level security ») parce que
+-- MIROIR avait deja un DEV-3523 — l'id du devis EST son numero, et
+-- chaque entreprise a son propre compteur : les numeros se croisent,
+-- c'est voulu. La cle primaire devient (entreprise_id, id) — meme
+-- patron que compteurs/prix_depots/taux_metiers (snippet 104). Aucun
+-- changement de code : l'upsert utilise la cle primaire, et le trigger
+-- poser_entreprise_id remplit l'entreprise avant le test d'unicite.
+-- ============================================================
+alter table devis_app drop constraint if exists devis_app_pkey;
+alter table devis_app add primary key (entreprise_id, id);
+
+-- Verification : la cle est bien composee.
+select string_agg(k.column_name, ', ' order by k.ordinal_position) as cle_primaire
+  from information_schema.table_constraints tc
+  join information_schema.key_column_usage k
+    on k.constraint_name = tc.constraint_name and k.table_schema = tc.table_schema
+ where tc.table_schema = 'public' and tc.table_name = 'devis_app'
+   and tc.constraint_type = 'PRIMARY KEY';
