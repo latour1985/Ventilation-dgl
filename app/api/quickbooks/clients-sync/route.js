@@ -117,9 +117,17 @@ async function descendreClientsQbo(acces, admin, entrepriseId) {
       continue;
     }
     // Inconnu de Fluxya → fiche neuve. Adresse de facturation en une
-    // ligne lisible ; le courriel QuickBooks devient le contact défaut.
+    // ligne lisible ; les courriels QuickBooks deviennent les contacts.
     const adresse = [q.BillAddr?.Line1, q.BillAddr?.City, q.BillAddr?.PostalCode].filter(Boolean).join(", ");
-    const courriel = (q.PrimaryEmailAddr?.Address || "").trim();
+    // ✂️ SÉPARÉS (2026-09-03, vécu : « info@…, jean@… » dans UNE seule
+    // entrée) : QuickBooks accepte plusieurs adresses dans son champ
+    // unique — collées ensemble chez nous, elles étaient REJETÉES à
+    // l'envoi par le filtre anti-coquilles. Une entrée par adresse, la
+    // première fait le défaut.
+    const courrielsQb = String(q.PrimaryEmailAddr?.Address || "")
+      .split(/[,;]/)
+      .map((x) => x.trim())
+      .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
     aCreer.push({
       // ⚠️ IDENTIFIANT CLOISONNÉ PAR ENTREPRISE (2026-09-03 — fuite
       // vécue) : « qbc-<id> » tout court entrait en COLLISION entre
@@ -131,7 +139,7 @@ async function descendreClientsQbo(acces, admin, entrepriseId) {
       id: `qbc-${entrepriseId}-${qbId}`,
       nom: nomQb,
       entreprise: q.CompanyName && nomNormalise(q.CompanyName) !== nomNormalise(nomQb) ? q.CompanyName : null,
-      courriels: courriel ? [{ id: `cc-qb-${qbId}`, label: "QuickBooks", email: courriel, defaut: true }] : [],
+      courriels: courrielsQb.map((email, i) => ({ id: `cc-qb-${qbId}-${i}`, label: "QuickBooks", email, defaut: i === 0 })),
       telephone: q.PrimaryPhone?.FreeFormNumber || null,
       adresse_facturation: adresse || null,
       quickbooks_customer_id: qbId,
