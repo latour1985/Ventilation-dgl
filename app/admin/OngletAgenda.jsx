@@ -882,7 +882,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     const numero = numeroDevisExistant.trim();
     if (!numero) return;
     setVerifDevisQbo({ etat: "cherche" });
-    const r = await lireEstimateQbo(numero);
+    // ⏲️ 15 secondes maximum (2026-09-03, vécu : le bouton restait gelé
+    // sur « … » quand QuickBooks ne répondait jamais) — au-delà, verdict
+    // « injoignable » et le bouton redevient cliquable.
+    const r = await Promise.race([
+      lireEstimateQbo(numero),
+      new Promise((resolve) => setTimeout(() => resolve(null), 15000)),
+    ]);
     if (r?.trouve) {
       setVerifDevisQbo({
         etat: "trouve",
