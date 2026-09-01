@@ -3059,6 +3059,7 @@ function AppAdmin() {
           projets={projets}
           setProjets={setProjets}
           clients={clients}
+          setClients={setClients}
           travaux={travaux}
           devisListe={devisListe}
           transactionsQb={transactionsQb}

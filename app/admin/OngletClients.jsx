@@ -13,6 +13,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { sauvegarderClient } from "@/lib/supabase/clients";
 import { listerFacturesLibres } from "@/lib/supabase/facturesLibres";
+import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { ModalDetailProjet } from "./OngletProjets";
 import { Button, BarrePagination, ITEMS_PAR_PAGE, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
@@ -729,12 +730,23 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
     setNouveauProjetSousTraitants((p) => p.map((st) => (st.id === id ? { ...st, [champ]: val } : st)));
   const retirerSousTraitant = (id) =>
     setNouveauProjetSousTraitants((p) => p.filter((st) => st.id !== id));
-  const totalFactureProjet =
-    nb(nouveauProjetMoFacture) + nb(nouveauProjetTrFacture) + nb(nouveauProjetMatFacture) +
-    nouveauProjetSousTraitants.reduce((s, st) => s + nb(st.facture), 0);
-  const totalCoutantProjet =
-    nb(nouveauProjetMoCoutant) + nb(nouveauProjetTrCoutant) + nb(nouveauProjetMatCoutant) +
-    nouveauProjetSousTraitants.reduce((s, st) => s + nb(st.coutant), 0);
+  // 🎯 BUDGET GLOBAL OU DÉTAILLÉ (2026-09-03, demande du propriétaire :
+  // « certains projets sont vendus à la tonne, pas au nombre d'heures »).
+  // Global : deux chiffres — prix vendu total et coût total projeté ;
+  // la rentabilité RÉELLE (heures pointées, achats QuickBooks, ST)
+  // continue de s'accumuler pareil et se compare au coût projeté total.
+  const [nouveauProjetModeBudget, setNouveauProjetModeBudget] = useState("detaille"); // "detaille" | "global"
+  const [nouveauProjetGlobalFacture, setNouveauProjetGlobalFacture] = useState("");
+  const [nouveauProjetGlobalCoutant, setNouveauProjetGlobalCoutant] = useState("");
+  const budgetGlobal = nouveauProjetModeBudget === "global";
+  const totalFactureProjet = budgetGlobal
+    ? nb(nouveauProjetGlobalFacture)
+    : nb(nouveauProjetMoFacture) + nb(nouveauProjetTrFacture) + nb(nouveauProjetMatFacture) +
+      nouveauProjetSousTraitants.reduce((s, st) => s + nb(st.facture), 0);
+  const totalCoutantProjet = budgetGlobal
+    ? nb(nouveauProjetGlobalCoutant)
+    : nb(nouveauProjetMoCoutant) + nb(nouveauProjetTrCoutant) + nb(nouveauProjetMatCoutant) +
+      nouveauProjetSousTraitants.reduce((s, st) => s + nb(st.coutant), 0);
   const margeProjet = totalFactureProjet - totalCoutantProjet;
   const margePctProjet = totalFactureProjet > 0 ? (margeProjet / totalFactureProjet) * 100 : 0;
 
@@ -769,21 +781,37 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
       bonsCommande: [],
       // Ventilation du budget PRÉVU. Le RÉEL viendra de l'app employé
       // (heures) et de QuickBooks (matériaux / sous-traitance).
-      budgetPrevu: {
-        mainOeuvreChantier: { heures: moHeures, facture: nb(nouveauProjetMoFacture), coutant: moCoutant },
-        transport: { heures: nb(nouveauProjetTrHeures), facture: nb(nouveauProjetTrFacture), coutant: nb(nouveauProjetTrCoutant) },
-        materiaux: { facture: nb(nouveauProjetMatFacture), coutant: nb(nouveauProjetMatCoutant) },
-        sousTraitants: nouveauProjetSousTraitants.map((st) => ({ nom: st.nom.trim(), facture: nb(st.facture), coutant: nb(st.coutant) })),
-        totalFacture: totalFactureProjet,
-        totalCoutant: totalCoutantProjet,
-        marge: margeProjet,
-      },
+      budgetPrevu: budgetGlobal
+        ? {
+            // 🎯 MODE GLOBAL — vendu à la tonne, au pied carré, au
+            // forfait : deux totaux, pas de ventilation. Les postes à
+            // zéro gardent la même forme que le mode détaillé — tous
+            // les calculs existants (totaux, santé, marge) continuent.
+            modeSimple: true,
+            mainOeuvreChantier: { heures: 0, facture: 0, coutant: 0 },
+            transport: { heures: 0, facture: 0, coutant: 0 },
+            materiaux: { facture: 0, coutant: 0 },
+            sousTraitants: [],
+            totalFacture: totalFactureProjet,
+            totalCoutant: totalCoutantProjet,
+            marge: margeProjet,
+          }
+        : {
+            mainOeuvreChantier: { heures: moHeures, facture: nb(nouveauProjetMoFacture), coutant: moCoutant },
+            transport: { heures: nb(nouveauProjetTrHeures), facture: nb(nouveauProjetTrFacture), coutant: nb(nouveauProjetTrCoutant) },
+            materiaux: { facture: nb(nouveauProjetMatFacture), coutant: nb(nouveauProjetMatCoutant) },
+            sousTraitants: nouveauProjetSousTraitants.map((st) => ({ nom: st.nom.trim(), facture: nb(st.facture), coutant: nb(st.coutant) })),
+            totalFacture: totalFactureProjet,
+            totalCoutant: totalCoutantProjet,
+            marge: margeProjet,
+          },
     };
     setProjets((prev) => [...prev, nouveau]);
     ajouterJournal(`🏗️ Projet "${nouveau.nom}" créé pour ${client?.nom} — budget ${totalFactureProjet.toFixed(2)} $, marge prévue ${margeProjet.toFixed(2)} $`);
     setNouveauProjetNom("");
     setNouveauProjetDebut(todayISO());
     setNouveauProjetFin("");
+    setNouveauProjetModeBudget("detaille"); setNouveauProjetGlobalFacture(""); setNouveauProjetGlobalCoutant("");
     setNouveauProjetMoHeures(""); setNouveauProjetMoFacture(""); setNouveauProjetMoCoutant("");
     setNouveauProjetTrHeures(""); setNouveauProjetTrFacture(""); setNouveauProjetTrCoutant("");
     setNouveauProjetMatFacture(""); setNouveauProjetMatCoutant("");
@@ -1432,6 +1460,46 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                             <input type="date" value={nouveauProjetFin} onChange={(e) => setNouveauProjetFin(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
                           </div>
                         </div>
+                        {/* 🎯 DEUX FAÇONS DE BUDGÉTER (2026-09-03) :
+                            détaillé (postes) ou GLOBAL — pour les
+                            projets vendus à la tonne, au pied carré, au
+                            forfait. Le réel s'accumule pareil dans les
+                            deux cas. */}
+                        <div className="mb-2 flex rounded-xl border border-slate-200 bg-white p-0.5">
+                          {[["detaille", "🧾 Budget détaillé"], ["global", "🎯 Montant global"]].map(([id, libelle]) => (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => setNouveauProjetModeBudget(id)}
+                              className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-extrabold ${nouveauProjetModeBudget === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+                            >
+                              {libelle}
+                            </button>
+                          ))}
+                        </div>
+                        {budgetGlobal && (
+                          <div className="mb-2 rounded-lg border border-slate-200 bg-white p-2">
+                            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Budget global du projet ($)</p>
+                            <p className="mb-1.5 text-[9px] text-slate-400">
+                              Vendu à la tonne, au pied carré, au forfait… Deux chiffres suffisent : la rentabilité réelle
+                              (heures pointées, achats QuickBooks, sous-traitants) se comparera au coût projeté total.
+                            </p>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-slate-400">Prix vendu (total) $</label>
+                                <InputNombreDecimal valeur={nouveauProjetGlobalFacture} onChange={(v) => setNouveauProjetGlobalFacture(v)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                              </div>
+                              <div>
+                                <label className="mb-0.5 block text-[9px] font-bold text-orange-500">Coût total projeté $</label>
+                                <InputNombreDecimal valeur={nouveauProjetGlobalCoutant} onChange={(v) => setNouveauProjetGlobalCoutant(v)} className="w-full rounded-lg border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs tabular-nums" />
+                              </div>
+                            </div>
+                            <p className="mt-1.5 text-right text-[11px] font-extrabold text-emerald-700 tabular-nums">
+                              Marge projetée : {margeProjet.toFixed(0)} $ · {margePctProjet.toFixed(0)} %
+                            </p>
+                          </div>
+                        )}
+                        {!budgetGlobal && (<>
                         <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50 p-2">
                           <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-700">Heures — prévu vs réel (suivi)</p>
                           <p className="mb-1.5 text-[9px] text-blue-500">Le réel se remplit au fur et à mesure que les techniciens pointent (app employé). Aucun impact sur les montants $.</p>
@@ -1542,6 +1610,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                             </div>
                           </div>
                         </div>
+                        </>)}
                         <Button onClick={() => creerProjet(c.id)} disabled={!nouveauProjetNom.trim() || totalFactureProjet <= 0} className="w-full min-h-0 py-1.5 text-xs">
                           Créer le projet
                         </Button>

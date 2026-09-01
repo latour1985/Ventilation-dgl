@@ -15,7 +15,8 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritBcSimple } from "@/lib/courriels";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
-import { Button, SelecteurItem, useCatalogue, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
+import { lireEstimateQbo } from "@/lib/quickbooksClient";
 
 // Projets / chantiers au long cours — lient un client, des tâches de
 // terrain (via `travaux[].projetId`), des bons de commande fournisseur
@@ -1089,6 +1090,252 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
 }
 
 // ============================================================
+// ============================================================
+// 🏗️ NOUVEAU PROJET DEPUIS LE HUB (2026-09-03, demande du propriétaire :
+// « créer un projet à partir de là, ajouter un client, ou aller
+// chercher un devis dans QuickBooks avec le bon montant »).
+// Le chemin RAPIDE : client (existant, ou fiche express), nom, adresse,
+// budget GLOBAL (vendu + coût projeté — les projets à la tonne), et
+// l'import d'un devis QuickBooks par numéro qui remplit le montant.
+// La ventilation détaillée par poste reste offerte au dossier client.
+// ============================================================
+function ModalNouveauProjetRapide({ clients, setClients, ajouterJournal, onFermer, onCreer }) {
+  const nb = (v) => Number(v) || 0;
+  const [clientId, setClientId] = useState("");
+  const [recherche, setRecherche] = useState("");
+  const client = (clients || []).find((c) => c.id === clientId) || null;
+  const resultats = (() => {
+    const t = recherche.trim().toLowerCase();
+    const base = clients || [];
+    return (t ? base.filter((c) => correspond(c, t)) : base).slice(0, 8);
+  })();
+  // Fiche EXPRESS d'un client absent — le minimum vital ; le dossier se
+  // complète ensuite dans l'onglet Clients (adresses, courriels…).
+  const [expressOuvert, setExpressOuvert] = useState(false);
+  const [expressNom, setExpressNom] = useState("");
+  const [expressTel, setExpressTel] = useState("");
+  const [expressCourriel, setExpressCourriel] = useState("");
+  const creerClientExpress = () => {
+    if (!expressNom.trim() || !setClients) return;
+    const fiche = {
+      id: `c-${Date.now()}`,
+      nom: expressNom.trim(),
+      entreprise: null,
+      courriels: expressCourriel.trim() ? [{ id: `cc-${Date.now()}`, label: "Principal", email: expressCourriel.trim(), defaut: true }] : [],
+      telephone: expressTel.trim() || null,
+      adresses: [],
+      contacts: [],
+    };
+    setClients((prev) => [...prev, fiche]);
+    setClientId(fiche.id);
+    setExpressOuvert(false);
+    ajouterJournal(`👤 Fiche express créée pour « ${fiche.nom} » — complète son dossier (adresse, courriels) dans l'onglet Clients.`);
+  };
+
+  const [nom, setNom] = useState("");
+  const [adresseId, setAdresseId] = useState("");
+  const [nouvelleAdresse, setNouvelleAdresse] = useState(null);
+  const [secteur, setSecteur] = useState("commercial");
+  const [debut, setDebut] = useState(todayISO());
+  const [fin, setFin] = useState("");
+  const [globalFacture, setGlobalFacture] = useState("");
+  const [globalCoutant, setGlobalCoutant] = useState("");
+  const marge = nb(globalFacture) - nb(globalCoutant);
+  const margePct = nb(globalFacture) > 0 ? (marge / nb(globalFacture)) * 100 : 0;
+
+  // 📥 IMPORT D'UN DEVIS QUICKBOOKS par numéro : la lecture existante
+  // (route estimate, action « lire ») ramène les lignes — leur total
+  // devient le prix vendu, le nom se propose tout seul.
+  const [devisQbNumero, setDevisQbNumero] = useState("");
+  const [devisQbEtat, setDevisQbEtat] = useState(""); // "" | "cherche" | message
+  const importerDevisQb = async () => {
+    const numero = devisQbNumero.trim();
+    if (!numero) return;
+    setDevisQbEtat("cherche");
+    const r = await lireEstimateQbo(numero);
+    if (r?.trouve) {
+      const total = (r.lignes || []).reduce((s, l) => s + (Number(l.quantite) || 1) * (Number(l.prixUnitaire) || 0), 0);
+      setGlobalFacture(Math.round(total * 100) / 100);
+      if (!nom.trim()) setNom(`Devis ${numero}`);
+      setDevisQbEtat(`✅ Devis ${numero} trouvé — ${(r.lignes || []).length} ligne${(r.lignes || []).length > 1 ? "s" : ""}, ${total.toFixed(2)} $ posé comme prix vendu.`);
+    } else {
+      setDevisQbEtat(r?.nonConnecte ? "🔌 QuickBooks non connecté." : r?.erreur ? `⚠️ ${r.erreur}` : `Devis ${numero} introuvable dans QuickBooks.`);
+    }
+  };
+
+  const creer = () => {
+    if (!client || !nom.trim() || nb(globalFacture) <= 0) return;
+    let adresseTravaux = null;
+    if (nouvelleAdresse) adresseTravaux = nouvelleAdresse.label;
+    else if (adresseId) {
+      const a = client?.adresses?.find((x) => x.id === adresseId);
+      if (a) adresseTravaux = `${a.nom} — ${libelleAdresse(a)}`;
+    }
+    onCreer(
+      {
+        id: `projet-${Date.now()}`,
+        nom: nom.trim(),
+        clientId: client.id,
+        adresseTravaux,
+        dateDebut: debut,
+        dateFin: fin,
+        secteur: secteur === "residentiel" ? "residentiel" : "commercial",
+        statut: "À planifier",
+        budgetTotal: nb(globalFacture),
+        tauxHoraireCoutant: 45,
+        bonsCommande: [],
+        ...(devisQbNumero.trim() && devisQbEtat.startsWith("✅") ? { devisNumero: devisQbNumero.trim() } : {}),
+        budgetPrevu: {
+          modeSimple: true,
+          mainOeuvreChantier: { heures: 0, facture: 0, coutant: 0 },
+          transport: { heures: 0, facture: 0, coutant: 0 },
+          materiaux: { facture: 0, coutant: 0 },
+          sousTraitants: [],
+          totalFacture: nb(globalFacture),
+          totalCoutant: nb(globalCoutant),
+          marge,
+        },
+      },
+      client.nom
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) onFermer(); }}>
+      <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-slate-100 p-5 pb-3">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">🏗️ Nouveau projet</h3>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              Budget global (vendu à la tonne, au forfait…) — pour la ventilation détaillée par poste, passe par le dossier du client.
+            </p>
+          </div>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5 pt-3">
+          {/* CLIENT */}
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">Client *</label>
+            {client ? (
+              <div className="flex items-center justify-between gap-2 rounded-lg border-2 border-[#FF6A13] bg-orange-50 px-3 py-2">
+                <span className="min-w-0 truncate text-sm font-bold text-slate-800">{nomAffichageClient(client)}</span>
+                <button onClick={() => { setClientId(""); setRecherche(""); setAdresseId(""); }} className="shrink-0 text-[11px] font-bold text-slate-500 underline">changer</button>
+              </div>
+            ) : expressOuvert ? (
+              <div className="space-y-1.5 rounded-xl border border-dashed border-slate-300 p-2.5">
+                <input value={expressNom} onChange={(e) => setExpressNom(e.target.value)} placeholder="Nom du client ou de l'entreprise *" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                <div className="grid grid-cols-2 gap-1.5">
+                  <input value={expressTel} onChange={(e) => setExpressTel(e.target.value)} placeholder="Téléphone" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  <input value={expressCourriel} onChange={(e) => setExpressCourriel(e.target.value)} placeholder="Courriel" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <Button variant="outline" onClick={() => setExpressOuvert(false)} className="min-h-0 py-1.5 text-[11px]">Annuler</Button>
+                  <Button onClick={creerClientExpress} disabled={!expressNom.trim()} className="min-h-0 py-1.5 text-[11px]">Créer la fiche express</Button>
+                </div>
+                <p className="text-[9px] text-slate-400">Le minimum pour démarrer — complète le dossier (adresse, courriels) dans l&apos;onglet Clients.</p>
+              </div>
+            ) : (
+              <>
+                <input value={recherche} onChange={(e) => setRecherche(e.target.value)} placeholder="🔍 Cherche un client par nom, entreprise ou téléphone…" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <div className="mt-0.5 max-h-[130px] overflow-y-auto rounded-lg border border-slate-200">
+                  {resultats.map((c) => (
+                    <button key={c.id} onClick={() => setClientId(c.id)} className="flex w-full items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-left text-xs last:border-0 hover:bg-orange-50">
+                      <span className="min-w-0 truncate">{nomAffichageClient(c)}</span>
+                      <span className="shrink-0 text-[10px] font-bold text-[#FF6A13]">choisir →</span>
+                    </button>
+                  ))}
+                </div>
+                {setClients && (
+                  <button onClick={() => { setExpressOuvert(true); setExpressNom(recherche.trim()); }} className="mt-1 text-[11px] font-bold text-slate-500 underline underline-offset-2">
+                    ➕ Client absent de la liste ? Créer une fiche express…
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* 📥 DEVIS QUICKBOOKS */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+            <label className="mb-1 block text-[10px] font-bold text-slate-500">📥 Importer un devis QuickBooks (facultatif)</label>
+            <div className="flex gap-1.5">
+              <input value={devisQbNumero} onChange={(e) => setDevisQbNumero(e.target.value)} placeholder="Nº du devis — ex : 1042 ou DEV-3520" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+              <Button variant="outline" onClick={importerDevisQb} loading={devisQbEtat === "cherche"} loadingText="…" className="min-h-0 shrink-0 px-2.5 py-1.5 text-[11px]">
+                Chercher
+              </Button>
+            </div>
+            {devisQbEtat && devisQbEtat !== "cherche" && <p className="mt-1 text-[10px] font-semibold text-slate-600">{devisQbEtat}</p>}
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">Nom du projet *</label>
+            <input value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Ex : Conduits sous dalle — 12 tonnes" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+
+          {/* ADRESSE DES TRAVAUX */}
+          <div>
+            <label className="mb-1 block text-xs font-bold text-slate-500">Adresse des travaux</label>
+            {(client?.adresses || []).length > 0 && (
+              <select value={adresseId} onChange={(e) => { setAdresseId(e.target.value); setNouvelleAdresse(null); }} className="mb-1.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-xs">
+                <option value="">— Choisir une adresse enregistrée —</option>
+                {(client?.adresses || []).map((a) => <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>)}
+              </select>
+            )}
+            <AutocompleteAdresse onSelection={(place) => { setNouvelleAdresse(place); setAdresseId(""); }} />
+            {nouvelleAdresse && <p className="mt-1 text-[11px] font-bold text-emerald-700">✓ {nouvelleAdresse.label}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Secteur CCQ</label>
+              <div className="flex rounded-lg border border-slate-200 p-0.5">
+                {[["commercial", "🏢 Commercial"], ["residentiel", "🏠 Résidentiel"]].map(([id, lib]) => (
+                  <button key={id} type="button" onClick={() => setSecteur(id)} className={`flex-1 rounded-md px-1.5 py-1.5 text-[10px] font-bold ${secteur === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}>{lib}</button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="mb-1 block text-[10px] font-bold text-slate-400">Début</label>
+                <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} className="w-full rounded-lg border border-slate-300 px-1.5 py-1.5 text-xs" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] font-bold text-slate-400">Fin</label>
+                <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} className="w-full rounded-lg border border-slate-300 px-1.5 py-1.5 text-xs" />
+              </div>
+            </div>
+          </div>
+
+          {/* 🎯 BUDGET GLOBAL */}
+          <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">🎯 Budget global ($)</p>
+            <div className="mt-1 grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="mb-0.5 block text-[9px] font-bold text-slate-400">Prix vendu (total) $ *</label>
+                <InputNombreDecimal valeur={globalFacture} onChange={setGlobalFacture} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[9px] font-bold text-orange-500">Coût total projeté $</label>
+                <InputNombreDecimal valeur={globalCoutant} onChange={setGlobalCoutant} className="w-full rounded-lg border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs tabular-nums" />
+              </div>
+            </div>
+            <p className="mt-1.5 text-right text-[11px] font-extrabold text-emerald-700 tabular-nums">
+              Marge projetée : {marge.toFixed(0)} $ · {margePct.toFixed(0)} %
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-4">
+          <Button variant="outline" onClick={onFermer} className="min-h-0 py-2 text-xs">Annuler</Button>
+          <Button disabled={!client || !nom.trim() || nb(globalFacture) <= 0} onClick={creer} className="min-h-0 py-2 text-xs">
+            Créer le projet
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // HUB PROJETS & RENTABILITÉ — vue générale, recherche/filtres,
 // cartes synthétiques de tous les projets
 // ============================================================
@@ -1178,7 +1425,10 @@ export const CarteProjet = React.memo(function CarteProjet({ p, client, travaux,
 });
 
 
-export function OngletProjetsHub({ projets, setProjets, clients, travaux, devisListe, transactionsQb, bonsTravail = [], utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooks, onAssignerTransaction, ajouterJournal, peutSyncQb, fournisseurs, setFournisseurs, inspections }) {
+export function OngletProjetsHub({ projets, setProjets, clients, setClients = null, travaux, devisListe, transactionsQb, bonsTravail = [], utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooks, onAssignerTransaction, ajouterJournal, peutSyncQb, fournisseurs, setFournisseurs, inspections }) {
+  // 🏗️ « + Nouveau projet » depuis le hub (2026-09-03, demande du
+  // propriétaire) — plus besoin de passer par le dossier client.
+  const [nouveauProjetOuvert, setNouveauProjetOuvert] = useState(false);
   const [recherche, setRecherche] = useState("");
   const [filtreStatut, setFiltreStatut] = useState("Tous");
   const [filtreClientId, setFiltreClientId] = useState("");
@@ -1269,6 +1519,9 @@ export function OngletProjetsHub({ projets, setProjets, clients, travaux, devisL
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Projets &amp; Rentabilité</h2>
         <div className="flex items-center gap-2">
+          <Button onClick={() => setNouveauProjetOuvert(true)} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
+            <Plus size={12} /> Nouveau projet
+          </Button>
           <div className="flex rounded-lg border border-slate-200 p-0.5">
             <button
               onClick={() => setVueAffichage("liste")}
@@ -1563,6 +1816,21 @@ export function OngletProjetsHub({ projets, setProjets, clients, travaux, devisL
         </div>
       )}
 
+      {nouveauProjetOuvert && (
+        <ModalNouveauProjetRapide
+          clients={clients}
+          setClients={setClients}
+          ajouterJournal={ajouterJournal}
+          onFermer={() => setNouveauProjetOuvert(false)}
+          onCreer={(nouveau, nomClient) => {
+            setNouveauProjetOuvert(false);
+            setProjets((prev) => [...prev, nouveau]);
+            ajouterJournal(
+              `🏗️ Projet "${nouveau.nom}" créé pour ${nomClient} — budget global ${Number(nouveau.budgetPrevu?.totalFacture || 0).toFixed(2)} $, coût projeté ${Number(nouveau.budgetPrevu?.totalCoutant || 0).toFixed(2)} $.`
+            );
+          }}
+        />
+      )}
       {projetOuvert && (
         <ModalDetailProjet
           inspections={inspections}
