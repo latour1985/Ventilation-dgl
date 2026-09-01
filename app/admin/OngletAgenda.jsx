@@ -15,6 +15,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { estCourrielST } from "@/lib/supabase/sousTraitants";
 import { estFerieCcq, marqueurCcq } from "@/lib/calendrierCcq";
+import { useLangue } from "@/lib/i18n";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
@@ -969,7 +970,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           className="sticky left-3 z-[1] flex min-w-0 items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-600"
         >
           <ChevronDown size={13} className={`shrink-0 transition-transform ${ouvert ? "rotate-180" : ""}`} />
-          {estBureauSec ? "🗂️ Personnel de bureau" : "🤝 Sous-traitants"} ({groupe.length})
+          {estBureauSec ? `🗂️ ${tr("Personnel de bureau")}` : `🤝 ${tr("Sous-traitants")}`} ({groupe.length})
           {!ouvert && nbEntrees > 0 && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-amber-700">
               {nbEntrees} entrée{nbEntrees > 1 ? "s" : ""} aujourd&apos;hui
@@ -987,8 +988,15 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       </div>
     );
   };
-  const jourLabel = jourAffiche.toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
-  const moisLabel = jourAffiche.toLocaleDateString("fr-CA", { month: "long", year: "numeric" });
+  // 🌎 Version anglaise — tranche 2b (2026-09-03) : `tr` traduit la
+  // coquille de l'agenda (repli français intact), `localeDates` met les
+  // DATES dans la langue choisie. Nommé `tr` (pas `t`) : les maps du
+  // fichier utilisent déjà `t` comme variable — un `t` de contexte
+  // serait masqué dans ces blocs et les traductions y casseraient.
+  const { t: tr, langue } = useLangue();
+  const localeDates = langue === "en" ? "en-CA" : "fr-CA";
+  const jourLabel = jourAffiche.toLocaleDateString(localeDates, { weekday: "long", day: "numeric", month: "long" });
+  const moisLabel = jourAffiche.toLocaleDateString(localeDates, { month: "long", year: "numeric" });
 
   const semaine = Array.from({ length: 7 }, (_, i) => ajouterJours(jourAffiche, i - jourAffiche.getDay() + 1));
   const mois = joursDuMois(jourAffiche);
@@ -2124,13 +2132,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           <button onClick={avancer} aria-label="Suivant" className="rounded-lg border border-slate-200 p-1.5"><ChevronRight size={16} /></button>
         </div>
         <div className="flex rounded-lg border border-slate-200 p-0.5">
-          {[["jour", "Jour"], ["semaine", "Semaine"], ["mois", "Mois"]].map(([id, label]) => (
+          {[["jour", "Jour"], ["semaine", "Semaine"], ["mois", "Mois"]].map(([id, labelVue]) => (
             <button
               key={id}
               onClick={() => setVue(id)}
               className={`rounded-md px-3 py-1.5 text-xs font-bold ${vue === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
             >
-              {label}
+              {tr(labelVue)}
             </button>
           ))}
         </div>
@@ -2157,7 +2165,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         {TYPES_TACHE.map((t) => (
           <div key={t.id} className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
             <span className={`h-2.5 w-2.5 rounded-full ${COULEUR_TYPE_TACHE[t.id].pastille}`} />
-            {t.label}
+            {tr(t.label)}
           </div>
         ))}
       </div>
@@ -2183,7 +2191,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                         : "bg-slate-100 text-slate-500"
                 }`}
               >
-                <span>{d.toLocaleDateString("fr-CA", { weekday: "short" })}</span>
+                <span>{d.toLocaleDateString(localeDates, { weekday: "short" })}</span>
                 <span className="tabular-nums">{d.getDate()}</span>
                 {marque && <span className="text-[9px] leading-none">{marque.type === "ferie" ? "🎌" : "🏖️"}</span>}
               </button>
@@ -2208,11 +2216,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         <div className="lg:w-80 lg:shrink-0">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
-              Tâches en attente ({tachesAttente.length})
+              {tr("Tâches en attente")} ({tachesAttente.length})
             </h3>
             {!lectureSeule && (
               <Button onClick={() => { setFormulaireOuvert((v) => !v); setEtapeTypeTache(false); }} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
-                <Plus size={12} /> Nouvelle tâche
+                <Plus size={12} /> {tr("Nouvelle tâche")}
               </Button>
             )}
           </div>
@@ -2225,7 +2233,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 ongletAttente === "pretes" ? "bg-[#131B2E] text-white" : "text-slate-500"
               }`}
             >
-              ✅ Prêtes
+              ✅ {tr("Prêtes")}
               <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${ongletAttente === "pretes" ? "bg-white/25" : "bg-slate-100 text-slate-600"}`}>
                 {tachesPretes.length}
               </span>
@@ -2236,7 +2244,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 ongletAttente === "bloquees" ? "bg-amber-600 text-white" : "text-slate-500"
               }`}
             >
-              🔒 Dépôt
+              🔒 {tr("Dépôt")}
               <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${ongletAttente === "bloquees" ? "bg-white/25" : "bg-slate-100 text-slate-600"}`}>
                 {tachesBloquees.length}
               </span>
@@ -2247,7 +2255,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 ongletAttente === "pieces" ? "bg-sky-600 text-white" : piecesEnRetard > 0 ? "text-red-600" : "text-slate-500"
               }`}
             >
-              🔧 Pièces
+              🔧 {tr("Pièces")}
               <span
                 className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${
                   ongletAttente === "pieces"
@@ -3509,7 +3517,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   const recue = pc.statut === "recue";
                   const attendPaiement = recue && pc.paiementRequis && !pc.paiementRecu;
                   const prevue = pc.dateReceptionPrevue
-                    ? new Date(`${pc.dateReceptionPrevue}T00:00:00`).toLocaleDateString("fr-CA", { day: "numeric", month: "long" })
+                    ? new Date(`${pc.dateReceptionPrevue}T00:00:00`).toLocaleDateString(localeDates, { day: "numeric", month: "long" })
                     : null;
                   return (
                     <div
@@ -3849,7 +3857,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
             )}
           </div>
           <p className="mt-3 hidden text-[11px] text-slate-400 lg:block">
-            Glisse une tâche vers une case du calendrier pour l'assigner.
+            {tr("Glisse une tâche vers une case du calendrier pour l'assigner.")}
           </p>
         </div>
 
@@ -4304,7 +4312,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                         marque?.type === "ferie" ? "bg-amber-50 text-amber-600" : marque?.type === "vacances" ? "bg-slate-100 text-slate-400" : weekend ? "text-orange-400" : "text-slate-400"
                       }`}
                     >
-                      {vue === "semaine" ? d.toLocaleDateString("fr-CA", { weekday: "short" }) : ""}
+                      {vue === "semaine" ? d.toLocaleDateString(localeDates, { weekday: "short" }) : ""}
                       <div>{marque ? `${marque.type === "ferie" ? "🎌" : "🏖️"}${d.getDate()}` : d.getDate()}</div>
                     </div>
                   );
