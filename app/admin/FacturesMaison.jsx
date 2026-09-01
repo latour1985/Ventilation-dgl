@@ -258,7 +258,7 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
 // ============================================================
 // LA SECTION COMPLÈTE — montée dans l'onglet Facturation.
 // ============================================================
-export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJournal, estAdminPrincipal, qbConnecte = null }) {
+export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJournal, estAdminPrincipal, qbConnecte = null, onAjouterCourrielClient = null }) {
   const [factures, setFactures] = useState([]);
   const [tableAbsente, setTableAbsente] = useState(false);
   const [modalOuverte, setModalOuverte] = useState(false); // true = facture ; objet = crédit sur cette facture
@@ -476,6 +476,7 @@ export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJo
       {choixCourriels && (
         <ModalSelectionCourriel
           client={choixCourriels.donnees.client?.id ? choixCourriels.donnees.client : (clients || []).find((c) => c.nom === (choixCourriels.origine?.clientNom || "")) || choixCourriels.donnees.client}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(choixCourriels.donnees.client?.id, email)}
           contexte={choixCourriels.origine ? "cette note de crédit" : "cette facture"}
           onFermer={() => setChoixCourriels(null)}
           onConfirmer={(choix) => {
@@ -488,6 +489,7 @@ export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJo
       {renvoiDe && (
         <ModalSelectionCourriel
           client={(clients || []).find((c) => c.id === renvoiDe.clientId || c.nom === renvoiDe.clientNom)}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(renvoiDe.clientId || (clients || []).find((c) => c.nom === renvoiDe.clientNom)?.id, email)}
           contexte={`le renvoi de la facture ${renvoiDe.numero}`}
           onFermer={() => setRenvoiDe(null)}
           onConfirmer={async (choix) => {

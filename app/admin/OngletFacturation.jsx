@@ -2697,6 +2697,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         ajouterJournal={ajouterJournal}
         estAdminPrincipal={estAdminPrincipal}
         qbConnecte={qbConnecte}
+        onAjouterCourrielClient={onAjouterCourrielClient}
       />
 
       {/* 🧾 FACTURES SANS CHANTIER — le registre des factures libres :
@@ -2775,6 +2776,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {renvoiLibre && (
         <ModalSelectionCourriel
           client={(clientsFacturation || []).find((c) => c.id === renvoiLibre.clientId || c.nom === renvoiLibre.clientNom)}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.((clientsFacturation || []).find((c) => c.id === renvoiLibre.clientId || c.nom === renvoiLibre.clientNom)?.id, email)}
           contexte={`le renvoi de la facture ${renvoiLibre.docNumber}`}
           onFermer={() => setRenvoiLibre(null)}
           onConfirmer={(choix) => {
@@ -3361,6 +3363,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {renvoiVers && (
         <ModalSelectionCourriel
           client={trouverClientDuBon(renvoiVers.bon)}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(renvoiVers.bon)?.id, email)}
           contexte={`le renvoi de la facture ${renvoiVers.f.numeroFactureQb}`}
           onFermer={() => setRenvoiVers(null)}
           onConfirmer={executerRenvoiVers}
@@ -3371,6 +3374,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {groupeAFacturer && (
         <ModalSelectionCourriel
           client={groupeAFacturer.client}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(groupeAFacturer.client?.id, email)}
           contexte={
             groupeAFacturer.bons.length > 1
               ? `cette facture groupée (${groupeAFacturer.bons.length} bons, ${groupeAFacturer.total.toFixed(2)} $)`
@@ -3409,6 +3413,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {courrielFactureLibre && (
         <ModalSelectionCourriel
           client={courrielFactureLibre.client}
+          onAjouterFiche={(email) => onAjouterCourrielClient?.(courrielFactureLibre.client?.id, email)}
           contexte="cette facture"
           onFermer={() => setCourrielFactureLibre(null)}
           onConfirmer={(choix) => {

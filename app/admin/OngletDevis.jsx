@@ -2594,6 +2594,19 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           contexte={`Devis pour ${client.nom} — ${totaux.vendant.toFixed(2)} $`}
           onFermer={() => setCourrielModalOuvert(false)}
           onConfirmer={(choix) => creerDevis(choix)}
+          // 💾 « Ajouter cette adresse à la fiche » (2026-09-03, demande
+          // du propriétaire) — la case n'apparaît que si cette poignée
+          // existe : elle manquait sur le chemin des devis.
+          onAjouterFiche={(email) => {
+            setClients((prev) =>
+              prev.map((c) => {
+                if (c.id !== client.id) return c;
+                if ((c.courriels || []).some((cc) => (cc.email || "").toLowerCase() === email.toLowerCase())) return c;
+                return { ...c, courriels: [...(c.courriels || []), { id: `cc-${Date.now()}`, label: "Ajouté à l'envoi", email, defaut: (c.courriels || []).length === 0 }] };
+              })
+            );
+            ajouterJournal(`💾 ${email} ajouté à la fiche de ${client.nom}.`);
+          }}
         />
       )}
       {/* FENÊTRE — NOUVEAU CLIENT depuis le devis (composant partagé). */}
