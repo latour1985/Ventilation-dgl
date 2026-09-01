@@ -1936,6 +1936,14 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       if (b.tacheId) await demanderRetraitFacturation(b.tacheId, raison, note);
       const cible = memeCibleRetrait(b);
       setBons((prev) => prev.map((x) => (cible(x) ? { ...x, retraitStatut: "demande", retraitRaison: raison, retraitNote: note || "" } : x)));
+      // 👑 L'ADMIN PRINCIPAL QUI DEMANDE VALIDE DU MÊME GESTE (2026-09-03,
+      // vécu : « regarde ce que ça écrit » — le système lui demandait de
+      // se valider lui-même). Le deux-temps reste ENTIER pour les autres
+      // rôles : c'est le validateur qui clique, pas la validation qui saute.
+      if (estAdminPrincipal) {
+        await validerRetrait({ ...b, retraitRaison: raison, retraitNote: note || "" }, true);
+        return;
+      }
       ajouterJournal(`🕓 Retrait de facturation DEMANDÉ — ${b.client} : ${RAISONS_RETRAIT[raison] || raison}. Un Admin principal doit valider.`);
     } catch {
       ajouterJournal("⚠️ Demande de retrait NON enregistrée — réessaie.");
