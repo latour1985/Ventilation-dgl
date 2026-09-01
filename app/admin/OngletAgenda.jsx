@@ -4376,7 +4376,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                           vue === "mois" ? (
                             <button
                               key={tache.id}
-                              onClick={() => !lectureSeule && !tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache, employe: emp, date: dateISO(d) }) : setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT }))}
+                              onClick={() => !lectureSeule && !tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache, employe: emp, date: dateISO(d) }) : setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: entreesJour.find((x) => x.tache.id === tache.id)?.heure || HEURE_PAR_DEFAUT }))}
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className="p-0.5"
                             >
@@ -4393,7 +4393,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                                 );
                                 ev.dataTransfer.effectAllowed = "move";
                               }}
-                              onClick={() => !lectureSeule && !tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache, employe: emp, date: dateISO(d) }) : setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: HEURE_PAR_DEFAUT }))}
+                              onClick={() => !lectureSeule && !tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache, employe: emp, date: dateISO(d) }) : setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: entreesJour.find((x) => x.tache.id === tache.id)?.heure || HEURE_PAR_DEFAUT }))}
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className={`block w-full rounded-lg border-l-4 p-1 text-left text-[9px] font-semibold leading-tight ${
                                 emp.estSousTraitant
