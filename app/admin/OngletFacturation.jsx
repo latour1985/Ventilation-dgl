@@ -1049,12 +1049,14 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
     (p) => p.statut !== "Terminé" && p.statut !== "Annulé" && client && p.clientId === client.id
   );
 
+  // 📝 Nom ET description du produit (2026-09-03) — même règle que la
+  // facture maison : la ligne raconte le produit au complet.
   const ajouterLigne = (item) =>
     setLignes((prev) => [
       ...prev,
       {
         uid: `l-${Date.now()}-${prev.length}`,
-        description: item?.nom || "",
+        description: item ? [item.nom, item.description].filter(Boolean).join("\n") : "",
         quantite: 1,
         prix: item?.prix_vendant ?? "",
       },
@@ -1267,7 +1269,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null }) {
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
@@ -2667,8 +2669,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         </div>
       )}
 
-      {/* ➕ FACTURER SANS TÂCHE — vente au comptoir, contrat, frais. */}
-      {estAdminPrincipal && (
+      {/* ➕ FACTURER SANS TÂCHE — vente au comptoir, contrat, frais.
+          🧭 UN SEUL CHEMIN (2026-09-03) : ce bouton QUICKBOOKS disparaît
+          pour une entreprise SANS connexion — elle a le chemin maison,
+          deux boutons de facture côte à côte invitent à créer la
+          mauvaise. (qbConnecte null = état pas encore connu : on montre,
+          comme avant.) */}
+      {estAdminPrincipal && qbConnecte !== false && (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
           <p className="min-w-0 text-[11px] text-slate-500">
             Une vente au comptoir, un contrat, des frais ? Une facture peut partir sans chantier.
@@ -2689,6 +2696,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         configEnt={configEnt}
         ajouterJournal={ajouterJournal}
         estAdminPrincipal={estAdminPrincipal}
+        qbConnecte={qbConnecte}
       />
 
       {/* 🧾 FACTURES SANS CHANTIER — le registre des factures libres :
@@ -2779,7 +2787,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
 
       {/* GARANTIE D'ENVOI — le filet : compare nos factures au registre
           d'envoi de QuickBooks. Toute facture créée mais jamais partie
-          remonte ici avec son bouton Renvoyer. */}
+          remonte ici avec son bouton Renvoyer. 🧭 Cachée pour une
+          entreprise sans QuickBooks — il n'y a rien à y vérifier. */}
+      {qbConnecte !== false && (
       <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
         <p className="min-w-0 text-[11px] text-slate-500">
           {envoisAConfirmer > 0 ? (
@@ -2796,6 +2806,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           {verifEnvoisEnCours ? "Vérification…" : "🔎 Vérifier les envois"}
         </button>
       </div>
+      )}
 
       {/* 🔎 Recherche rapide — job, client, nº de devis, nº de facture
           QuickBooks. Sans filtre actif, elle fouille TOUT (les « Déjà

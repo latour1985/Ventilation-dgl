@@ -549,7 +549,7 @@ export const LigneProjetClient = React.memo(function LigneProjetClient({ p, trav
 });
 
 
-export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [] }) {
+export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], qbConnecte = null }) {
   // Taux camion par défaut — pour le coût réel des travaux du client.
   const configClients = useEntreprise();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
@@ -930,18 +930,22 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
         <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Clients</h2>
         {/* 🔐 Règle du propriétaire (2026-08-30) : les synchronisations
             de CLIENTS sont ouvertes aux Admin principal ET régulier —
-            seul ce qui touche les PRIX reste à l'Admin principal. */}
-        <Button
-          variant="outline"
-          onClick={peutSyncQb ? synchroniserDepuisQuickbooks : undefined}
-          disabled={!peutSyncQb}
-          loading={syncEnCours}
-          title={peutSyncQb ? undefined : "Réservé aux administrateurs"}
-          className="min-h-0 px-3 py-1.5 text-xs"
-        >
-          {!syncEnCours && (peutSyncQb ? <RefreshCw size={13} /> : <Lock size={13} />)}
-          {dejaSyncQb ? "✓ Synchroniser depuis QuickBooks" : "Synchroniser depuis QuickBooks"}
-        </Button>
+            seul ce qui touche les PRIX reste à l'Admin principal.
+            🧭 UN SEUL CHEMIN (2026-09-03) : bouton invisible pour une
+            entreprise SANS QuickBooks — rien à synchroniser. */}
+        {qbConnecte !== false && (
+          <Button
+            variant="outline"
+            onClick={peutSyncQb ? synchroniserDepuisQuickbooks : undefined}
+            disabled={!peutSyncQb}
+            loading={syncEnCours}
+            title={peutSyncQb ? undefined : "Réservé aux administrateurs"}
+            className="min-h-0 px-3 py-1.5 text-xs"
+          >
+            {!syncEnCours && (peutSyncQb ? <RefreshCw size={13} /> : <Lock size={13} />)}
+            {dejaSyncQb ? "✓ Synchroniser depuis QuickBooks" : "Synchroniser depuis QuickBooks"}
+          </Button>
+        )}
       </div>
 
       {/* "NOUVEAU CLIENT" — toujours en premier dans la liste */}
@@ -1085,7 +1089,8 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
               </p>
             )}
             <Button onClick={creerClient} disabled={!peutCreer} className="w-full">
-              Créer le client et transférer vers QuickBooks
+              {/* 🧭 Sans QuickBooks, le bouton ne promet pas de transfert. */}
+              {qbConnecte === false ? "Créer le client" : "Créer le client et transférer vers QuickBooks"}
             </Button>
           </div>
         )}

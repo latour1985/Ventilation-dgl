@@ -2348,6 +2348,19 @@ function AppAdmin() {
   // Clients ET le Hub Projets partagent la même source de vérité.
   // ------------------------------------------------------------
   const [transactionsQb, setTransactionsQb] = useState([]);
+  // 🧭 UN SEUL CHEMIN DE FACTURATION (2026-09-03, demande du
+  // propriétaire : « ne pas mettre l'option QuickBooks si le client n'en
+  // a pas besoin — il pourrait créer la mauvaise facture »). L'onglet
+  // Facturation et le bouton de synchronisation des clients s'adaptent à
+  // la CONNEXION de l'entreprise : null = état pas encore connu (on
+  // montre tout, comme avant, le temps d'une seconde).
+  const [qbConnecte, setQbConnecte] = useState(null);
+  useEffect(() => {
+    if (!session) return;
+    etatQuickbooks()
+      .then((e) => setQbConnecte(!!e?.connecte))
+      .catch(() => setQbConnecte(null));
+  }, [session]);
   const [syncQbEnCours, setSyncQbEnCours] = useState(false);
   // Attributions manuelles QuickBooks PERSISTÉES { quickbooksId: projetId }
   // — chargées de Supabase, ré-appliquées à chaque synchro pour survivre
@@ -3011,6 +3024,7 @@ function AppAdmin() {
 
       {vue === "clients" && (
         <OngletClients
+          qbConnecte={qbConnecte}
           clients={clients}
           setClients={setClients}
           ajouterJournal={ajouterJournal}
@@ -3257,6 +3271,7 @@ function AppAdmin() {
       )}
       {vue === "facturation" && (
         <OngletFacturation
+          qbConnecte={qbConnecte}
           bons={bons}
           setBons={setBons}
           // ➕ Facture libre : la liste des projets (rattachement) et le

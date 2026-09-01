@@ -70,10 +70,18 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
     return base.filter((c) => correspond(c, t)).slice(0, 8);
   }, [clients, recherche]);
 
+  // 📝 Nom ET description du produit (2026-09-03, retour du propriétaire :
+  // « la description n'apparaît pas, seulement le titre ») — la ligne de
+  // facture raconte le produit au complet, ajustable avant l'envoi.
   const ajouterLigne = (item) =>
     setLignes((prev) => [
       ...prev,
-      { uid: `l-${Date.now()}-${prev.length}`, description: item?.nom || "", quantite: 1, prix: item?.prix_vendant ?? "" },
+      {
+        uid: `l-${Date.now()}-${prev.length}`,
+        description: item ? [item.nom, item.description].filter(Boolean).join("\n") : "",
+        quantite: 1,
+        prix: item?.prix_vendant ?? "",
+      },
     ]);
   const majLigne = (uid, champs) => setLignes((prev) => prev.map((l) => (l.uid === uid ? { ...l, ...champs } : l)));
   const retirerLigne = (uid) => setLignes((prev) => prev.filter((l) => l.uid !== uid));
@@ -250,7 +258,7 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
 // ============================================================
 // LA SECTION COMPLÈTE — montée dans l'onglet Facturation.
 // ============================================================
-export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJournal, estAdminPrincipal }) {
+export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJournal, estAdminPrincipal, qbConnecte = null }) {
   const [factures, setFactures] = useState([]);
   const [tableAbsente, setTableAbsente] = useState(false);
   const [modalOuverte, setModalOuverte] = useState(false); // true = facture ; objet = crédit sur cette facture
@@ -377,14 +385,19 @@ export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJo
 
   return (
     <>
-      {/* La porte d'entrée — à côté du chemin QuickBooks, jamais à sa place. */}
-      {estAdminPrincipal && (
+      {/* 🧭 UN SEUL CHEMIN (2026-09-03, demande du propriétaire) : cette
+          porte n'apparaît que pour une entreprise SANS QuickBooks — et
+          elle devient alors LE chemin principal (bouton noir, message
+          direct). Entreprise connectée : la porte disparaît (deux
+          boutons de facture côte à côte = la mauvaise finit par sortir),
+          mais les factures maison déjà créées restent listées plus bas. */}
+      {estAdminPrincipal && qbConnecte === false && (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
           <p className="min-w-0 text-[11px] text-slate-500">
-            Pas de QuickBooks ? La facture officielle peut vivre ici même — numérotée, envoyée, suivie, exportable.
+            Une vente au comptoir, un contrat, des frais ? Crée la facture officielle ici — numérotée, envoyée, suivie, exportable.
           </p>
-          <Button variant="outline" onClick={() => setModalOuverte(true)} className="min-h-0 shrink-0 gap-1 px-2.5 py-1.5 text-[11px]">
-            🧾 Facture sans QuickBooks
+          <Button onClick={() => setModalOuverte(true)} className="min-h-0 shrink-0 gap-1 px-2.5 py-1.5 text-[11px]">
+            🧾 Nouvelle facture
           </Button>
         </div>
       )}
