@@ -144,6 +144,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // Si aucune adresse de travaux propre n'a été fixée pour cette
   // tâche, on retombe sur l'adresse de facturation par défaut du
   // client, mais l'étiquette le précise sans ambiguïté.
+  // 🏖️ CONGÉ = FICHE SIMPLE (2026-09-02, demande du propriétaire) :
+  // journée, heure et raison — sans équipe, sans dupliquer, sans
+  // « fermer pour oubli » : un congé n'est pas un chantier.
+  const estConge = (tache.typeTache || tache.type) === "conge";
   const adresseFacturationDefaut = client?.adresses?.[0];
   // Repli FINAL (2026-09-01, même règle qu'à la création) : les clients
   // descendus de QuickBooks n'ont AUCUNE adresse de chantier — leur
@@ -534,7 +538,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
 
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-500">
-              Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span>
+              {estConge ? <>Raison du congé <span className="font-normal text-slate-400">(reste notée au dossier)</span></> : <>Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span></>}
             </label>
             <textarea
               value={description}
@@ -668,7 +672,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               avec son interrupteur 💰/🤝 modifiable APRÈS coup (avant,
               le choix de la création était définitif) et, quand ils
               sont plusieurs, un bouton pour retirer LUI SEUL. */}
-          {dejaPlanifiee && (techniciensSurTache || []).length > 0 && onBasculerFacturable && (
+          {!estConge && dejaPlanifiee && (techniciensSurTache || []).length > 0 && onBasculerFacturable && (
             <div>
               <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Équipe sur cette tâche</p>
               <div className="space-y-1.5">
@@ -718,7 +722,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
 
           {/* APPLIQUER LA MODIFICATION À… — visible dès que la tâche est
               partagée entre plusieurs techniciens. */}
-          {dejaPlanifiee && (techniciensSurTache || []).length > 1 && (
+          {!estConge && dejaPlanifiee && (techniciensSurTache || []).length > 1 && (
             <div>
               <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Appliquer la modification à…</p>
               <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
@@ -752,7 +756,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
           )}
 
           {/* AJOUTER / DUPLIQUER VERS UN TECHNICIEN */}
-          {dejaPlanifiee && onAjouterTechnicien && (
+          {!estConge && dejaPlanifiee && onAjouterTechnicien && (
             <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3">
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Ajouter ou dupliquer vers un technicien</p>
               <div className="mb-2 grid grid-cols-2 gap-2">
@@ -809,7 +813,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               L'admin déclare début/fin : paie au taux figé, carte fermée
               sur le téléphone (avec avis), facturation en OPTION
               (bon sans signature ni photos — décochée par défaut). */}
-          {dejaPlanifiee && !travailFait && onFermerPourTechnicien && (
+          {!estConge && dejaPlanifiee && !travailFait && onFermerPourTechnicien && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
               <p className="text-xs font-extrabold uppercase tracking-wide text-amber-800">
                 🕐 Fermer cette tâche pour {nomTechOuvert} (oubli)

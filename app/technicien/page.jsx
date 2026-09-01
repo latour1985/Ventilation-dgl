@@ -207,7 +207,9 @@ function completerTransportsJournee(tachesEntree, transportDebutFin = true) {
   );
   const parDate = {};
   taches.forEach((t) => {
-    if (t.type === "travail" && t.date) (parDate[t.date] = parDate[t.date] || []).push(t);
+    // 🏖️ Un CONGÉ n'est pas un déplacement (2026-09-02) : il ne déclenche
+    // aucun transport Début/Fin — la journée reste marquée, c'est tout.
+    if (t.type === "travail" && t.date && t.typeTache !== "conge") (parDate[t.date] = parDate[t.date] || []).push(t);
   });
   // Option transport ETEINTE : les blocs Debut/Fin jamais commences
   // disparaissent (ceux avec du temps couru restent — on ne jette

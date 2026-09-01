@@ -69,6 +69,13 @@ export function recalculerTransports(planning, sansTransport = new Set()) {
     const reelles = listeCellule(valeur).filter((t) => !t?.est_tache_systeme);
     if (reelles.length === 0) return;
     resultat[cle] = reelles;
+    // 🏖️ Un CONGÉ n'est pas un déplacement (2026-09-02, demande du
+    // propriétaire) : il reste affiché avec sa journée et son heure,
+    // mais ne fabrique aucun bloc Transport Début/Fin. S'il partage la
+    // journée avec une vraie tâche, les transports de la vraie tâche
+    // s'installent normalement.
+    const deplacements = reelles.filter((t) => t?.typeTache !== "conge" && t?.type !== "conge");
+    if (deplacements.length === 0) return;
     const [date, employeId, heure] = cle.split("|");
     const g = `${date}|${employeId}`;
     if (!groupes[g]) groupes[g] = { date, employeId, indices: [] };
@@ -1080,6 +1087,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       jours: nouvelleDureeJours,
       sauterWeekend: nouveauSauterWeekend,
       sauterFeries: configEnt?.calendrierCcq === true && nouveauSauterFeries,
+      // 🕚 TECHNICIEN / DATE / HEURE PRÉVUS — mémorisés sur TOUTE tâche
+      // (2026-09-02, bogue vécu par Louise : réservés au chemin « avec
+      // dépôt », une tâche ordinaire laissée en attente perdait son
+      // 11 h — la carte et le placement en un clic retombaient à 07:00).
+      technicienPrevu: nouveauEmployeId || null,
+      datePrevue: nouvelleDate || null,
+      heurePrevue: nouvelleHeureDebut || null,
       description: nouvelleDescription.trim(),
       // 📎 Photos et plans joints par le bureau — le technicien les
       // ouvre sur son téléphone, sans rappeler pour « c'est où déjà ? ».
@@ -1926,7 +1940,15 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // édités, pas l'ancienne durée.
       cibles.forEach((id) => assigner(tacheMiseAJour, id, new Date(`${date}T00:00:00`), heureDebut));
     } else {
-      setTachesAttente((prev) => prev.map((t) => (t.id === tacheId ? tacheMiseAJour : t)));
+      // 🕚 La date/heure choisies SUIVENT la tâche en attente (2026-09-02,
+      // bogue de Louise) : modifier « 11:00 » sans assigner de technicien
+      // gardait l'ancien 07:00 sur la carte et au placement en un clic.
+      const avecPrevisions = {
+        ...tacheMiseAJour,
+        ...(date ? { datePrevue: date } : {}),
+        ...(heureDebut ? { heurePrevue: heureDebut } : {}),
+      };
+      setTachesAttente((prev) => prev.map((t) => (t.id === tacheId ? avecPrevisions : t)));
       ajouterJournal(`✏️ Durée mise à jour pour "${tache.titre || tache.clientNom}" (${heures} h/jour, ${jours} jour${jours > 1 ? "s" : ""})`);
     }
     setTacheEnEditionId(null);
@@ -2425,13 +2447,17 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               )}
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                  Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span>
+                  {/* 🏖️ Un congé n'a pas de « travaux » : on demande la
+                      RAISON, qui reste notée au dossier (2026-09-02). */}
+                  {nouveauType === "conge"
+                    ? <>Raison du congé <span className="font-normal text-slate-400">(reste notée au dossier)</span></>
+                    : <>Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span></>}
                 </label>
                 <textarea
                   value={nouvelleDescription}
                   onChange={(e) => setNouvelleDescription(e.target.value)}
                   rows={2}
-                  placeholder="Ce qu'il y a à faire sur cette tâche, instructions particulières..."
+                  placeholder={nouveauType === "conge" ? "Pourquoi cette journée est bloquée — vacances, rendez-vous, finir tôt…" : "Ce qu'il y a à faire sur cette tâche, instructions particulières..."}
                   className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                 />
                 {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
