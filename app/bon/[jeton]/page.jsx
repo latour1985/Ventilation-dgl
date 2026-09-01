@@ -20,7 +20,7 @@ import { useState, useEffect } from "react";
 import { use } from "react";
 import dynamic from "next/dynamic";
 import { AlertTriangle, Loader2, FileCheck2, MapPin, Wrench } from "lucide-react";
-import { chargerBonPublic, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
+import { chargerBonPublic, JOURS_VALIDITE_BON, noterConsultationBon } from "@/lib/supabase/bonPublic";
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 
@@ -45,7 +45,13 @@ export default function PageBonPublic({ params }) {
     chargerBonPublic(jeton)
       .then((b) => {
         if (!b) setErreur("Ce lien n'est pas valide. Vérifiez l'adresse ou communiquez avec nous.");
-        else setBon(b);
+        else {
+          setBon(b);
+          // 👁️ Consultation notée (snippet 123) — jamais en aperçu bureau.
+          if (typeof window !== "undefined" && !new URLSearchParams(window.location.search).has("apercu")) {
+            noterConsultationBon(jeton);
+          }
+        }
       })
       .catch(() => setErreur("Impossible de charger ce bon de travail. Réessayez dans quelques minutes."))
       .finally(() => setChargement(false));

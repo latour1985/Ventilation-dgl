@@ -433,9 +433,20 @@ export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJo
                     ) : (
                       <span className="text-[10px] font-bold text-amber-700">📄 Émise — pas envoyée</span>
                     )}
+                    {/* 👁️ Suivi de consultation (snippet 123) : la
+                        PREMIÈRE ouverture par le client se voit ici. */}
+                    {f.consulteLe ? (
+                      <span className="text-[10px] font-bold text-sky-600" title={`Consultée ${f.consultations} fois — première fois le ${String(f.consulteLe).slice(0, 10)}`}>
+                        👁️ Consultée{f.consultations > 1 ? ` (${f.consultations}×)` : ""}
+                      </span>
+                    ) : f.envoyeeLe ? (
+                      <span className="text-[10px] font-bold text-slate-400" title="Le client n'a pas encore ouvert sa facture">👁️ Pas encore vue</span>
+                    ) : null}
                     {f.jetonPublic && (
-                      <a href={lienFactureMaison(f)} target="_blank" rel="noreferrer" className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 active:scale-95">
-                        👁️ Voir
+                      /* ?apercu=1 : le regard du BUREAU ne compte jamais
+                         comme celui du client. */
+                      <a href={`${lienFactureMaison(f)}?apercu=1`} target="_blank" rel="noreferrer" className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 active:scale-95">
+                        Voir
                       </a>
                     )}
                     <button onClick={() => setRenvoiDe(f)} className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-600 active:scale-95">

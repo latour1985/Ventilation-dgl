@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import { AlertTriangle, Loader2, Printer } from "lucide-react";
-import { chargerFactureMaisonPublique } from "@/lib/supabase/facturesMaison";
+import { chargerFactureMaisonPublique, noterConsultationFactureMaison } from "@/lib/supabase/facturesMaison";
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import { numeroPourTaxe } from "@/lib/taxesCanada";
 
@@ -30,7 +30,13 @@ export default function PageFacturePublique({ params }) {
     chargerFactureMaisonPublique(jeton)
       .then((f) => {
         if (!f) setErreur("Ce lien n'est pas valide. Vérifie l'adresse, ou demande un nouveau lien.");
-        else setFacture(f);
+        else {
+          setFacture(f);
+          // 👁️ Consultation notée (snippet 123) — jamais en aperçu bureau.
+          if (typeof window !== "undefined" && !new URLSearchParams(window.location.search).has("apercu")) {
+            noterConsultationFactureMaison(jeton);
+          }
+        }
       })
       .catch(() => setErreur("La facture n'a pas pu être chargée. Réessaie dans un moment."))
       .finally(() => setChargement(false));

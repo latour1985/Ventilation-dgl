@@ -22,7 +22,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
-import { chargerDevisPublic, repondreDevis, chargerOptionsDevis, chargerVersionDevis, choisirVersionDevis, JOURS_VALIDITE_PRIX_DEVIS, ligneAccreditations } from "@/lib/supabase/devisPublic";
+import { chargerDevisPublic, repondreDevis, chargerOptionsDevis, chargerVersionDevis, choisirVersionDevis, JOURS_VALIDITE_PRIX_DEVIS, ligneAccreditations, noterConsultationDevis } from "@/lib/supabase/devisPublic";
 import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
 import { CONFIG_DEFAUT, calculerTaxes } from "@/lib/supabase/entreprise";
 
@@ -59,6 +59,12 @@ export default function PageDevisPublic({ params }) {
         else {
           setDevis(d);
           setNumeroActif(d.numero);
+          // 👁️ « Le client a consulté son devis » (snippet 123) — sauf
+          // en APERÇU du bureau (?apercu=1), pour ne jamais compter nos
+          // propres regards comme ceux du client.
+          if (typeof window !== "undefined" && !new URLSearchParams(window.location.search).has("apercu")) {
+            noterConsultationDevis(jeton);
+          }
           // Les options offertes à la comparaison — absentes (snippet
           // 111 pas passé, ou une seule version) : pas d'onglets.
           chargerOptionsDevis(jeton).then(setOptions).catch(() => {});

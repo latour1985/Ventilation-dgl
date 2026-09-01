@@ -545,7 +545,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -663,6 +663,41 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
         <div className="mb-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">
           Ce travail contient un prix qui n'existe pas dans le catalogue — vérifie chaque item avant d'autoriser l'envoi au client.
         </div>
+
+        {/* 📋 LE RÉCIT DE LA JOB (2026-09-03, demande du propriétaire :
+            « ça me prend les détails et notes de la job ») — on fixe un
+            prix avec le déroulement sous les yeux : la description des
+            travaux, les heures 💰/🤝 de chaque technicien et leurs notes
+            de terrain. Lecture seulement — rien ne part sur la facture
+            sans passer par les lignes ci-dessous. */}
+        {(() => {
+          const be = bonEnrichi || bon;
+          const notes = (be.lignesReelles || []).filter((t) => (t.noteTerrain || "").trim() || (t.noteInterne || "").trim());
+          const equipe = be.equipe || [];
+          if (!be.description && notes.length === 0 && equipe.length === 0) return null;
+          return (
+            <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">📋 La job — détails et notes</p>
+              {be.description && (
+                <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{be.description}</p>
+              )}
+              {equipe.length > 0 && (
+                <p className="mt-1.5 text-[11px] font-semibold text-slate-600">
+                  ⏱️ {equipe.map((e) => `${e.nom} : ${e.heures.toFixed(2)} h`).join(" · ")}
+                </p>
+              )}
+              {notes.map((t, i) => (
+                <div key={i} className="mt-1.5 rounded-lg bg-white p-2">
+                  <p className="text-[10px] font-bold text-slate-500">📝 {t.employeNom || t.employeEmail || "Technicien"}</p>
+                  {(t.noteTerrain || "").trim() && <p className="whitespace-pre-wrap text-[11px] text-slate-700">{t.noteTerrain}</p>}
+                  {(t.noteInterne || "").trim() && (
+                    <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-amber-700">🔒 Interne : {t.noteInterne}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {depotPaye && (
           <div className="mb-3 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
@@ -1384,7 +1419,14 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // dit). Les lignes arrivent PRÉ-REMPLIES dans la révision, jamais
   // verrouillées : la machine calcule, l'humain décide.
   const lignesTempsSupp = (b) => {
-    if (!b || b.type !== "appel_service") return [];
+    // ⏱️ TEMPS ET MATÉRIEL (2026-09-03, demande du propriétaire : « les
+    // heures que les techs ont passées, selon qu'elles sont facturables
+    // ou pas, doivent être comptabilisées ») : TOUTES les heures 💰 de
+    // l'équipe sont suggérées au taux vendant — pas de temps inclus ni
+    // de règle de zone (elles appartiennent aux appels de service). Le
+    // 🤝 (aide interne) reste exclu, le passager au taux réduit.
+    if (!b || (b.type !== "appel_service" && b.type !== "temps_materiel")) return [];
+    const estTempsMateriel = b.type === "temps_materiel";
     const tauxV = Number(prixDepots?.taux_horaire_vendant) || 0;
     if (tauxV <= 0) return [];
     const camion = Number(configEnt?.coutCamionHoraire) || 0;
@@ -1434,8 +1476,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         passager: estPassager(s.employeNom, s.date || b.date),
       }))
       .sort((a, x) => (a.passager ? 1 : 0) - (x.passager ? 1 : 0));
-    let inclusRestant =
-      (horsZone ? Number(prixDepots?.minutes_incluses_hors_zone) || 180 : Number(prixDepots?.minutes_incluses) || 90) / 60;
+    // Temps et matériel : AUCUNE minute incluse — chaque heure 💰 se
+    // facture depuis la première (c'est la définition du T&M).
+    let inclusRestant = estTempsMateriel
+      ? 0
+      : (horsZone ? Number(prixDepots?.minutes_incluses_hors_zone) || 180 : Number(prixDepots?.minutes_incluses) || 90) / 60;
     const lignes = [];
     tries.forEach((s) => {
       const consomme = Math.min(inclusRestant, s.heures);
@@ -1448,7 +1493,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
       lignes.push({
         description:
-          `Temps supplémentaire${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""}${horsZone ? " (hors zone — transport compté)" : ""} : ` +
+          `${estTempsMateriel ? "Main-d'œuvre" : "Temps supplémentaire"}${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""}${!estTempsMateriel && horsZone ? " (hors zone — transport compté)" : ""} : ` +
           `${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
         prix: Math.round(factH * taux * 100) / 100,
       });
@@ -2626,11 +2671,23 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                             </span>
                             {/* Les bons sans prix ne partent dans aucune
                                 facture — mieux vaut le dire que de les
-                                compter en silence. */}
+                                compter en silence. 🖱️ CLIQUABLE
+                                (2026-09-03, « on ne peut pas créer la
+                                facture directement en appuyant sur le
+                                client ? ») : ouvre la révision du 1er bon
+                                à réviser — heures 💰 pré-comptées au taux
+                                vendant, tu ajustes, tu émets. */}
                             {sg.aReviser > 0 && (
-                              <span className="ml-1.5 font-bold text-amber-700">
-                                · {sg.aReviser} à réviser
-                              </span>
+                              <button
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  const premier = sg.bons.find((b) => resteAFacturerDe(b) <= 0);
+                                  if (premier) setBonAReviserId(premier.id);
+                                }}
+                                className="ml-1.5 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-bold text-amber-700 active:scale-95"
+                              >
+                                ✏️ {sg.aReviser} à réviser — cliquer pour fixer le prix
+                              </button>
                             )}
                           </span>
                           {estAdminPrincipal && sg.facturables.length > 0 && (
@@ -3436,6 +3493,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           depotPaye={depotPayePour(bonAReviser.tacheId)}
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
           lignesSuggerees={lignesTempsSupp(bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser)}
+          bonEnrichi={bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || null}
           onFermer={() => setBonAReviserId(null)}
           onConfirmer={(items, total) => reviserPrixNonListe(bonAReviser.id, items, total)}
         />

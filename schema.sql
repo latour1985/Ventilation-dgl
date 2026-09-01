@@ -4901,3 +4901,96 @@ update entreprises set courriel_expediteur_verifie = 'info@ventilationdgl.com' w
 
 -- Verification : DGL a son adresse, les autres restent au modele plateforme.
 select id, courriel_expediteur_verifie from entreprises order by id;
+
+-- ============================================================
+-- 123 - « LE CLIENT A CONSULTE SON DOCUMENT » + rebonds (2026-09-03)
+-- ------------------------------------------------------------
+-- Choix du proprietaire (option B) : plutot que le pixel de courriel
+-- (menteur dans les deux sens), on note l'OUVERTURE DE LA PAGE du
+-- devis / de la facture maison / du bon — fiable a 100 %, c'est notre
+-- page. Premiere consultation -> consulte_le + mot au journal ;
+-- chaque visite -> compteur + derniere_consultation_le. Les fonctions
+-- sont SECURITY DEFINER : la page publique (anonyme) ne peut RIEN
+-- faire d'autre que noter la visite du jeton qu'elle possede.
+-- ============================================================
+alter table devis_app       add column if not exists consulte_le timestamptz;
+alter table devis_app       add column if not exists consultations integer not null default 0;
+alter table devis_app       add column if not exists derniere_consultation_le timestamptz;
+alter table factures_maison add column if not exists consulte_le timestamptz;
+alter table factures_maison add column if not exists consultations integer not null default 0;
+alter table factures_maison add column if not exists derniere_consultation_le timestamptz;
+alter table bons_travail    add column if not exists consulte_le timestamptz;
+alter table bons_travail    add column if not exists consultations integer not null default 0;
+alter table bons_travail    add column if not exists derniere_consultation_le timestamptz;
+
+create or replace function noter_consultation_devis(p_jeton text)
+returns void language plpgsql security definer as $$
+declare l_devis devis_app;
+begin
+  select * into l_devis from devis_app where jeton_public = p_jeton and version_active limit 1;
+  if l_devis.id is null then return; end if;
+  update devis_app set
+    consulte_le = coalesce(consulte_le, now()),
+    consultations = consultations + 1,
+    derniere_consultation_le = now()
+  where entreprise_id = l_devis.entreprise_id and id = l_devis.id;
+  if l_devis.consulte_le is null then
+    insert into journal_activite (texte, par_nom, date_locale, heure_locale, entreprise_id)
+    values ('👁️ Le devis ' || l_devis.numero || ' a été CONSULTÉ par le client (' || coalesce(l_devis.client_nom, '?') || ').',
+            'page publique',
+            (now() at time zone 'America/Montreal')::date,
+            to_char(now() at time zone 'America/Montreal', 'HH24:MI'),
+            l_devis.entreprise_id);
+  end if;
+end; $$;
+revoke all on function noter_consultation_devis(text) from public;
+grant execute on function noter_consultation_devis(text) to anon, authenticated;
+
+create or replace function noter_consultation_facture_maison(p_jeton text)
+returns void language plpgsql security definer as $$
+declare l_f factures_maison;
+begin
+  select * into l_f from factures_maison where jeton_public = p_jeton limit 1;
+  if l_f.id is null then return; end if;
+  update factures_maison set
+    consulte_le = coalesce(consulte_le, now()),
+    consultations = consultations + 1,
+    derniere_consultation_le = now()
+  where id = l_f.id;
+  if l_f.consulte_le is null then
+    insert into journal_activite (texte, par_nom, date_locale, heure_locale, entreprise_id)
+    values ('👁️ La ' || case when l_f.type = 'credit' then 'note de crédit ' else 'facture ' end || l_f.numero || ' a été CONSULTÉE par le client (' || coalesce(l_f.client_nom, '?') || ').',
+            'page publique',
+            (now() at time zone 'America/Montreal')::date,
+            to_char(now() at time zone 'America/Montreal', 'HH24:MI'),
+            l_f.entreprise_id);
+  end if;
+end; $$;
+revoke all on function noter_consultation_facture_maison(text) from public;
+grant execute on function noter_consultation_facture_maison(text) to anon, authenticated;
+
+create or replace function noter_consultation_bon(p_jeton text)
+returns void language plpgsql security definer as $$
+declare l_b bons_travail;
+begin
+  select * into l_b from bons_travail where jeton_public = p_jeton limit 1;
+  if l_b.id is null then return; end if;
+  update bons_travail set
+    consulte_le = coalesce(consulte_le, now()),
+    consultations = consultations + 1,
+    derniere_consultation_le = now()
+  where id = l_b.id;
+  if l_b.consulte_le is null then
+    insert into journal_activite (texte, par_nom, date_locale, heure_locale, entreprise_id)
+    values ('👁️ Le bon de travail « ' || coalesce(l_b.titre, '?') || ' » a été CONSULTÉ par le client (' || coalesce(l_b.client_nom, '?') || ').',
+            'page publique',
+            (now() at time zone 'America/Montreal')::date,
+            to_char(now() at time zone 'America/Montreal', 'HH24:MI'),
+            l_b.entreprise_id);
+  end if;
+end; $$;
+revoke all on function noter_consultation_bon(text) from public;
+grant execute on function noter_consultation_bon(text) to anon, authenticated;
+
+-- Verification : les trois fonctions existent.
+select proname from pg_proc where proname like 'noter_consultation%' order by proname;
