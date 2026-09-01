@@ -545,7 +545,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -817,6 +817,22 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
               className="w-full rounded-xl border-2 border-emerald-500 bg-emerald-50 py-2.5 text-xs font-extrabold text-emerald-800 active:scale-[0.99]"
             >
               ✅ Rien à facturer — le dépôt de {(Number(depotPaye.montantHT) || 0).toFixed(2)} $ couvre le travail au complet
+            </button>
+          )}
+
+          {/* 🛡️ SORTIE « NON FACTURABLE » (2026-09-03, demande du
+              propriétaire : « je n'ai pas l'option d'envoyer cette tâche
+              dans non facturable sous garantie ») — le chemin existait
+              sur la carte du bon, pas ici où la décision se prend.
+              Ouvre la même fenêtre de retrait (garantie / client
+              maison / travaux en cours), validation Admin principal
+              comme toujours. */}
+          {onRetirerFacturation && (
+            <button
+              onClick={onRetirerFacturation}
+              className="w-full rounded-xl border border-slate-300 bg-white py-2 text-xs font-bold text-slate-600 active:scale-[0.99]"
+            >
+              🛡️ Ne pas facturer — retirer (garantie / client maison)…
             </button>
           )}
         </div>
@@ -3568,6 +3584,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             ajouterJournal(
               `✅ « ${b.projet} » (${b.client}) : RIEN à facturer — couvert au complet par le dépôt payé d'avance de ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT${depot.qboDocNumber ? ` (facture nº ${depot.qboDocNumber})` : ""}. Aucune facture créée, aucun crédit.`
             );
+          }}
+          onRetirerFacturation={() => {
+            const id = bonAReviser.id;
+            setBonAReviserId(null);
+            setBonRetraitId(id);
           }}
           depotPaye={depotPayePour(bonAReviser.tacheId)}
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
