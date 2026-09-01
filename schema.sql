@@ -4632,3 +4632,166 @@ alter table entreprises add column if not exists calendrier_ccq boolean not null
 -- Verification : la colonne existe.
 select column_name, data_type from information_schema.columns
  where table_schema = 'public' and table_name = 'entreprises' and column_name = 'calendrier_ccq';
+
+-- ============================================================
+-- 119 - FACTURATION MAISON, SANS QUICKBOOKS (2026-09-02)
+-- ------------------------------------------------------------
+-- GO du proprietaire (design approuve le 2026-08-17) : les compagnies
+-- de la plateforme SANS systeme comptable facturent directement de
+-- Fluxya — gabarit legal Quebec (identite complete + nos TPS/TVQ),
+-- sequence SANS TROU par entreprise, notes de credit rattachees
+-- (jamais de suppression), suivi paye/en retard, export comptable.
+-- ============================================================
+
+create table if not exists factures_maison (
+  id                 uuid primary key default gen_random_uuid(),
+  entreprise_id      text not null default 'dgl',
+  numero             text not null,
+  -- 'facture' ou 'credit' — une note de credit porte sa facture d'origine.
+  type               text not null default 'facture',
+  facture_origine_id uuid references factures_maison(id),
+  client_id          text,
+  client_nom         text not null,
+  client_adresse     text,
+  courriels          jsonb not null default '[]'::jsonb,
+  -- [{ description, quantite, prix_unitaire, montant }] — negatifs pour un credit.
+  lignes             jsonb not null default '[]'::jsonb,
+  sous_total         numeric not null default 0,
+  -- [{ code: 'TPS'|'TVQ'|'TVH'|'TVP', taux, montant }] — le regime de
+  -- taxes est CHOISI a la facture (chaque province canadienne a le
+  -- sien : QC TPS+TVQ, ON TVH 13, Maritimes TVH 15, BC/SK/MB TPS+TVP,
+  -- AB et territoires TPS seule, ou exonere).
+  taxes              jsonb not null default '[]'::jsonb,
+  regime_taxes       text not null default 'qc',
+  total              numeric not null default 0,
+  terme              text,
+  date_emission      date not null default current_date,
+  date_echeance      date,
+  note               text,
+  -- emise -> envoyee -> payee ; annulee (par note de credit ou erreur).
+  statut             text not null default 'emise',
+  envoyee_le         timestamptz,
+  payee_le           timestamptz,
+  mode_paiement      text,
+  annulee_le         timestamptz,
+  annulation_note    text,
+  exportee_le        timestamptz,
+  jeton_public       text unique,
+  jeton_expire_le    timestamptz,
+  created_at         timestamptz not null default now(),
+  unique (entreprise_id, numero)
+);
+
+alter table factures_maison enable row level security;
+drop policy if exists "iso_factures_maison" on factures_maison;
+create policy "iso_factures_maison" on factures_maison
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton())
+  with check (entreprise_id = public.entreprise_du_jeton());
+drop trigger if exists trg_entreprise_factures_maison on factures_maison;
+create trigger trg_entreprise_factures_maison before insert on factures_maison
+  for each row execute function public.poser_entreprise_id();
+
+-- ---- CREATION ATOMIQUE : numero + insertion dans LA MEME transaction ----
+-- C'est ce qui garantit la sequence SANS TROU (exigence comptable) : si
+-- l'insertion echoue, le compteur n'a pas avance non plus.
+create or replace function creer_facture_maison(p jsonb)
+returns factures_maison
+language plpgsql
+security definer
+as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  le_type text := coalesce(p->>'type', 'facture');
+  cle text;
+  prefixe text;
+  n bigint;
+  ligne factures_maison;
+begin
+  if ent is null then
+    raise exception 'Connexion requise';
+  end if;
+  if le_type not in ('facture', 'credit') then
+    raise exception 'Type invalide';
+  end if;
+  cle := case when le_type = 'credit' then 'credit_maison' else 'facture_maison' end;
+  prefixe := case when le_type = 'credit' then 'CR' else 'FAC' end;
+  insert into compteurs (entreprise_id, cle, valeur) values (ent, cle, 1)
+  on conflict (entreprise_id, cle) do update set valeur = compteurs.valeur + 1
+  returning valeur into n;
+  insert into factures_maison (
+    entreprise_id, numero, type, facture_origine_id,
+    client_id, client_nom, client_adresse, courriels, lignes,
+    sous_total, taxes, regime_taxes, total, terme,
+    date_emission, date_echeance, note, jeton_public, jeton_expire_le
+  ) values (
+    ent,
+    prefixe || '-' || to_char(coalesce((p->>'date_emission')::date, current_date), 'YYYY') || '-' || lpad(n::text, 4, '0'),
+    le_type,
+    nullif(p->>'facture_origine_id', '')::uuid,
+    nullif(p->>'client_id', ''),
+    coalesce(p->>'client_nom', ''),
+    nullif(p->>'client_adresse', ''),
+    coalesce(p->'courriels', '[]'::jsonb),
+    coalesce(p->'lignes', '[]'::jsonb),
+    coalesce((p->>'sous_total')::numeric, 0),
+    coalesce(p->'taxes', '[]'::jsonb),
+    coalesce(p->>'regime_taxes', 'qc'),
+    coalesce((p->>'total')::numeric, 0),
+    nullif(p->>'terme', ''),
+    coalesce((p->>'date_emission')::date, current_date),
+    nullif(p->>'date_echeance', '')::date,
+    nullif(p->>'note', ''),
+    coalesce(nullif(p->>'jeton_public', ''), encode(gen_random_bytes(24), 'hex')),
+    now() + interval '1 year'
+  ) returning * into ligne;
+  return ligne;
+end;
+$$;
+revoke all on function creer_facture_maison(jsonb) from public, anon;
+grant execute on function creer_facture_maison(jsonb) to authenticated;
+
+-- ---- PAGE PUBLIQUE (lien envoye au client — anonyme) ----
+-- L'identite complete voyage avec la facture, meme mecanique que
+-- devis_public (snippets 92/97/99).
+drop function if exists facture_maison_public(text);
+create function facture_maison_public(p_jeton text)
+returns table (
+  numero text, type text, numero_origine text,
+  client_nom text, client_adresse text,
+  lignes jsonb, sous_total numeric, taxes jsonb, total numeric,
+  terme text, date_emission date, date_echeance date, note text,
+  statut text, payee_le timestamptz, expire boolean,
+  entreprise_id text, entreprise_nom text, entreprise_adresse text,
+  entreprise_telephone text, entreprise_courriel text, entreprise_site_web text,
+  entreprise_logo text, entreprise_rbq text, entreprise_associations jsonb,
+  entreprise_numero_tps text, entreprise_numero_tvq text,
+  entreprise_note_facture text
+)
+language sql security definer set search_path = public as $$
+  select
+    f.numero, f.type,
+    (select o.numero from factures_maison o where o.id = f.facture_origine_id),
+    f.client_nom, f.client_adresse,
+    f.lignes, f.sous_total, f.taxes, f.total,
+    f.terme, f.date_emission, f.date_echeance, f.note,
+    f.statut, f.payee_le,
+    (f.jeton_expire_le is not null and f.jeton_expire_le < now()),
+    f.entreprise_id,
+    coalesce(e.nom_commercial, e.nom_legal),
+    e.adresse, e.telephone, e.courriel, e.site_web,
+    e.logo_donnees, e.numero_rbq,
+    coalesce(e.associations, case when e.membre_cmmtq then '["cmmtq"]'::jsonb else '[]'::jsonb end),
+    e.numero_tps, e.numero_tvq,
+    e.note_facture
+  from factures_maison f
+  left join entreprises e on e.id = f.entreprise_id
+  where f.jeton_public = p_jeton;
+$$;
+revoke all on function facture_maison_public(text) from public;
+grant execute on function facture_maison_public(text) to anon, authenticated;
+
+-- Verification : table et fonctions en place.
+select 'factures_maison' as objet, count(*) from factures_maison
+union all select 'fn creer', count(*) from pg_proc where proname = 'creer_facture_maison'
+union all select 'fn publique', count(*) from pg_proc where proname = 'facture_maison_public';

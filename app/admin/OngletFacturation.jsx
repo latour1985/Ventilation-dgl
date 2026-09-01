@@ -15,6 +15,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
+import { SectionFacturesMaison } from "./FacturesMaison";
 import { majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
@@ -2677,6 +2678,18 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           </Button>
         </div>
       )}
+
+      {/* 🧾 FACTURATION MAISON — SANS QUICKBOOKS (2026-09-02) : pour les
+          entreprises de la plateforme sans système comptable. Module
+          autonome (FacturesMaison.jsx) : création multi-provinces, lien
+          public, suivi payé/en retard, crédits, export comptable. */}
+      <SectionFacturesMaison
+        clients={clientsFacturation}
+        catalogue={catalogueFacturation}
+        configEnt={configEnt}
+        ajouterJournal={ajouterJournal}
+        estAdminPrincipal={estAdminPrincipal}
+      />
 
       {/* 🧾 FACTURES SANS CHANTIER — le registre des factures libres :
           visibles, vérifiables, renvoyables (2026-08-29 : « j'ai créé
