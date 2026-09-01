@@ -766,6 +766,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const [nouveauDevisId, setNouveauDevisId] = useState("");
   const [nouvelleFrequence, setNouvelleFrequence] = useState(4);
   const [nouveauProjetId, setNouveauProjetId] = useState(""); // "" = Aucun / Projet général
+  // 🏗️ Mini-panneau « créer un projet pour cette tâche » (2026-09-03).
+  const [miniProjetOuvert, setMiniProjetOuvert] = useState(false);
+  const [miniProjetNom, setMiniProjetNom] = useState("");
+  const [miniProjetFacture, setMiniProjetFacture] = useState("");
+  const [miniProjetCoutant, setMiniProjetCoutant] = useState("");
   // SECTEUR CCQ — décide du taux coûtant de chaque heure. Hérité du
   // (DOIT vivre APRÈS nouveauProjetId : l'avoir déclaré AVANT plantait
   // tout l'onglet Agenda — « cannot access before initialization ».
@@ -1023,6 +1028,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setNouvelleAdresseTravaux(null);
     setFiltreAdresseTache("");
     setNouveauProjetId("");
+    setMiniProjetOuvert(false);
     const fiche = clients.find((c) => c.id === id);
     const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
     const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
@@ -1416,6 +1422,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     dernierTexteDevisRef.current = "";
     setNouvelleFrequence(4);
     setNouveauProjetId("");
+    setMiniProjetOuvert(false);
+    setMiniProjetNom("");
+    setMiniProjetFacture("");
+    setMiniProjetCoutant("");
     setAdresseTravauxDifferente(false);
     setAdresseTravauxId("");
     setNouvelleAdresseTravaux(null);
@@ -2681,6 +2691,87 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   <p className="mt-1 text-[10px] text-emerald-600">
                     Les heures de cette tâche compteront dans la rentabilité de ce projet.
                   </p>
+                )}
+                {/* 🏗️ CRÉER LE PROJET AVEC LA TÂCHE (2026-09-03, demande
+                    du propriétaire) — le chantier naît du même geste :
+                    nom prérempli du titre, budget global prérempli du
+                    DEVIS QUICKBOOKS VÉRIFIÉ (🔎 ci-contre) quand il y en
+                    a un. La tâche se rattache toute seule. */}
+                {!nouveauProjetId && nouveauClientId && onCreerProjet && !miniProjetOuvert && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMiniProjetOuvert(true);
+                      setMiniProjetNom(nouveauTitre.trim() || "");
+                      setMiniProjetFacture(verifDevisQbo?.etat === "trouve" ? verifDevisQbo.total : "");
+                      setMiniProjetCoutant("");
+                    }}
+                    className="mt-1 text-[10px] font-bold text-slate-500 underline underline-offset-2"
+                  >
+                    ➕ Créer un projet pour cette tâche…
+                  </button>
+                )}
+                {miniProjetOuvert && (
+                  <div className="mt-1.5 space-y-1.5 rounded-xl border border-dashed border-slate-300 p-2.5">
+                    <input
+                      value={miniProjetNom}
+                      onChange={(e) => setMiniProjetNom(e.target.value)}
+                      placeholder="Nom du projet *"
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <label className="mb-0.5 block text-[9px] font-bold text-slate-400">Prix vendu (total) $ *</label>
+                        <InputNombreDecimal valeur={miniProjetFacture} onChange={setMiniProjetFacture} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                      </div>
+                      <div>
+                        <label className="mb-0.5 block text-[9px] font-bold text-orange-500">Coût projeté $</label>
+                        <InputNombreDecimal valeur={miniProjetCoutant} onChange={setMiniProjetCoutant} className="w-full rounded-lg border border-orange-200 bg-orange-50 px-2 py-1.5 text-xs tabular-nums" />
+                      </div>
+                    </div>
+                    {verifDevisQbo?.etat === "trouve" && Number(miniProjetFacture) === Number(verifDevisQbo.total) && (
+                      <p className="text-[9px] font-semibold text-emerald-700">💡 Prix vendu prérempli du devis QuickBooks vérifié.</p>
+                    )}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <Button variant="outline" onClick={() => setMiniProjetOuvert(false)} className="min-h-0 py-1.5 text-[11px]">Annuler</Button>
+                      <Button
+                        disabled={!miniProjetNom.trim() || (Number(miniProjetFacture) || 0) <= 0}
+                        onClick={() => {
+                          const nouveau = {
+                            id: `projet-${Date.now()}`,
+                            nom: miniProjetNom.trim(),
+                            clientId: nouveauClientId,
+                            adresseTravaux: null,
+                            dateDebut: nouvelleDate || todayISO(),
+                            dateFin: "",
+                            secteur: nouveauSecteur === "residentiel" ? "residentiel" : "commercial",
+                            statut: "À planifier",
+                            budgetTotal: Number(miniProjetFacture) || 0,
+                            tauxHoraireCoutant: 45,
+                            bonsCommande: [],
+                            ...(verifDevisQbo?.etat === "trouve" && numeroDevisExistant.trim() ? { devisNumero: numeroDevisExistant.trim() } : {}),
+                            budgetPrevu: {
+                              modeSimple: true,
+                              mainOeuvreChantier: { heures: 0, facture: 0, coutant: 0 },
+                              transport: { heures: 0, facture: 0, coutant: 0 },
+                              materiaux: { facture: 0, coutant: 0 },
+                              sousTraitants: [],
+                              totalFacture: Number(miniProjetFacture) || 0,
+                              totalCoutant: Number(miniProjetCoutant) || 0,
+                              marge: (Number(miniProjetFacture) || 0) - (Number(miniProjetCoutant) || 0),
+                            },
+                          };
+                          onCreerProjet(nouveau);
+                          setNouveauProjetId(nouveau.id);
+                          setMiniProjetOuvert(false);
+                          ajouterJournal(`🏗️ Projet "${nouveau.nom}" créé avec la tâche — budget global ${(Number(miniProjetFacture) || 0).toFixed(2)} $.`);
+                        }}
+                        className="min-h-0 py-1.5 text-[11px]"
+                      >
+                        Créer et rattacher
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
 

@@ -55,7 +55,15 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
     setEmployeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   // Techniciens (autres que celui ouvert ici) qui recevront AUSSI la
   // modification — cases cochées dans « Appliquer la modification à… ».
-  const [autresCibles, setAutresCibles] = useState([]);
+  // ✅ TOUTE L'ÉQUIPE COCHÉE D'OFFICE (2026-09-03, vécu par le
+  // propriétaire) : il changeait la date d'une tâche à 5 techniciens et
+  // « ça ne marchait pas » — seule l'instance du technicien ouvert
+  // bougeait, la tâche restait à l'ancienne date pour les 4 autres.
+  // Quand une job se déplace, c'est presque toujours TOUTE l'équipe qui
+  // bouge : décocher devient l'exception, plus l'inverse.
+  const [autresCibles, setAutresCibles] = useState(() =>
+    (techniciensSurTache || []).map((t) => t.employeId).filter((id) => id && id !== employeIdInitial)
+  );
   const basculerCible = (id) =>
     setAutresCibles((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
@@ -481,6 +489,14 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               </select>
             </div>
           </div>
+          {/* Rappel visible SANS défiler (le vécu du 2026-09-03) : la
+              tâche est partagée — dire tout de suite que l'équipe suit. */}
+          {!estConge && dejaPlanifiee && (techniciensSurTache || []).length > 1 && (
+            <p className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] text-slate-600">
+              👥 Tâche partagée par {(techniciensSurTache || []).length} techniciens — la modification s'appliquera à
+              toute l'équipe (ajustable dans « Appliquer la modification à… » plus bas).
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -748,7 +764,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
             <div>
               <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Appliquer la modification à…</p>
               <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
-                Coche les techniciens dont les plages recevront ces changements (date, heures, durée, description).
+                Toute l'équipe est cochée : les changements (date, heures, durée, description) s'appliquent à tous.
+                Décoche un technicien pour le laisser tel quel.
               </p>
               <div className="space-y-1.5">
                 {(techniciensSurTache || []).map((t) => {
