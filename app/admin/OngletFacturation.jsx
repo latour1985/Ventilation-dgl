@@ -545,7 +545,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -678,6 +678,16 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
           return (
             <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">📋 La job — détails et notes</p>
+              {/* 📄 Devis associé · 📍 adresse des travaux · 💰 hommes
+                  facturables (2026-09-03) — les repères de base pour
+                  fixer un prix sans fouiller ailleurs. */}
+              <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold text-slate-600">
+                {be.devisNumero && <span>📄 Devis {be.devisNumero}</span>}
+                {be.adresseTravaux && <span>📍 {be.adresseTravaux}</span>}
+                {nbFacturables != null && equipe.length > 0 && (
+                  <span className="text-emerald-700">💰 {nbFacturables} homme{nbFacturables > 1 ? "s" : ""} facturable{nbFacturables > 1 ? "s" : ""} sur {equipe.length}</span>
+                )}
+              </p>
               {be.description && (
                 <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{be.description}</p>
               )}
@@ -3039,6 +3049,18 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                       </span>
                     ))}
                     <span className="font-bold tabular-nums text-slate-700">= {b.heures.toFixed(2)} h au total</span>
+                    {/* 💰 COMBIEN D'HOMMES À FACTURER (2026-09-03, demande
+                        du propriétaire) — le compte des 💰 en un coup d'œil. */}
+                    {(() => {
+                      const nbFact = (b.equipe || []).filter(
+                        (t) => facturablesAssignations[`${b.tacheId || ""}|${(t.courriel || "").toLowerCase()}`] !== false
+                      ).length;
+                      return (
+                        <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 font-bold text-emerald-700">
+                          💰 {nbFact} homme{nbFact > 1 ? "s" : ""} facturable{nbFact > 1 ? "s" : ""}
+                        </span>
+                      );
+                    })()}
                   </p>
                 )}
                 {/* ⏳ ÉQUIPE INCOMPLÈTE (2026-08-27) : l'équipe assignée est
@@ -3065,6 +3087,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                     <MapPin size={11} className="mt-0.5 shrink-0" />
                     <span>Travaux : {b.adresseTravaux}</span>
                   </div>
+                )}
+                {/* 📄 LE DEVIS ASSOCIÉ (2026-09-03, « on ne voit pas le
+                    devis associé ») — visible directement sur la carte. */}
+                {b.devisNumero && (
+                  <p className="mt-0.5 text-[11px] font-semibold text-slate-500">📄 Devis {b.devisNumero}</p>
                 )}
                 {/* 📦 MATÉRIEL AUX COÛTS (2026-08-25) — coût INTERNE de la
                     job, jamais sur un document client. Deux sources :
@@ -3494,6 +3521,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
           lignesSuggerees={lignesTempsSupp(bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser)}
           bonEnrichi={bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || null}
+          nbFacturables={(() => {
+            const be = bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id));
+            if (!be?.equipe) return null;
+            return be.equipe.filter((t) => facturablesAssignations[`${be.tacheId || ""}|${(t.courriel || "").toLowerCase()}`] !== false).length;
+          })()}
           onFermer={() => setBonAReviserId(null)}
           onConfirmer={(items, total) => reviserPrixNonListe(bonAReviser.id, items, total)}
         />

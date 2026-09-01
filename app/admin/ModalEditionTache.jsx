@@ -13,7 +13,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { AutocompleteAdresse, Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
-export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien }) {
+export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -370,6 +370,28 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
             )}
           </div>
         </div>
+
+        {/* 🧾 LES REPÈRES DE BASE (2026-09-03, demande du propriétaire :
+            « il manque les infos de base comme le nº de devis ou le
+            numéro de la facture de dépôt ») — visibles d'entrée, sans
+            descendre jusqu'aux rattachements. */}
+        {(tache.devisNumero || depot) && (
+          <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-700">
+            {tache.devisNumero && <span>📄 Devis {tache.devisNumero}</span>}
+            {depot && (
+              <span>
+                💰 Dépôt {depot.qboDocNumber ? `— facture nº ${depot.qboDocNumber} ` : ""}· {(Number(depot.montantHT) || 0).toFixed(2)} $ HT ·{" "}
+                {["paye", "paye_manuellement"].includes(depot.statut)
+                  ? `payé${depot.payeLe ? ` le ${String(depot.payeLe).slice(0, 10)}` : ""} ✓`
+                  : depot.statut === "en_attente_paiement"
+                    ? "en attente de paiement"
+                    : depot.statut === "annule" || depot.statut === "annule_qb"
+                      ? "annulé"
+                      : depot.statut || ""}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* NOTES DU TECHNICIEN (travail complété) — pour retrouver vite
             l'information quand le client rappelle pour des détails. */}

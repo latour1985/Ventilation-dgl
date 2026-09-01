@@ -4610,6 +4610,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           employes={employes}
           travailFait={travailTermine(tacheDetailOuverte.tache, tacheDetailOuverte.employe)}
           techniciensSurTache={techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes)}
+          depot={depotDe(tacheDetailOuverte.tache.id) || null}
           facturables={facturablesAssignations}
           onBasculerFacturable={
             lectureSeule
