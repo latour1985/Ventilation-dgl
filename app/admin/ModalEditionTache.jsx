@@ -7,11 +7,11 @@
 // comportement ne change — seuls des export/import s'ajoutent.
 
 import { useState } from "react";
-import { Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
+import { Check, Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
@@ -150,6 +150,52 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // adresse de facturation (champ libre de la fiche) sert de défaut.
   const adresseFacturationTexte = adresseFacturationClient(client);
 
+  // 🏠 MODIFIER L'ADRESSE DES TRAVAUX (2026-09-01, demande du
+  // propriétaire) — le client rappelle « finalement c'est au chalet » :
+  // plus besoin d'annuler et refaire la tâche. Même sélecteur qu'à la
+  // création : adresse du dossier, facturation (défaut), ou nouvelle
+  // adresse (autocomplétion) enregistrée au dossier sans doublon.
+  // Fermé par défaut — la fiche reste légère.
+  const [modifAdresseOuverte, setModifAdresseOuverte] = useState(false);
+  const [adresseTacheId, setAdresseTacheId] = useState("");
+  const [nouvelleAdresse, setNouvelleAdresse] = useState(null);
+  const [nouvelleAdresseApp, setNouvelleAdresseApp] = useState("");
+  const [enregistrerAdresseFiche, setEnregistrerAdresseFiche] = useState(true);
+  // Les champs d'adresse à joindre au payload — undefined = pas touchée.
+  const champsAdresse = () => {
+    if (!modifAdresseOuverte) return {};
+    if (nouvelleAdresse) {
+      const app = nouvelleAdresseApp.trim();
+      const complete = `${nouvelleAdresse.label}${app ? `, app. ${app}` : ""}`;
+      return {
+        adresseTravaux: complete,
+        adresseIntervention: complete,
+        adresseUnite: app || null,
+        // L'adresse tapée s'offre à la PROCHAINE tâche du client aussi.
+        ...(enregistrerAdresseFiche && client
+          ? { nouvelleAdressePourDossier: { ligne1: nouvelleAdresse.label, appartement: app || "" } }
+          : {}),
+      };
+    }
+    if (adresseTacheId) {
+      const a = (client?.adresses || []).find((x) => x.id === adresseTacheId);
+      if (!a) return {};
+      const complete = `${a.nom} — ${libelleAdresse(a)}`;
+      return { adresseTravaux: complete, adresseIntervention: complete, adresseUnite: a.appartement || null };
+    }
+    // « Adresse de facturation » : adresseTravaux redevient null (même
+    // convention qu'à la création — c'est ce que QuickBooks attend), le
+    // technicien reçoit quand même où aller.
+    return {
+      adresseTravaux: null,
+      adresseIntervention:
+        (adresseFacturationDefaut ? `${adresseFacturationDefaut.nom} — ${adresseFacturationDefaut.ligne1}` : null) ||
+        adresseFacturationTexte ||
+        null,
+      adresseUnite: adresseFacturationDefaut?.appartement || null,
+    };
+  };
+
   const enregistrer = () => {
     // Contact sur place résolu depuis le carnet (ou conservé tel quel).
     const carnetClient = client?.contacts || [];
@@ -167,6 +213,9 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       jours: Math.max(0, jours),
       sauterWeekend,
       sauterFeries,
+      // 🏠 Adresse modifiée seulement si le panneau a été ouvert —
+      // sinon les clés sont absentes et l'existante est conservée.
+      ...champsAdresse(),
       // Assignation immédiate seulement si un/des technicien(s) choisis —
       // sinon la tâche reste "en attente" avec sa durée mise à jour.
       employeId: dejaPlanifiee ? employeId || null : employeIds[0] || null,
@@ -246,6 +295,74 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               </>
             ) : (
               <p className="text-[11px] text-slate-400">Aucune adresse disponible pour ce client.</p>
+            )}
+            {/* 🏠 MODIFIER L'ADRESSE (2026-09-02) — « le client rappelle :
+                finalement c'est au chalet ». */}
+            {!modifAdresseOuverte ? (
+              <button
+                type="button"
+                onClick={() => setModifAdresseOuverte(true)}
+                className="mt-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 active:scale-95"
+              >
+                ✏️ Modifier l&apos;adresse des travaux
+              </button>
+            ) : (
+              <div className="mt-2 space-y-1.5 rounded-xl border border-dashed border-slate-300 bg-white p-2.5">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse du dossier client</label>
+                  <select
+                    value={nouvelleAdresse ? "__nouvelle__" : adresseTacheId}
+                    onChange={(e) => {
+                      setNouvelleAdresse(null);
+                      setAdresseTacheId(e.target.value === "__nouvelle__" ? "" : e.target.value);
+                    }}
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  >
+                    <option value="">Adresse de facturation (défaut)</option>
+                    {(client?.adresses || []).map((a) => (
+                      <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
+                    ))}
+                    {nouvelleAdresse && <option value="__nouvelle__">🆕 {nouvelleAdresse.label}</option>}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">…ou tape une nouvelle adresse</label>
+                  <AutocompleteAdresse onSelection={(place) => { setNouvelleAdresse(place); setAdresseTacheId(""); }} />
+                </div>
+                {nouvelleAdresse && (
+                  <>
+                    <p className="flex items-center gap-1 text-[11px] font-bold text-emerald-700">
+                      <Check size={12} /> {nouvelleAdresse.label}
+                    </p>
+                    <input
+                      value={nouvelleAdresseApp}
+                      onChange={(e) => setNouvelleAdresseApp(e.target.value)}
+                      placeholder="App. / bureau / casier postal (facultatif)"
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    />
+                    <label className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={enregistrerAdresseFiche}
+                        onChange={(e) => setEnregistrerAdresseFiche(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-[#FF6A13]"
+                      />
+                      Enregistrer cette adresse au dossier du client
+                    </label>
+                  </>
+                )}
+                <p className="text-[10px] text-slate-400">
+                  La nouvelle adresse suivra la tâche partout — horaire et téléphone des techniciens — dès « Enregistrer les
+                  modifications ». Les bons de travail déjà produits gardent la leur.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setModifAdresseOuverte(false); setNouvelleAdresse(null); setAdresseTacheId(""); setNouvelleAdresseApp(""); }}
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-500"
+                >
+                  Annuler — garder l&apos;adresse actuelle
+                </button>
+              </div>
             )}
           </div>
         </div>

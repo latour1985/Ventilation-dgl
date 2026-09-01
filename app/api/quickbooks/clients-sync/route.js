@@ -56,11 +56,21 @@ async function descendreClientsQbo(acces, admin, entrepriseId) {
   // entreprises — on se borne aux fiches de L'ENTREPRISE DU DEMANDEUR
   // pour ne jamais raccorder la fiche d'une compagnie aux clients
   // QuickBooks d'une autre.
-  const { data: fiches, error: erreurLecture } = await admin
-    .from("clients_app")
-    .select("id, nom, entreprise, quickbooks_customer_id")
-    .eq("entreprise_id", entrepriseId);
-  if (erreurLecture) throw new Error(`Lecture des fiches : ${erreurLecture.message}`);
+  // 📚 PAR PAGES (2026-09-02) : Supabase plafonne à 1 000 lignes — au-delà
+  // de 1 000 fiches, les suivantes semblaient « inconnues » et la
+  // descente les recréait (463 « nouveaux » à chaque clic, sans dommage
+  // grâce aux ids déterministes, mais faux au journal et pour rien).
+  const fiches = [];
+  for (let depart = 0; ; depart += 1000) {
+    const { data, error: erreurLecture } = await admin
+      .from("clients_app")
+      .select("id, nom, entreprise, quickbooks_customer_id")
+      .eq("entreprise_id", entrepriseId)
+      .range(depart, depart + 999);
+    if (erreurLecture) throw new Error(`Lecture des fiches : ${erreurLecture.message}`);
+    fiches.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
 
   const dejaRelies = new Set((fiches || []).map((f) => f.quickbooks_customer_id).filter(Boolean));
   const parNom = new Map();

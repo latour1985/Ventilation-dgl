@@ -1982,20 +1982,41 @@ function AppAdmin() {
   useEffect(() => {
     if (!session) return;
     let annule = false;
+    // 🧠 CE QUI ARRIVE DE LA BASE EST DÉJÀ ENREGISTRÉ (2026-09-02).
+    // Sans ce marquage, la sauvegarde automatique voyait chaque fiche
+    // chargée comme « jamais écrite » et RÉÉCRIVAIT TOUT le répertoire à
+    // chaque session — anodin à 200 clients, mais à 1 465 (descente
+    // QuickBooks) la rafale saturait la connexion et les dernières
+    // fiches (fin de l'alphabet) échouaient : le journal se remplissait
+    // de « affiché localement mais NON enregistré » pour des fiches
+    // parfaitement en base. On sème donc la mémoire de la sauvegarde
+    // avec la signature exacte de ce qui vient d'être lu.
+    const semer = (cle, liste) => {
+      const memoire = dejaEnregistre.current[cle];
+      liste.forEach((el) => {
+        memoire[el.id] = JSON.stringify(el);
+      });
+    };
     const charger = () => {
       listerClients()
         .then((liste) => {
-          if (!annule && liste.length > 0) setClients(liste);
+          if (annule || liste.length === 0) return;
+          semer("clients", liste);
+          setClients(liste);
         })
         .catch(() => {});
       listerProjets()
         .then((liste) => {
-          if (!annule && liste.length > 0) setProjets(liste);
+          if (annule || liste.length === 0) return;
+          semer("projets", liste);
+          setProjets(liste);
         })
         .catch(() => {});
       listerTachesAttente()
         .then((liste) => {
-          if (!annule) setTachesAttente(liste);
+          if (annule) return;
+          semer("taches", liste);
+          setTachesAttente(liste);
         })
         .catch(() => {});
     };

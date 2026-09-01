@@ -1825,7 +1825,21 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     appliquerRattachements(tache, { projetId });
   };
 
+  // 📌 Une adresse tapée dans la FICHE de tâche rejoint le dossier du
+  // client (2026-09-02) — même règle anti-doublon qu'à la création.
+  const poserAdresseAuDossier = (tache, entree) => {
+    if (!entree?.ligne1) return;
+    const client = clients.find((c) => c.id === tache.clientId) || clients.find((c) => c.nom === tache.clientNom);
+    if (!client) return;
+    const deja = (client.adresses || []).some((a) => (a.ligne1 || "").trim().toLowerCase() === entree.ligne1.trim().toLowerCase());
+    if (deja) return;
+    const fiche = { id: `adr-${Date.now()}`, nom: "Chantier", ligne1: entree.ligne1, ...(entree.appartement ? { appartement: entree.appartement } : {}) };
+    setClients((prev) => prev.map((x) => (x.id === client.id ? { ...x, adresses: [...(x.adresses || []), fiche] } : x)));
+    ajouterJournal(`📌 Adresse « ${entree.ligne1} » enregistrée au dossier de ${client.nom}`);
+  };
+
   const modifierTachePlanifiee = (tache, ancienEmployeId, champs) => {
+    if (champs?.nouvelleAdressePourDossier) poserAdresseAuDossier(tache, champs.nouvelleAdressePourDossier);
     if (lectureSeule) return;
     // Synchro Supabase : si la tâche change de technicien (ou retourne en
     // attente), on retire l'ancienne assignation. Si c'est le même
@@ -1851,6 +1865,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       jours: champs.jours,
       sauterWeekend: champs.sauterWeekend,
       ...(champs.sauterFeries !== undefined ? { sauterFeries: champs.sauterFeries } : {}),
+      // 🏠 Adresse des travaux modifiée dans la fiche (2026-09-02) —
+      // clés absentes = adresse inchangée.
+      ...(champs.adresseIntervention !== undefined
+        ? { adresseTravaux: champs.adresseTravaux, adresseIntervention: champs.adresseIntervention, adresseUnite: champs.adresseUnite || null }
+        : {}),
       description: champs.description,
       // Contact sur place : suit la modification (null = retiré) ; si la
       // modale ne l'a pas touché (undefined), l'existant est conservé.
@@ -1881,16 +1900,18 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
+    if (nouvelleAdressePourDossier) poserAdresseAuDossier(tache, nouvelleAdressePourDossier);
     const tacheMiseAJour = {
       ...tache,
       heures,
       jours,
       sauterWeekend,
       ...(sauterFeries !== undefined ? { sauterFeries } : {}),
+      ...(adresseIntervention !== undefined ? { adresseTravaux, adresseIntervention, adresseUnite: adresseUnite || null } : {}),
       description: description ?? tache.description,
       contactSurPlace: contactSurPlace !== undefined ? contactSurPlace : tache.contactSurPlace || null,
     };
