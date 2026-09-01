@@ -1569,12 +1569,26 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                       </p>
                     )}
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                      affichee.statut === "accepte" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-black"
-                    }`}
-                  >
-                    {affichee.statut === "accepte" ? "ACCEPTÉ" : "ENVOYÉ"}
+                  <span className="flex shrink-0 flex-col items-end gap-0.5">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                        affichee.statut === "accepte" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-black"
+                      }`}
+                    >
+                      {affichee.statut === "accepte" ? "ACCEPTÉ" : "ENVOYÉ"}
+                    </span>
+                    {/* 👁️ Suivi de consultation (snippet 123) : avant
+                        l'appel de relance, on sait s'il l'a regardé. */}
+                    {affichee.consulteLe ? (
+                      <span
+                        className="text-[9px] font-bold text-sky-600"
+                        title={`Première consultation le ${String(affichee.consulteLe).slice(0, 10)}${affichee.derniereConsultationLe ? ` · dernière le ${String(affichee.derniereConsultationLe).slice(0, 10)}` : ""}`}
+                      >
+                        👁️ Consulté{affichee.consultations > 1 ? ` (${affichee.consultations}×)` : ""}
+                      </span>
+                    ) : affichee.statut !== "accepte" ? (
+                      <span className="text-[9px] font-bold text-slate-400" title="Le client n'a pas encore ouvert son devis">👁️ Pas encore vu</span>
+                    ) : null}
                   </span>
                 </div>
 
