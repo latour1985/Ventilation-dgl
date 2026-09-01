@@ -369,7 +369,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               Sauter les samedis et dimanches
             </label>
           )}
-          {jours >= 1 && configEntCcq?.calendrierCcq === true && (
+          {configEntCcq?.calendrierCcq === true && (
             <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
               <input type="checkbox" checked={sauterFeries} onChange={(e) => setSauterFeries(e.target.checked)} className="h-3.5 w-3.5 accent-[#FF6A13]" />
               Sauter les jours fériés (calendrier CCQ)

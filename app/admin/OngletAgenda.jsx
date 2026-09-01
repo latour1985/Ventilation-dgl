@@ -2905,8 +2905,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </label>
                 )}
                 {/* 📅 Offerte seulement aux entreprises qui suivent le
-                    calendrier CCQ (Paramètres → Paie & heures). */}
-                {nouvelleDureeJours > 1 && configEnt?.calendrierCcq === true && (
+                    calendrier CCQ (Paramètres → Paie & heures). TOUJOURS
+                    visible (2026-09-01, retour du propriétaire : cachée
+                    derrière « jours > 1 », il la cherchait sans la
+                    trouver) — et utile même à 1 jour : une tâche posée
+                    SUR un férié glisse au jour ouvrable suivant. */}
+                {configEnt?.calendrierCcq === true && (
                   <label className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
                     <input
                       type="checkbox"
@@ -3629,7 +3633,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     Sauter les samedis et dimanches
                   </label>
                 )}
-                {(t.jours ?? 1) > 1 && configEnt?.calendrierCcq === true && (
+                {configEnt?.calendrierCcq === true && (
                   <label className="mt-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
                     <input
                       type="checkbox"
