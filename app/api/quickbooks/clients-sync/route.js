@@ -121,7 +121,14 @@ async function descendreClientsQbo(acces, admin, entrepriseId) {
     const adresse = [q.BillAddr?.Line1, q.BillAddr?.City, q.BillAddr?.PostalCode].filter(Boolean).join(", ");
     const courriel = (q.PrimaryEmailAddr?.Address || "").trim();
     aCreer.push({
-      id: `qbc-${qbId}`,
+      // ⚠️ IDENTIFIANT CLOISONNÉ PAR ENTREPRISE (2026-09-03 — fuite
+      // vécue) : « qbc-<id> » tout court entrait en COLLISION entre
+      // compagnies (les clients 1-75 du Sandbox de Miroir écrasaient les
+      // fiches 1-75 de DGL, et les descentes automatiques des deux se
+      // les revolaient aux 15 minutes). L'id porte maintenant
+      // l'entreprise — les fiches historiques « qbc-<id> » restent
+      // reconnues par leur quickbooks_customer_id (dejaRelies).
+      id: `qbc-${entrepriseId}-${qbId}`,
       nom: nomQb,
       entreprise: q.CompanyName && nomNormalise(q.CompanyName) !== nomNormalise(nomQb) ? q.CompanyName : null,
       courriels: courriel ? [{ id: `cc-qb-${qbId}`, label: "QuickBooks", email: courriel, defaut: true }] : [],

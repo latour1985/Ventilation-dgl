@@ -4795,3 +4795,70 @@ grant execute on function facture_maison_public(text) to anon, authenticated;
 select 'factures_maison' as objet, count(*) from factures_maison
 union all select 'fn creer', count(*) from pg_proc where proname = 'creer_facture_maison'
 union all select 'fn publique', count(*) from pg_proc where proname = 'facture_maison_public';
+
+-- ============================================================
+-- 120 - REPARATION creer_facture_maison : « column reference
+--       "cle" is ambiguous » (2026-09-03)
+-- ------------------------------------------------------------
+-- Vecu au premier envoi d'une facture maison : la variable plpgsql
+-- « cle » portait le meme nom que la COLONNE compteurs.cle — le
+-- « on conflict (entreprise_id, cle) » ne savait plus de qui on
+-- parlait. Variables renommees (v_cle, v_prefixe), rien d'autre ne
+-- change. Idempotent (create or replace).
+-- ============================================================
+create or replace function creer_facture_maison(p jsonb)
+returns factures_maison
+language plpgsql
+security definer
+as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  le_type text := coalesce(p->>'type', 'facture');
+  v_cle text;
+  v_prefixe text;
+  n bigint;
+  ligne factures_maison;
+begin
+  if ent is null then
+    raise exception 'Connexion requise';
+  end if;
+  if le_type not in ('facture', 'credit') then
+    raise exception 'Type invalide';
+  end if;
+  v_cle := case when le_type = 'credit' then 'credit_maison' else 'facture_maison' end;
+  v_prefixe := case when le_type = 'credit' then 'CR' else 'FAC' end;
+  insert into compteurs (entreprise_id, cle, valeur) values (ent, v_cle, 1)
+  on conflict (entreprise_id, cle) do update set valeur = compteurs.valeur + 1
+  returning valeur into n;
+  insert into factures_maison (
+    entreprise_id, numero, type, facture_origine_id,
+    client_id, client_nom, client_adresse, courriels, lignes,
+    sous_total, taxes, regime_taxes, total, terme,
+    date_emission, date_echeance, note, jeton_public, jeton_expire_le
+  ) values (
+    ent,
+    v_prefixe || '-' || to_char(coalesce((p->>'date_emission')::date, current_date), 'YYYY') || '-' || lpad(n::text, 4, '0'),
+    le_type,
+    nullif(p->>'facture_origine_id', '')::uuid,
+    nullif(p->>'client_id', ''),
+    coalesce(p->>'client_nom', ''),
+    nullif(p->>'client_adresse', ''),
+    coalesce(p->'courriels', '[]'::jsonb),
+    coalesce(p->'lignes', '[]'::jsonb),
+    coalesce((p->>'sous_total')::numeric, 0),
+    coalesce(p->'taxes', '[]'::jsonb),
+    coalesce(p->>'regime_taxes', 'qc'),
+    coalesce((p->>'total')::numeric, 0),
+    nullif(p->>'terme', ''),
+    coalesce((p->>'date_emission')::date, current_date),
+    nullif(p->>'date_echeance', '')::date,
+    nullif(p->>'note', ''),
+    coalesce(nullif(p->>'jeton_public', ''), encode(gen_random_bytes(24), 'hex')),
+    now() + interval '1 year'
+  ) returning * into ligne;
+  return ligne;
+end;
+$$;
+
+-- Verification rapide : la fonction recompile sans erreur.
+select proname from pg_proc where proname = 'creer_facture_maison';
