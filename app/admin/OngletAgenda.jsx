@@ -378,7 +378,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -4551,6 +4551,51 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           employes={employes}
           travailFait={travailTermine(tacheDetailOuverte.tache, tacheDetailOuverte.employe)}
           techniciensSurTache={techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes)}
+          facturables={facturablesAssignations}
+          onBasculerFacturable={
+            lectureSeule
+              ? undefined
+              : (employeId, facturable) => {
+                  const employe = employes.find((x) => x.id === employeId);
+                  const t = tacheDetailOuverte.tache;
+                  majFacturableAssignation(t.id, employe?.courriel, facturable).catch(() =>
+                    ajouterJournal("⚠️ Choix facturable NON enregistré (connexion ?) — réessaie.")
+                  );
+                  onMajFacturable?.(t.id, employe?.courriel, facturable);
+                  ajouterJournal(
+                    facturable
+                      ? `💰 ${employe?.nom || "Technicien"} passe FACTURABLE sur « ${t.titre || t.clientNom} ».`
+                      : `🤝 ${employe?.nom || "Technicien"} passe NON facturable (aide interne) sur « ${t.titre || t.clientNom} » — ses heures ne compteront pas dans la facturation.`
+                  );
+                }
+          }
+          onRetirerTechnicien={
+            lectureSeule
+              ? undefined
+              : (employeId) => {
+                  const employe = employes.find((x) => x.id === employeId);
+                  const t = tacheDetailOuverte.tache;
+                  // Ses cases quittent la grille — celles des autres restent.
+                  setPlanning((prev) => {
+                    const copie = { ...prev };
+                    Object.keys(copie).forEach((cle) => {
+                      const [, empCle] = cle.split("|");
+                      if (empCle !== employeId) return;
+                      const restants = listeCellule(copie[cle]).filter((x) => x.id !== t.id);
+                      if (restants.length) copie[cle] = restants;
+                      else delete copie[cle];
+                    });
+                    return recalculerTransports(copie, sansTransportAgendaRef.current);
+                  });
+                  // Et son téléphone est prévenu (l'assignation disparaît).
+                  if (!t.est_tache_systeme && employe?.courriel) {
+                    retirerTacheSupabase(t.id, employe.courriel).catch(() =>
+                      ajouterJournal(`⚠️ Retrait de ${employe?.nom} : la grille est à jour ici, mais son app mobile n'a peut-être PAS reçu le retrait — vérifie la connexion.`)
+                    );
+                  }
+                  ajouterJournal(`↩️ ${employe?.nom || "Technicien"} retiré de « ${t.titre || t.clientNom} » — les autres techniciens restent assignés.`);
+                }
+          }
           onAjouterTechnicien={({ employeId, date, heureDebut, heures, jours, dupliquer }) => {
             // « Ajouter » = même tâche partagée (id identique) ; « Dupliquer »
             // = copie indépendante (nouvel id). Dans les deux cas, le

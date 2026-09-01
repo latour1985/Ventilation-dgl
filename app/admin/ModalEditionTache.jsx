@@ -13,7 +13,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
-export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet }) {
+export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -542,6 +542,60 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                   bon de travail déjà créé suivront ce rattachement — les coûts du projet se mettront à jour.
                 </p>
               )}
+            </div>
+          )}
+
+          {/* 👥 ÉQUIPE SUR CETTE TÂCHE (2026-09-01, demande du
+              propriétaire : « modifier une tâche au complet… qui est
+              facturable s'ils sont 2 ? ») — chaque technicien assigné
+              avec son interrupteur 💰/🤝 modifiable APRÈS coup (avant,
+              le choix de la création était définitif) et, quand ils
+              sont plusieurs, un bouton pour retirer LUI SEUL. */}
+          {dejaPlanifiee && (techniciensSurTache || []).length > 0 && onBasculerFacturable && (
+            <div>
+              <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-500">Équipe sur cette tâche</p>
+              <div className="space-y-1.5">
+                {(techniciensSurTache || []).map((t) => {
+                  const fiche = employes.find((e) => e.id === t.employeId);
+                  const courriel = (fiche?.courriel || "").toLowerCase();
+                  const estST = !!fiche?.estSousTraitant;
+                  const facturable = facturables?.[`${tache.id}|${courriel}`] !== false;
+                  return (
+                    <div key={`equipe-${t.employeId}`} className="flex items-center gap-2 rounded-lg border border-slate-200 p-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-slate-800">{estST ? `🤝 ${t.nom} (sous-traitant)` : t.nom}</p>
+                        <p className="text-[10px] text-slate-400">{t.detail}</p>
+                      </div>
+                      {/* Le statut facturable des SOUS-TRAITANTS vit dans
+                          leur propre suivi (coûts/statuts ST) — pas ici. */}
+                      {!estST && (
+                        <button
+                          type="button"
+                          onClick={() => onBasculerFacturable(t.employeId, !facturable)}
+                          title={facturable ? "Facturable au client — cliquer pour passer en aide interne (non facturable)" : "Non facturable (aide interne) — cliquer pour passer facturable"}
+                          className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${facturable ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}
+                        >
+                          {facturable ? "💰 Facturable" : "🤝 Non facturable"}
+                        </button>
+                      )}
+                      {(techniciensSurTache || []).length > 1 && onRetirerTechnicien && (
+                        <button
+                          type="button"
+                          onClick={() => onRetirerTechnicien(t.employeId)}
+                          title="Retirer CE technicien de la tâche — les autres restent assignés"
+                          className="shrink-0 rounded-lg border border-red-200 px-1.5 py-1 text-[10px] font-bold text-red-600"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[10px] text-slate-400">
+                💰/🤝 se change en un clic — les heures d'un 🤝 (aide interne) ne comptent pas dans la facturation. Le ✕
+                retire ce technicien seulement ; « Retirer de l'horaire » plus bas retire la tâche au complet.
+              </p>
             </div>
           )}
 

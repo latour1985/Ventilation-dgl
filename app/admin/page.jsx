@@ -3115,6 +3115,7 @@ function AppAdmin() {
           onMajFacturable={(tacheId, courriel, val) =>
             setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }))
           }
+          facturablesAssignations={facturablesAssignations}
           tachesAttente={tachesAttente}
           setTachesAttente={setTachesAttente}
           planning={planning}
