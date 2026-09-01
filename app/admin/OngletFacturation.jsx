@@ -651,8 +651,15 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
-        <div className="mb-3 flex items-start justify-between gap-2">
+      {/* 🖥️ DEUX PANNEAUX CÔTE À CÔTE (2026-09-03, demande du
+          propriétaire : « difficile de facturer en remontant toujours de
+          haut en bas ») — le DOSSIER à gauche (récit, notes, alertes),
+          l'ACTION à droite (items, total, sorties), chacun avec son
+          propre ascenseur : les notes du technicien restent sous les
+          yeux pendant qu'on tape les prix. Sur écran étroit, tout
+          retombe en une colonne comme avant. */}
+      <div className="flex max-h-[92vh] w-full max-w-md flex-col rounded-2xl bg-white lg:max-w-5xl">
+        <div className="flex items-start justify-between gap-2 border-b border-slate-100 p-5 pb-3">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900">Réviser le prix non listé</h3>
             <p className="text-xs text-slate-500">{bon.projet} · {bon.client}</p>
@@ -660,6 +667,9 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
           <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
         </div>
 
+        <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-2 lg:overflow-hidden">
+        {/* ---- PANNEAU GAUCHE : LE DOSSIER (lecture) ---- */}
+        <div className="p-5 pt-3 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-slate-100">
         <div className="mb-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">
           Ce travail contient un prix qui n'existe pas dans le catalogue — vérifie chaque item avant d'autoriser l'envoi au client.
         </div>
@@ -729,8 +739,10 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
             taux réduit pour un passager du même camion). Les lignes sont modifiables ou effaçables — c'est toi qui as le dernier mot.
           </div>
         )}
+        </div>
 
-        <div className="space-y-3">
+        {/* ---- PANNEAU DROIT : L'ACTION (items, total, sorties) ---- */}
+        <div className="space-y-3 p-5 pt-3 lg:min-h-0 lg:overflow-y-auto">
           <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-500">Items à facturer (description + prix séparés)</label>
             {items.map((it, i) => (
@@ -835,6 +847,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
               🛡️ Ne pas facturer — retirer (garantie / client maison)…
             </button>
           )}
+        </div>
         </div>
       </div>
     </div>
