@@ -5651,6 +5651,13 @@ function AppTechnicien() {
   useEffect(() => {
     if (!session?.user?.email) return;
     let annule = false;
+    // 📴 CACHE HORS-LIGNE (2026-09-02) : le service worker s'enregistre
+    // à CHAQUE visite — avant, seulement quand les notifications
+    // étaient activées, et sans lui l'app ne s'ouvrait pas du tout dans
+    // un sous-sol sans signal (« démarrer les travaux ne part pas »).
+    if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
     // 🔔 Permission déjà accordée : l'abonnement push se rafraîchit en
     // silence (il peut expirer côté navigateur) — le bouton d'activation
     // de l'accueil reste le chemin pour la première fois.
