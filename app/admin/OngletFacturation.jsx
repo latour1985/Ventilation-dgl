@@ -545,7 +545,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -803,6 +803,22 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
           <Button disabled={!peutValider} onClick={() => onConfirmer(items, total)} className="w-full">
             Valider et débloquer pour l&apos;envoi
           </Button>
+
+          {/* ✅ LE DÉPÔT COUVRE TOUT (2026-09-03, demande du
+              propriétaire : « il ne faut pas faire une facture de
+              -260 — le client tomberait en crédit dans QuickBooks »).
+              Quand le dépôt PAYÉ égale le travail, il n'y a RIEN à
+              facturer : la facture de dépôt déjà payée dans QuickBooks
+              EST la facture officielle. Ce bouton ferme le bon sans
+              créer quoi que ce soit — zéro crédit, zéro doublon. */}
+          {depotPaye && onCouvertParDepot && (
+            <button
+              onClick={onCouvertParDepot}
+              className="w-full rounded-xl border-2 border-emerald-500 bg-emerald-50 py-2.5 text-xs font-extrabold text-emerald-800 active:scale-[0.99]"
+            >
+              ✅ Rien à facturer — le dépôt de {(Number(depotPaye.montantHT) || 0).toFixed(2)} $ couvre le travail au complet
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -3517,6 +3533,42 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {bonAReviser && (
         <ModalReviserPrixNonListe
           bon={bonAReviser}
+          onCouvertParDepot={() => {
+            const b = bonAReviser;
+            const depot = depotPayePour(b.tacheId);
+            if (!depot) return;
+            setBonAReviserId(null);
+            // La facture de dépôt DÉJÀ PAYÉE dans QuickBooks devient la
+            // preuve de facturation du bon — aucune nouvelle facture,
+            // aucun crédit, le bon passe « Déjà facturés ».
+            const entree = {
+              id: `fact-${Date.now()}-${b.id}`,
+              montant: 0,
+              type: "complete",
+              detail: `Couverte par le dépôt payé d'avance de ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT${depot.qboDocNumber ? ` (facture nº ${depot.qboDocNumber})` : ""}`,
+              date: dateISO(new Date()),
+              numeroFactureQb: depot.qboDocNumber || null,
+              qboInvoiceId: depot.qboInvoiceId || null,
+              // La preuve d'envoi est celle du dépôt : facture émise et
+              // payée — rien d'autre ne devait partir.
+              envoiQb: { envoyee: true, envoyeeLe: depot.payeLe || null },
+            };
+            setBons((prev) =>
+              prev.map((x) => {
+                if (x.id !== b.id) return x;
+                const nouvelles = [...(x.facturesEmises || []), entree];
+                if (String(x.id).startsWith("sbb-")) {
+                  majFacturesEmises(String(x.id).slice(4), nouvelles, "envoye").catch(() =>
+                    ajouterJournal(`⚠️ « ${b.projet} » marqué couvert par le dépôt à l'écran, mais NON enregistré — vérifie la connexion.`)
+                  );
+                }
+                return { ...x, statutQb: "envoye", facturesEmises: nouvelles };
+              })
+            );
+            ajouterJournal(
+              `✅ « ${b.projet} » (${b.client}) : RIEN à facturer — couvert au complet par le dépôt payé d'avance de ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT${depot.qboDocNumber ? ` (facture nº ${depot.qboDocNumber})` : ""}. Aucune facture créée, aucun crédit.`
+            );
+          }}
           depotPaye={depotPayePour(bonAReviser.tacheId)}
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
           lignesSuggerees={lignesTempsSupp(bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser)}
