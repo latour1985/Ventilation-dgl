@@ -1250,7 +1250,9 @@ export function GalerieAvantApres({ travail, enMarge = false }) {
 // ============================================================
 export function ApercuBonTravailClient({ travail, clients, onFermer }) {
   const client = (clients || []).find((c) => c.id === travail.clientId);
-  const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${libelleAdresse(client.adresses[0])}` : null);
+  // Repli final : l'adresse de FACTURATION — les clients descendus de
+  // QuickBooks n'ont pas d'adresses de chantier (2026-09-01).
+  const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${libelleAdresse(client.adresses[0])}` : null) || (client?.adresseFacturation ? String(client.adresseFacturation).trim() : null);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">

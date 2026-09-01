@@ -1159,9 +1159,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // accès au répertoire des clients pour aller la chercher.
     // Sans ce champ, il partait le matin sans savoir où aller.
     const adressePrincipale = client?.adresses?.[0];
+    // Repli FINAL : l'adresse de FACTURATION (2026-09-01, vécu — les
+    // clients descendus de QuickBooks ont leur adresse dans la fiche
+    // mais AUCUNE adresse de chantier : la tâche partait sans adresse
+    // à l'horaire et chez le technicien).
     nouvelle.adresseIntervention =
       nouvelle.adresseTravaux ||
-      (adressePrincipale ? `${adressePrincipale.nom} — ${adressePrincipale.ligne1}` : null);
+      (adressePrincipale ? `${adressePrincipale.nom} — ${adressePrincipale.ligne1}` : null) ||
+      (client?.adresseFacturation ? String(client.adresseFacturation).trim() : null);
     if (!nouvelle.adresseUnite && adressePrincipale?.appartement && !nouvelle.adresseTravaux) {
       nouvelle.adresseUnite = adressePrincipale.appartement;
     }
@@ -2058,7 +2063,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       deplacerTache(objet.tacheId, objet.employeId, employeId, date, null);
       return;
     }
-    assigner(objet, employeId, date, HEURE_PAR_DEFAUT);
+    // ⏰ L'HEURE CHOISIE À LA CRÉATION d'abord (2026-09-01, vécu :
+    // « toutes à 7 h 00 même quand on demande une autre heure » — le
+    // dépôt en vue Semaine/Mois ignorait heurePrevue).
+    assigner(objet, employeId, date, objet.heurePrevue || HEURE_PAR_DEFAUT);
   };
 
   return (
@@ -3718,7 +3726,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     setAssignationMobile(
                       assignationMobile?.tacheId === t.id
                         ? null
-                        : { tacheId: t.id, employeId: employes[0].id, heure: HEURE_PAR_DEFAUT, date: jourKey }
+                        : {
+                            tacheId: t.id,
+                            // Le technicien, la date et l'heure PRÉVUS à la
+                            // création pré-remplissent — plus de 07:00 forcé.
+                            employeId: (t.technicienPrevu && employes.some((e) => e.id === t.technicienPrevu) ? t.technicienPrevu : employes[0].id),
+                            heure: t.heurePrevue || HEURE_PAR_DEFAUT,
+                            date: t.datePrevue || jourKey,
+                          }
                     )
                   }
                   className="mt-2 w-full min-h-0 py-1.5 text-xs lg:hidden"
