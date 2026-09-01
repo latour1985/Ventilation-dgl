@@ -11,7 +11,7 @@ import { Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
+import { Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
@@ -145,6 +145,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // tâche, on retombe sur l'adresse de facturation par défaut du
   // client, mais l'étiquette le précise sans ambiguïté.
   const adresseFacturationDefaut = client?.adresses?.[0];
+  // Repli FINAL (2026-09-01, même règle qu'à la création) : les clients
+  // descendus de QuickBooks n'ont AUCUNE adresse de chantier — leur
+  // adresse de facturation (champ libre de la fiche) sert de défaut.
+  const adresseFacturationTexte = adresseFacturationClient(client);
 
   const enregistrer = () => {
     // Contact sur place résolu depuis le carnet (ou conservé tel quel).
@@ -229,13 +233,15 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                 </p>
                 <p className="mt-0.5 text-xs font-semibold text-slate-800">{tache.adresseTravaux}</p>
               </>
-            ) : adresseFacturationDefaut ? (
+            ) : adresseFacturationDefaut || adresseFacturationTexte ? (
               <>
                 <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
                   <MapPin size={11} /> Adresse de facturation (par défaut — aucune adresse de travaux distincte définie)
                 </p>
                 <p className="mt-0.5 text-xs font-semibold text-slate-800">
-                  {adresseFacturationDefaut.nom} — {libelleAdresse(adresseFacturationDefaut)}
+                  {adresseFacturationDefaut
+                    ? `${adresseFacturationDefaut.nom} — ${libelleAdresse(adresseFacturationDefaut)}`
+                    : adresseFacturationTexte}
                 </p>
               </>
             ) : (
