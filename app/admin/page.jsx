@@ -1077,6 +1077,13 @@ export default function App() {
 function AppAdmin() {
   const { t: tEnTete } = useLangue();
   const [onglet, setOnglet] = useState("tableau-de-bord");
+  // ⬆️ RETOUR EN HAUT à chaque changement d'onglet (2026-09-04, demande
+  // du propriétaire : « quand je change d'onglet je n'arrive pas dans
+  // le haut des pages ») — la position de défilement de l'ancien onglet
+  // collait au nouveau.
+  useEffect(() => {
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  }, [onglet]);
   // 💰/🤝 Drapeaux « facturable » par (tâche, technicien) — la clé est
   // `tacheId|courriel`. Rempli au chargement des assignations, mis à
   // jour au choix du répartiteur. La facturation s'en sert pour exclure
