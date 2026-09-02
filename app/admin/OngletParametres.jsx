@@ -483,6 +483,17 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               <ChampParametre {...propsChamp} cle="telephoneUrgence" libelle="Téléphone d'urgence" placeholder="— facultatif —" />
               <ChampParametre {...propsChamp} cle="courriel" libelle="Courriel général" placeholder="info@…" />
               <ChampParametre {...propsChamp} cle="courrielFacturation" libelle="Courriel de facturation" aide="Utilisé pour les envois liés à la facturation." placeholder="— facultatif —" />
+              {/* 📧 Copie permanente des BONS DE COMMANDE (2026-09-04,
+                  demande du propriétaire) : chaque BC envoyé met déjà en
+                  copie CELUI QUI COMMANDE (son courriel de connexion) —
+                  cette adresse-ci en reçoit UNE DE PLUS, toujours. */}
+              <ChampParametre
+                {...propsChamp}
+                cle="courrielCopieBc"
+                libelle="Copie des bons de commande (CC)"
+                aide="Chaque bon de commande envoyé met en copie celui qui l'envoie + cette adresse (ex. info@ ou commande@). Vide = pas de copie fixe."
+                placeholder="— facultatif —"
+              />
               <div className="sm:col-span-2">
                 <ChampParametre {...propsChamp} cle="siteWeb" libelle="Site web" placeholder="— facultatif —" />
               </div>
