@@ -624,6 +624,25 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   </label>
                 ))}
               </div>
+              {/* 👁️ APERÇU MODIFIABLE AVANT L'ENVOI (2026-09-04, demande
+                  du propriétaire : « voir la version du bon avant de
+                  l'envoyer, appliquer des correctifs ») — l'objet est
+                  affiché tel quel, le texte s'édite ICI et c'est cette
+                  version corrigée qui part. */}
+              <div className="mt-2 rounded-lg border border-blue-200 bg-white p-2">
+                <p className="text-[10px] font-bold text-slate-500">
+                  Objet : Bon de commande {offreEnvoiBc.numero} — {configEnt.nomLegal}
+                </p>
+                <textarea
+                  rows={5}
+                  value={offreEnvoiBc.description}
+                  onChange={(e) => setOffreEnvoiBc((p) => ({ ...p, description: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-[11px]"
+                />
+                <p className="text-[9px] text-slate-400">
+                  L&apos;entête et la signature de {configEnt.nomCommercial || configEnt.nomLegal} s&apos;ajoutent automatiquement autour de ce texte.
+                </p>
+              </div>
               <div className="mt-2 flex gap-1.5">
                 <Button
                   loading={envoiBcLibreEnCours}
@@ -751,6 +770,11 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   className="min-w-0 flex-1"
                 />
               </div>
+              <p className="text-[9px] leading-snug text-slate-400">
+                <span className="font-bold">Montant HT</span> = le total de la facture du fournisseur, avant taxes
+                (les taxes sont récupérables, jamais un coût). Une estimation suffit : la facture QuickBooks portant
+                ce nº de BC posera le montant réel.
+              </p>
               {/* 💵 PART DE LA JOB — ajustable À LA BAISSE seulement : on
                   profite d'une commande pour ajouter du stock (rouleaux
                   de cuivre…), mais seule la part de la job compte dans
@@ -771,9 +795,20 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     className="w-24 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs tabular-nums"
                   />
                   {Number(bcLibre.montantAttribue) > (Number(bcLibre.montantHT) || 0) && (
-                    <span className="text-[9px] font-semibold text-amber-700">
-                      ⚠️ dépasse le Montant HT — sera ramenée à {(Number(bcLibre.montantHT) || 0).toFixed(2)} $ à la création.
-                    </span>
+                    (Number(bcLibre.montantHT) || 0) <= 0 ? (
+                      // 🤝 INDULGENCE (2026-09-04, vécu : part tapée avant le
+                      // montant) : quand le Montant HT est encore à 0, la
+                      // part devient le montant de l'achat à la création —
+                      // c'est le cas le plus courant (tout l'achat est pour
+                      // la job).
+                      <span className="text-[9px] font-semibold text-emerald-700">
+                        Le montant de l&apos;achat sera posé égal à la part ({(Number(bcLibre.montantAttribue) || 0).toFixed(2)} $) à la création.
+                      </span>
+                    ) : (
+                      <span className="text-[9px] font-semibold text-amber-700">
+                        ⚠️ dépasse le Montant HT — sera ramenée à {(Number(bcLibre.montantHT) || 0).toFixed(2)} $ à la création.
+                      </span>
+                    )
                   )}
                   <span className="text-[9px] leading-snug text-emerald-700">
                     $ — le reste ({Math.max(0, (Number(bcLibre.montantHT) || 0) - (bcLibre.montantAttribue === "" ? Number(bcLibre.montantHT) || 0 : Number(bcLibre.montantAttribue) || 0)).toFixed(2)} $) demeure un achat de stock.
@@ -783,7 +818,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
               <div className="flex gap-1.5">
                 <Button
                   loading={bcLibreEnCours}
-                  disabled={!(bcLibre.description || "").trim() || !(Number(bcLibre.montantHT) > 0)}
+                  disabled={!(bcLibre.description || "").trim() || !(Number(bcLibre.montantHT) > 0 || Number(bcLibre.montantAttribue) > 0)}
                   onClick={async () => {
                     setBcLibreEnCours(true);
                     // 📦 La livraison souhaitée voyage DANS la description :
@@ -793,7 +828,12 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                       ? `\n📦 Livraison souhaitée : ${new Date(`${bcLibre.livraisonEstimee}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`
                       : "";
                     const descriptionFinale = `${(bcLibre.description || "").trim()}${livraison}`;
-                    const numero = await onCreerBcLibre?.({ ...bcLibre, description: descriptionFinale });
+                    // 🤝 Montant HT laissé à 0 mais part attribuée tapée :
+                    // la part DEVIENT le montant de l'achat (voir l'aide du
+                    // champ) — plus jamais de part « ramenée à 0 ».
+                    const partTapee = Number(bcLibre.montantAttribue) || 0;
+                    const montantEffectif = (Number(bcLibre.montantHT) || 0) <= 0 && partTapee > 0 ? partTapee : bcLibre.montantHT;
+                    const numero = await onCreerBcLibre?.({ ...bcLibre, montantHT: montantEffectif, description: descriptionFinale });
                     setBcLibreEnCours(false);
                     setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
                     // 📧 Le fournisseur est au répertoire avec des
