@@ -3044,6 +3044,33 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                               {sg.facturables.length > 1 ? `📅 Facturer les ${sg.facturables.length} d'un coup` : "Facturer"}
                             </button>
                           )}
+                          {/* 📋 LE DÉTAIL DES BONS, ICI MÊME (2026-09-04,
+                              demande du propriétaire : « pourquoi je vois
+                              juste une des tâches s'il y en a 3 ? ») —
+                              chaque bon du groupe est listé avec sa date
+                              et son bouton : « Réviser » quand le prix
+                              n'est pas fixé, sinon son montant. Plus
+                              besoin de descendre chercher les cartes. */}
+                          <div className="w-full space-y-0.5 pl-3">
+                            {sg.bons.map((bx) => (
+                              <div key={bx.id} className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
+                                <span className="min-w-0 flex-1 truncate text-slate-500">
+                                  <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${bx.prixNonListe ? "bg-red-500" : "bg-emerald-500"}`} />
+                                  {bx.projet || bx.description || "Travaux"} <span className="text-slate-400">· {bx.date}</span>
+                                </span>
+                                {bx.prixNonListe ? (
+                                  <button
+                                    onClick={() => setBonAReviserId(bx.id)}
+                                    className="shrink-0 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 active:scale-95"
+                                  >
+                                    ✏️ Réviser
+                                  </button>
+                                ) : (
+                                  <span className="shrink-0 font-bold tabular-nums text-slate-600">{resteAFacturerDe(bx).toFixed(2)} $</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>
