@@ -3738,31 +3738,34 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 <p className="mt-1 whitespace-pre-line text-xs text-slate-500">{t.description}</p>
                 </div>
 
+                {/* ✍️ CHAMPS ÉDITABLES DANS UNE CARTE GLISSABLE (2026-09-03,
+                    vécu par le propriétaire) : deux misères réglées ici.
+                    (1) Sélectionner le texte à la souris DÉPLAÇAIT toute la
+                    carte (elle est draggable) — chaque champ se déclare
+                    draggable et ANNULE son drag : la sélection reste au
+                    champ, la carte ne bouge plus. (2) Impossible de VIDER
+                    le champ pour taper une nouvelle valeur (le champ
+                    contrôlé retombait à 1 dès « » ) — InputNombreDecimal
+                    garde le texte tapé pendant la frappe et se remet
+                    d'aplomb en quittant le champ. */}
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <div>
                     <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Heures / jour</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={HEURES.length}
-                      value={t.heures ?? 1}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        majDureeTache(t.id, { heures: Number.isNaN(val) ? 1 : Math.max(0, val) });
-                      }}
+                    <InputNombreDecimal
+                      valeur={t.heures ?? 1}
+                      onChange={(val) => majDureeTache(t.id, { heures: Math.max(0, Math.min(Math.round(val), HEURES.length)) })}
+                      draggable
+                      onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
                       className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs tabular-nums"
                     />
                   </div>
                   <div>
                     <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Nombre de jours</label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={t.jours ?? 1}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value);
-                        majDureeTache(t.id, { jours: Number.isNaN(val) ? 1 : Math.max(0, val) });
-                      }}
+                    <InputNombreDecimal
+                      valeur={t.jours ?? 1}
+                      onChange={(val) => majDureeTache(t.id, { jours: Math.max(0, Math.round(val)) })}
+                      draggable
+                      onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
                       className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs tabular-nums"
                     />
                   </div>

@@ -2153,7 +2153,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                         <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Vendant</label>
                         <InputNombreDecimal
                           valeur={l.prix_vendant}
-                          onChange={(v) => majLigne(l.uid, { ...l, prix_vendant: v })}
+                          /* 💸 RABAIS TOUJOURS NÉGATIF (2026-09-03, vécu :
+                             taper « 250 » sur la ligne Rabais AUGMENTAIT le
+                             devis de 250 $) — le signe moins est posé par
+                             le système, plus jamais par la mémoire. */
+                          onChange={(v) => majLigne(l.uid, { ...l, prix_vendant: l.estRabais ? -Math.abs(v) : v })}
                           className={`min-h-[44px] w-full rounded-lg border px-2 text-right text-sm font-bold tabular-nums ${
                             (Number(l.prix_vendant) || 0) < 0 ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-300"
                           }`}
@@ -2270,7 +2274,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                       <td className="py-1.5 text-right tabular-nums font-semibold text-slate-900">
                         <InputNombreDecimal
                           valeur={l.prix_vendant}
-                          onChange={(v) => majLigne(l.uid, { ...l, prix_vendant: v })}
+                          /* 💸 RABAIS TOUJOURS NÉGATIF (2026-09-03, vécu :
+                             taper « 250 » sur la ligne Rabais AUGMENTAIT le
+                             devis de 250 $) — le signe moins est posé par
+                             le système, plus jamais par la mémoire. */
+                          onChange={(v) => majLigne(l.uid, { ...l, prix_vendant: l.estRabais ? -Math.abs(v) : v })}
                           className={`w-20 rounded border px-1 py-0.5 text-right tabular-nums font-semibold ${
                             (Number(l.prix_vendant) || 0) < 0
                               ? "border-rose-300 bg-rose-50 text-rose-700"

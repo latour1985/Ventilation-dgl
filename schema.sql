@@ -4994,3 +4994,15 @@ grant execute on function noter_consultation_bon(text) to anon, authenticated;
 
 -- Verification : les trois fonctions existent.
 select proname from pg_proc where proname like 'noter_consultation%' order by proname;
+
+-- ============================================================
+-- 124 - COPIE (CC) PERMANENTE DES BONS DE COMMANDE (2026-09-03)
+-- ============================================================
+-- Demande du proprietaire : une adresse (ex. commande@...) recoit une
+-- copie de CHAQUE bon de commande envoye — en plus de la copie
+-- automatique a celui qui commande. Par entreprise. Vide = pas de copie.
+alter table entreprises add column if not exists courriel_copie_bc text;
+
+-- Verification : la colonne existe.
+select column_name from information_schema.columns
+ where table_name = 'entreprises' and column_name = 'courriel_copie_bc';

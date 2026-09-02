@@ -1473,6 +1473,21 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // passager (il n'amène pas de camion — l'inspection du matin nous le
   // dit). Les lignes arrivent PRÉ-REMPLIES dans la révision, jamais
   // verrouillées : la machine calcule, l'humain décide.
+  // 🧾 APPEL SANS DÉPÔT (2026-09-03, vécu par le propriétaire : la
+  // révision suggérait 32,50 $ pour un appel complet) : quand AUCUN
+  // dépôt n'a été payé d'avance, le PRIX DE BASE de l'appel (le prix de
+  // zone que le dépôt aurait couvert) doit être facturé — il est donc
+  // suggéré d'office, modifiable comme le reste. Hors zone : pas de
+  // prix fixe, l'humain le tape (l'avertissement rouge le force déjà).
+  const lignesBaseAppel = (b) => {
+    if (!b || b.type !== "appel_service") return [];
+    if (depotPayePour(b.tacheId)) return []; // la base est déjà payée — la déduction s'en charge
+    const zone = zonePourTache ? zonePourTache(b.tacheId) : null;
+    if (!zone || zone === "hors_zone") return [];
+    const prixZone = Number(prixDepots?.[zone]) || 0;
+    if (prixZone <= 0) return [];
+    return [{ description: `Appel de service — ${zone} (aucun dépôt perçu d'avance)`, prix: prixZone }];
+  };
   const lignesTempsSupp = (b) => {
     // ⏱️ TEMPS ET MATÉRIEL (2026-09-03, demande du propriétaire : « les
     // heures que les techs ont passées, selon qu'elles sont facturables
@@ -3613,7 +3628,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }}
           depotPaye={depotPayePour(bonAReviser.tacheId)}
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
-          lignesSuggerees={lignesTempsSupp(bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser)}
+          lignesSuggerees={(() => {
+            const be = bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser;
+            // Le prix de base de l'appel (si aucun dépôt) AVANT le temps
+            // supplémentaire — l'ordre naturel d'une facture.
+            return [...lignesBaseAppel(be), ...lignesTempsSupp(be)];
+          })()}
           bonEnrichi={bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || null}
           nbFacturables={(() => {
             const be = bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id));
