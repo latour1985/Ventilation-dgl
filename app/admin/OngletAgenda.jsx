@@ -2522,7 +2522,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               </div>
               )}
               <div>
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Titre / description courte</label>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                  {nouveauType === "divers" || nouveauType === "course" ? "Quoi faire" : "Titre / description courte"}
+                </label>
                 <input
                   value={nouveauTitre}
                   onChange={(e) => setNouveauTitre(e.target.value)}
@@ -2755,6 +2757,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 </div>
               </div>
               )}
+              {/* Projet lié : caché pour les types SANS CLIENT (divers,
+                  course, congé) — SAUF le shop, dont les heures peuvent
+                  compter au projet (2026-09-04, formulaire allégé). */}
+              {(nouveauType === "shop" || !estTypeSansClient(nouveauType)) && (
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Projet lié (optionnel)</label>
                 <select
@@ -2857,7 +2863,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </div>
                 )}
               </div>
+              )}
 
+              {!estTypeSansClient(nouveauType) && (
               <div>
                 <label className="mb-1 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
                   <input
@@ -2944,8 +2952,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </div>
                 )}
               </div>
-
-
+              )}
 
               {(nouveauType === "devis" || nouveauType === "entretien_contrat" || nouveauType === "appel_service") && (
                 <div>
@@ -3036,7 +3043,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   propriétaire), pour les ENTRETIENS : les anciens
                   contrats n'ont aucun devis dans l'app — leur numéro se
                   tape ici et la fréquence se choisit juste au-dessus. */}
-              {(
+              {!estTypeSansClient(nouveauType) && (
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
                     {nouveauType === "devis" ? "…ou entre un Nº de devis manuellement (devis fait hors de l'app)" : nouveauType === "entretien_contrat" ? "…ou entre le Nº de l'ancien contrat / devis (d'avant Fluxya)" : "Nº de devis existant (QuickBooks)"} <span className="font-normal normal-case text-slate-400">— optionnel</span>
@@ -3310,7 +3317,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 </div>
               )}
 
-              {/* DÉPÔT PRÉALABLE */}
+              {/* DÉPÔT PRÉALABLE — jamais pour les types SANS CLIENT (divers, course, shop, congé) : pas de client, pas de dépôt (2026-09-04). */}
+              {!estTypeSansClient(nouveauType) && (
               <div className="rounded-xl border border-amber-200 bg-amber-50 p-2.5">
                 <label className="flex items-center gap-2 text-xs font-bold text-amber-900">
                   <input
@@ -3572,6 +3580,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </div>
                 )}
               </div>
+              )}
 
               {/* Garde-fou : dépôt coché SANS montant = création bloquée.
                   Sinon la tâche filerait à l'agenda comme si aucun dépôt

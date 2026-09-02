@@ -16,7 +16,7 @@ import { listerFacturesLibres } from "@/lib/supabase/facturesLibres";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { ModalDetailProjet } from "./OngletProjets";
-import { Button, BarrePagination, ITEMS_PAR_PAGE, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
+import { Button, BarrePagination, ITEMS_PAR_PAGE, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
 
 export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, onNouvelleVersion }) {
   const [dossierOuvert, setDossierOuvert] = useState(null);
@@ -91,6 +91,13 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, 
                     <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold text-purple-700">
                       CONTRAT · {affichee.frequenceFacturationAnnuelle}×/an
                     </span>
+                  )}
+                  {/* 👁️ Suivi de consultation — le même badge que
+                      partout (2026-09-04). Seulement si le devis a été
+                      ENVOYÉ (un jeton public existe) : avant l'envoi,
+                      « pas encore vu » serait un faux reproche. */}
+                  {(affichee.jetonPublic || affichee.consulteLe) && (
+                    <BadgeConsultation consulteLe={affichee.consulteLe} consultations={affichee.consultations} derniereLe={affichee.derniereConsultationLe} />
                   )}
                 </p>
                 <p className="text-[10px] text-slate-400">

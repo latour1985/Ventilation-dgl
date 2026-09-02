@@ -948,6 +948,29 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
 }
 
 
+// 👁️ BADGE DE CONSULTATION (2026-09-04, demande du propriétaire :
+// « le voir aussi à côté du devis ou de la facture dans le dossier
+// client et les autres places ») — le même badge partout : VERT quand
+// le client a ouvert sa page, GRIS « pas encore vu » sinon. Seulement
+// pour NOS documents (devis, bons, factures maison) — les factures
+// QuickBooks n'ont pas de page à nous, donc pas de suivi possible.
+export function BadgeConsultation({ consulteLe, consultations = 0, derniereLe = null, feminin = false, className = "" }) {
+  const vu = !!consulteLe;
+  const mot = feminin ? (vu ? "Consultée" : "Pas encore vue") : (vu ? "Consulté" : "Pas encore vu");
+  return vu ? (
+    <span
+      className={`text-[10px] font-bold text-sky-600 ${className}`}
+      title={`Première consultation le ${String(consulteLe).slice(0, 10)}${derniereLe ? ` · dernière le ${String(derniereLe).slice(0, 10)}` : ""}`}
+    >
+      👁️ {mot}{Number(consultations) > 1 ? ` (${consultations}×)` : ""}
+    </span>
+  ) : (
+    <span className={`text-[10px] font-bold text-slate-400 ${className}`} title="Le client n'a pas encore ouvert sa page">
+      👁️ {mot}
+    </span>
+  );
+}
+
 export function adresseFacturationClient(client) {
   if (client?.adresseFacturation) return client.adresseFacturation;
   const principale = client?.adresses?.[0];
@@ -1814,7 +1837,7 @@ export const TYPES_TACHE = [
   // Les heures restent PAYÉES — c'est la facturation qui change, pas la paie.
   { id: "visite_chantier", label: "Visite de chantier", description: "Non facturable — heures aux frais administratifs (ou au projet, au choix)", nonFacturable: true, admin: true },
   { id: "visite_soumission", label: "Visite pour soumission", description: "Non facturable — reste en attente tant qu'aucun devis n'y est rattaché", nonFacturable: true, admin: true, suiviDevis: true },
-  { id: "divers", label: "Divers", description: "Non facturable — heures payées, hors projet et hors administratif", nonFacturable: true },
+  { id: "divers", label: "Divers", description: "Non facturable — heures payées, hors projet et hors administratif. Formulaire allégé : quoi faire, technicien, date.", nonFacturable: true, sansClient: true },
   // 🚗 COURSE / INTERNE — la même mécanique que la course créée par le
   // technicien (2026-08-17) : AUCUN client, juste une adresse. Porter
   // un camion au garage, aller chercher une pièce. Heures payées en

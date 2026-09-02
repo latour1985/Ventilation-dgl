@@ -19,7 +19,7 @@ import { SectionFacturesMaison } from "./FacturesMaison";
 import { majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
-import { AdressesDocument, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
+import { AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 
@@ -3525,8 +3525,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                   </button>
                 )}
                 {b.envoyeClientLe && (
-                  <p className="mt-0.5 text-[9px] font-bold text-emerald-600">
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[9px] font-bold text-emerald-600">
                     📸 Envoyé le {new Date(b.envoyeClientLe).toLocaleDateString("fr-CA")}
+                    {/* 👁️ Le même badge que partout (2026-09-04) — a-t-il
+                        OUVERT son bon ? Un bon jamais consulté avant la
+                        facture, ça se relance autrement. */}
+                    <BadgeConsultation consulteLe={b.consulteLe} consultations={b.consultations} derniereLe={b.derniereConsultationLe} className="text-[9px]" />
                   </p>
                 )}
                 {b.statutQb === "en_attente" && !b.retraitStatut && (
