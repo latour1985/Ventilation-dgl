@@ -2983,6 +2983,38 @@ function AppAdmin() {
                       (d.lignes || []).some((l) => (l.nom || "").toLowerCase().includes(q))
                   )
                   .slice(0, 4);
+                // 🧾 COMMANDES dans le menu déroulant aussi (2026-09-04,
+                // vécu : le nº de la boîte tapé dans l'entête donnait
+                // « aucun résultat » — seule la page complète cherchait
+                // les bons de commande). Même sources que la page.
+                const commandesTrouvees = [
+                  ...(achatsLibres || [])
+                    .filter((a) => `${a.numeroBc} ${a.fournisseurNom} ${a.description} ${a.clientNom} ${a.tacheTitre}`.toLowerCase().includes(q))
+                    .map((a) => ({
+                      cle: `a-${a.id}`,
+                      titre: `${a.numeroBc || "(sans nº)"}${a.fournisseurNom ? ` — ${a.fournisseurNom}` : ""}`,
+                      detail: [a.clientNom, a.tacheTitre].filter(Boolean).join(" · ") || (a.description || "").split("\n")[0] || "achat général",
+                      aller: "pieces",
+                    })),
+                  ...(pieces || [])
+                    .filter((p) => `${p.numeroBc} ${p.fournisseurNom} ${p.pieceRequise} ${p.clientNom}`.toLowerCase().includes(q))
+                    .map((p) => ({
+                      cle: `p-${p.id}`,
+                      titre: `${p.numeroBc || "(sans nº)"}${p.fournisseurNom ? ` — ${p.fournisseurNom}` : ""}`,
+                      detail: [p.clientNom, p.pieceRequise].filter(Boolean).join(" · ") || "—",
+                      aller: "pieces",
+                    })),
+                  ...(projets || []).flatMap((pr) =>
+                    (pr.bonsCommande || [])
+                      .filter((bc) => `${bc.numeroBC} ${bc.fournisseur} ${bc.description}`.toLowerCase().includes(q))
+                      .map((bc) => ({
+                        cle: `bc-${pr.id}-${bc.id}`,
+                        titre: `${bc.numeroBC || "(sans nº)"}${bc.fournisseur ? ` — ${bc.fournisseur}` : ""}`,
+                        detail: `🏗️ ${pr.nom}`,
+                        aller: "projets",
+                      }))
+                  ),
+                ].slice(0, 4);
                 const ouvrirClient = (c) => {
                   setCibleRecherche({ clientId: c.id, numeroDevis: null });
                   setOnglet("clients");
@@ -2995,7 +3027,7 @@ function AppAdmin() {
                 };
                 return (
                   <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                    {clientsTrouves.length === 0 && devisTrouves.length === 0 ? (
+                    {clientsTrouves.length === 0 && devisTrouves.length === 0 && commandesTrouvees.length === 0 ? (
                       <p className="px-3 py-3 text-xs text-slate-400">Aucun résultat pour « {rechercheGlobale.trim()} »</p>
                     ) : (
                       <>
@@ -3024,6 +3056,22 @@ function AppAdmin() {
                             <span className="min-w-0">
                               <span className="block truncate text-xs font-bold text-slate-800">Devis {d.numero}</span>
                               <span className="block truncate text-[10px] text-slate-400">{d.clientNom || "—"}</span>
+                            </span>
+                          </button>
+                        ))}
+                        {commandesTrouvees.map((r) => (
+                          <button
+                            key={r.cle}
+                            onMouseDown={() => {
+                              setOnglet(r.aller);
+                              setListeRechercheOuverte(false);
+                            }}
+                            className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                          >
+                            <span className="shrink-0">🧾</span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-bold text-slate-800">{r.titre}</span>
+                              <span className="block truncate text-[10px] text-slate-400">{r.detail}</span>
                             </span>
                           </button>
                         ))}
