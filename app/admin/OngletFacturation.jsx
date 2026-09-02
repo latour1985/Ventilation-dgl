@@ -2472,10 +2472,25 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     if (bonsDuGroupe.length === 0) return;
     const clientNom = groupe.clientNom || bonsDuGroupe[0]?.client || "";
     const fiche = (clientsFacturation || []).find((c) => c.nom === clientNom) || null;
-    const lignes = bonsDuGroupe.map((b) => ({
-      description: [b.date, b.projet || "Travaux"].filter(Boolean).join(" — "),
-      montant: resteAFacturerDe(b),
-    }));
+    // 🧾 LE DÉTAIL DE LA RÉVISION SUIT LA FACTURE (2026-09-04, vécu
+    // facture 4264 : les prix et détails fixés dans la révision étaient
+    // écrasés par UNE ligne plate par bon). Quand un bon révisé est
+    // facturé AU COMPLET, ses lignes détaillées partent telles quelles
+    // (préfixées de la date) — descriptions à 0 $ comprises, elles
+    // expliquent le travail au client. Un bon facturé PARTIELLEMENT
+    // garde la ligne plate : son détail ne correspondrait plus au reste.
+    const lignes = bonsDuGroupe.flatMap((b) => {
+      const reste = resteAFacturerDe(b);
+      const details = Array.isArray(b.lignesNonListees) ? b.lignesNonListees : [];
+      const totalDetails = details.reduce((s, l) => s + (parseFloat(l.prix) || 0), 0);
+      if (details.length > 0 && Math.abs(totalDetails - reste) < 0.01) {
+        return details.map((l) => ({
+          description: [b.date, l.description].filter(Boolean).join(" — "),
+          montant: parseFloat(l.prix) || 0,
+        }));
+      }
+      return [{ description: [b.date, b.projet || "Travaux"].filter(Boolean).join(" — "), montant: reste }];
+    });
     const total = lignes.reduce((s, l) => s + l.montant, 0);
     const r = await creerFactureQbo({
       clientId: fiche?.id || null,
@@ -2546,7 +2561,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       `📅 Facture GROUPÉE ${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length} bons réunis, ${total.toFixed(2)} $ HT` +
         (r?.envoiQb?.envoyee
           ? ` · envoyée à ${destinataires.map((c) => c.email).join(", ")}`
-          : " · ⚠️ envoi par QuickBooks NON confirmé — renvoie-la depuis QuickBooks")
+          : (r?.envoiQb?.ratees || []).length > 0
+            ? ` · ⚠️ envoi NON confirmé pour ${r.envoiQb.ratees.join(", ")}${destinataires.length > r.envoiQb.ratees.length ? " (les autres adresses ont reçu)" : ""} — renvoie depuis QuickBooks ou corrige l'adresse`
+            : " · ⚠️ envoi par QuickBooks NON confirmé — renvoie-la depuis QuickBooks")
     );
   };
 
@@ -2622,7 +2639,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     }
     ajouterJournal(
       r?.creee
-        ? `🧾 Facture QuickBooks Nº ${numeroReel} créée pour "${b.projet}"${paiements.carte || paiements.virement ? ` — paiement en ligne offert : ${[paiements.carte ? "carte" : null, paiements.virement ? "virement" : null].filter(Boolean).join(" + ")}` : ""}${envoiQbSimple ? (envoiQbSimple.statut === "envoyee" ? ` — ✉️ ENVOYÉE par QuickBooks à ${libelleDestinataires(destinataires)} (confirmé au registre)` : " — ⚠️ envoi par QuickBooks NON CONFIRMÉ : bouton Renvoyer sur la carte") : destinataires.length > 0 ? ` — destinataires notés : ${libelleDestinataires(destinataires)}` : ""}`
+        ? `🧾 Facture QuickBooks Nº ${numeroReel} créée pour "${b.projet}"${paiements.carte || paiements.virement ? ` — paiement en ligne offert : ${[paiements.carte ? "carte" : null, paiements.virement ? "virement" : null].filter(Boolean).join(" + ")}` : ""}${envoiQbSimple ? (envoiQbSimple.statut === "envoyee" ? ` — ✉️ ENVOYÉE par QuickBooks à ${libelleDestinataires(destinataires)} (confirmé au registre)` : (r?.envoiQb?.ratees || []).length > 0 ? ` — ⚠️ envoi NON confirmé pour ${r.envoiQb.ratees.join(", ")}${destinataires.length > r.envoiQb.ratees.length ? " (les autres ont reçu)" : ""} : bouton Renvoyer sur la carte` : " — ⚠️ envoi par QuickBooks NON CONFIRMÉ : bouton Renvoyer sur la carte") : destinataires.length > 0 ? ` — destinataires notés : ${libelleDestinataires(destinataires)}` : ""}`
         : `🧪 QuickBooks non configuré ici — numéro local ${numeroReel} (normal en développement)`
     );
     setBonEnvoiCourrielId(null);
