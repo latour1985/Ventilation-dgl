@@ -1447,6 +1447,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ajouterJournal(`📋 Tâche créée — ${libelleType} (${client?.nom})${suffixeProjet}`);
     }
 
+    viderFormulaireTache();
+  };
+
+  // 🧹 VIDER LE FORMULAIRE « Nouvelle tâche » — après la création, OU
+  // sur « Quitter et effacer » (2026-09-04, demande du propriétaire :
+  // fermer sans créer gardait tout en silence et la prochaine ouverture
+  // tombait sur une page déjà commencée).
+  const viderFormulaireTache = () => {
     setDepotMontant("");
     setZoneAppelChoix("");
     setDepotEmails([]);
@@ -1495,6 +1503,21 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setNouvelleDureeJours(0);
     setNouveauSauterWeekend(false);
     setFormulaireOuvert(false);
+  };
+
+  // ❓ FERMETURE AVEC BROUILLON — si quelque chose a été saisi, on
+  // demande avant de jeter ; un formulaire vide se ferme sans question.
+  const [confirmFermetureTache, setConfirmFermetureTache] = useState(false);
+  const demanderFermetureFormulaire = () => {
+    const aCommence =
+      !!nouveauTitre.trim() ||
+      !!nouvelleDescription.trim() ||
+      !!nouveauClientId ||
+      !!numeroDevisExistant.trim() ||
+      (nouvellesPiecesJointes || []).length > 0 ||
+      parseFloat(depotMontant) > 0;
+    if (aCommence) setConfirmFermetureTache(true);
+    else setFormulaireOuvert(false);
   };
 
   // Fonction unique d'assignation — utilisée par la vue Jour (glisser-
@@ -2341,7 +2364,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                logique ne change : mêmes champs, mêmes règles. */
             <div
               className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 md:items-center md:p-6"
-              onClick={() => setFormulaireOuvert(false)}
+              onClick={demanderFermetureFormulaire}
             >
               <div
                 className="flex max-h-[96dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white md:max-h-[88vh] md:max-w-3xl md:rounded-2xl"
@@ -2352,7 +2375,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     ➕ Nouvelle tâche
                     <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{TYPE_INFO(nouveauType)?.label}</span>
                   </h3>
-                  <button onClick={() => setFormulaireOuvert(false)} aria-label="Fermer">
+                  <button onClick={demanderFermetureFormulaire} aria-label="Fermer">
                     <X size={18} className="text-slate-400" />
                   </button>
                 </div>
@@ -5219,6 +5242,34 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
             );
           }}
         />
+      )}
+      {/* ❓ QUITTER LE FORMULAIRE COMMENCÉ ? (2026-09-04, demande du
+          propriétaire) — jamais d'effacement silencieux : soit on
+          continue, soit on jette EXPLICITEMENT le brouillon. */}
+      {confirmFermetureTache && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xs rounded-2xl bg-white p-5">
+            <h3 className="text-sm font-extrabold text-slate-900">Quitter la nouvelle tâche ?</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Ce qui est saisi n&apos;est pas enregistré — quitter <span className="font-bold">efface le formulaire</span>.
+            </p>
+            <div className="mt-3 grid gap-2">
+              <Button onClick={() => setConfirmFermetureTache(false)} className="min-h-0 py-2 text-xs">
+                ← Continuer la saisie
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConfirmFermetureTache(false);
+                  viderFormulaireTache();
+                }}
+                className="min-h-0 py-2 text-xs text-red-600"
+              >
+                🗑️ Quitter et effacer
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
       {/* 📧 PANNEAU DE RENVOI DE LA DEMANDE DE DÉPÔT — courriels de la
           fiche cochables + adresse corrigée à la main (ajoutable au

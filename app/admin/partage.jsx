@@ -1000,6 +1000,11 @@ export function AutocompleteAdresse({ onSelection }) {
   // Champs de repli, utilisés seulement en saisie manuelle.
   const [ville, setVille] = useState("");
   const [codePostal, setCodePostal] = useState("");
+  // ✅ Une adresse vient d'être CHOISIE (2026-09-04, vécu) : le champ
+  // garde son texte et les suggestions se vident — sans ce drapeau, le
+  // panneau « Aucune suggestion ne correspond » s'ouvrait juste APRÈS
+  // un choix réussi. Il se réarme dès que le texte est modifié.
+  const [selectionFaite, setSelectionFaite] = useState(false);
   // Jeton de session Google : une seule unité de facturation pour toute
   // la recherche + la sélection (voir lib/googlePlaces.js).
   const jetonRef = useRef(null);
@@ -1049,12 +1054,13 @@ export function AutocompleteAdresse({ onSelection }) {
     jetonRef.current = null; // le jeton meurt avec la sélection
     setSuggestions([]);
     setOuvert(false);
+    setSelectionFaite(true);
   };
 
   // Saisie manuelle : proposée quand Google est indisponible, ou quand
   // aucune suggestion ne correspond (adresse neuve, chantier sans
   // numéro civique…).
-  const saisieLibre = texte.trim().length >= 5 && !chargement && suggestions.length === 0;
+  const saisieLibre = texte.trim().length >= 5 && !chargement && suggestions.length === 0 && !selectionFaite;
 
   const confirmerSaisieLibre = () => {
     if (!texte.trim() || !ville.trim()) return;
@@ -1065,6 +1071,7 @@ export function AutocompleteAdresse({ onSelection }) {
       codePostal: codePostal.trim(),
     });
     setOuvert(false);
+    setSelectionFaite(true);
   };
 
   return (
@@ -1076,6 +1083,7 @@ export function AutocompleteAdresse({ onSelection }) {
           onChange={(e) => {
             setTexte(e.target.value);
             setOuvert(true);
+            setSelectionFaite(false);
           }}
           placeholder="Commence à taper l'adresse…"
           className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-9 text-sm"
