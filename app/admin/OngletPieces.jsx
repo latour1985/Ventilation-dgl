@@ -122,7 +122,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "" });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "" });
   // ✏️ FICHE D'UN BC (2026-08-26) — la ligne cliquée s'ouvre en fenêtre :
   // fournisseur, description, montant et RATTACHEMENT modifiables,
   // suppression en deux clics. `bcOuvert` = l'achat ; `bcEdit` = la
@@ -694,6 +694,19 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   <InputNombreDecimal valeur={Number(bcLibre.montantHT) || 0} onChange={(v) => setBcLibre((f) => ({ ...f, montantHT: v }))} className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
                   $
                 </span>
+                {/* 📦 Livraison souhaitée (2026-09-03, demande du
+                    propriétaire) : notée sur le bon ET écrite dans le
+                    courriel au fournisseur — plus besoin de la taper
+                    dans la description. */}
+                <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                  Livraison souhaitée
+                  <input
+                    type="date"
+                    value={bcLibre.livraisonEstimee}
+                    onChange={(e) => setBcLibre((f) => ({ ...f, livraisonEstimee: e.target.value }))}
+                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                </span>
                 {/* 🔎 Recherche par nom OU liste complète au clic —
                     Tâches / Clients / Projets groupés. */}
                 <SelecteurCibleAchat
@@ -717,11 +730,23 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
               {(bcLibre.tacheId || bcLibre.clientId) && (
                 <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5">
                   <span className="text-[10px] font-bold text-emerald-800">Part attribuée à la job (HT)</span>
+                  {/* ✍️ SAISIE LIBRE (2026-09-03, vécu : « le chiffre ne
+                      reste pas ») — le plafonnement au Montant HT se
+                      faisait À CHAQUE FRAPPE : tant que Montant HT était
+                      à 0, tout chiffre tapé retombait à 0 en sortant du
+                      champ. On tape librement ; le plafond s'applique à
+                      la CRÉATION du bon (creerBcLibre), là où il a du
+                      sens. */}
                   <InputNombreDecimal
                     valeur={bcLibre.montantAttribue === "" ? Number(bcLibre.montantHT) || 0 : Number(bcLibre.montantAttribue) || 0}
-                    onChange={(v) => setBcLibre((f) => ({ ...f, montantAttribue: String(Math.min(Number(v) || 0, Number(f.montantHT) || 0)) }))}
+                    onChange={(v) => setBcLibre((f) => ({ ...f, montantAttribue: String(Number(v) || 0) }))}
                     className="w-24 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs tabular-nums"
                   />
+                  {Number(bcLibre.montantAttribue) > (Number(bcLibre.montantHT) || 0) && (
+                    <span className="text-[9px] font-semibold text-amber-700">
+                      ⚠️ dépasse le Montant HT — sera ramenée à {(Number(bcLibre.montantHT) || 0).toFixed(2)} $ à la création.
+                    </span>
+                  )}
                   <span className="text-[9px] leading-snug text-emerald-700">
                     $ — le reste ({Math.max(0, (Number(bcLibre.montantHT) || 0) - (bcLibre.montantAttribue === "" ? Number(bcLibre.montantHT) || 0 : Number(bcLibre.montantAttribue) || 0)).toFixed(2)} $) demeure un achat de stock.
                   </span>
@@ -733,7 +758,14 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   disabled={!(bcLibre.description || "").trim() || !(Number(bcLibre.montantHT) > 0)}
                   onClick={async () => {
                     setBcLibreEnCours(true);
-                    const numero = await onCreerBcLibre?.(bcLibre);
+                    // 📦 La livraison souhaitée voyage DANS la description :
+                    // elle suit le bon partout (liste, journal, courriel)
+                    // sans nouvelle colonne.
+                    const livraison = bcLibre.livraisonEstimee
+                      ? `\n📦 Livraison souhaitée : ${new Date(`${bcLibre.livraisonEstimee}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`
+                      : "";
+                    const descriptionFinale = `${(bcLibre.description || "").trim()}${livraison}`;
+                    const numero = await onCreerBcLibre?.({ ...bcLibre, description: descriptionFinale });
                     setBcLibreEnCours(false);
                     setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
                     // 📧 Le fournisseur est au répertoire avec des
@@ -743,12 +775,12 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                       setOffreEnvoiBc({
                         numero,
                         fournisseur: fiche.nom,
-                        description: (bcLibre.description || "").trim(),
+                        description: descriptionFinale,
                         courriels: fiche.courriels,
                         coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
                       });
                     }
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "" });
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "" });
                     setBcLibreOuvert(false);
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"

@@ -1291,8 +1291,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     const materiaux = devis.lignes.map((l) => ({ description: l.nom, quantite: l.quantite, unite: l.unite || "unité" }));
 
     setPdfAperçu({ numero: numeroBc, client: devis.clientNom, materiaux, date: todayISO() });
-    ajouterJournal(`📄 Bon de commande ${numeroBc} généré (PDF, sans prix de vente)`);
-    ajouterJournal(`📧 Courriel envoyé à achats@ventilationdgl.com — pièce jointe : ${numeroBc}.pdf`);
+    // ⚠️ MENSONGE RETIRÉ (2026-09-03) : depuis le prototype, une fausse
+    // ligne « Courriel envoyé à achats@… » s'écrivait ici alors
+    // qu'AUCUN courriel ne part sur ce chemin — le PDF s'ouvre et
+    // l'humain l'envoie lui-même. Le journal ne ment jamais.
+    ajouterJournal(`📄 Bon de commande ${numeroBc} généré (PDF, sans prix de vente) — aucun envoi automatique : télécharge le PDF et transmets-le toi-même.`);
 
     ajouterTacheAgenda({
       id: `tache-${devis.id}`,

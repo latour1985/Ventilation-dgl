@@ -570,6 +570,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
   const [bcMontant, setBcMontant] = useState("");
   const [bcNumero, setBcNumero] = useState("");
   const [bcDescription, setBcDescription] = useState("");
+  const [bcLivraison, setBcLivraison] = useState(""); // 📦 date souhaitée
   const [modalFournisseur, setModalFournisseur] = useState(false);
   // Envoi du BC au fournisseur : choix des adresses avant création.
   const [envoiOuvert, setEnvoiOuvert] = useState(false);
@@ -623,6 +624,12 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
         ajouterJournal?.("⚠️ Numéro de BC séquentiel indisponible — numéro de secours attribué, à corriger manuellement.");
       }
     }
+    // 📦 La livraison souhaitée voyage DANS la description — elle suit
+    // le bon partout (fiche du projet, courriel, journal).
+    const livraisonBc = bcLivraison
+      ? `\n📦 Livraison souhaitée : ${new Date(`${bcLivraison}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`
+      : "";
+    const descriptionBc = `${bcDescription.trim()}${livraisonBc}`;
     let envoiReussi = false;
     // 📧 Copie choisie à l'envoi (facultative). « Retenir » l'enregistre
     // comme adresse PERMANENTE de l'entreprise (ex. commande@...) — les
@@ -645,7 +652,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
       const r = await envoyerCourriel({
         a: destinataires,
         sujet: `Bon de commande ${numero} — ${configBc.nomLegal}`,
-        html: gabaritBcSimple({ config: configBc, numeroBc: numero, description: bcDescription.trim(), adresseLivraison }),
+        html: gabaritBcSimple({ config: configBc, numeroBc: numero, description: descriptionBc, adresseLivraison }),
         // La réponse du fournisseur (« pas en stock avant le 12 »)
         // revient à celui qui a commandé.
         copieExpediteur: true,
@@ -665,7 +672,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
       numeroBC: numero,
       fournisseur: fournisseurChoisi?.nom || "",
       fournisseurId: fournisseurChoisi?.id || null,
-      description: bcDescription.trim(),
+      description: descriptionBc,
       // Le MONTANT est optionnel : un BC créé sans montant (0 $) se
       // remplira tout seul quand la facture fournisseur portant le même
       // numéro arrivera de QuickBooks (voir calculerRentabiliteProjet).
@@ -676,13 +683,14 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
     });
     ajouterJournal?.(
       envoiReussi
-        ? `📧 Bon de commande ${numero} envoyé à ${fournisseurChoisi?.nom} (${destinataires.join(", ")}) — ${bcDescription.trim() || "sans description"}${adresseLivraison ? ` · livraison : ${adresseLivraison}` : ""}`
+        ? `📧 Bon de commande ${numero} envoyé à ${fournisseurChoisi?.nom} (${destinataires.join(", ")}) — ${descriptionBc || "sans description"}${adresseLivraison ? ` · livraison : ${adresseLivraison}` : ""}`
         : `📋 Bon de commande ${numero} créé pour ${fournisseurChoisi?.nom || "fournisseur"} — aucun courriel envoyé`
     );
     setBcFournisseurId("");
     setBcMontant("");
     setBcNumero("");
     setBcDescription("");
+    setBcLivraison("");
     setCourrielsChoisis([]);
   };
 
@@ -853,6 +861,17 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
             placeholder="Montant avant taxes $ (optionnel)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
           />
         </div>
+        {/* 📦 Livraison souhaitée — notée sur le bon et écrite dans le
+            courriel au fournisseur (2026-09-03). */}
+        <label className="flex items-center gap-1.5 text-[10px] text-slate-400">
+          Livraison souhaitée
+          <input
+            type="date"
+            value={bcLivraison}
+            onChange={(e) => setBcLivraison(e.target.value)}
+            className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+          />
+        </label>
         <Button variant="outline" onClick={demarrerAjoutBC} disabled={!fournisseurChoisi} className="w-full min-h-0 py-1.5 text-xs">
           <Plus size={12} /> {fournisseurChoisi && (fournisseurChoisi.courriels || []).length > 0 ? "Créer et envoyer le BC" : "Ajouter le BC"}
         </Button>
@@ -906,6 +925,9 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
             <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px] text-slate-600">
               <p className="font-bold text-slate-800">Bon de commande {bcNumero.trim() || "(numéro automatique)"}</p>
               <p className="mt-1 whitespace-pre-wrap">{bcDescription.trim() || "— aucune description saisie —"}</p>
+              {bcLivraison && (
+                <p className="mt-1">📦 Livraison souhaitée : {new Date(`${bcLivraison}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p>
+              )}
               {adresseLivraison && <p className="mt-1">📍 Livraison : {adresseLivraison}</p>}
               <p className="mt-1 text-slate-400">Projet : {projet.nom}</p>
             </div>
