@@ -1590,6 +1590,39 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // dans Tarifs (défaut 3 h) ; le dépôt perçu se déduit comme
     // toujours par la ligne automatique de la révision.
     // ============================================================
+    // 🔧 TEMPS & MATÉRIEL — MINIMUM D'HEURES PAR HOMME (2026-09-04,
+    // règle du propriétaire, précisée le même jour) : minimum (Tarifs,
+    // défaut 3 h) PAR homme facturable quand
+    //   • le technicien est SEUL sur la job (1 × minimum), ou
+    //   • 2 hommes et plus sont FACTURABLES (minimum chacun).
+    // Le SEUL cas sans minimum : plusieurs sur place mais UN seul
+    // facturable (l'autre en 🤝 aide interne) — là, heures réelles.
+    // Chauffeur au taux vendant, passager au taux moins camion. Pas de
+    // transport compté : le minimum couvre le déplacement, c'est son rôle.
+    const nbTravailleursTM = (((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || [b]))
+      .filter((s) => (Number(s.heures) || 0) > 0).length;
+    if (estTempsMateriel && (sources.length >= 2 || nbTravailleursTM === 1)) {
+      const minTM = Number(prixDepots?.minimum_heures_2_hommes_tm) > 0 ? Number(prixDepots.minimum_heures_2_hommes_tm) : 3;
+      const trancheTM = Number(configEnt?.trancheFacturationMin) || 15;
+      return sources
+        .map((s) => ({
+          nom: s.employeNom || "",
+          heures: Number(s.heures) || 0,
+          passager: (inspections || []).some((i) => i.date === (s.date || b.date) && i.passagerDeNom && i.technicienNom === s.employeNom),
+        }))
+        .sort((a, x) => (a.passager ? 1 : 0) - (x.passager ? 1 : 0))
+        .map((s) => {
+          const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
+          const arrondiH = (Math.ceil(Math.round(s.heures * 60) / trancheTM) * trancheTM) / 60;
+          const factH = Math.max(minTM, arrondiH);
+          return {
+            description:
+              `Main-d'œuvre — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ${s.heures.toFixed(2)} h` +
+              `${factH > arrondiH ? ` (minimum ${minTM} h appliqué)` : ""} = ${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
+            prix: Math.round(factH * taux * 100) / 100,
+          };
+        });
+    }
     if (!estTempsMateriel && sources.length >= 2) {
       const minH = Number(prixDepots?.minimum_heures_2_hommes) > 0 ? Number(prixDepots.minimum_heures_2_hommes) : 3;
       const trancheMin2 = Number(configEnt?.trancheFacturationMin) || 15;
