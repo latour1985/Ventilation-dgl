@@ -1751,6 +1751,45 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     return lignes;
   };
   const configEnt = useEntreprise();
+  // ============================================================
+  // 📧 COPIE INTERNE PAR LE CANAL FLUXYA (2026-09-04, vécu : la copie
+  // QuickBooks de la facture 4264 pour Louise s'est perdue entre Intuit
+  // et Gmail, sans trace). Les adresses cochées qui appartiennent au
+  // DOMAINE de l'entreprise (@ventilationdgl.com…) reçoivent EN PLUS un
+  // récapitulatif envoyé par NOTRE canal Resend — celui qu'on contrôle
+  // et qu'on surveille (rebond → journal en 30 s). Le CLIENT, lui, ne
+  // reçoit que la facture officielle QuickBooks — jamais de doublon.
+  // Seules les adresses cochées reçoivent (la règle « ceux qui le
+  // demandent ») — aucune copie globale.
+  // ============================================================
+  const domainesInternes = () =>
+    new Set(
+      [configEnt?.courriel, configEnt?.courrielFacturation]
+        .filter(Boolean)
+        .map((e) => String(e).split("@")[1]?.toLowerCase())
+        .filter(Boolean)
+    );
+  const envoyerCopieInterne = async ({ numero, clientNom, totalHT, destinataires }) => {
+    const doms = domainesInternes();
+    if (doms.size === 0) return;
+    const internes = (destinataires || [])
+      .map((c) => (typeof c === "string" ? c : c?.email))
+      .filter((e) => e && doms.has(String(e).split("@")[1]?.toLowerCase()));
+    if (internes.length === 0) return;
+    const r = await envoyerCourriel({
+      a: internes,
+      sujet: `Copie interne — Facture ${numero} — ${clientNom}`,
+      html:
+        `<p><b>Copie interne Fluxya</b> — la facture officielle (avec le lien de paiement) part par QuickBooks au client.</p>` +
+        `<p>Facture <b>Nº ${numero}</b> · ${clientNom}${Number(totalHT) > 0 ? ` · <b>${Number(totalHT).toFixed(2)} $ HT</b>` : ""}</p>` +
+        `<p>Destinataires choisis : ${(destinataires || []).map((c) => (typeof c === "string" ? c : c?.email)).filter(Boolean).join(", ")}</p>`,
+    });
+    ajouterJournal(
+      r.envoye
+        ? `📧 Copie interne de la facture ${numero} envoyée à ${internes.join(", ")} (canal Fluxya — un rebond se verrait au journal).`
+        : `⚠️ Copie interne de la facture ${numero} NON envoyée à ${internes.join(", ")}${r.erreur ? ` (${r.erreur})` : ""} — la facture QuickBooks, elle, suit son cours.`
+    );
+  };
   const [bonFacturationId, setBonFacturationId] = useState(null);
   // Fenêtre d'avant-envoi : { mode: "simple"|"progressive", bonId,
   // info?, montant, clientNom, courriels } — remplie quand le choix des
@@ -2246,6 +2285,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           return { ...x, facturesEmises: liste };
         })
       );
+      envoyerCopieInterne({ numero: f.numeroFactureQb, clientNom: b.client || "", totalHT: f.montant, destinataires: adresses });
       ajouterJournal(`✉️ Facture ${f.numeroFactureQb} RENVOYÉE par QuickBooks à ${adresses.join(", ")}.`);
     } else {
       ajouterJournal(`⚠️ Facture ${f.numeroFactureQb} : le renvoi a échoué${r?.erreur ? ` (${r.erreur})` : r?.nonConnecte ? " (QuickBooks non connecté)" : ""} — réessaie.`);
@@ -2261,6 +2301,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const r = await envoyerFactureQbo(f.qboInvoiceId, adresses);
     if (r?.envoyee) {
       appliquerEnvoiQb(b.id, f.id, { statut: "envoyee", date: r.envoyeeLe || new Date().toISOString() });
+      envoyerCopieInterne({ numero: f.numeroFactureQb, clientNom: b.client || "", totalHT: f.montant, destinataires: adresses });
       ajouterJournal(`✉️ Facture ${f.numeroFactureQb} ENVOYÉE par QuickBooks à ${adresses.join(", ")} — confirmé au registre.`);
     } else {
       appliquerEnvoiQb(b.id, f.id, { statut: "non_confirme", date: null });
@@ -2588,6 +2629,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         };
       })
     );
+    envoyerCopieInterne({ numero, clientNom, totalHT: total, destinataires });
     ajouterJournal(
       `📅 Facture GROUPÉE ${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length} bons réunis, ${total.toFixed(2)} $ HT` +
         (r?.envoiQb?.envoyee
@@ -2667,6 +2709,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       majFacturesEmises(String(b.id).slice(4), nouvelles, "envoye").catch(() =>
         ajouterJournal("⚠️ Facture émise affichée mais NON enregistrée en base — vérifie la connexion.")
       );
+    }
+    if (r?.creee) {
+      envoyerCopieInterne({ numero: numeroReel, clientNom: b.client || "", totalHT: entree.montant, destinataires });
     }
     ajouterJournal(
       r?.creee
