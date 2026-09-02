@@ -545,7 +545,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -591,6 +591,30 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     return base;
   });
   const [attestation, setAttestation] = useState(false);
+
+  // 🔁 RESYNCHRONISATION DES LIGNES SUGGÉRÉES (2026-09-04) : quand un
+  // 💰/🤝 bascule dans le récit ci-contre, le parent recalcule
+  // lignesSuggerees — les lignes auto (« supp- ») sont remplacées par
+  // les fraîches, SANS toucher à la ligne de description, aux
+  // déductions (dépôt/pièce) ni aux items ajoutés à la main. Une
+  // révision déjà enregistrée (lignesNonListees) n'est jamais réécrite.
+  // (Une ligne auto modifiée à la main est régénérée au prochain
+  // basculement — le prix de vérité, c'est le calcul.)
+  const cleSuggestions = JSON.stringify(lignesSuggerees || []);
+  const premiereCleRef = useRef(cleSuggestions);
+  useEffect(() => {
+    if (bon.lignesNonListees?.length) return;
+    if (premiereCleRef.current === cleSuggestions) return; // montage : rien à refaire
+    premiereCleRef.current = cleSuggestions;
+    setItems((prev) => {
+      const sansAuto = prev.filter((it) => !String(it.id).startsWith("supp-"));
+      const fraiches = (lignesSuggerees || []).map((l, i) => ({ id: `supp-${Date.now()}-${i}`, description: l.description, prix: l.prix }));
+      // Les suggestions reprennent leur place : après la 1re ligne (la
+      // description de la job), avant les déductions et ajouts manuels.
+      return [...sansAuto.slice(0, 1), ...fraiches, ...sansAuto.slice(1)];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleSuggestions]);
 
   const total = items.reduce((s, it) => s + (parseFloat(it.prix) || 0), 0);
   // ============================================================
@@ -702,9 +726,41 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                 <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{be.description}</p>
               )}
               {equipe.length > 0 && (
-                <p className="mt-1.5 text-[11px] font-semibold text-slate-600">
-                  ⏱️ {equipe.map((e) => `${e.nom} : ${e.heures.toFixed(2)} h`).join(" · ")}
-                </p>
+                <div className="mt-1.5">
+                  {/* 💰/🤝 BASCULABLE ICI MÊME (2026-09-04, demande du
+                      propriétaire — le cas Pascale Lapointe : deux temps
+                      supplémentaires alors qu'un seul homme devait être
+                      facturable, et il fallait retourner dans l'agenda
+                      pour le corriger). Un clic bascule, la base est mise
+                      à jour, et les lignes de temps suggérées à droite se
+                      recalculent immédiatement. */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {equipe.map((e) => {
+                      const email = (e.courriel || "").toLowerCase();
+                      const fact = facturables[`${be.tacheId || ""}|${email}`] !== false;
+                      const basculable = !!onBasculerFacturable && !!email;
+                      return (
+                        <button
+                          key={email || e.nom}
+                          type="button"
+                          disabled={!basculable}
+                          onClick={() => onBasculerFacturable?.(be.tacheId, e.courriel, !fact)}
+                          title={basculable ? (fact ? "Cliquer pour passer NON facturable (aide interne)" : "Cliquer pour passer FACTURABLE") : ""}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${
+                            fact ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-slate-100 text-slate-500"
+                          } ${basculable ? "cursor-pointer hover:opacity-80" : ""}`}
+                        >
+                          {fact ? "💰" : "🤝"} {e.nom} · {e.heures.toFixed(2)} h
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {onBasculerFacturable && (
+                    <p className="mt-1 text-[9px] text-slate-400">
+                      Clique un technicien pour basculer 💰 facturable / 🤝 aide interne — les lignes de temps se recalculent.
+                    </p>
+                  )}
+                </div>
               )}
               {notes.map((t, i) => (
                 <div key={i} className="mt-1.5 rounded-lg bg-white p-2">
@@ -1359,7 +1415,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null }) {
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
@@ -3628,6 +3684,21 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }}
           depotPaye={depotPayePour(bonAReviser.tacheId)}
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
+          facturables={facturablesAssignations}
+          onBasculerFacturable={
+            onBasculerFacturable
+              ? (tacheId, courriel, val) => {
+                  onBasculerFacturable(tacheId, courriel, val);
+                  const be = bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id));
+                  const nom = (be?.equipe || []).find((e) => (e.courriel || "").toLowerCase() === (courriel || "").toLowerCase())?.nom || courriel;
+                  ajouterJournal(
+                    val
+                      ? `💰 ${nom} passe FACTURABLE sur « ${bonAReviser.projet || bonAReviser.client} » (depuis la révision).`
+                      : `🤝 ${nom} passe NON facturable (aide interne) sur « ${bonAReviser.projet || bonAReviser.client} » — ses heures ne seront pas suggérées au client.`
+                  );
+                }
+              : null
+          }
           lignesSuggerees={(() => {
             const be = bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser;
             // Le prix de base de l'appel (si aucun dépôt) AVANT le temps

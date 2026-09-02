@@ -3418,6 +3418,14 @@ function AppAdmin() {
           qbConnecte={qbConnecte}
           bons={bons}
           setBons={setBons}
+          // 💰/🤝 basculable depuis la fenêtre de révision (2026-09-04) —
+          // même écriture que l'agenda : base + état local.
+          onBasculerFacturable={(tacheId, courriel, val) => {
+            majFacturableAssignation(tacheId, courriel, val).catch(() =>
+              ajouterJournal("⚠️ Choix facturable NON enregistré (connexion ?) — réessaie.")
+            );
+            setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }));
+          }}
           // ➕ Facture libre : la liste des projets (rattachement) et le
           // nom de l'admin (traçabilité de l'attribution).
           projets={projets}
