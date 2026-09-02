@@ -459,20 +459,42 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // QuickBooks repart (route /send par identifiant : jamais une
   // nouvelle). Destinataire : le prospect s'il y en a un, sinon le
   // courriel par défaut de la fiche client.
-  const renvoyerDemandeDepot = async (t, d) => {
+  // 📧 RENVOI DE LA DEMANDE DE DÉPÔT — avec CHOIX DU COURRIEL (2026-09-04,
+  // demande du propriétaire : « pouvoir modifier le courriel du client
+  // pour le renvoyer au besoin ») : le bouton ouvre un petit panneau
+  // (cases de la fiche + autre adresse, ajoutable au dossier) au lieu
+  // d'envoyer directement au courriel par défaut.
+  const [renvoiDepot, setRenvoiDepot] = useState(null); // { tache, depot, coches, extra, extraAuDossier, enCours }
+  const ouvrirRenvoiDepot = (t, d) => {
     const fiche = (clients || []).find((c) => c.id === t.clientId || c.nom === t.clientNom);
-    const defaut = courrielDefautClient(fiche);
-    const courriel = (d.prospectCourriel || "").trim() || defaut?.email || null;
-    if (!courriel) {
-      ajouterJournal(`⚠️ Aucun courriel connu pour « ${t.clientNom || t.titre} » — ajoute-le à sa fiche avant de renvoyer la demande de dépôt.`);
-      return;
+    const defaut = (d.prospectCourriel || "").trim() || courrielDefautClient(fiche)?.email || "";
+    setRenvoiDepot({ tache: t, depot: d, coches: defaut ? [defaut] : [], extra: "", extraAuDossier: true, enCours: false });
+  };
+  const executerRenvoiDepot = async () => {
+    const { tache: t, depot: d, coches, extra, extraAuDossier } = renvoiDepot;
+    const extraCourriel = extra.trim().toLowerCase();
+    const adresses = [...new Set([...coches, ...(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extraCourriel) ? [extraCourriel] : [])])];
+    if (adresses.length === 0) return;
+    setRenvoiDepot((p) => ({ ...p, enCours: true }));
+    // 📌 L'adresse tapée s'offre au dossier — même réflexe que partout.
+    const fiche = (clients || []).find((c) => c.id === t.clientId || c.nom === t.clientNom);
+    if (extraAuDossier && fiche && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extraCourriel)) {
+      const dejaLa = (fiche.courriels || []).some(
+        (c) => String(typeof c === "string" ? c : c?.email || "").trim().toLowerCase() === extraCourriel
+      );
+      if (!dejaLa) {
+        const entree = { id: `cc-${Date.now()}`, label: "", email: extraCourriel, defaut: false };
+        setClients((prev) => prev.map((x) => (x.id === fiche.id ? { ...x, courriels: [...(x.courriels || []), entree] } : x)));
+        ajouterJournal(`📌 Courriel « ${extraCourriel} » ajouté au dossier de ${fiche.nom}`);
+      }
     }
-    const r = await envoyerFactureQbo(d.qboInvoiceId, [courriel]);
+    const r = await envoyerFactureQbo(d.qboInvoiceId, adresses);
     ajouterJournal(
       r?.envoyee
-        ? `📧 Demande de dépôt (${d.qboDocNumber || d.qboInvoiceId}) RENVOYÉE à ${courriel} — même facture QuickBooks, aucune nouvelle créée.`
+        ? `📧 Demande de dépôt (${d.qboDocNumber || d.qboInvoiceId}) RENVOYÉE à ${adresses.join(", ")} — même facture QuickBooks, aucune nouvelle créée.`
         : `⚠️ Renvoi de la demande de dépôt refusé${r?.erreur ? ` : ${r.erreur}` : r?.nonConnecte ? " — QuickBooks non connecté" : ""} — réessaie.`
     );
+    setRenvoiDepot(null);
   };
   const depotBloque = (tacheId) => {
     const d = depotDe(tacheId);
@@ -3706,8 +3728,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                         (jamais une nouvelle — route /send par identifiant). */}
                     {d.qboInvoiceId && (
                       <button
-                        onClick={() => renvoyerDemandeDepot(t, d)}
-                        title="Renvoie la meme facture de depot par QuickBooks — au cas ou le client ne l a pas recue"
+                        onClick={() => ouvrirRenvoiDepot(t, d)}
+                        title="Renvoie la meme facture de depot par QuickBooks — choisis ou corrige le courriel avant l'envoi"
                         className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[9px] font-bold text-amber-800 active:scale-95"
                       >
                         📧 Renvoyer la demande
@@ -5148,6 +5170,80 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           }}
         />
       )}
+      {/* 📧 PANNEAU DE RENVOI DE LA DEMANDE DE DÉPÔT — courriels de la
+          fiche cochables + adresse corrigée à la main (ajoutable au
+          dossier). Même facture QuickBooks, jamais une nouvelle. */}
+      {renvoiDepot && (() => {
+        const ficheR = (clients || []).find((c) => c.id === renvoiDepot.tache.clientId || c.nom === renvoiDepot.tache.clientNom);
+        const contactsR = (ficheR?.courriels || [])
+          .map((c) => (typeof c === "string" ? { email: c } : c))
+          .filter((c) => c?.email);
+        const extraValide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(renvoiDepot.extra.trim());
+        const nbAdresses = new Set([...renvoiDepot.coches, ...(extraValide ? [renvoiDepot.extra.trim().toLowerCase()] : [])]).size;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setRenvoiDepot(null); }}>
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">📧 Renvoyer la demande de dépôt</h3>
+                  <p className="text-xs text-slate-500">
+                    {renvoiDepot.tache.clientNom || renvoiDepot.tache.titre} · facture {renvoiDepot.depot.qboDocNumber || renvoiDepot.depot.qboInvoiceId}
+                  </p>
+                </div>
+                <button onClick={() => setRenvoiDepot(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+              </div>
+              {contactsR.length === 0 && (
+                <p className="mb-2 text-[11px] font-semibold text-amber-700">Ce client n&apos;a aucun courriel dans sa fiche — inscris une adresse ci-dessous.</p>
+              )}
+              <div className="space-y-1">
+                {contactsR.map((c) => (
+                  <label key={c.email} className="flex items-center gap-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={renvoiDepot.coches.includes(c.email)}
+                      onChange={() =>
+                        setRenvoiDepot((p) => ({
+                          ...p,
+                          coches: p.coches.includes(c.email) ? p.coches.filter((x) => x !== c.email) : [...p.coches, c.email],
+                        }))
+                      }
+                      className="h-4 w-4 accent-[#FF6A13]"
+                    />
+                    <span className="min-w-0 truncate font-semibold">{c.email}</span>
+                    {c.label ? <span className="shrink-0 text-[10px] text-slate-400">({c.label}{c.defaut ? " · défaut" : ""})</span> : null}
+                  </label>
+                ))}
+              </div>
+              <input
+                value={renvoiDepot.extra}
+                onChange={(e) => setRenvoiDepot((p) => ({ ...p, extra: e.target.value }))}
+                placeholder="Autre adresse (corrigée) — optionnel"
+                className="mt-2 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-xs"
+              />
+              {renvoiDepot.extra.trim() && !extraValide && (
+                <p className="mt-1 text-[10px] text-red-500">Adresse invalide — elle ne sera pas utilisée.</p>
+              )}
+              {extraValide && ficheR && (
+                <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={renvoiDepot.extraAuDossier}
+                    onChange={(e) => setRenvoiDepot((p) => ({ ...p, extraAuDossier: e.target.checked }))}
+                    className="h-3.5 w-3.5 accent-[#FF6A13]"
+                  />
+                  📌 Ajouter ce courriel au dossier de {nomAffichageClient(ficheR)}
+                </label>
+              )}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setRenvoiDepot(null)} className="min-h-0 py-2 text-xs">Annuler</Button>
+                <Button loading={renvoiDepot.enCours} disabled={nbAdresses === 0} onClick={executerRenvoiDepot} className="min-h-0 py-2 text-xs">
+                  Renvoyer{nbAdresses > 1 ? ` (${nbAdresses} adresses)` : ""}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {modalNouveauClientTache && (
         <ModalNouveauClient
           clients={clients}
