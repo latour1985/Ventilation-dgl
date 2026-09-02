@@ -1535,8 +1535,19 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // zone que le dépôt aurait couvert) doit être facturé — il est donc
   // suggéré d'office, modifiable comme le reste. Hors zone : pas de
   // prix fixe, l'humain le tape (l'avertissement rouge le force déjà).
+  // 👥 Les hommes FACTURABLES d'un bon (heures > 0, pas 🤝) — sert à
+  // détecter le régime « appel à 2 hommes » (2026-09-04).
+  const sourcesFacturables = (b) =>
+    (((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || [b])).filter(
+      (s) =>
+        (Number(s.heures) || 0) > 0 &&
+        facturablesAssignations[`${b.tacheId || ""}|${(s.employeEmail || "").toLowerCase()}`] !== false
+    );
   const lignesBaseAppel = (b) => {
     if (!b || b.type !== "appel_service") return [];
+    // 👥 2 hommes facturables et plus : le prix de zone ne s'applique
+    // plus — le régime « minimum d'heures » (lignesTempsSupp) fait tout.
+    if (sourcesFacturables(b).length >= 2) return [];
     if (depotPayePour(b.tacheId)) return []; // la base est déjà payée — la déduction s'en charge
     const zone = zonePourTache ? zonePourTache(b.tacheId) : null;
     if (!zone || zone === "hors_zone") return [];
@@ -1567,6 +1578,57 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       (s) => (Number(s.heures) || 0) > 0 && !estNonFacturable(s)
     );
     if (sources.length === 0) return [];
+
+    // ============================================================
+    // 👥 APPEL À 2 HOMMES (2026-09-04, règle du propriétaire) : dès
+    // 2 techniciens FACTURABLES sur un appel de service, le prix de
+    // zone et le temps inclus disparaissent. Chaque homme est facturé
+    //   max(minimum d'heures, SON aller-retour + SON temps sur place)
+    // — le chauffeur au taux vendant, l'assistant (passager du même
+    // camion) au taux vendant MOINS le camion. Au-delà du minimum :
+    // mêmes taux, tranches de 15 minutes ENTAMÉES. Le minimum se règle
+    // dans Tarifs (défaut 3 h) ; le dépôt perçu se déduit comme
+    // toujours par la ligne automatique de la révision.
+    // ============================================================
+    if (!estTempsMateriel && sources.length >= 2) {
+      const minH = Number(prixDepots?.minimum_heures_2_hommes) > 0 ? Number(prixDepots.minimum_heures_2_hommes) : 3;
+      const trancheMin2 = Number(configEnt?.trancheFacturationMin) || 15;
+      // Transport RÉEL du jour de CHAQUE homme — la règle 2 hommes
+      // facture l'aller-retour explicitement, peu importe la zone.
+      const transportDe = (s) =>
+        (travaux || [])
+          .filter(
+            (t) =>
+              t.supabase &&
+              t.estTransport &&
+              (t.employeEmail || "").toLowerCase() === (s.employeEmail || "").toLowerCase() &&
+              t.date === (s.date || b.date)
+          )
+          .reduce((somme, t) => somme + (Number(t.heures) || 0), 0);
+      return sources
+        .map((s) => ({
+          nom: s.employeNom || "",
+          site: Number(s.heures) || 0,
+          transport: transportDe(s),
+          // (même règle qu'estPassager plus bas — déclaré après ce bloc)
+          passager: (inspections || []).some((i) => i.date === (s.date || b.date) && i.passagerDeNom && i.technicienNom === s.employeNom),
+        }))
+        // Chauffeur d'abord — l'ordre des lignes suit la logique du client.
+        .sort((a, x) => (a.passager ? 1 : 0) - (x.passager ? 1 : 0))
+        .map((s) => {
+          const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
+          const brutH = s.site + s.transport;
+          const arrondiH = (Math.ceil(Math.round(brutH * 60) / trancheMin2) * trancheMin2) / 60;
+          const factH = Math.max(minH, arrondiH);
+          return {
+            description:
+              `Appel de service 2 techniciens — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ` +
+              `${s.site.toFixed(2)} h sur place + ${s.transport.toFixed(2)} h transport` +
+              `${factH > arrondiH ? ` (minimum ${minH} h appliqué)` : ""} = ${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
+            prix: Math.round(factH * taux * 100) / 100,
+          };
+        });
+    }
     // 🗺️ LA RÈGLE SUIT LA ZONE (2026-08-25) — la même que l'info-bulle
     // de l'agenda, enfin appliquée ICI aussi :
     //   • Zones 1-2-3 : 90 min incluses CHEZ LE CLIENT (le transport est

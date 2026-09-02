@@ -500,6 +500,29 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
               <span className="text-[10px] text-slate-400">$/h</span>
             </div>
           </div>
+          {/* 👥 APPEL À 2 HOMMES (2026-09-04, règle du propriétaire) : dès
+              2 techniciens facturables, plus de prix de zone ni de temps
+              inclus — chaque homme est facturé max(minimum, aller-retour
+              + sur place) : chauffeur au taux vendant, assistant au taux
+              vendant moins le camion. */}
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Appel à 2 hommes — minimum d&apos;heures</label>
+            <div className={`flex items-center rounded-lg border px-2 ${estAdminPrincipal ? "border-slate-300" : "border-slate-200 bg-slate-50"}`}>
+              <input
+                type="number"
+                min={0}
+                step="0.5"
+                value={prixDepots?.minimum_heures_2_hommes ?? 3}
+                disabled={!estAdminPrincipal}
+                onChange={(e) => setPrixDepots((prev) => ({ ...prev, minimum_heures_2_hommes: e.target.value }))}
+                className="w-full bg-transparent py-1.5 text-xs outline-none disabled:text-slate-400"
+              />
+              <span className="text-[10px] text-slate-400">h</span>
+            </div>
+            <p className="mt-0.5 text-[9px] text-slate-400">
+              Chaque homme : max(minimum, aller-retour + sur place). Chauffeur au taux vendant, assistant (passager) au taux vendant − camion. Remplace le prix de zone dès 2 hommes facturables.
+            </p>
+          </div>
         </div>
         <p className="mt-1.5 text-[10px] text-slate-400">
           ⏱️ Au-delà du temps inclus, le dépassement devient automatiquement <span className="font-bold">facturable au taux vendant</span> — calculé sur les heures réelles du technicien.

@@ -3296,7 +3296,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       )}
                       {zoneAppelChoix && zoneAppelChoix !== "hors_zone" && (
                         <p className="rounded-lg bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
-                          {zoneAppelChoix} — <span className="tabular-nums">{(Number(prixDepots?.[zoneAppelChoix]) || 0).toFixed(2)} $ HT</span> (liste de prix)
+                          {/* Le MONTANT RÉEL du dépôt d'abord — il peut différer
+                              du prix de zone (appel à 2 hommes appliqué). */}
+                          {Math.abs((parseFloat(depotMontant) || 0) - (Number(prixDepots?.[zoneAppelChoix]) || 0)) < 0.01 ? (
+                            <>{zoneAppelChoix} — <span className="tabular-nums">{(Number(prixDepots?.[zoneAppelChoix]) || 0).toFixed(2)} $ HT</span> (liste de prix)</>
+                          ) : (
+                            <><span className="tabular-nums">{(parseFloat(depotMontant) || 0).toFixed(2)} $ HT</span> (minimum 2 hommes — le prix de {zoneAppelChoix} aurait été {(Number(prixDepots?.[zoneAppelChoix]) || 0).toFixed(2)} $)</>
+                          )}
                         </p>
                       )}
                       {zonesEffectives(prixDepots).every((z) => !(Number(prixDepots?.[z]) > 0)) && (
@@ -3311,6 +3317,43 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                           className="mt-1.5 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs"
                         />
                       )}
+                      {/* 👥 APPEL À 2 HOMMES (2026-09-04, règle du
+                          propriétaire) : dès 2 techniciens FACTURABLES
+                          prévus, le prix de zone ne s'applique plus —
+                          chaque homme = max(minimum d'heures, A/R + sur
+                          place). Le dépôt suggéré devient le minimum au
+                          complet (chauffeur plein taux + assistant taux
+                          moins camion). Un bouton l'applique — jamais en
+                          douce. */}
+                      {(() => {
+                        const nbFact =
+                          (nouveauEmployeId ? 1 : 0) +
+                          nouveauxEmployesEnPlus.filter((id) => id && id !== nouveauEmployeId && facturablesEnPlus[id] !== false).length;
+                        if (nbFact < 2) return null;
+                        const tauxV = Number(prixDepots?.taux_horaire_vendant) || 0;
+                        const camion = Number(configEnt?.coutCamionHoraire) || 0;
+                        const minH = Number(prixDepots?.minimum_heures_2_hommes) > 0 ? Number(prixDepots.minimum_heures_2_hommes) : 3;
+                        if (tauxV <= 0) return null;
+                        const suggere = Math.round(minH * (tauxV + Math.max(0, tauxV - camion)) * 100) / 100;
+                        const dejaApplique = Math.abs((parseFloat(depotMontant) || 0) - suggere) < 0.01;
+                        return (
+                          <div className="mt-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-[10px] text-sky-800">
+                            👥 <span className="font-bold">{nbFact} hommes facturables prévus</span> — cet appel se facturera au
+                            minimum {minH} h par homme (chauffeur {tauxV.toFixed(2)} $/h + assistant {Math.max(0, tauxV - camion).toFixed(2)} $/h),
+                            pas au prix de zone. Dépôt suggéré : <span className="font-bold tabular-nums">{suggere.toFixed(2)} $ HT</span>.
+                            {!dejaApplique && (
+                              <button
+                                type="button"
+                                onClick={() => setDepotMontant(String(suggere))}
+                                className="ml-1.5 rounded-full border border-sky-300 bg-white px-2 py-0.5 font-bold text-sky-800"
+                              >
+                                Appliquer
+                              </button>
+                            )}
+                            {dejaApplique && <span className="ml-1 font-bold">✓ appliqué</span>}
+                          </div>
+                        );
+                      })()}
                       {parseFloat(depotMontant) > 0 && (() => {
                         const t = taxesDepot(depotMontant, configEnt);
                         return (
