@@ -17,7 +17,7 @@ import { ZONES_DEPOTS } from "@/lib/supabase/prixDepots";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
-import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, SelecteurCibleAchat, Button, todayISO } from "./partage";
+import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, SelecteurCibleAchat, Button, libelleAdresse, todayISO } from "./partage";
 
 export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
@@ -122,7 +122,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "" });
   // ✏️ FICHE D'UN BC (2026-08-26) — la ligne cliquée s'ouvre en fenêtre :
   // fournisseur, description, montant et RATTACHEMENT modifiables,
   // suppression en deux clics. `bcOuvert` = l'achat ; `bcEdit` = la
@@ -805,9 +805,49 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
               </div>
               <p className="text-[9px] leading-snug text-slate-400">
                 <span className="font-bold">Montant HT</span> = le total de la facture du fournisseur, avant taxes
-                (les taxes sont récupérables, jamais un coût). Une estimation suffit : la facture QuickBooks portant
-                ce nº de BC posera le montant réel.
+                (les taxes sont récupérables, jamais un coût). Optionnel : à 0 $, la facture QuickBooks portant
+                ce nº de BC posera le montant réel toute seule.
               </p>
+              {/* 📍 LIVRAISON À (2026-09-04, demande du propriétaire :
+                  « savoir où le stock sera mis ») — l'ATELIER par défaut
+                  (l'adresse de l'entreprise, Paramètres) ; les adresses de
+                  la tâche / du client / du projet rattachés s'offrent dès
+                  qu'ils sont choisis ; « Autre » pour un cas spécial.
+                  L'adresse suit le bon partout (courriel compris). */}
+              {(() => {
+                const t = bcLibre.tacheId ? (tachesPourAchat || []).find((x) => x.id === bcLibre.tacheId) : null;
+                const cl = bcLibre.clientId ? (clients || []).find((x) => x.id === bcLibre.clientId) : null;
+                const pr = bcLibre.projetId ? (projets || []).find((x) => x.id === bcLibre.projetId) : null;
+                return (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="shrink-0 text-[10px] text-slate-400">📍 Livraison à</span>
+                    <select
+                      value={bcLibre.livraisonChoix}
+                      onChange={(e) => setBcLibre((f) => ({ ...f, livraisonChoix: e.target.value }))}
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+                    >
+                      <option value="atelier">Atelier — {configEnt.adresse || "adresse de l'entreprise (Paramètres)"}</option>
+                      {t?.adresse && <option value="tache">Chantier de la tâche — {t.adresse}</option>}
+                      {(cl?.adresses || []).map((a) => (
+                        <option key={a.id} value={`ca:${a.id}`}>{cl.nom} — {a.nom ? `${a.nom} · ` : ""}{libelleAdresse(a)}</option>
+                      ))}
+                      {cl?.adresseFacturation && <option value="cfact">{cl.nom} — facturation : {cl.adresseFacturation}</option>}
+                      {pr && (pr.adresseLivraison || pr.adresseTravaux) && (
+                        <option value="projet">Projet {pr.nom} — {pr.adresseLivraison || pr.adresseTravaux}</option>
+                      )}
+                      <option value="autre">Autre adresse…</option>
+                    </select>
+                    {bcLibre.livraisonChoix === "autre" && (
+                      <input
+                        value={bcLibre.livraisonAutre}
+                        onChange={(e) => setBcLibre((f) => ({ ...f, livraisonAutre: e.target.value }))}
+                        placeholder="Adresse de livraison"
+                        className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                      />
+                    )}
+                  </div>
+                );
+              })()}
               {/* 💵 PART DE LA JOB — ajustable À LA BAISSE seulement : on
                   profite d'une commande pour ajouter du stock (rouleaux
                   de cuivre…), mais seule la part de la job compte dans
@@ -851,7 +891,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
               <div className="flex gap-1.5">
                 <Button
                   loading={bcLibreEnCours}
-                  disabled={!(bcLibre.description || "").trim() || !(Number(bcLibre.montantHT) > 0 || Number(bcLibre.montantAttribue) > 0)}
+                  disabled={!(bcLibre.description || "").trim()}
                   onClick={async () => {
                     setBcLibreEnCours(true);
                     // 📦 La livraison souhaitée voyage DANS la description :
@@ -860,7 +900,25 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     const livraison = bcLibre.livraisonEstimee
                       ? `\n📦 Livraison souhaitée : ${new Date(`${bcLibre.livraisonEstimee}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`
                       : "";
-                    const descriptionFinale = `${(bcLibre.description || "").trim()}${livraison}`;
+                    // 📍 L'adresse de livraison choisie suit le bon partout
+                    // (liste, dossier, courriel au fournisseur).
+                    const tL = bcLibre.tacheId ? (tachesPourAchat || []).find((x) => x.id === bcLibre.tacheId) : null;
+                    const clL = bcLibre.clientId ? (clients || []).find((x) => x.id === bcLibre.clientId) : null;
+                    const prL = bcLibre.projetId ? (projets || []).find((x) => x.id === bcLibre.projetId) : null;
+                    const adresseLivraisonBc = (() => {
+                      const c = bcLibre.livraisonChoix;
+                      if (c === "atelier") return configEnt.adresse ? `Atelier — ${configEnt.adresse}` : "";
+                      if (c === "tache") return tL?.adresse || "";
+                      if (c.startsWith("ca:")) {
+                        const a = (clL?.adresses || []).find((x) => x.id === c.slice(3));
+                        return a ? `${clL.nom} — ${a.nom ? `${a.nom} · ` : ""}${libelleAdresse(a)}` : "";
+                      }
+                      if (c === "cfact") return clL?.adresseFacturation ? `${clL.nom} — ${clL.adresseFacturation}` : "";
+                      if (c === "projet") return prL ? `Projet ${prL.nom} — ${prL.adresseLivraison || prL.adresseTravaux || ""}` : "";
+                      if (c === "autre") return bcLibre.livraisonAutre.trim();
+                      return "";
+                    })();
+                    const descriptionFinale = `${(bcLibre.description || "").trim()}${livraison}${adresseLivraisonBc ? `\n📍 Livraison : ${adresseLivraisonBc}` : ""}`;
                     // 🤝 Montant HT laissé à 0 mais part attribuée tapée :
                     // la part DEVIENT le montant de l'achat (voir l'aide du
                     // champ) — plus jamais de part « ramenée à 0 ».
@@ -906,7 +964,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         coches: [courrielTape],
                       });
                     }
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true });
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "" });
                     setBcLibreOuvert(false);
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"

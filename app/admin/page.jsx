@@ -3728,11 +3728,11 @@ function AppAdmin() {
             const vues = new Map();
             for (const valeur of Object.values(planning)) {
               for (const t of listeCellule(valeur)) {
-                if (t && !t.est_tache_systeme && !vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "" });
+                if (t && !t.est_tache_systeme && !vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "", adresse: t.adresseIntervention || t.adresseTravaux || "" });
               }
             }
             (tachesAttente || []).forEach((t) => {
-              if (!vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "" });
+              if (!vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "", adresse: t.adresseIntervention || t.adresseTravaux || "" });
             });
             return [...vues.values()].sort((a, b) => (a.clientNom || "").localeCompare(b.clientNom || "", "fr"));
           })()}
