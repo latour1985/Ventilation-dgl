@@ -593,9 +593,69 @@ function EcranEntente({ config, session, onAcceptee }) {
   );
 }
 
-function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }) {
+function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme, achatsLibres = [], pieces = [], projets = [], devisPourTache = null, onOuvrirCommandes = null, onOuvrirProjet = null }) {
   const q = terme.trim().toLowerCase();
   const resultats = terme.trim() ? clients.filter((c) => correspond(c, terme)) : [];
+
+  // 🧾 COMMANDES trouvées (2026-09-04, demande du propriétaire : « la
+  // personne qui trouve la boîte sait c'est où l'attitrer ») : taper le
+  // numéro écrit sur la boîte (BC-1012), le fournisseur ou la pièce
+  // ramène la commande AVEC son client, sa tâche, son devis, son projet.
+  const commandesTrouvees = (() => {
+    if (!q) return [];
+    const rangs = [];
+    (achatsLibres || []).forEach((a) => {
+      const texte = `${a.numeroBc} ${a.fournisseurNom} ${a.description} ${a.clientNom} ${a.tacheTitre}`.toLowerCase();
+      if (!texte.includes(q)) return;
+      const devisNo = a.tacheId && devisPourTache ? devisPourTache(a.tacheId) : null;
+      rangs.push({
+        cle: `a-${a.id}`,
+        numero: a.numeroBc || "(sans nº)",
+        fournisseur: a.fournisseurNom || "",
+        description: a.description || "",
+        statut: a.statut === "recu" ? "Reçue" : "Commandée",
+        date: a.dateAchat || "",
+        rattache: [a.clientNom && `👤 ${a.clientNom}`, a.tacheTitre && `🔧 ${a.tacheTitre}`, devisNo && `📄 Devis ${devisNo}`]
+          .filter(Boolean)
+          .join(" · ") || "Achat général (stock)",
+        aller: "pieces",
+      });
+    });
+    (pieces || []).forEach((p) => {
+      const texte = `${p.numeroBc} ${p.fournisseurNom} ${p.pieceRequise} ${p.clientNom}`.toLowerCase();
+      if (!texte.includes(q)) return;
+      const devisNo = p.tacheRetourId && devisPourTache ? devisPourTache(p.tacheRetourId) : null;
+      rangs.push({
+        cle: `p-${p.id}`,
+        numero: p.numeroBc || "(sans nº)",
+        fournisseur: p.fournisseurNom || "",
+        description: p.pieceRequise || "",
+        statut: p.statut || "",
+        date: p.dateReceptionPrevue || "",
+        rattache: [p.clientNom && `👤 ${p.clientNom}`, devisNo && `📄 Devis ${devisNo}`].filter(Boolean).join(" · ") || "—",
+        aller: "pieces",
+      });
+    });
+    (projets || []).forEach((pr) => {
+      (pr.bonsCommande || []).forEach((bc) => {
+        const texte = `${bc.numeroBC} ${bc.fournisseur} ${bc.description}`.toLowerCase();
+        if (!texte.includes(q)) return;
+        const cl = clients.find((c) => c.id === pr.clientId);
+        rangs.push({
+          cle: `bc-${pr.id}-${bc.id}`,
+          numero: bc.numeroBC || "(sans nº)",
+          fournisseur: bc.fournisseur || "",
+          description: bc.description || "",
+          statut: bc.statut || "",
+          date: bc.date || "",
+          rattache: [cl && `👤 ${nomAffichageClient(cl)}`, `🏗️ ${pr.nom}`].filter(Boolean).join(" · "),
+          aller: "projet",
+          projetId: pr.id,
+        });
+      });
+    });
+    return rangs.slice(0, 20);
+  })();
 
   // DEVIS trouvés : par numéro (« 3500 », « DEV-3500-1 »), par nom de
   // client, ou par CONTENU (un item du devis — « rooftop », « membrane »).
@@ -620,7 +680,7 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }
       .sort((a, b) => (b.active.date || "").localeCompare(a.active.date || ""));
   })();
 
-  const total = resultats.length + devisTrouves.length;
+  const total = resultats.length + devisTrouves.length + commandesTrouvees.length;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
@@ -637,8 +697,9 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }
 
       {!terme.trim() && (
         <p className="text-center text-xs text-slate-400">
-          Cherche un <span className="font-bold">client</span> (nom, entreprise, adresse, téléphone, courriel) ou un{" "}
-          <span className="font-bold">devis</span> (numéro, client, produit inscrit dedans).
+          Cherche un <span className="font-bold">client</span> (nom, entreprise, adresse, téléphone, courriel), un{" "}
+          <span className="font-bold">devis</span> (numéro, client, produit inscrit dedans) ou une{" "}
+          <span className="font-bold">commande</span> (nº de bon de commande écrit sur la boîte, fournisseur, pièce).
         </p>
       )}
 
@@ -648,6 +709,32 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme }
 
       {total > 0 && (
         <p className="text-xs font-bold text-slate-400">{total} résultat{total > 1 ? "s" : ""}</p>
+      )}
+
+      {/* 🧾 COMMANDES — le numéro sur la boîte suffit pour savoir à qui
+          elle appartient. Un clic amène à l'écran concerné. */}
+      {commandesTrouvees.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Commandes ({commandesTrouvees.length})</p>
+          {commandesTrouvees.map((r) => (
+            <button
+              key={r.cle}
+              onClick={() => (r.aller === "projet" ? onOuvrirProjet?.(r.projetId) : onOuvrirCommandes?.())}
+              className="flex w-full items-start justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-[#FF6A13] hover:bg-orange-50"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">🧾 {r.numero}{r.fournisseur ? ` — ${r.fournisseur}` : ""}</p>
+                <p className="truncate text-xs text-slate-500">{r.description || "—"}</p>
+                <p className="mt-0.5 text-[11px] font-semibold text-slate-600">{r.rattache}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[10px] font-bold text-emerald-700">{r.statut}</p>
+                {r.date && <p className="text-[10px] text-slate-400">{r.date}</p>}
+                <span className="mt-0.5 inline-block text-[10px] font-bold text-[#FF6A13]">Ouvrir ›</span>
+              </div>
+            </button>
+          ))}
+        </div>
       )}
 
       {/* DEVIS — un clic ouvre le dossier du client, devis en évidence. */}
@@ -2865,7 +2952,7 @@ function AppAdmin() {
                       setOnglet("recherche");
                     }
                   }}
-                  placeholder={tEnTete("Recherche rapide — client, adresse, devis, produit…")}
+                  placeholder={tEnTete("Recherche rapide — client, devis, produit, commande…")}
                   className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
                 />
                 {rechercheGlobale && (
@@ -3019,6 +3106,12 @@ function AppAdmin() {
             setCibleRecherche({ clientId: d.clientId, numeroDevis: d.numero });
             setOnglet("clients");
           }}
+          achatsLibres={achatsLibres}
+          pieces={pieces}
+          projets={projets}
+          devisPourTache={(tacheId) => tacheParId(tacheId)?.devisNumero || null}
+          onOuvrirCommandes={() => setOnglet("pieces")}
+          onOuvrirProjet={() => setOnglet("projets")}
         />
       )}
 
@@ -3032,6 +3125,7 @@ function AppAdmin() {
           setTravaux={setTravaux}
           inspections={inspections}
           achatsLibres={achatsLibres}
+          piecesCommandees={pieces}
           projets={projets}
           setProjets={setProjets}
           devisListe={devisListe}
@@ -3148,6 +3242,7 @@ function AppAdmin() {
       )}
       {vue === "agenda" && (
         <OngletAgenda
+          achatsLibres={achatsLibres}
           onMajFacturable={(tacheId, courriel, val) =>
             setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }))
           }

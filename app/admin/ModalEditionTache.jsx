@@ -13,7 +13,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { AutocompleteAdresse, Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
-export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null }) {
+export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [] }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -383,7 +383,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
             « il manque les infos de base comme le nº de devis ou le
             numéro de la facture de dépôt ») — visibles d'entrée, sans
             descendre jusqu'aux rattachements. */}
-        {(tache.devisNumero || depot) && (
+        {(tache.devisNumero || depot || (commandes || []).length > 0) && (
           <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-700">
             {tache.devisNumero && <span>📄 Devis {tache.devisNumero}</span>}
             {depot && (
@@ -398,6 +398,14 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                       : depot.statut || ""}
               </span>
             )}
+            {/* 🧾 Commandes rattachées (2026-09-04) : le répartiteur voit
+                d'un œil que la job attend sa pièce — et le numéro à
+                chercher quand la boîte arrive. */}
+            {(commandes || []).map((cm) => (
+              <span key={cm.cle} title={cm.texte || ""}>
+                🧾 {cm.numero}{cm.fournisseur ? ` — ${cm.fournisseur}` : ""} · {cm.statut}
+              </span>
+            ))}
           </div>
         )}
 

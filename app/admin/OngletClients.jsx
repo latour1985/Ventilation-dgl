@@ -550,7 +550,7 @@ export const LigneProjetClient = React.memo(function LigneProjetClient({ p, trav
 });
 
 
-export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], qbConnecte = null }) {
+export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], piecesCommandees = [], qbConnecte = null }) {
   // Taux camion par défaut — pour le coût réel des travaux du client.
   const configClients = useEntreprise();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
@@ -1915,6 +1915,64 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                           </div>
                           <p className="mt-1 text-[9px] text-slate-400">
                             Renvoi et annulation : onglet Facturation → « Factures sans chantier ».
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {/* 🧾 COMMANDES DU CLIENT (2026-09-04, demande du
+                        propriétaire) : les bons de commande et pièces
+                        rattachés à ce client — « ma pièce est-tu
+                        arrivée ? » se répond ici, et la boîte reçue se
+                        retrouve par son numéro. */}
+                    {(() => {
+                      const commandesDuClient = [
+                        ...(achatsLibres || [])
+                          .filter((a) => (a.clientId && a.clientId === c.id) || (a.clientNom && a.clientNom === c.nom))
+                          .map((a) => ({
+                            cle: `ca-${a.id}`,
+                            numero: a.numeroBc || "—",
+                            fournisseur: a.fournisseurNom || "",
+                            texte: a.description || "",
+                            job: a.tacheTitre || "",
+                            statut: a.statut === "recu" ? "✅ Reçue" : "📦 Commandée",
+                            date: a.dateAchat || "",
+                          })),
+                        ...(piecesCommandees || [])
+                          .filter((p) => p.clientNom && p.clientNom === c.nom)
+                          .map((p) => ({
+                            cle: `cp-${p.id}`,
+                            numero: p.numeroBc || "—",
+                            fournisseur: p.fournisseurNom || "",
+                            texte: p.pieceRequise || "",
+                            job: "",
+                            statut: p.statut || "",
+                            date: p.dateReceptionPrevue || "",
+                          })),
+                      ];
+                      if (commandesDuClient.length === 0) return null;
+                      return (
+                        <div className="mt-4 border-t border-slate-100 pt-3">
+                          <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                            🧾 Commandes ({commandesDuClient.length})
+                          </p>
+                          <div className="space-y-1">
+                            {commandesDuClient.slice(0, 10).map((cm) => (
+                              <div key={cm.cle} className="flex flex-wrap items-center justify-between gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+                                <span className="min-w-0">
+                                  <span className="font-bold text-slate-800">{cm.numero}</span>
+                                  {cm.fournisseur && <span> · {cm.fournisseur}</span>}
+                                  {cm.texte && <span className="text-slate-400"> · {cm.texte.split("\n")[0]}</span>}
+                                  {cm.job && <span className="text-slate-400"> · 🔧 {cm.job}</span>}
+                                </span>
+                                <span className="shrink-0 text-[10px] font-bold text-slate-500">
+                                  {cm.statut}{cm.date ? ` · ${cm.date}` : ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="mt-1 text-[9px] text-slate-400">
+                            Réception et suivi : onglet Pièces en commande (le nº de la boîte se cherche aussi dans la Recherche rapide).
                           </p>
                         </div>
                       );

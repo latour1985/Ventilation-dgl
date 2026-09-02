@@ -386,7 +386,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [] }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -442,6 +442,19 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // Statut du dépôt d'une tâche : bloque la planification tant que le
   // dépôt n'est pas payé (ou payé manuellement) — annulé après 24 h.
   const depotDe = (tacheId) => depots?.[tacheId];
+  // 🧾 Commandes rattachées à une tâche (2026-09-04) : bons de commande
+  // libres + pièces commandées — affichées dans les repères de la fiche.
+  const commandesPourTache = (tacheId) => {
+    if (!tacheId) return [];
+    return [
+      ...(achatsLibres || [])
+        .filter((a) => a.tacheId === tacheId)
+        .map((a) => ({ cle: `a-${a.id}`, numero: a.numeroBc || "—", fournisseur: a.fournisseurNom || "", statut: a.statut === "recu" ? "reçue ✓" : "commandée", texte: a.description || "" })),
+      ...(pieces || [])
+        .filter((p) => p.tacheRetourId === tacheId)
+        .map((p) => ({ cle: `p-${p.id}`, numero: p.numeroBc || "—", fournisseur: p.fournisseurNom || "", statut: p.statut || "", texte: p.pieceRequise || "" })),
+    ];
+  };
   // 📧 RENVOYER LA DEMANDE DE DÉPÔT (2026-08-29) — la MÊME facture
   // QuickBooks repart (route /send par identifiant : jamais une
   // nouvelle). Destinataire : le prospect s'il y en a un, sinon le
@@ -4711,6 +4724,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           travailFait={travailTermine(tacheDetailOuverte.tache, tacheDetailOuverte.employe)}
           techniciensSurTache={techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes)}
           depot={depotDe(tacheDetailOuverte.tache.id) || null}
+          commandes={commandesPourTache(tacheDetailOuverte.tache.id)}
           facturables={facturablesAssignations}
           onBasculerFacturable={
             lectureSeule
@@ -4854,6 +4868,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           employes={employes}
           tache={tachesAttente.find((t) => t.id === tacheEnEditionId)}
           clients={clients}
+          commandes={commandesPourTache(tacheEnEditionId)}
           onFermer={() => setTacheEnEditionId(null)}
           onEnregistrer={(champs) => enregistrerEditionRapide(tacheEnEditionId, champs)}
           annulation={contexteAnnulation(tachesAttente.find((t) => t.id === tacheEnEditionId))}
