@@ -155,20 +155,29 @@ export async function POST(request) {
 
     // Une ligne SANS montant devient une ligne de description ; les
     // autres restent des lignes de vente normales.
-    const ligneQbo = (l, texteSeulement) =>
-      l.montant === 0 && !texteSeulement
-        ? { DetailType: "DescriptionOnly", Description: l.description, DescriptionLineDetail: {} }
-        : {
-            DetailType: "SalesItemLineDetail",
-            Amount: l.montant,
-            Description: l.description,
-            SalesItemLineDetail: {
-              ItemRef: { value: itemId },
-              Qty: 1,
-              UnitPrice: l.montant,
-              ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
-            },
-          };
+    // 🔢 QUANTITÉ × PRIX UNITAIRE (2026-09-04, demande du propriétaire) :
+    // une ligne peut porter sa quantité et son prix unitaire — la
+    // colonne « Qté » de QuickBooks devient vraie (« 5 × 12,50 $ »).
+    // Sans quantité : 1 × montant, comme avant.
+    const ligneQbo = (l, texteSeulement) => {
+      if (l.montant === 0 && !texteSeulement) {
+        return { DetailType: "DescriptionOnly", Description: l.description, DescriptionLineDetail: {} };
+      }
+      const qte = Number(l.quantite) > 0 ? Number(l.quantite) : 1;
+      const prixUnitaire =
+        Number(l.prixUnitaire) > 0 ? Number(l.prixUnitaire) : Math.round(((Number(l.montant) || 0) / qte) * 10000) / 10000;
+      return {
+        DetailType: "SalesItemLineDetail",
+        Amount: l.montant,
+        Description: l.description,
+        SalesItemLineDetail: {
+          ItemRef: { value: itemId },
+          Qty: qte,
+          UnitPrice: prixUnitaire,
+          ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
+        },
+      };
+    };
 
     const corpsFacture = async (texteSeulement, sansLienEstimate = false) => ({
       // 🔗 LIEN VERS L'ESTIMATE (2026-08-30, GO du propriétaire) : une

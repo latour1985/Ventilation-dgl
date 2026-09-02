@@ -822,12 +822,41 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                     </button>
                   )}
                 </div>
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <span className="text-xs text-slate-400">Prix ($)</span>
+                {/* 🔢 QTÉ × PRIX UNITAIRE (2026-09-04, demande du
+                    propriétaire) : remplir le prix unitaire fait
+                    calculer le total tout seul (« 5 × 12,50 = 62,50 »)
+                    et la quantité voyage jusqu'à la colonne Qté de
+                    QuickBooks. Prix unitaire vide = mode simple, le
+                    Prix se tape directement comme avant. */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-slate-400">Qté</span>
+                  <input
+                    type="number" min={0} step="0.01" value={it.quantite ?? 1}
+                    onChange={(e) => {
+                      const q = parseFloat(e.target.value) || 0;
+                      const pu = parseFloat(it.prixUnitaire) || 0;
+                      majItem(it.id, { quantite: q, ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100 } : {}) });
+                    }}
+                    className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
+                  />
+                  <span className="text-[11px] text-slate-400">× Prix unitaire ($)</span>
+                  <input
+                    type="number" min={0} step="0.01" value={it.prixUnitaire ?? ""}
+                    placeholder="—"
+                    onChange={(e) => {
+                      const pu = parseFloat(e.target.value) || 0;
+                      const q = Number(it.quantite) > 0 ? Number(it.quantite) : 1;
+                      majItem(it.id, { prixUnitaire: e.target.value === "" ? "" : pu, ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100, quantite: q } : {}) });
+                    }}
+                    className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
+                  />
+                  <span className="text-[11px] text-slate-400">= Prix ($)</span>
                   <input
                     type="number" min={0} step="0.01" value={it.prix}
+                    readOnly={parseFloat(it.prixUnitaire) > 0}
+                    title={parseFloat(it.prixUnitaire) > 0 ? "Calculé : quantité × prix unitaire (vide le prix unitaire pour taper le total à la main)" : ""}
                     onChange={(e) => majItem(it.id, { prix: parseFloat(e.target.value) || 0 })}
-                    className="w-28 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm font-bold tabular-nums"
+                    className={`w-28 rounded-lg border px-2 py-1 text-right text-sm font-bold tabular-nums ${parseFloat(it.prixUnitaire) > 0 ? "border-slate-200 bg-slate-50 text-slate-600" : "border-slate-300"}`}
                   />
                 </div>
               </div>
@@ -2487,6 +2516,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         return details.map((l) => ({
           description: [b.date, l.description].filter(Boolean).join(" — "),
           montant: parseFloat(l.prix) || 0,
+          quantite: l.quantite,
+          prixUnitaire: l.prixUnitaire,
         }));
       }
       return [{ description: [b.date, b.projet || "Travaux"].filter(Boolean).join(" — "), montant: reste }];
@@ -2575,7 +2606,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // Les lignes réelles de la révision (déductions incluses) — sinon le
     // montant global du bon.
     const lignes = b.lignesNonListees?.length
-      ? b.lignesNonListees.map((l) => ({ description: l.description, montant: parseFloat(l.prix) || 0 }))
+      ? b.lignesNonListees.map((l) => ({ description: l.description, montant: parseFloat(l.prix) || 0, quantite: l.quantite, prixUnitaire: l.prixUnitaire }))
       : [{ description: b.projet || "Travaux", montant: Number(b.montant) || 0 }];
     const r = await creerFactureQbo({
       clientId: fiche?.id || null,
