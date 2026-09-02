@@ -5072,3 +5072,33 @@ end; $$;
 
 -- Verification : un appel avec un jeton bidon passe sans erreur.
 select noter_consultation_devis('jeton-inexistant-test');
+
+-- ============================================================
+-- 126 - INVENTAIRE COURANT (2026-09-04)
+-- ============================================================
+-- Demande du proprietaire : la liste vivante de ce qui dort a
+-- l'atelier — nom, quantite, unite, emplacement. Cloisonnee par
+-- entreprise (meme patron que factures_maison).
+create table if not exists inventaire_articles (
+  id            text primary key,
+  nom           text not null,
+  quantite      numeric not null default 0,
+  unite         text,
+  emplacement   text,
+  updated_at    timestamptz not null default now(),
+  created_at    timestamptz not null default now(),
+  entreprise_id text not null default 'dgl'
+);
+alter table inventaire_articles enable row level security;
+drop policy if exists "iso_inventaire" on inventaire_articles;
+create policy "iso_inventaire" on inventaire_articles
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton())
+  with check (entreprise_id = public.entreprise_du_jeton());
+drop trigger if exists trg_entreprise_inventaire on inventaire_articles;
+create trigger trg_entreprise_inventaire before insert on inventaire_articles
+  for each row execute function public.poser_entreprise_id();
+create index if not exists idx_inventaire_entreprise on inventaire_articles (entreprise_id);
+
+-- Verification : la table existe et la RLS est active.
+select relname, relrowsecurity from pg_class where relname = 'inventaire_articles';

@@ -1048,8 +1048,27 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const mois = joursDuMois(jourAffiche);
   const joursAffiches = vue === "semaine" ? semaine : vue === "mois" ? mois : [];
 
-  const reculer = () => setJourAffiche(vue === "mois" ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() - 1, 1) : ajouterJours(jourAffiche, vue === "semaine" ? -7 : -1));
-  const avancer = () => setJourAffiche(vue === "mois" ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() + 1, 1) : ajouterJours(jourAffiche, vue === "semaine" ? 7 : 1));
+  // 📅 EN VUE SEMAINE, LE CURSEUR ATTERRIT SUR LE LUNDI (2026-09-04,
+  // retour du propriétaire : « quand on bouge les semaines on arrive au
+  // mercredi ») — la grille montrait la bonne semaine mais l'en-tête
+  // gardait le jour de départ. Même formule de lundi que la grille.
+  const lundiDe = (d) => ajouterJours(d, -d.getDay() + 1);
+  const reculer = () =>
+    setJourAffiche(
+      vue === "mois"
+        ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() - 1, 1)
+        : vue === "semaine"
+          ? lundiDe(ajouterJours(jourAffiche, -7))
+          : ajouterJours(jourAffiche, -1)
+    );
+  const avancer = () =>
+    setJourAffiche(
+      vue === "mois"
+        ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() + 1, 1)
+        : vue === "semaine"
+          ? lundiDe(ajouterJours(jourAffiche, 7))
+          : ajouterJours(jourAffiche, 1)
+    );
 
   const majDureeTache = (id, champs) => {
     setTachesAttente((prev) => prev.map((t) => (t.id === id ? { ...t, ...champs } : t)));

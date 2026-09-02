@@ -16,6 +16,7 @@ import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { ZONES_DEPOTS } from "@/lib/supabase/prixDepots";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
+import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
 import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, SelecteurCibleAchat, Button, libelleAdresse, todayISO } from "./partage";
 
@@ -585,6 +586,10 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
         ajouterJournal={ajouterJournal}
         peutModifier={peutCommander}
       />
+
+      {/* 📦 INVENTAIRE COURANT (2026-09-04, demande du propriétaire) —
+          la liste vivante de l'atelier, à côté des bons de commande. */}
+      <SectionInventaire ajouterJournal={ajouterJournal} peutModifier={peutCommander} nomUtilisateur={nomUtilisateur} />
 
       {/* ➕ BON DE COMMANDE LIBRE — « 4 rouleaux de tape » : pas de tâche,
           pas de pièce client. Attribué à un PROJET = entre dans ses coûts
@@ -1877,6 +1882,139 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
 // en deux clics (le répertoire seulement — les BC existants gardent
 // le nom du fournisseur, rien d'historique ne casse).
 // ============================================================
+// ============================================================
+// 📦 INVENTAIRE COURANT (2026-09-04, demande du propriétaire — étage 1)
+// ------------------------------------------------------------
+// Nom, quantité, unité, emplacement — ajustement en un geste (+ / − /
+// saisie directe), recherche, et CHAQUE mouvement au journal (« qui a
+// bougé quoi », la règle maison). Repliée par défaut, comme les
+// fournisseurs. Table inventaire_articles (snippet 126), cloisonnée
+// par entreprise. Les automatismes (réception d'un BC → stock, stock
+// utilisé → décrément, seuil minimum) viendront UN PAR UN sur demande.
+// ============================================================
+function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
+  const [ouvert, setOuvert] = useState(false);
+  const [articles, setArticles] = useState([]);
+  const [charge, setCharge] = useState(false);
+  const [filtre, setFiltre] = useState("");
+  const [nouveau, setNouveau] = useState(null); // { nom, quantite, unite, emplacement }
+  useEffect(() => {
+    listerInventaire().then((l) => { setArticles(l); setCharge(true); }).catch(() => setCharge(true));
+  }, []);
+  const persister = (a, texteJournal) => {
+    setArticles((prev) => {
+      const existe = prev.some((x) => x.id === a.id);
+      const liste = existe ? prev.map((x) => (x.id === a.id ? a : x)) : [...prev, a];
+      return liste.slice().sort((x, y) => (x.nom || "").localeCompare(y.nom || "", "fr"));
+    });
+    sauvegarderArticleInventaire(a)
+      .then(() => texteJournal && ajouterJournal?.(texteJournal))
+      .catch(() => ajouterJournal?.(`⚠️ Inventaire : « ${a.nom} » affiché mais NON enregistré — vérifie la connexion.`));
+  };
+  const ajuster = (a, delta) => {
+    const avant = Number(a.quantite) || 0;
+    const apres = Math.max(0, Math.round((avant + delta) * 100) / 100);
+    if (apres === avant) return;
+    persister({ ...a, quantite: apres }, `📦 Inventaire — ${a.nom} : ${avant} → ${apres} ${a.unite || ""} — par ${nomUtilisateur || "bureau"}`);
+  };
+  const f = filtre.trim().toLowerCase();
+  const visibles = articles.filter((a) => !f || `${a.nom} ${a.emplacement}`.toLowerCase().includes(f));
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+      <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+            📦 Inventaire courant <span className="text-slate-400">({articles.length})</span>
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-400">Ce qui dort à l&apos;atelier — quantités ajustables, chaque mouvement au journal</p>
+        </div>
+        <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${ouvert ? "rotate-180" : ""}`} />
+      </button>
+      {ouvert && (
+        <div className="mt-2 space-y-1.5">
+          <div className="flex gap-1.5">
+            <input
+              value={filtre}
+              onChange={(e) => setFiltre(e.target.value)}
+              placeholder="Filtrer — nom ou emplacement…"
+              className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+            {peutModifier && !nouveau && (
+              <Button variant="outline" onClick={() => setNouveau({ nom: "", quantite: "", unite: "", emplacement: "" })} className="min-h-0 shrink-0 py-1.5 text-xs">
+                ➕ Article
+              </Button>
+            )}
+          </div>
+          {nouveau && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed border-slate-300 p-2">
+              <input value={nouveau.nom} onChange={(e) => setNouveau((p) => ({ ...p, nom: e.target.value }))} placeholder="Nom de l'article *" className="min-w-[160px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+              <InputNombreDecimal valeur={nouveau.quantite === "" ? 0 : Number(nouveau.quantite)} onChange={(v) => setNouveau((p) => ({ ...p, quantite: v }))} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-xs tabular-nums" />
+              <input value={nouveau.unite} onChange={(e) => setNouveau((p) => ({ ...p, unite: e.target.value }))} placeholder="unité (pi, un…)" className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+              <input value={nouveau.emplacement} onChange={(e) => setNouveau((p) => ({ ...p, emplacement: e.target.value }))} placeholder="emplacement (étagère B…)" className="min-w-[130px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+              <Button
+                disabled={!nouveau.nom.trim()}
+                onClick={() => {
+                  const a = { id: `inv-${Date.now()}`, nom: nouveau.nom.trim(), quantite: Number(nouveau.quantite) || 0, unite: nouveau.unite.trim(), emplacement: nouveau.emplacement.trim() };
+                  persister(a, `📦 Inventaire — article ajouté : ${a.nom} (${a.quantite} ${a.unite || ""}) — par ${nomUtilisateur || "bureau"}`);
+                  setNouveau(null);
+                }}
+                className="min-h-0 shrink-0 py-1.5 text-xs"
+              >
+                Ajouter
+              </Button>
+              <Button variant="outline" onClick={() => setNouveau(null)} className="min-h-0 shrink-0 py-1.5 text-xs">Annuler</Button>
+            </div>
+          )}
+          {visibles.map((a) => (
+            <div key={a.id} className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1.5 text-xs">
+              <span className="min-w-0 flex-1 font-semibold text-slate-800">
+                {a.nom}
+                {a.emplacement && <span className="ml-1.5 font-normal text-slate-400">📍 {a.emplacement}</span>}
+              </span>
+              {peutModifier && (
+                <button onClick={() => ajuster(a, -1)} className="h-7 w-7 rounded-lg border border-slate-300 font-bold text-slate-600 active:scale-95">−</button>
+              )}
+              <InputNombreDecimal
+                valeur={a.quantite}
+                onChange={(v) => {
+                  if (!peutModifier) return;
+                  const apres = Math.max(0, Number(v) || 0);
+                  persister({ ...a, quantite: apres }, `📦 Inventaire — ${a.nom} : ${a.quantite} → ${apres} ${a.unite || ""} — par ${nomUtilisateur || "bureau"}`);
+                }}
+                disabled={!peutModifier}
+                className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-right font-bold tabular-nums"
+              />
+              {peutModifier && (
+                <button onClick={() => ajuster(a, 1)} className="h-7 w-7 rounded-lg border border-slate-300 font-bold text-slate-600 active:scale-95">+</button>
+              )}
+              <span className="w-12 text-[10px] text-slate-400">{a.unite || ""}</span>
+              {peutModifier && (
+                <button
+                  onClick={() => {
+                    setArticles((prev) => prev.filter((x) => x.id !== a.id));
+                    supprimerArticleInventaire(a.id)
+                      .then(() => ajouterJournal?.(`📦 Inventaire — article retiré : ${a.nom} — par ${nomUtilisateur || "bureau"}`))
+                      .catch(() => ajouterJournal?.(`⚠️ Inventaire : retrait de « ${a.nom} » NON enregistré — il reviendra au rechargement.`));
+                  }}
+                  title="Retirer cet article de l'inventaire"
+                  className="text-slate-300 hover:text-red-500"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          ))}
+          {charge && visibles.length === 0 && (
+            <p className="py-2 text-center text-[11px] text-slate-400">
+              {articles.length === 0 ? "Inventaire vide — ajoute ton premier article avec « ➕ Article »." : "Aucun article ne correspond au filtre."}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SectionFournisseurs({ fournisseurs, setFournisseurs, ajouterJournal, peutModifier }) {
   const [ouvert, setOuvert] = useState(false);
   const [recherche, setRecherche] = useState("");
