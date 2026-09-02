@@ -5006,3 +5006,69 @@ alter table entreprises add column if not exists courriel_copie_bc text;
 -- Verification : la colonne existe.
 select column_name from information_schema.columns
  where table_name = 'entreprises' and column_name = 'courriel_copie_bc';
+
+-- ============================================================
+-- 125 - REPARATION DU SUIVI 👁️ (2026-09-04)
+-- ============================================================
+-- Vecu : les fonctions du snippet 123 ecrivaient au journal avec des
+-- colonnes qui N'EXISTENT PAS (par_nom, date_locale, heure_locale — la
+-- table n'a que texte/created_by/entreprise_id). L'erreur annulait TOUTE
+-- la fonction : zero consultation n'a jamais ete enregistree. Le
+-- « par ... » vit dans le texte, comme partout ailleurs au journal.
+
+create or replace function noter_consultation_devis(p_jeton text)
+returns void language plpgsql security definer as $$
+declare l_devis devis_app;
+begin
+  select * into l_devis from devis_app where jeton_public = p_jeton and version_active limit 1;
+  if l_devis.id is null then return; end if;
+  update devis_app set
+    consulte_le = coalesce(consulte_le, now()),
+    consultations = consultations + 1,
+    derniere_consultation_le = now()
+  where entreprise_id = l_devis.entreprise_id and id = l_devis.id;
+  if l_devis.consulte_le is null then
+    insert into journal_activite (texte, entreprise_id)
+    values ('👁️ Le devis ' || l_devis.numero || ' a été CONSULTÉ par le client (' || coalesce(l_devis.client_nom, '?') || '). — par page publique',
+            l_devis.entreprise_id);
+  end if;
+end; $$;
+
+create or replace function noter_consultation_facture_maison(p_jeton text)
+returns void language plpgsql security definer as $$
+declare l_f factures_maison;
+begin
+  select * into l_f from factures_maison where jeton_public = p_jeton limit 1;
+  if l_f.id is null then return; end if;
+  update factures_maison set
+    consulte_le = coalesce(consulte_le, now()),
+    consultations = consultations + 1,
+    derniere_consultation_le = now()
+  where id = l_f.id;
+  if l_f.consulte_le is null then
+    insert into journal_activite (texte, entreprise_id)
+    values ('👁️ La ' || case when l_f.type = 'credit' then 'note de crédit ' else 'facture ' end || l_f.numero || ' a été CONSULTÉE par le client (' || coalesce(l_f.client_nom, '?') || '). — par page publique',
+            l_f.entreprise_id);
+  end if;
+end; $$;
+
+create or replace function noter_consultation_bon(p_jeton text)
+returns void language plpgsql security definer as $$
+declare l_b bons_travail;
+begin
+  select * into l_b from bons_travail where jeton_public = p_jeton limit 1;
+  if l_b.id is null then return; end if;
+  update bons_travail set
+    consulte_le = coalesce(consulte_le, now()),
+    consultations = consultations + 1,
+    derniere_consultation_le = now()
+  where id = l_b.id;
+  if l_b.consulte_le is null then
+    insert into journal_activite (texte, entreprise_id)
+    values ('👁️ Le bon de travail « ' || coalesce(l_b.titre, '?') || ' » a été CONSULTÉ par le client (' || coalesce(l_b.client_nom, '?') || '). — par page publique',
+            l_b.entreprise_id);
+  end if;
+end; $$;
+
+-- Verification : un appel avec un jeton bidon passe sans erreur.
+select noter_consultation_devis('jeton-inexistant-test');

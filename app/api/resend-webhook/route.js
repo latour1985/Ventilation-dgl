@@ -107,14 +107,16 @@ export async function POST(request) {
       );
     if (trouvee) entrepriseId = trouvee.id;
 
-    const maintenant = new Date();
-    await admin.from("journal_activite").insert({
-      texte: `📮 Le courriel à ${destinataires || "?"} ${libelle}${sujet ? ` — « ${sujet} »` : ""}. Vérifie l'adresse du client et renvoie le document au besoin.`,
-      par_nom: "suivi de livraison",
-      date_locale: `${maintenant.getFullYear()}-${String(maintenant.getMonth() + 1).padStart(2, "0")}-${String(maintenant.getDate()).padStart(2, "0")}`,
-      heure_locale: `${String(maintenant.getHours()).padStart(2, "0")}:${String(maintenant.getMinutes()).padStart(2, "0")}`,
+    // ⚠️ COLONNES RÉELLES seulement (diagnostic 2026-09-04, vécu : la
+    // table n'a QUE texte/created_by/entreprise_id — les colonnes
+    // par_nom/date_locale/heure_locale n'existent pas, l'insertion
+    // échouait en silence et AUCUN rebond n'atteignait le journal).
+    // Le « par … » vit DANS le texte, comme partout ailleurs.
+    const { error: erreurJournal } = await admin.from("journal_activite").insert({
+      texte: `📮 Le courriel à ${destinataires || "?"} ${libelle}${sujet ? ` — « ${sujet} »` : ""}. Vérifie l'adresse du client et renvoie le document au besoin. — par suivi de livraison`,
       entreprise_id: entrepriseId,
     });
+    if (erreurJournal) throw erreurJournal;
   } catch (e) {
     // Le journal est un bonus — un échec ici ne fait jamais échouer le
     // webhook (Resend réessaierait en boucle pour rien). Mais l'échec
