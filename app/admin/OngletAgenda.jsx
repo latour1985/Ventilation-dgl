@@ -1261,10 +1261,16 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         (d) => d.id === nouveauDevisId && (!nouveauClientId || !d.clientId || d.clientId === nouveauClientId)
       );
       // « Travaux avec devis » accepte AUSSI un numéro tapé à la main
-      // (devis fait hors de l'app — retour de tests 2026-08-17). Le
-      // contrat d'entretien, lui, exige un vrai contrat de la liste.
-      if (!devis && nouveauType === "devis" && numeroDevisExistant.trim()) {
+      // (devis fait hors de l'app — retour de tests 2026-08-17). Depuis
+      // le 2026-09-04 (demande du propriétaire), l'ENTRETIEN aussi : les
+      // ANCIENS contrats (papier ou QuickBooks, d'avant Fluxya) n'ont
+      // aucun devis dans l'app — leur numéro se tape à la main et la
+      // FRÉQUENCE se choisit dans le formulaire (le sélecteur y est).
+      if (!devis && numeroDevisExistant.trim()) {
         nouvelle.devisNumero = numeroDevisExistant.trim();
+        if (nouveauType === "entretien_contrat") {
+          nouvelle.frequenceFacturationAnnuelle = nouvelleFrequence;
+        }
       } else if (!devis) {
         return; // un devis/contrat doit être sélectionné pour ces types
       }
@@ -2957,7 +2963,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   )}
                   {nouveauClientId && devisListe.filter((d) => d.clientId === nouveauClientId).length === 0 && (
                     <p className="mt-1 text-[10px] text-amber-600">
-                      Aucun devis au dossier de ce client{nouveauType !== "entretien_contrat" ? " — entre un numéro manuellement ci-dessous, ou crée le devis dans l'onglet Devis" : " — crée d'abord le contrat dans l'onglet Devis"}.
+                      Aucun devis au dossier de ce client{nouveauType !== "entretien_contrat" ? " — entre un numéro manuellement ci-dessous, ou crée le devis dans l'onglet Devis" : " — entre le Nº de l'ancien contrat ci-dessous, ou crée le contrat dans l'onglet Devis"}.
                     </p>
                   )}
                   {devisListe.length === 0 && (
@@ -2984,13 +2990,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               {/* Nº DE DEVIS EXISTANT (transition QuickBooks) — pour les
                   jobs vendues avec un devis d'AVANT l'application. Offert
                   AUSSI pour « Travaux avec devis » (retour de tests
-                  2026-08-17) : un devis fait hors de l'app se tape à la
-                  main quand il n'est pas dans la liste. Pas pour les
-                  contrats d'entretien (la fréquence vient du contrat). */}
-              {nouveauType !== "entretien_contrat" && (
+                  2026-08-17) et, depuis le 2026-09-04 (demande du
+                  propriétaire), pour les ENTRETIENS : les anciens
+                  contrats n'ont aucun devis dans l'app — leur numéro se
+                  tape ici et la fréquence se choisit juste au-dessus. */}
+              {(
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                    {nouveauType === "devis" ? "…ou entre un Nº de devis manuellement (devis fait hors de l'app)" : "Nº de devis existant (QuickBooks)"} <span className="font-normal normal-case text-slate-400">— optionnel</span>
+                    {nouveauType === "devis" ? "…ou entre un Nº de devis manuellement (devis fait hors de l'app)" : nouveauType === "entretien_contrat" ? "…ou entre le Nº de l'ancien contrat / devis (d'avant Fluxya)" : "Nº de devis existant (QuickBooks)"} <span className="font-normal normal-case text-slate-400">— optionnel</span>
                   </label>
                   <div className="flex gap-1.5">
                     <input
@@ -3496,7 +3503,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       // le prix de base et la règle du temps inclus.
                       if (nouveauType === "appel_service" && !zoneAppelChoix) raisons.push("la zone de tarification de l'appel");
                       if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un devis (de la liste, ou un numéro tapé à la main)");
-                      if (nouveauType === "entretien_contrat" && !nouveauDevisId) raisons.push("un contrat de la liste");
+                      if (nouveauType === "entretien_contrat" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un contrat (de la liste, ou le Nº d'un ancien contrat tapé à la main)");
                       if (depotRequis && !(parseFloat(depotMontant) > 0)) raisons.push("un montant de dépôt");
                       // « Nouveau contact » choisi mais incomplet : on ne
                       // crée pas une tâche avec un contact fantôme.
