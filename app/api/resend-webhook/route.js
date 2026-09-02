@@ -74,8 +74,13 @@ export async function POST(request) {
   }
   const libelle = LIBELLES[evenement?.type];
   // Les autres événements (delivered, opened…) ne nous intéressent pas :
-  // on répond 200 pour que Resend n'insiste pas.
-  if (!libelle) return Response.json({ ignore: true });
+  // on répond 200 pour que Resend n'insiste pas. Le type est journalisé
+  // côté serveur (diagnostic 2026-09-04 : un 200 muet ne disait pas si
+  // l'événement était ignoré ou si l'écriture échouait).
+  if (!libelle) {
+    console.log("resend-webhook: événement ignoré —", evenement?.type || "(sans type)");
+    return Response.json({ ignore: true });
+  }
 
   const donnees = evenement?.data || {};
   const destinataires = (Array.isArray(donnees.to) ? donnees.to : [donnees.to]).filter(Boolean).join(", ");
@@ -110,9 +115,11 @@ export async function POST(request) {
       heure_locale: `${String(maintenant.getHours()).padStart(2, "0")}:${String(maintenant.getMinutes()).padStart(2, "0")}`,
       entreprise_id: entrepriseId,
     });
-  } catch {
+  } catch (e) {
     // Le journal est un bonus — un échec ici ne fait jamais échouer le
-    // webhook (Resend réessaierait en boucle pour rien).
+    // webhook (Resend réessaierait en boucle pour rien). Mais l'échec
+    // se VOIT au moins dans les journaux serveur.
+    console.error("resend-webhook: écriture au journal échouée —", e?.message || e);
   }
   return Response.json({ note: true });
 }
