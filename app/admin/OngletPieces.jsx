@@ -176,6 +176,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // clique, parti (même vrai service que les pièces).
   const [offreEnvoiBc, setOffreEnvoiBc] = useState(null); // { numero, fournisseur, description, coches }
   const [envoiBcLibreEnCours, setEnvoiBcLibreEnCours] = useState(false);
+  const [envoiBcAjout, setEnvoiBcAjout] = useState(""); // ➕ adresse différente
   const ficheFournisseurParNom = (nom) =>
     (fournisseurs || []).find((f) => (f.nom || "").trim().toLowerCase() === String(nom || "").trim().toLowerCase()) || null;
   const envoyerBcLibre = async () => {
@@ -623,6 +624,38 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     {c.label && <span className="text-[10px] text-slate-400">({c.label})</span>}
                   </label>
                 ))}
+                {(offreEnvoiBc.courriels || []).length === 0 && (
+                  <p className="text-[10px] text-slate-500">Ce fournisseur n&apos;a aucun courriel au répertoire — ajoute une adresse ci-dessous.</p>
+                )}
+              </div>
+              {/* ➕ ADRESSE DIFFÉRENTE (2026-09-04) : envoyer à quelqu'un
+                  d'autre que les adresses du répertoire — l'adresse
+                  s'ajoute à la liste, cochée, pour CET envoi. */}
+              <div className="mt-1.5 flex gap-1.5">
+                <input
+                  value={envoiBcAjout}
+                  onChange={(e) => setEnvoiBcAjout(e.target.value)}
+                  placeholder="Autre adresse — ex. jean@descair.ca"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px]"
+                />
+                <Button
+                  variant="outline"
+                  disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(envoiBcAjout.trim())}
+                  onClick={() => {
+                    const email = envoiBcAjout.trim();
+                    setOffreEnvoiBc((p) => ({
+                      ...p,
+                      courriels: p.courriels.some((c) => c.email.toLowerCase() === email.toLowerCase())
+                        ? p.courriels
+                        : [...p.courriels, { id: `ajout-${Date.now()}`, label: "ajoutée", email }],
+                      coches: p.coches.includes(email) ? p.coches : [...p.coches, email],
+                    }));
+                    setEnvoiBcAjout("");
+                  }}
+                  className="min-h-0 shrink-0 py-1 text-[11px]"
+                >
+                  ➕ Ajouter
+                </Button>
               </div>
               {/* 👁️ APERÇU MODIFIABLE AVANT L'ENVOI (2026-09-04, demande
                   du propriétaire : « voir la version du bon avant de
@@ -890,11 +923,11 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   était en lecture seule : impossible de corriger un
                   montant, de re-rattacher ou de supprimer un test. */}
               {(achatsLibres || []).slice((Math.min(pageBc, Math.max(1, Math.ceil((achatsLibres || []).length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageBc, Math.max(1, Math.ceil((achatsLibres || []).length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((a2) => (
+                <div key={a2.id} className="flex items-center gap-1">
                 <button
-                  key={a2.id}
                   onClick={() => ouvrirBc(a2)}
                   title="Ouvrir la fiche — modifier, rattacher, supprimer"
-                  className="flex w-full items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-[11px] text-slate-500 hover:bg-slate-50"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-1.5 py-1 text-left text-[11px] text-slate-500 hover:bg-slate-50"
                 >
                   <span className="min-w-0 truncate">
                     <span className="font-bold text-slate-700">{a2.numeroBc}</span> · {a2.description}
@@ -910,6 +943,29 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   </span>
                   <span className="shrink-0 tabular-nums">{a2.montantHT.toFixed(2)} $</span>
                 </button>
+                {/* 📧 RENVOYER (2026-09-04, demande du propriétaire) : le
+                    même panneau d'envoi (aperçu modifiable, choix des
+                    adresses, adresse différente possible) — pour un bon
+                    déjà créé, autant de fois que nécessaire. */}
+                {peutCommander && (
+                  <button
+                    onClick={() => {
+                      const fiche = ficheFournisseurParNom(a2.fournisseurNom);
+                      setOffreEnvoiBc({
+                        numero: a2.numeroBc || "(sans nº)",
+                        fournisseur: a2.fournisseurNom || "le fournisseur",
+                        description: a2.description || "",
+                        courriels: fiche?.courriels || [],
+                        coches: (fiche?.courriels || []).filter((c) => c.defaut).map((c) => c.email),
+                      });
+                    }}
+                    title="Renvoyer ce bon de commande par courriel"
+                    className="shrink-0 rounded-lg border border-slate-200 px-1.5 py-1 text-[10px] font-bold text-slate-500 hover:border-blue-300 hover:text-blue-700"
+                  >
+                    📧
+                  </button>
+                )}
+                </div>
               ))}
               <div ref={refListeBc}>
                 <BarrePagination total={(achatsLibres || []).length} page={pageBc} onPage={setPageBc} refHaut={refListeBc} libelle="bons de commande" />
