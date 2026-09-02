@@ -1870,7 +1870,12 @@ function AppAdmin() {
     // Le TEXTE COMPLET (les dix clauses) suit lui aussi : au long dans
     // notre courriel, et par le lien /conditions sur la facture
     // QuickBooks — son message est trop court pour dix clauses.
-    const lienConditions = typeof window !== "undefined" ? `${window.location.origin}/conditions` : null;
+    // 🏢 « ?e=<entreprise> » : la page publique affiche le nom et le
+    // LOGO de la bonne compagnie (2026-09-04).
+    const lienConditions =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/conditions?e=${encodeURIComponent(configEntreprise?.id || "dgl")}`
+        : null;
     const conditionsDepot = conditionsDepotAppel(configEntreprise, lienConditions);
     // 📝 L'OBJET DE LA VISITE — « pourquoi on vient » — sur la facture
     // ET dans le courriel. « Dépôt — appel de service » tout court

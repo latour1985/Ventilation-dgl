@@ -208,7 +208,9 @@ export async function POST(request) {
         // lue de la demande : fluxya.app en production, localhost en dev.
         let lienConditions = "";
         try {
-          lienConditions = `Termes et conditions : ${new URL(request.url).origin}/conditions`;
+          // « ?e=<entreprise> » : la page montre le nom et le logo de la
+          // bonne compagnie (2026-09-04).
+          lienConditions = `Termes et conditions : ${new URL(request.url).origin}/conditions?e=${encodeURIComponent(entrepriseId)}`;
         } catch {
           lienConditions = "Termes et conditions disponibles sur demande.";
         }
