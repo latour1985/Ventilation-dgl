@@ -3331,12 +3331,24 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   <div className="mt-2 space-y-2">
                     <div>
                       <label className="mb-0.5 block text-[10px] font-bold text-amber-800">Montant du dépôt (HT $)</label>
-                      {!zoneAppelChoix && (
+                      {/* 💰 HORS APPEL DE SERVICE (2026-09-04, vécu : une
+                          visite de chantier avec dépôt réclamait une
+                          « zone » qui n'existe pas pour ce type) : le
+                          montant se tape librement — la zone n'appartient
+                          qu'aux appels. */}
+                      {nouveauType !== "appel_service" && (
+                        <InputNombreDecimal
+                          valeur={depotMontant || 0}
+                          onChange={(v) => setDepotMontant(String(v))}
+                          className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs"
+                        />
+                      )}
+                      {nouveauType === "appel_service" && !zoneAppelChoix && (
                         <p className="rounded-lg bg-white px-2 py-1.5 text-[10px] font-semibold text-amber-800">
                           Choisis d&apos;abord la <span className="font-bold">zone de tarification</span> ci-dessus — le montant du dépôt suivra tout seul.
                         </p>
                       )}
-                      {zoneAppelChoix && zoneAppelChoix !== "hors_zone" && (
+                      {nouveauType === "appel_service" && zoneAppelChoix && zoneAppelChoix !== "hors_zone" && (
                         <p className="rounded-lg bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
                           {/* Le MONTANT RÉEL du dépôt d'abord — il peut différer
                               du prix de zone (appel à 2 hommes appliqué). */}
@@ -3347,12 +3359,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                           )}
                         </p>
                       )}
-                      {zonesEffectives(prixDepots).every((z) => !(Number(prixDepots?.[z]) > 0)) && (
+                      {nouveauType === "appel_service" && zonesEffectives(prixDepots).every((z) => !(Number(prixDepots?.[z]) > 0)) && (
                         <p className="mt-1 text-[9px] text-amber-700">
                           Aucun prix de zone configuré — l&apos;Admin principal peut les définir dans Utilisateurs → « Liste de prix — dépôts ».
                         </p>
                       )}
-                      {zoneAppelChoix === "hors_zone" && (
+                      {nouveauType === "appel_service" && zoneAppelChoix === "hors_zone" && (
                         <InputNombreDecimal
                           valeur={depotMontant || 0}
                           onChange={(v) => setDepotMontant(String(v))}
@@ -3368,6 +3380,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                           moins camion). Un bouton l'applique — jamais en
                           douce. */}
                       {(() => {
+                        if (nouveauType !== "appel_service") return null; // le régime 2 hommes appartient aux appels
                         const nbFact =
                           (nouveauEmployeId ? 1 : 0) +
                           nouveauxEmployesEnPlus.filter((id) => id && id !== nouveauEmployeId && facturablesEnPlus[id] !== false).length;
