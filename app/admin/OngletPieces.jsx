@@ -122,7 +122,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "" });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true });
   // ✏️ FICHE D'UN BC (2026-08-26) — la ligne cliquée s'ouvre en fenêtre :
   // fournisseur, description, montant et RATTACHEMENT modifiables,
   // suppression en deux clics. `bcOuvert` = l'achat ; `bcEdit` = la
@@ -668,13 +668,41 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                 <option value="__autre__">Autre (taper le nom)…</option>
               </select>
               {bcLibre.fournisseurNom !== "" && !(fournisseurs || []).some((f) => f.nom === bcLibre.fournisseurNom) && (
-                <input
-                  autoFocus
-                  value={bcLibre.fournisseurNom.trim()}
-                  onChange={(e) => setBcLibre((f) => ({ ...f, fournisseurNom: e.target.value }))}
-                  placeholder="Nom du fournisseur"
-                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                />
+                <>
+                  <input
+                    autoFocus
+                    value={bcLibre.fournisseurNom.trim()}
+                    onChange={(e) => setBcLibre((f) => ({ ...f, fournisseurNom: e.target.value }))}
+                    placeholder="Nom du fournisseur"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                  {/* 📧 FOURNISSEUR HORS RÉPERTOIRE (2026-09-03, demande du
+                      propriétaire : « il n'y a pas de courriel où on peut
+                      envoyer chez un autre fournisseur ») — un courriel
+                      tapé ici permet d'ENVOYER le bon quand même, et le
+                      fournisseur s'enregistre au répertoire du même geste
+                      (décochable) pour la prochaine fois. */}
+                  <input
+                    value={bcLibre.courrielFournisseur}
+                    onChange={(e) => setBcLibre((f) => ({ ...f, courrielFournisseur: e.target.value }))}
+                    placeholder="Courriel du fournisseur (optionnel — pour envoyer le bon)"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                  {bcLibre.courrielFournisseur.trim() !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bcLibre.courrielFournisseur.trim()) && (
+                    <p className="text-[10px] text-red-500">Adresse invalide — le bon sera créé mais ne partira pas par courriel.</p>
+                  )}
+                  {/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bcLibre.courrielFournisseur.trim()) && (
+                    <label className="flex items-center gap-1.5 text-[10px] text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={bcLibre.enregistrerFournisseur}
+                        onChange={(e) => setBcLibre((f) => ({ ...f, enregistrerFournisseur: e.target.checked }))}
+                        className="h-3.5 w-3.5 accent-[#131B2E]"
+                      />
+                      Enregistrer ce fournisseur au répertoire (nom + courriel)
+                    </label>
+                  )}
+                </>
               )}
               {(fournisseurs || []).length === 0 && (
                 <p className="text-[10px] text-amber-700">
@@ -771,6 +799,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     // 📧 Le fournisseur est au répertoire avec des
                     // courriels ? On offre l'envoi direct du bon.
                     const fiche = ficheFournisseurParNom(bcLibre.fournisseurNom);
+                    const courrielTape = bcLibre.courrielFournisseur.trim();
+                    const courrielTapeValide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(courrielTape);
                     if (fiche && (fiche.courriels || []).length > 0) {
                       setOffreEnvoiBc({
                         numero,
@@ -779,8 +809,31 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         courriels: fiche.courriels,
                         coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
                       });
+                    } else if (!fiche && courrielTapeValide) {
+                      // 🏭 FOURNISSEUR HORS RÉPERTOIRE avec courriel tapé :
+                      // l'envoi s'offre pareil — et la fiche s'enregistre
+                      // au répertoire (si coché) pour la prochaine fois.
+                      const nomF = bcLibre.fournisseurNom.trim();
+                      if (bcLibre.enregistrerFournisseur && nomF) {
+                        const nouveauF = {
+                          id: `f-${Date.now()}`,
+                          nom: nomF,
+                          courriels: [{ id: `fc-${Date.now()}`, label: "Commande", email: courrielTape, defaut: true }],
+                        };
+                        setFournisseurs?.((prev) => [...(prev || []), nouveauF]);
+                        sauvegarderFournisseur(nouveauF)
+                          .then(() => ajouterJournal?.(`🏭 Fournisseur « ${nomF} » ajouté au répertoire (${courrielTape}).`))
+                          .catch(() => ajouterJournal?.(`⚠️ Fournisseur « ${nomF} » affiché mais NON enregistré au répertoire — réessaie.`));
+                      }
+                      setOffreEnvoiBc({
+                        numero,
+                        fournisseur: nomF || "fournisseur",
+                        description: descriptionFinale,
+                        courriels: [{ id: "libre", label: "Commande", email: courrielTape, defaut: true }],
+                        coches: [courrielTape],
+                      });
                     }
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "" });
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true });
                     setBcLibreOuvert(false);
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"
