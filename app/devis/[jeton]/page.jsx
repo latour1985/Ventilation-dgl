@@ -542,10 +542,13 @@ export default function PageDevisPublic({ params }) {
                   >
                     {prixPerimes ? "Demander une mise à jour" : "Demander une modification"}
                   </button>
+                  {/* Plus FONCÉ (2026-09-04, retour du propriétaire : le
+                      bouton se perdait dans le blanc) — lisible même
+                      désactivé, franchement rouge une fois le nom écrit. */}
                   <button
                     onClick={() => repondre("refuse")}
                     disabled={nom.trim().length < 3 || envoi === "envoi"}
-                    className="min-h-[44px] rounded-xl border border-slate-300 text-xs font-bold text-slate-500 disabled:opacity-40"
+                    className="min-h-[44px] rounded-xl border border-red-300 bg-red-50 text-xs font-bold text-red-700 disabled:border-slate-400 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100"
                   >
                     Refuser ce devis
                   </button>
