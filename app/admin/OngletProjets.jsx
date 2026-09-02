@@ -16,7 +16,7 @@ import { envoyerCourriel, gabaritBcSimple } from "@/lib/courriels";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { poserCopieBc } from "@/lib/supabase/entreprise";
-import { AutocompleteAdresse, Button, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
 import { lireEstimateQbo } from "@/lib/quickbooksClient";
 
 // Projets / chantiers au long cours — lient un client, des tâches de
@@ -1765,38 +1765,28 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
                     </p>
                   )}
                   <div className="mt-1.5 flex gap-1.5">
-                    <select
-                      value={choix}
-                      onChange={(e) => setAssignationManuelleId({ quickbooksId: t.quickbooksId, valeur: e.target.value })}
-                      className="flex-1 rounded-lg border border-slate-300 px-2 py-1 text-[11px]"
-                    >
-                      <option value="">Rattacher à…</option>
-                      {projets.length > 0 && (
-                        <optgroup label="🏗️ Projets">
-                          {projets.map((p) => <option key={p.id} value={`projet:${p.id}`}>{p.nom}</option>)}
-                        </optgroup>
-                      )}
-                      {jobsRattachables.length > 0 && (
-                        <optgroup label="🔧 Jobs (tâches)">
-                          {jobsRattachables.map((j) => (
-                            <option key={j.id} value={`tache:${j.id}`}>
-                              {j.libelle}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {(clients || []).length > 0 && (
-                        <optgroup label="👤 Clients (aucune job précise)">
-                          {(clients || []).map((c) => <option key={c.id} value={`client:${c.id}`}>{c.nom}</option>)}
-                        </optgroup>
-                      )}
-                    </select>
+                    {/* 🔎 RECHERCHE AU LIEU DU MENU DÉROULANT (2026-09-04,
+                        demande du propriétaire : « trop long de tout
+                        chercher en déroulant ») — le même sélecteur avec
+                        filtre que le bon de commande libre : on tape trois
+                        lettres du client, de la job ou du projet. */}
+                    <SelecteurCibleAchat
+                      valeur={choix}
+                      onChoisir={(v) => setAssignationManuelleId({ quickbooksId: t.quickbooksId, valeur: v })}
+                      taches={jobsRattachables.map((j) => ({ id: j.id, titre: j.libelle, clientNom: "" }))}
+                      clients={clients || []}
+                      projets={projets}
+                      placeholder="Rattacher à… — tape un client, une job ou un projet"
+                      texteVide="Aucun résultat — précise ou corrige le mot tapé."
+                      className="min-w-0 flex-1"
+                    />
                     <Button
                       variant="outline"
                       disabled={!choix}
                       onClick={() => {
-                        const [type, ...reste] = String(choix).split(":");
-                        onAssignerTransaction(t.quickbooksId, { type, id: reste.join(":") });
+                        const pref = String(choix).slice(0, 2);
+                        const type = pref === "p:" ? "projet" : pref === "t:" ? "tache" : "client";
+                        onAssignerTransaction(t.quickbooksId, { type, id: String(choix).slice(2) });
                         setAssignationManuelleId(null);
                       }}
                       className="min-h-0 px-2 py-1 text-[11px]"

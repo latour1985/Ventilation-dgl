@@ -328,7 +328,7 @@ export function BarrePagination({ total, page, onPage, refHaut = null, libelle =
 // groupées : Tâches (jobs) / Clients / Projets. La valeur garde le même
 // encodage qu'avant : "" | "t:id" | "c:id" | "p:id".
 // ============================================================
-export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = [], projets = [], libelleRepli = "", className = "" }) {
+export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = [], projets = [], libelleRepli = "", className = "", placeholder = "Achat général — ou tape un client, une tâche, un projet…", texteVide = "Aucun résultat — l'achat restera général (stock)." }) {
   const [ouvert, setOuvert] = useState(false);
   const [filtre, setFiltre] = useState("");
   const boiteRef = useRef(null);
@@ -404,13 +404,13 @@ export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = 
         value={filtre}
         onFocus={() => setOuvert(true)}
         onChange={(e) => { setFiltre(e.target.value); setOuvert(true); }}
-        placeholder="Achat général — ou tape un client, une tâche, un projet…"
+        placeholder={placeholder}
         className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
       />
       {ouvert && (
         <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
           {tachesVisibles.length === 0 && clientsVisibles.length === 0 && projetsVisibles.length === 0 ? (
-            <p className="px-2 py-2 text-center text-[11px] text-slate-400">Aucun résultat — l&apos;achat restera général (stock).</p>
+            <p className="px-2 py-2 text-center text-[11px] text-slate-400">{texteVide}</p>
           ) : (
             <>
               {groupe("Tâches (jobs)", tachesVisibles, (t) => `${t.clientNom ? `${t.clientNom} — ` : ""}${t.titre}`, "t")}
