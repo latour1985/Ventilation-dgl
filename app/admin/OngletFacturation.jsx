@@ -1861,8 +1861,20 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // cochées). Aucun filtre actif = tout s'affiche, comme avant.
   const [filtresActifs, setFiltresActifs] = useState([]);
   const basculerFiltre = (categorie) => {
-    setFiltresActifs((prev) => (prev.includes(categorie) ? prev.filter((c) => c !== categorie) : [...prev, categorie]));
+    setFiltresActifs((prev) => {
+      const active = !prev.includes(categorie);
+      // 📜 DÉFILER JUSQU'AUX CARTES (2026-09-04, vécu : « je clique sur
+      // Retirés et rien ne se passe ») — la liste filtrée vit PLUS BAS
+      // que l'écran (après le tableau À facturer et les factures sans
+      // chantier) : le filtre marchait, mais rien de visible ne
+      // bougeait. Activer un encadré amène maintenant l'œil dessus.
+      if (active) {
+        setTimeout(() => refListeFact.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      }
+      return active ? [...prev, categorie] : prev.filter((c) => c !== categorie);
+    });
   };
+  const refListeFact = useRef(null);
   // 🔎 RECHERCHE RAPIDE (2026-09-03, demande du propriétaire : « disons
   // qu'il y en a 500 dans Déjà facturés et qu'on veut aller revoir ») —
   // cherche dans le titre de la job, le client, le numéro de devis ET
@@ -1958,7 +1970,6 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // cartes de l'application s'empilaient sans fin. Changer de filtre
   // ramène page 1 ; la borne Math.min évite toute page vide.
   const [pageFact, setPageFact] = useState(1);
-  const refListeFact = useRef(null);
   useEffect(() => { setPageFact(1); }, [filtresActifs, rechercheFact]);
   const pageFactEff = Math.min(pageFact, Math.max(1, Math.ceil(bonsAffiches.length / ITEMS_PAR_PAGE)));
   const bonsPageines = bonsAffiches.slice((pageFactEff - 1) * ITEMS_PAR_PAGE, pageFactEff * ITEMS_PAR_PAGE);

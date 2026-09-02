@@ -486,7 +486,9 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
               />
               <span className="text-[10px] text-slate-400">min</span>
             </div>
-            <p className="mt-0.5 text-[9px] text-slate-400">Transport aller-retour depuis le 771 boul. Industriel + temps sur place.</p>
+            <p className="mt-0.5 text-[9px] text-slate-400">
+              Transport aller-retour depuis l&apos;adresse de l&apos;entreprise (Paramètres{configEnt?.adresse ? ` — ${configEnt.adresse}` : ""}) + temps sur place.
+            </p>
           </div>
           <div>
             <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Taux horaire VENDANT technicien</label>
