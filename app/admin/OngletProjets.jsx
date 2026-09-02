@@ -15,6 +15,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritBcSimple } from "@/lib/courriels";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
+import { poserCopieBc } from "@/lib/supabase/entreprise";
 import { AutocompleteAdresse, Button, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
 import { lireEstimateQbo } from "@/lib/quickbooksClient";
 
@@ -151,6 +152,15 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQu
         <div className="flex justify-between text-slate-500"><span>Coût main-d&apos;œuvre ({r.totalHeures} h, taux réels)</span><span className="tabular-nums">{r.coutMainOeuvre.toFixed(2)} $</span></div>
         {(r.coutCamion || 0) > 0 && (
           <div className="flex justify-between text-slate-500"><span>Coût camion (heures avec véhicule)</span><span className="tabular-nums">{r.coutCamion.toFixed(2)} $</span></div>
+        )}
+        {/* 📋 Heures ADMINISTRATIVES liées au projet (mesures, visites de
+            soumission…) — affichées pour mémoire, JAMAIS dans le coût :
+            elles restent aux frais généraux de l'entreprise. */}
+        {(r.heuresAdminLiees || 0) > 0 && (
+          <div className="flex justify-between text-slate-400">
+            <span>📋 Heures administratives liées (visites, mesures) — non comptées au coût</span>
+            <span className="tabular-nums">{r.heuresAdminLiees} h</span>
+          </div>
         )}
         <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold text-slate-700"><span>Coût total réel</span><span className="tabular-nums">{r.coutTotalReel.toFixed(2)} $</span></div>
         {/* 💰 PRÉVU vs RÉEL (2026-08-28) : le coûtant attendu vient du
@@ -564,6 +574,12 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
   // Envoi du BC au fournisseur : choix des adresses avant création.
   const [envoiOuvert, setEnvoiOuvert] = useState(false);
   const [courrielsChoisis, setCourrielsChoisis] = useState([]);
+  // 📧 Copie (CC) optionnelle du BC (2026-09-03, demande du
+  // propriétaire) : une adresse de plus reçoit le courriel — et peut
+  // devenir PERMANENTE (ex. commande@...) via la case « retenir ».
+  const [bcCopieA, setBcCopieA] = useState("");
+  const [bcRetenirCopie, setBcRetenirCopie] = useState(false);
+  const copieValide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(bcCopieA.trim());
 
   const fournisseurChoisi = (fournisseurs || []).find((f) => f.id === bcFournisseurId) || null;
   const adresseLivraison =
@@ -581,6 +597,9 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
   const demarrerAjoutBC = () => {
     if (!fournisseurChoisi) return;
     if ((fournisseurChoisi.courriels || []).length > 0) {
+      // L'adresse permanente de l'entreprise préremplit la copie.
+      setBcCopieA(configBc.courrielCopieBc || "");
+      setBcRetenirCopie(false);
       setEnvoiOuvert(true);
       return;
     }
@@ -605,6 +624,23 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
       }
     }
     let envoiReussi = false;
+    // 📧 Copie choisie à l'envoi (facultative). « Retenir » l'enregistre
+    // comme adresse PERMANENTE de l'entreprise (ex. commande@...) — les
+    // prochains BC la prérempliront tout seuls. Retenir avec le champ
+    // VIDE efface l'adresse permanente.
+    const copieCourante = bcCopieA.trim();
+    if (bcRetenirCopie && copieCourante !== (configBc.courrielCopieBc || "")) {
+      try {
+        await poserCopieBc(configBc.id, copieCourante);
+        ajouterJournal?.(
+          copieCourante
+            ? `📧 Adresse de copie permanente des bons de commande enregistrée : ${copieCourante}.`
+            : "📧 Adresse de copie permanente des bons de commande effacée."
+        );
+      } catch {
+        ajouterJournal?.("⚠️ Adresse de copie NON retenue (connexion ?) — la copie part quand même sur CE bon.");
+      }
+    }
     if (destinataires.length > 0) {
       const r = await envoyerCourriel({
         a: destinataires,
@@ -613,6 +649,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
         // La réponse du fournisseur (« pas en stock avant le 12 »)
         // revient à celui qui a commandé.
         copieExpediteur: true,
+        copieA: copieCourante ? [copieCourante] : [],
       });
       envoiReussi = !!r.envoye;
       if (!envoiReussi) {
@@ -872,8 +909,35 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
               {adresseLivraison && <p className="mt-1">📍 Livraison : {adresseLivraison}</p>}
               <p className="mt-1 text-slate-400">Projet : {projet.nom}</p>
             </div>
+            {/* 📧 COPIE (CC) FACULTATIVE — en plus de la copie automatique
+                à celui qui commande. « Retenir » = adresse permanente de
+                l'entreprise (chaque compagnie a LA SIENNE). */}
+            <div className="mt-3 rounded-xl border border-slate-200 p-3">
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">Copie (CC) — optionnel</label>
+              <input
+                value={bcCopieA}
+                onChange={(e) => setBcCopieA(e.target.value)}
+                placeholder="ex. commande@tonentreprise.com"
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-xs"
+              />
+              {bcCopieA.trim() && !copieValide && (
+                <p className="mt-1 text-[10px] text-red-500">Adresse invalide — la copie ne partira pas.</p>
+              )}
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={bcRetenirCopie}
+                  onChange={(e) => setBcRetenirCopie(e.target.checked)}
+                  className="h-4 w-4 shrink-0 accent-[#FF6A13]"
+                />
+                Retenir cette adresse pour tous les prochains bons de commande
+              </label>
+              <p className="mt-1 text-[10px] text-slate-400">
+                Celui qui envoie reçoit déjà une copie automatiquement — ceci en ajoute une de plus.
+              </p>
+            </div>
             <div className="mt-4 space-y-2">
-              <Button onClick={() => creerBC(courrielsChoisis)} disabled={courrielsChoisis.length === 0} className="w-full">
+              <Button onClick={() => creerBC(courrielsChoisis)} disabled={courrielsChoisis.length === 0 || (!!bcCopieA.trim() && !copieValide)} className="w-full">
                 Envoyer le BC{courrielsChoisis.length > 1 ? ` (${courrielsChoisis.length} adresses)` : ""}
               </Button>
               <Button variant="outline" onClick={() => creerBC([])} className="w-full">
@@ -914,6 +978,36 @@ export function OngletTempsProjet({ r }) {
         ))}
         {r.travauxDuProjet.length === 0 && <p className="text-xs text-slate-400">Aucune tâche rattachée à ce projet pour l'instant.</p>}
       </div>
+
+      {/* 📋 HEURES ADMINISTRATIVES LIÉES (2026-09-03, demande du
+          propriétaire) — les visites/mesures rattachées au projet mais
+          comptées aux frais généraux : visibles ici POUR MÉMOIRE, avec
+          la mention claire qu'elles ne touchent pas au coût du projet. */}
+      {(r.travauxAdminLies || []).length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+            📋 Heures administratives liées ({r.heuresAdminLiees} h) — non comptées dans le coût du projet
+          </p>
+          <div className="space-y-1.5">
+            {r.travauxAdminLies.map((t) => (
+              <div key={t.id} className="flex items-center justify-between rounded-lg border border-dashed border-slate-200 bg-slate-50 p-2 text-xs">
+                <div>
+                  <p className="font-semibold text-slate-600">{t.titre}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {t.employeNom ? `${t.employeNom} · ` : ""}{t.date}
+                    {t.categorieHeures === "administratif" ? " · frais administratifs" : " · divers"}
+                  </p>
+                </div>
+                <p className="font-bold tabular-nums text-slate-500">{t.heures || 0} h</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1 text-[10px] text-slate-400">
+            Ces heures sont payées (feuille de temps) mais restent aux frais généraux de l&apos;entreprise — une
+            visite de soumission ne gonfle pas le coût du contrat.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

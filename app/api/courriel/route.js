@@ -84,6 +84,14 @@ export async function POST(request) {
   // L'adresse vient du jeton de session validé, jamais du corps de la
   // demande : impossible de mettre en copie une adresse arbitraire.
   const copieExpediteur = corps?.copieExpediteur === true && courrielValide(utilisateur.email);
+  // 📧 COPIES SUPPLÉMENTAIRES (2026-09-03, bons de commande) : adresses
+  // choisies par l'admin à l'envoi (ex. commande@...) — même niveau de
+  // confiance que les destinataires eux-mêmes (l'admin connecté choisit
+  // déjà librement « à qui »). Validées et plafonnées comme eux.
+  const copiesSupplementaires = (Array.isArray(corps?.copieA) ? corps.copieA : [])
+    .filter(courrielValide)
+    .map((a) => a.trim())
+    .slice(0, 3);
 
   // 3. Service configuré ? Sinon : mode simulé, honnête et sans échec.
   const cle = process.env.RESEND_API_KEY;
@@ -163,7 +171,15 @@ export async function POST(request) {
         to: destinataires,
         subject: sujet,
         html,
-        ...(copieExpediteur ? { cc: [utilisateur.email] } : {}),
+        ...((copieExpediteur || copiesSupplementaires.length > 0)
+          ? {
+              cc: [
+                ...(copieExpediteur ? [utilisateur.email] : []),
+                // Sans doublon : l'expéditeur déjà en copie ne l'est pas deux fois.
+                ...copiesSupplementaires.filter((c) => c.toLowerCase() !== String(utilisateur.email || "").toLowerCase()),
+              ],
+            }
+          : {}),
         // Les réponses reviennent dans une vraie boîte, pas dans un trou
         // noir : celle de l'expéditeur (bons de commande — c'est lui qui
         // ajuste la date), avec la boîte générale en filet de sécurité.

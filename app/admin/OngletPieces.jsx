@@ -93,6 +93,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
           sujet: `Bon de commande ${po} — matériel (${configEnt.nomCommercial || configEnt.nomLegal})`,
           html: gabaritCommandeGroupee({ config: configEnt, numeroPo: po, fournisseurNom: fNom, lignes: arts.map((a) => ({ article: a.article, quantite: a.total })) }),
           copieExpediteur: true,
+          // 📧 Copie permanente des BC (réglage d'entreprise, ex. commande@).
+          copieA: configEnt.courrielCopieBc ? [configEnt.courrielCopieBc] : [],
         });
         envoye = !!r.envoye;
       } else {
@@ -185,6 +187,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
       html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description }),
       // La réponse du fournisseur revient à celui qui a commandé.
       copieExpediteur: true,
+      // 📧 Copie permanente des BC (réglage d'entreprise, ex. commande@).
+      copieA: configEnt.courrielCopieBc ? [configEnt.courrielCopieBc] : [],
     });
     setEnvoiBcLibreEnCours(false);
     if (r.envoye) {
@@ -220,6 +224,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
       // Celui qui commande reçoit la copie, et la réponse du fournisseur
       // (« impossible le 14, je peux le 18 ») lui revient directement.
       copieExpediteur: true,
+      // 📧 Copie permanente des BC (réglage d'entreprise, ex. commande@).
+      copieA: configEnt.courrielCopieBc ? [configEnt.courrielCopieBc] : [],
     });
     setEnvoiBcEnCours(null);
     if (r.envoye) {

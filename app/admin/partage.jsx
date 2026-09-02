@@ -782,6 +782,16 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
   const travauxDuProjet = travaux.filter(
     (t) => t.projetId === projet.id && (t.categorieHeures || "projet") === "projet"
   );
+  // 📋 HEURES LIÉES MAIS NON COMPTÉES (2026-09-03, demande du
+  // propriétaire — « les heures de Dominic aux mesures doivent quand
+  // même apparaître quelque part sur le projet ») : les heures
+  // administratives/diverses qui PORTENT ce projet restent exclues du
+  // coût (règle ci-dessus), mais elles sont retournées à part pour
+  // s'AFFICHER — purement informatif, le profit ne bouge pas.
+  const travauxAdminLies = travaux.filter(
+    (t) => t.projetId === projet.id && (t.categorieHeures || "projet") !== "projet"
+  );
+  const heuresAdminLiees = travauxAdminLies.reduce((s, t) => s + (t.heures || 0), 0);
   // Heures Totales du Projet = Heures Tâches Projet + Heures Transport
   // Aller/Retour imputées (voir la règle d'imputation automatique côté
   // app technicien, basée sur la chronologie de la journée). Les deux
@@ -905,6 +915,8 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
     travauxDuProjet,
     travauxChantier,
     travauxTransport,
+    travauxAdminLies,
+    heuresAdminLiees,
     heuresChantier,
     heuresTransport,
     kilometrageTransport,
