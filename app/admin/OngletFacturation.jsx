@@ -3057,6 +3057,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                                 <span className="min-w-0 flex-1 truncate text-slate-500">
                                   <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full align-middle ${bx.prixNonListe ? "bg-red-500" : "bg-emerald-500"}`} />
                                   {bx.projet || bx.description || "Travaux"} <span className="text-slate-400">· {bx.date}</span>
+                                  {/* 📍 L'adresse du chantier (2026-09-04,
+                                      demande du propriétaire) — on
+                                      reconnaît la job par son chantier. */}
+                                  {bx.adresseTravaux && (
+                                    <span className="ml-1.5 text-[10px] text-slate-400">📍 {bx.adresseTravaux}</span>
+                                  )}
                                 </span>
                                 {bx.prixNonListe ? (
                                   <button
