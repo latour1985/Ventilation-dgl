@@ -3439,7 +3439,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     </p>
                     <p className="text-[9px] leading-snug text-amber-700">
                       La tâche restera bloquée hors agenda tant que le dépôt n&apos;est pas payé (ou confirmé manuellement).
-                      À la création : la facture de dépôt est créée dans QuickBooks (Sandbox pendant les tests) et la
+                      À la création : la facture de dépôt est créée dans QuickBooks et la
                       demande part aux adresses cochées.
                     </p>
                   </div>
@@ -5154,11 +5154,21 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           setClients={setClients}
           ajouterJournal={ajouterJournal}
           onFermer={() => setModalNouveauClientTache(false)}
-          onSelection={(id) => {
+          onSelection={(id, ficheNeuve) => {
             setNouveauClientId(id);
             setAdresseTravauxId("");
             setNouvelleAdresseTravaux(null);
             setNouveauProjetId("");
+            // 📧 COURRIELS DE DÉPÔT PRÉCOCHÉS (2026-09-04, vécu : le
+            // dépôt de Luis Gonzalez est parti SANS courriel alors que
+            // sa fiche toute neuve en avait un — la sélection d'un
+            // client existant précoche, la création n'en faisait rien).
+            // Même règle que choisirClientTache : les défauts d'abord.
+            const courriels = ficheNeuve?.courriels || [];
+            const defauts = courriels.filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
+            const tous = courriels.map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
+            setDepotEmails(defauts.length > 0 ? defauts : tous.slice(0, 1));
+            setDepotExtra("");
           }}
         />
       )}

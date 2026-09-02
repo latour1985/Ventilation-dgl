@@ -127,6 +127,27 @@ export async function POST(request) {
     const carteOfferte = typeof corps?.paiementCarte === "boolean" ? corps.paiementCarte : carteAuto;
     const virementOffert = typeof corps?.paiementVirement === "boolean" ? corps.paiementVirement : virementAuto;
 
+    // 📧 ADRESSE DE LA FACTURE : les courriels choisis d'abord ; SINON
+    // (2026-09-04, vécu Luis Gonzalez — « l'adresse est dans la fiche
+    // QuickBooks mais pas sur la facture ») le courriel de la fiche
+    // client QuickBooks fait le repli : la facture porte toujours une
+    // adresse, et un envoi manuel depuis QuickBooks fonctionne. Le
+    // repli n'envoie RIEN tout seul — il remplit le champ.
+    const envoyerAValides = (Array.isArray(corps?.envoyerA) ? corps.envoyerA : [])
+      .map((e) => String(e || "").trim())
+      .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e))
+      .slice(0, 5);
+    let adresseFacture = envoyerAValides.join(", ");
+    if (!adresseFacture) {
+      try {
+        // « select * » obligatoire : la production QuickBooks refuse les
+        // champs imbriqués nommés (même leçon que la descente clients).
+        const luClient = await requeteQbo(acces, `select * from Customer where Id = '${String(customerId).replace(/'/g, "")}'`);
+        adresseFacture = String(luClient?.Customer?.[0]?.PrimaryEmailAddr?.Address || "").trim();
+      } catch {
+        // fiche illisible — la facture partira sans adresse, comme avant
+      }
+    }
     const echeance = new Date(Date.now() + joursLimite * 24 * 60 * 60 * 1000);
     const dateLocale = `${echeance.getFullYear()}-${String(echeance.getMonth() + 1).padStart(2, "0")}-${String(echeance.getDate()).padStart(2, "0")}`;
     // `include=invoiceLink` : QuickBooks retourne le lien « voir et
@@ -141,9 +162,7 @@ export async function POST(request) {
       // ENVOI PAR QUICKBOOKS (2026-08-17) : les courriels choisis et
       // notre message de réservation voyagent SUR la facture — le
       // client reçoit la facture officielle avec notre contexte dedans.
-      ...((Array.isArray(corps?.envoyerA) ? corps.envoyerA : []).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || "").trim())).length > 0
-        ? { BillEmail: { Address: corps.envoyerA.map((e) => String(e).trim()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).slice(0, 5).join(", ") } }
-        : {}),
+      ...(adresseFacture ? { BillEmail: { Address: adresseFacture } } : {}),
       // 💳 Les MODALITÉS DE PAIEMENT de l'entreprise (Paramètres) sont
       // ajoutées au message — sur CHAQUE facture de dépôt (2026-08-17).
       ...((() => {

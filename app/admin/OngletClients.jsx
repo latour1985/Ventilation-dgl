@@ -910,7 +910,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
       .then((r) => {
         if (r?.fait > 0) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "synchronise" } : c)));
-          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans QuickBooks (Sandbox)`);
+          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans QuickBooks`);
         } else if (r?.simule) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
           ajouterJournal("🧪 QuickBooks non configuré ici — client local seulement (normal en développement)");
@@ -2112,7 +2112,11 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
     };
     setClients((prev) => [...prev, nouveauClient]);
     ajouterJournal(`👤 Client "${nouveauClient.nom}" créé — transfert vers QuickBooks en cours...`);
-    onSelection?.(id);
+    // La FICHE accompagne l'id (2026-09-04, vécu Luis Gonzalez) : le
+    // formulaire de tâche doit précocher les courriels de dépôt de ce
+    // client tout neuf — or sa liste `clients` ne le contient pas encore
+    // (l'état vient d'être posé). L'objet évite la course.
+    onSelection?.(id, nouveauClient);
     onFermer();
     // VRAI transfert QuickBooks — même flux que l'onglet Clients.
     sauvegarderClient(nouveauClient)
@@ -2120,7 +2124,7 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
       .then((r) => {
         if (r?.fait > 0) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "synchronise" } : c)));
-          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans QuickBooks (Sandbox)`);
+          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans QuickBooks`);
         } else if (r?.simule) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
           ajouterJournal("🧪 QuickBooks non configuré ici — client local seulement (normal en développement)");

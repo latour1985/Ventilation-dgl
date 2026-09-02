@@ -2516,7 +2516,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     }
     ajouterJournal(
       r?.creee
-        ? `🧾 Facture QuickBooks Nº ${numeroReel} créée (Sandbox) pour "${b.projet}"${paiements.carte || paiements.virement ? ` — paiement en ligne offert : ${[paiements.carte ? "carte" : null, paiements.virement ? "virement" : null].filter(Boolean).join(" + ")}` : ""}${envoiQbSimple ? (envoiQbSimple.statut === "envoyee" ? ` — ✉️ ENVOYÉE par QuickBooks à ${libelleDestinataires(destinataires)} (confirmé au registre)` : " — ⚠️ envoi par QuickBooks NON CONFIRMÉ : bouton Renvoyer sur la carte") : destinataires.length > 0 ? ` — destinataires notés : ${libelleDestinataires(destinataires)}` : ""}`
+        ? `🧾 Facture QuickBooks Nº ${numeroReel} créée pour "${b.projet}"${paiements.carte || paiements.virement ? ` — paiement en ligne offert : ${[paiements.carte ? "carte" : null, paiements.virement ? "virement" : null].filter(Boolean).join(" + ")}` : ""}${envoiQbSimple ? (envoiQbSimple.statut === "envoyee" ? ` — ✉️ ENVOYÉE par QuickBooks à ${libelleDestinataires(destinataires)} (confirmé au registre)` : " — ⚠️ envoi par QuickBooks NON CONFIRMÉ : bouton Renvoyer sur la carte") : destinataires.length > 0 ? ` — destinataires notés : ${libelleDestinataires(destinataires)}` : ""}`
         : `🧪 QuickBooks non configuré ici — numéro local ${numeroReel} (normal en développement)`
     );
     setBonEnvoiCourrielId(null);
