@@ -74,6 +74,7 @@ import { STATUTS_PROJET, FILTRES_STATUT_HUB, ONGLETS_PROJET, calculerAvancementC
 import { FREQUENCES_CONTRAT, LARGEUR_LIGNE_DESCRIPTION, hauteurDescription, listeDestinataires, libelleDestinataires, courrielDefautClient, ModalSelectionCourriel } from "./partage";
 import { OngletDevis, ApercuBonCommande, ModalReportCatalogue, ModalTraiterDevis } from "./OngletDevis";
 import { OngletFacturation, ModalFacturationDevis, ModalReviserPrixNonListe, ApercuFactureClient, FacturesEmisesListe, ModalChoixPaiementFacture, ModalRetraitFacturation } from "./OngletFacturation";
+import TourGuide, { tourDejaFait } from "./TourGuide";
 import { TYPES_TACHE, TYPE_INFO, estTypeSansClient, HEURES_QUART, HEURE_PAR_DEFAUT, listeCellule, cleTacheDesHeures, camionsEntretienDu, tachesDuJourPourEmploye } from "./partage";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { OngletTableauDeBord } from "./OngletTableauDeBord";
@@ -1140,6 +1141,12 @@ function AppAdmin() {
   // RECHERCHE GLOBALE — tapée dans la barre d'en-tête (visible partout)
   // ou dans la page Recherche : même valeur, deux endroits.
   const [rechercheGlobale, setRechercheGlobale] = useState("");
+  // ❓ TOUR GUIDÉ (2026-09-04, chantier approuvé) — proposé UNE fois
+  // par navigateur au premier passage, relançable par le bouton ❓.
+  // (L'effet d'ouverture automatique vit plus bas, APRÈS la
+  // déclaration de `session` — la référencer d'ici plantait le
+  // prérendu : « Cannot access before initialization », vécu.)
+  const [tourOuvert, setTourOuvert] = useState(false);
   // Liste déroulante des résultats sous la barre d'en-tête — on reste
   // sur l'écran en cours, les résultats viennent à nous.
   const [listeRechercheOuverte, setListeRechercheOuverte] = useState(false);
@@ -1263,6 +1270,14 @@ function AppAdmin() {
 
   // --- Authentification Supabase ---
   const [session, setSession] = useState(null);
+  // ❓ Ouverture automatique du tour guidé — une fois par navigateur.
+  useEffect(() => {
+    if (!session) return;
+    if (tourDejaFait()) return;
+    // Petite respiration : l'écran se pose avant l'invitation.
+    const t = setTimeout(() => setTourOuvert(true), 1500);
+    return () => clearTimeout(t);
+  }, [session]);
   // 🤝 Chargement du répertoire des sous-traitants + leurs assignations
   // (états déclarés plus haut, près des statuts d'assignations).
   useEffect(() => {
@@ -2935,6 +2950,17 @@ function AppAdmin() {
           </button>
         )}
         <BoutonLangue />
+        {/* ❓ TOUR GUIDÉ — la visite de bienvenue, relançable à volonté. */}
+        <button
+          onClick={() => setTourOuvert(true)}
+          title="Tour guidé de Fluxya — visite des écrans en 2 minutes"
+          className="shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+        >
+          ❓
+        </button>
+        {tourOuvert && (
+          <TourGuide permissions={permissions} onAllerOnglet={setOnglet} onFermer={() => setTourOuvert(false)} />
+        )}
         {/* 🔍 RECHERCHE GLOBALE — accessible de partout, comme demandé
             par le propriétaire : la recherche est une PORTE D'ENTRÉE,
             pas une destination. Première frappe = la page Recherche
@@ -3303,6 +3329,7 @@ function AppAdmin() {
       {vue === "agenda" && (
         <OngletAgenda
           achatsLibres={achatsLibres}
+          fournisseurs={fournisseurs}
           onMajFacturable={(tacheId, courriel, val) =>
             setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }))
           }

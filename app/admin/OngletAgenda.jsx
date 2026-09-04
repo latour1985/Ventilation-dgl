@@ -394,7 +394,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [] }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [] }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -2558,7 +2558,40 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       </button>
                     </div>
                   ) : (
-                    <AutocompleteAdresse onSelection={(place) => setAdresseCourseLibre(place.label)} />
+                    <>
+                      {/* 🏭 CHEZ UN FOURNISSEUR (2026-09-04, demande du
+                          propriétaire) : la course classique, c'est aller
+                          chercher une pièce — l'adresse de la fiche
+                          fournisseur se pige en un clic, sans la retaper.
+                          Fiche sans adresse : le nom part quand même, et
+                          on invite à compléter la fiche (Pièces →
+                          Fournisseurs). */}
+                      {(fournisseurs || []).length > 0 && (
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const f = (fournisseurs || []).find((x) => x.id === e.target.value);
+                            if (!f) return;
+                            setAdresseCourseLibre(f.adresse ? `${f.nom} — ${f.adresse}` : f.nom);
+                            if (!f.adresse)
+                              ajouterJournal(`💡 La fiche du fournisseur « ${f.nom} » n'a pas d'adresse — ajoute-la dans Pièces → Fournisseurs pour que le technicien ait le lien de navigation.`);
+                          }}
+                          className="mb-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-600"
+                        >
+                          <option value="">🏭 Chez un fournisseur… (adresse de sa fiche)</option>
+                          {(fournisseurs || [])
+                            .slice()
+                            .sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"))
+                            .map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.nom}
+                                {f.adresse ? ` — ${f.adresse}` : " (fiche sans adresse)"}
+                              </option>
+                            ))}
+                        </select>
+                      )}
+                      <AutocompleteAdresse onSelection={(place) => setAdresseCourseLibre(place.label)} />
+                    </>
                   )}
                 </div>
               )}
