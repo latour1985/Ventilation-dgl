@@ -198,6 +198,20 @@ export async function POST(request) {
     return Response.json({ erreur: `Étiquette refusée (${erreurEtiquette.message}) — tout a été défait, réessaie.` }, { status: 502 });
   }
 
+  // 📜 SA LIGNE DE PERMISSIONS — depuis la RLS phase 2 (snippet 128), le
+  // rôle vient de la TABLE permissions_utilisateurs, plus du jeton : sans
+  // cette ligne, l'admin de la nouvelle entreprise serait traité en
+  // Technicien par la base (Tarifs et Paramètres fermés).
+  const { error: erreurPermission } = await admin.from("permissions_utilisateurs").upsert({
+    email: adminCourriel.toLowerCase(),
+    role: "Admin principal",
+    entreprise_id: id,
+  });
+  if (erreurPermission) {
+    await defaire(idCompte);
+    return Response.json({ erreur: `Ligne de permissions refusée (${erreurPermission.message}) — tout a été défait, réessaie.` }, { status: 502 });
+  }
+
   // ---- Le courriel de bienvenue ----
   const lien = `${origine}/choisir-mot-de-passe?jeton=${encodeURIComponent(jetonHache)}&type=invite`;
   const cle = process.env.RESEND_API_KEY;

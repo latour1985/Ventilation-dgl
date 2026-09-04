@@ -5114,3 +5114,216 @@ alter table projets_app add column if not exists numero_suivi_client text;
 -- Verification : la colonne existe.
 select column_name from information_schema.columns
  where table_name = 'projets_app' and column_name = 'numero_suivi_client';
+
+-- ============================================================
+-- 128 - RLS PHASE 2 : LES ROLES REVIENNENT DANS LA BASE (2026-09-04)
+-- ============================================================
+-- La sonde a confirme 4 failles rouvertes par la cloison
+-- multi-entreprises (qui avait balaye les regles par role) :
+--   1. un technicien lisait les SALAIRES (repertoire_employes) ;
+--   2. un technicien pouvait se PROMOUVOIR Admin principal ;
+--   3. un technicien pouvait modifier les TARIFS (prix de zones) ;
+--   4. un technicien pouvait modifier la FICHE ENTREPRISE.
+-- Ce snippet remet les regles par role PAR-DESSUS la cloison
+-- d'entreprise, et retire le repli falsifiable sur user_metadata.
+
+-- ---- 0. Lignes de permissions manquantes (2 comptes reels) ----
+insert into permissions_utilisateurs (email, role, entreprise_id)
+values ('jflatour1985@gmail.com', 'Admin principal', 'ventilation-miroir'),
+       ('m.beaudry@groupeprc.com', 'Admin régulier', 'dgl')
+on conflict (email) do nothing;
+
+-- ---- 1. Le role vient de la TABLE, jamais du jeton falsifiable ----
+-- (user_metadata est modifiable par l'utilisateur lui-meme via l'API :
+-- un compte sans ligne de permissions retombe sur Technicien, le role
+-- le moins privilegie — plus jamais sur ce que le jeton pretend.)
+create or replace function public.fn_mon_role() returns text
+language sql stable security definer
+set search_path = public, extensions
+as $fn$
+  select coalesce(
+    (select role from permissions_utilisateurs
+       where lower(email) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
+         and entreprise_id = coalesce(public.entreprise_du_jeton(), 'dgl')
+       limit 1),
+    'Technicien')
+$fn$;
+
+create or replace function public.fn_est_admin() returns boolean
+language sql stable security definer
+set search_path = public, extensions
+as $fn$
+  select public.fn_mon_role() in ('Admin principal', 'Admin régulier')
+$fn$;
+
+create or replace function public.fn_est_bureau() returns boolean
+language sql stable security definer
+set search_path = public, extensions
+as $fn$
+  select public.fn_mon_role() in
+    ('Admin principal', 'Admin régulier', 'Administration bureau',
+     'Chargé de projet', 'Répartiteur')
+$fn$;
+
+-- La SECTION d'un utilisateur — miroir exact de lib/permissions.js :
+-- acces personnalises (colonne sections) sinon defauts du role et de
+-- la sous-categorie. C'est elle qui garde les policies alignees sur
+-- ce que l'application permet deja a l'ecran.
+create or replace function public.fn_a_section(section text) returns boolean
+language sql stable security definer
+set search_path = public, extensions
+as $fn$
+  select coalesce((
+    select case
+      when p.role = 'Admin principal' then true
+      when p.sections is not null then p.sections ? section
+      when p.role = 'Admin régulier' then section in
+        ('tableau-de-bord','recherche','clients','projets','devis','agenda',
+         'facturation','inspections','pieces','paies','tarifs','utilisateurs')
+      when p.role in ('Administration bureau','Chargé de projet','Répartiteur') then
+        case coalesce(nullif(p.sous_categorie, ''),
+                      case p.role when 'Chargé de projet' then 'Chargé de projet'
+                                  when 'Répartiteur' then 'Répartiteur'
+                                  else '' end)
+          when 'Adjointe administrative' then section in ('tableau-de-bord','clients','devis','facturation')
+          when 'Chargé de projet' then section in ('tableau-de-bord','projets','agenda','pieces','technicien')
+          when 'Estimateur' then section in ('tableau-de-bord','clients','devis','projets')
+          when 'Répartiteur' then section in ('clients','agenda','inspections','pieces','paies')
+          when 'Directeur' then section in
+            ('tableau-de-bord','recherche','clients','projets','devis','agenda',
+             'facturation','inspections','pieces','paies','tarifs','utilisateurs')
+          else section in ('tableau-de-bord','clients','devis','facturation')
+        end
+      else false
+    end
+    from permissions_utilisateurs p
+    where lower(p.email) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
+      and p.entreprise_id = coalesce(public.entreprise_du_jeton(), 'dgl')
+    limit 1
+  ), false)
+$fn$;
+
+revoke execute on function fn_mon_role() from public, anon;
+grant execute on function fn_mon_role() to authenticated;
+revoke execute on function fn_est_admin() from public, anon;
+grant execute on function fn_est_admin() to authenticated;
+revoke execute on function fn_est_bureau() from public, anon;
+grant execute on function fn_est_bureau() to authenticated;
+revoke execute on function fn_a_section(text) from public, anon;
+grant execute on function fn_a_section(text) to authenticated;
+
+-- ---- 2. PERMISSIONS : sa propre ligne en lecture ; gestion reservee
+--         a la section « utilisateurs » (fini l'auto-promotion) ----
+drop policy if exists "iso_permissions_utilisateurs" on permissions_utilisateurs;
+create policy "permissions_lecture" on permissions_utilisateurs
+  for select to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and (lower(email) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
+              or public.fn_a_section('utilisateurs')));
+create policy "permissions_ecriture_ins" on permissions_utilisateurs
+  for insert to authenticated
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('utilisateurs'));
+create policy "permissions_ecriture_upd" on permissions_utilisateurs
+  for update to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('utilisateurs'))
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('utilisateurs'));
+create policy "permissions_ecriture_del" on permissions_utilisateurs
+  for delete to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('utilisateurs'));
+
+-- ---- 3. REPERTOIRE : lecture bureau, ecriture section utilisateurs
+--         (les salaires redeviennent invisibles aux techniciens) ----
+drop policy if exists "iso_repertoire_employes" on repertoire_employes;
+create policy "repertoire_lecture_bureau" on repertoire_employes
+  for select to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_est_bureau());
+create policy "repertoire_ecriture_ins" on repertoire_employes
+  for insert to authenticated
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('utilisateurs'));
+create policy "repertoire_ecriture_upd" on repertoire_employes
+  for update to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('utilisateurs'))
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('utilisateurs'));
+create policy "repertoire_ecriture_del" on repertoire_employes
+  for delete to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('utilisateurs'));
+
+-- L'ANNUAIRE (noms, courriels — JAMAIS les taux) reste accessible a
+-- tout employe connecte : la vue traverse la RLS (droits du
+-- proprietaire) mais n'expose que 4 colonnes, et filtre par
+-- entreprise. C'est le meme choix assume que le snippet 44 — le
+-- Security Advisor la signalera « security definer view » : voulu.
+drop view if exists public.annuaire_employes;
+create view public.annuaire_employes as
+  select id, nom, courriel, nom_utilisateur
+    from public.repertoire_employes
+   where entreprise_id = coalesce(public.entreprise_du_jeton(), 'dgl');
+alter view public.annuaire_employes set (security_invoker = false);
+revoke all on public.annuaire_employes from public, anon;
+grant select on public.annuaire_employes to authenticated;
+
+-- ---- 4. TARIFS : lecture pour tous (l'app en a besoin), ecriture
+--         reservee a la section « tarifs » ----
+drop policy if exists "iso_prix_depots" on prix_depots;
+create policy "prix_depots_lecture" on prix_depots
+  for select to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), ''));
+create policy "prix_depots_ecriture_ins" on prix_depots
+  for insert to authenticated
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('tarifs'));
+create policy "prix_depots_ecriture_upd" on prix_depots
+  for update to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('tarifs'))
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('tarifs'));
+create policy "prix_depots_ecriture_del" on prix_depots
+  for delete to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('tarifs'));
+
+drop policy if exists "iso_taux_metiers" on taux_metiers;
+create policy "taux_metiers_lecture" on taux_metiers
+  for select to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), ''));
+create policy "taux_metiers_ecriture_ins" on taux_metiers
+  for insert to authenticated
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('tarifs'));
+create policy "taux_metiers_ecriture_upd" on taux_metiers
+  for update to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('tarifs'))
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+              and public.fn_a_section('tarifs'));
+create policy "taux_metiers_ecriture_del" on taux_metiers
+  for delete to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '')
+         and public.fn_a_section('tarifs'));
+
+-- ---- 5. FICHE ENTREPRISE : modification reservee a la section
+--         « parametres » (Admin principal) — ou la plateforme ----
+drop policy if exists "entreprises_maj_sa_fiche" on entreprises;
+create policy "entreprises_maj_sa_fiche" on entreprises
+  for update to authenticated
+  using ((id = public.entreprise_du_jeton() and public.fn_a_section('parametres'))
+         or public.est_plateforme())
+  with check ((id = public.entreprise_du_jeton() and public.fn_a_section('parametres'))
+              or public.est_plateforme());
+
+-- ---- 6. Verification : les policies en place sur les 5 tables ----
+select tablename, policyname, cmd from pg_policies
+ where schemaname = 'public'
+   and tablename in ('permissions_utilisateurs', 'repertoire_employes',
+                     'prix_depots', 'taux_metiers', 'entreprises')
+ order by tablename, policyname;

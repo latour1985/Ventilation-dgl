@@ -13,7 +13,7 @@ import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
-import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
+import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo } from "@/lib/quickbooksClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
 import { creerFactureMaison, majFactureMaison, lienFactureMaison } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
@@ -81,13 +81,27 @@ export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
 // (registre QuickBooks), son PDF officiel et, au besoin, son bouton
 // « Renvoyer ». Rien ne se perd : pas de preuve = alerte rouge.
 // ============================================================
-export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, onRenvoyerVers = null, envoiAuto = true }) {
+export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, onRenvoyerVers = null, envoiAuto = true, paiements = null }) {
   return (
     <div className="mt-1.5 space-y-1">
-      {(bon.facturesEmises || []).map((f) => (
+      {(bon.facturesEmises || []).map((f) => {
+        // 💵 LE PAIEMENT REDESCEND DE QUICKBOOKS (2026-09-04, chantier
+        // approuvé) — solde réel lu du registre : payée, en retard, ou
+        // en attente. Absent tant que la lecture n'a pas eu lieu.
+        const p = paiements && f.qboInvoiceId ? paiements[String(f.qboInvoiceId)] : null;
+        return (
         <div key={f.id} className="rounded-lg bg-slate-50 px-1.5 py-1 text-left text-[10px] text-slate-500">
           <p>
             <span className="font-semibold text-slate-600">{f.numeroFactureQb}</span> — {Number(f.montant).toFixed(2)} $ ({f.detail}) · {f.date}
+            {p && (
+              p.payee ? (
+                <span className="ml-1.5 font-bold text-emerald-600">💵 Payée ✓</span>
+              ) : p.enRetard ? (
+                <span className="ml-1.5 font-bold text-red-600">💵 En retard — solde {p.solde.toFixed(2)} $</span>
+              ) : (
+                <span className="ml-1.5 font-bold text-amber-600">💵 Solde {p.solde.toFixed(2)} ${p.echeance ? ` · échéance ${p.echeance}` : ""}</span>
+              )
+            )}
           </p>
           <p className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {f.envoiQb?.statut === "envoyee" ? (
@@ -128,7 +142,8 @@ export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, onRenvoyerVers = n
             )}
           </p>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1668,6 +1683,23 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // « nous payons les gars durant le transport ») — l'aller-retour
     // réel de chaque homme s'ajoute à ses heures, comme pour l'appel
     // à 2 hommes.
+    // ➗ RÉPARTI ENTRE LES JOBS DU JOUR (2026-09-04, vigilance signalée
+    // et GO du propriétaire) : deux jobs T&M le même jour comptaient
+    // CHACUNE le transport complet — le même trajet facturé deux fois.
+    // Le transport du jour se divise maintenant par le nombre de bons
+    // T&M du technicien ce jour-là ; à une seule job, rien ne change.
+    const nbJobsTmDuJour = (s) => {
+      const courriel = (s.employeEmail || "").toLowerCase();
+      const date = s.date || b.date;
+      const n = (bons || []).filter(
+        (x) =>
+          x.type === "temps_materiel" &&
+          x.date === date &&
+          (((x.lignesReelles && x.lignesReelles.length > 0 ? x.lignesReelles : x.lignesSource) || [x]))
+            .some((l) => (l.employeEmail || "").toLowerCase() === courriel && (Number(l.heures) || 0) > 0)
+      ).length;
+      return Math.max(1, n);
+    };
     const transportTM = (s) =>
       (travaux || [])
         .filter(
@@ -1677,7 +1709,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             (t.employeEmail || "").toLowerCase() === (s.employeEmail || "").toLowerCase() &&
             t.date === (s.date || b.date)
         )
-        .reduce((somme, t) => somme + (Number(t.heures) || 0), 0);
+        .reduce((somme, t) => somme + (Number(t.heures) || 0), 0) / nbJobsTmDuJour(s);
     const nbTravailleursTM = (((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || [b]))
       .filter((s) => (Number(s.heures) || 0) > 0).length;
     if (estTempsMateriel && (sources.length >= 2 || nbTravailleursTM === 1)) {
@@ -2317,6 +2349,53 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       ajouterJournal("⚠️ Remise à facturer NON enregistrée — réessaie.");
     }
   };
+
+  // ------------------------------------------------------------
+  // 💵 PAIEMENTS QUICKBOOKS (2026-09-04, chantier approuvé) — le solde
+  // réel de chaque facture émise (payée ? en retard ?) + le tableau
+  // « Comptes à recevoir » (TOUTES les factures ouvertes, même celles
+  // faites directement dans QuickBooks). Lecture seule, à la demande —
+  // et une fois automatiquement à l'ouverture de l'onglet.
+  // ------------------------------------------------------------
+  const [paiements, setPaiements] = useState({}); // qboInvoiceId -> { solde, payee, enRetard… }
+  const [comptesAR, setComptesAR] = useState(null); // null = jamais lu
+  const [arTronque, setArTronque] = useState(false);
+  const [paiementsEnCours, setPaiementsEnCours] = useState(false);
+  const [paiementsLusA, setPaiementsLusA] = useState(null);
+  const [arOuvert, setArOuvert] = useState(false);
+  const actualiserPaiements = async () => {
+    if (paiementsEnCours) return;
+    setPaiementsEnCours(true);
+    try {
+      const ids = [];
+      bons.forEach((x) => (x.facturesEmises || []).forEach((f) => {
+        if (f.qboInvoiceId) ids.push(String(f.qboInvoiceId));
+      }));
+      const [rSoldes, rOuvertes] = await Promise.all([
+        ids.length > 0 ? lireSoldesQbo(ids) : Promise.resolve({ factures: {} }),
+        lireComptesARecevoirQbo(),
+      ]);
+      if (rSoldes?.factures) setPaiements(rSoldes.factures);
+      if (Array.isArray(rOuvertes?.ouvertes)) {
+        setComptesAR(rOuvertes.ouvertes);
+        setArTronque(!!rOuvertes.tronque);
+      } else if (rOuvertes?.erreur || rSoldes?.erreur) {
+        ajouterJournal(`⚠️ Paiements QuickBooks illisibles : ${rOuvertes?.erreur || rSoldes?.erreur}`);
+      }
+      setPaiementsLusA(new Date());
+    } finally {
+      setPaiementsEnCours(false);
+    }
+  };
+  // Une lecture automatique à l'arrivée dans l'onglet (si QB connecté).
+  const paiementsAutoRef = useRef(false);
+  useEffect(() => {
+    if (qbConnecte === true && !paiementsAutoRef.current) {
+      paiementsAutoRef.current = true;
+      actualiserPaiements();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qbConnecte]);
 
   // ------------------------------------------------------------
   // GARANTIE D'ENVOI QUICKBOOKS — PDF officiel, renvoi, vérification.
@@ -3445,6 +3524,97 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       </div>
       )}
 
+      {/* 💵 COMPTES À RECEVOIR (2026-09-04, chantier approuvé) — toutes
+          les factures au solde ouvert, lues du registre QuickBooks
+          (même celles faites directement dans QuickBooks). Retards en
+          tête, en rouge. Lecture seule — l'encaissement reste dans
+          QuickBooks. */}
+      {qbConnecte !== false && (
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <button
+          onClick={() => {
+            setArOuvert((v) => !v);
+            if (comptesAR === null && !paiementsEnCours) actualiserPaiements();
+          }}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+        >
+          <p className="min-w-0 text-[11px] font-bold text-slate-700">
+            💵 Comptes à recevoir
+            {Array.isArray(comptesAR) && (
+              <>
+                {" "}
+                — {comptesAR.length} facture{comptesAR.length > 1 ? "s" : ""} ouverte{comptesAR.length > 1 ? "s" : ""} ·{" "}
+                {comptesAR.reduce((s, f) => s + (Number(f.solde) || 0), 0).toFixed(2)} $
+                {comptesAR.some((f) => f.enRetard) && (
+                  <span className="ml-1 font-bold text-red-600">
+                    ({comptesAR.filter((f) => f.enRetard).length} en retard)
+                  </span>
+                )}
+              </>
+            )}
+          </p>
+          <span className="shrink-0 text-xs text-slate-400">{arOuvert ? "▾" : "▸"}</span>
+        </button>
+        {arOuvert && (
+          <div className="border-t border-slate-100 px-3 pb-3 pt-2">
+            {paiementsEnCours && comptesAR === null ? (
+              <p className="py-2 text-center text-xs text-slate-400">Lecture du registre QuickBooks…</p>
+            ) : !Array.isArray(comptesAR) ? (
+              <p className="py-2 text-center text-xs text-slate-400">Rien lu encore — bouton « Actualiser » ci-dessous.</p>
+            ) : comptesAR.length === 0 ? (
+              <p className="py-2 text-center text-xs font-semibold text-emerald-700">✅ Aucune facture ouverte — tout est encaissé.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[11px]">
+                  <thead>
+                    <tr className="text-[10px] uppercase text-slate-400">
+                      <th className="py-1 pr-2 font-semibold">Facture</th>
+                      <th className="py-1 pr-2 font-semibold">Client</th>
+                      <th className="py-1 pr-2 font-semibold">Échéance</th>
+                      <th className="py-1 pr-2 text-right font-semibold">Solde</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comptesAR.map((f) => {
+                      const retardJours = f.enRetard && f.echeance
+                        ? Math.max(1, Math.round((Date.now() - new Date(f.echeance + "T12:00:00").getTime()) / 86400000))
+                        : 0;
+                      return (
+                        <tr key={f.id} className={`border-t border-slate-100 ${f.enRetard ? "text-red-700" : "text-slate-600"}`}>
+                          <td className="py-1 pr-2 font-semibold whitespace-nowrap">{f.numero || f.id}</td>
+                          <td className="py-1 pr-2">{f.client}</td>
+                          <td className="py-1 pr-2 whitespace-nowrap">
+                            {f.echeance || "—"}
+                            {f.enRetard && <span className="ml-1 font-bold">({retardJours} j de retard)</span>}
+                          </td>
+                          <td className="py-1 pr-2 text-right font-bold whitespace-nowrap">{Number(f.solde).toFixed(2)} $</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {arTronque && (
+                  <p className="mt-1 text-[10px] text-amber-600">⚠️ Liste tronquée à 500 factures — le total réel est plus élevé.</p>
+                )}
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-[10px] text-slate-400">
+                {paiementsLusA ? `Lu du registre QuickBooks à ${paiementsLusA.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" })}` : ""}
+              </p>
+              <button
+                onClick={actualiserPaiements}
+                disabled={paiementsEnCours}
+                className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 active:scale-95 disabled:opacity-50"
+              >
+                {paiementsEnCours ? "Lecture…" : "🔄 Actualiser"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      )}
+
       {/* 🔎 Recherche rapide — job, client, nº de devis, nº de facture
           QuickBooks. Sans filtre actif, elle fouille TOUT (les « Déjà
           facturés » et les retirés compris). */}
@@ -3741,7 +3911,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                         </div>
                       </>
                     )}
-                    <FacturesEmisesListe bon={b} onPdf={ouvrirPdfFacture} onRenvoyer={renvoyerFactureQb} onRenvoyerVers={(bn, fx) => setRenvoiVers({ bon: bn, f: fx })} envoiAuto={configEnt?.envoiAutoFactureQb === true} />
+                    <FacturesEmisesListe bon={b} onPdf={ouvrirPdfFacture} onRenvoyer={renvoyerFactureQb} onRenvoyerVers={(bn, fx) => setRenvoiVers({ bon: bn, f: fx })} envoiAuto={configEnt?.envoiAutoFactureQb === true} paiements={paiements} />
                   </div>
                 )}
               </div>
