@@ -41,14 +41,19 @@ async function roleAppelant(admin, utilisateur) {
       .from("permissions_utilisateurs")
       .select("role")
       .eq("email", (utilisateur.email || "").toLowerCase())
+      .eq("entreprise_id", entrepriseDuCompte(utilisateur))
       .maybeSingle();
     brut = data?.role || null;
   } catch {
     // table injoignable — on retombe sur les métadonnées
   }
-  if (!brut) brut = utilisateur.user_metadata?.role || null;
+  // 🔒 RLS phase 3 (2026-09-04) : le repli sur user_metadata (que
+  // l'utilisateur peut trafiquer) et le défaut « Admin principal »
+  // disparaissent — depuis le snippet 128, CHAQUE compte a sa ligne de
+  // permissions (vérifié : 9/9), et cette route pose désormais celle
+  // des invités elle-même. Sans ligne : Technicien, donc refusé.
   const propre = String(brut || "").trim();
-  return ROLES_CONNUS.includes(propre) ? propre : "Admin principal";
+  return ROLES_CONNUS.includes(propre) ? propre : "Technicien";
 }
 
 // GABARIT DU COURRIEL — aux couleurs FLUXYA (marque produit, rebranding
@@ -229,6 +234,26 @@ export async function POST(request) {
     } catch {
       // etiquette non posee — l'invitation part quand meme, un passage
       // du snippet d'etiquetage rattrapera le compte
+    }
+    // 📜 SA LIGNE DE PERMISSIONS, POSÉE ICI MÊME (RLS phase 3,
+    // 2026-09-04) : depuis le snippet 128, le rôle fait foi dans la
+    // TABLE — un compte sans ligne est traité en Technicien partout.
+    // Avant, c'était l'écran admin qui posait la ligne après coup
+    // (côté client) : un échec silencieux laissait un compte sans
+    // ligne. Le serveur la garantit maintenant. `ignoreDuplicates` :
+    // une ré-invitation ne touche JAMAIS au rôle existant.
+    try {
+      await admin.from("permissions_utilisateurs").upsert(
+        {
+          email: courriel,
+          role: roleNouveau,
+          sous_categorie: sousCategorie,
+          entreprise_id: entrepriseInviteur,
+        },
+        { onConflict: "email", ignoreDuplicates: true }
+      );
+    } catch {
+      // ligne non posée — l'écran admin la posera comme avant
     }
   }
   if (!jetonHache) {
