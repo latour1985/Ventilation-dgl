@@ -848,6 +848,10 @@ function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, 
 // ============================================================
 function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel }) {
   const configEnt = useEntreprise();
+  // 🌎 Version anglaise (tranche « inspection », 2026-09-04) — seule
+  // l'INTERFACE se traduit : les données enregistrées (contrôles,
+  // remarques) restent en français, comme la piste d'audit.
+  const { t } = useLangue();
   const [etape, setEtape] = useState("choix"); // "choix" | "form" | "passager"
   const [camion, setCamion] = useState("");
   // PASSAGER (bloc 6) : dans le camion d'un collègue. Pas d'inspection à
@@ -924,30 +928,30 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
     <div className="flex min-h-full flex-col bg-slate-100">
       <div className="bg-[#131B2E] px-5 pb-6 pt-8 text-white">
         <button onClick={onRetour} className="mb-2 flex items-center gap-1 text-xs font-semibold text-slate-400">
-          <ChevronLeft size={14} /> Horaire
+          <ChevronLeft size={14} /> {t("Horaire")}
         </button>
         <p className="text-sm text-slate-400">{dateLabel}</p>
-        <h1 className="mt-1 text-2xl font-extrabold text-black">Inspection du véhicule</h1>
-        <p className="mt-1 text-[11px] text-zinc-300">À remplir avant de démarrer ta journée.</p>
+        <h1 className="mt-1 text-2xl font-extrabold text-black">{t("Inspection du véhicule")}</h1>
+        <p className="mt-1 text-[11px] text-zinc-300">{t("À remplir avant de démarrer ta journée.")}</p>
       </div>
 
       <div className="flex-1 space-y-4 px-4 py-5">
         {etape === "choix" ? (
           <div className="space-y-2">
             <Button onClick={() => setEtape("form")} className="w-full">
-              <Car size={16} /> Je conduis un camion
+              <Car size={16} /> {t("Je conduis un camion")}
             </Button>
             <Button variant="outline" onClick={() => setEtape("passager")} className="w-full">
-              👥 Je suis passager d'un collègue
+              {t("👥 Je suis passager d'un collègue")}
             </Button>
             <Button variant="outline" onClick={() => onSoumettre({ sansVehicule: true })} className="w-full">
-              🚶 Je n'ai pas de véhicule aujourd'hui
+              {t("🚶 Je n'ai pas de véhicule aujourd'hui")}
             </Button>
           </div>
         ) : etape === "passager" ? (
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
             <div>
-              <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Qui conduit le camion ?</label>
+              <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Qui conduit le camion ?")}</label>
               <select
                 value={conducteur?.courriel || ""}
                 onChange={(e) => {
@@ -956,13 +960,13 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
                 }}
                 className="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900"
               >
-                <option value="">— Choisis le conducteur —</option>
+                <option value="">{t("— Choisis le conducteur —")}</option>
                 {collegues.map((c) => (
                   <option key={c.courriel || c.nom} value={c.courriel || ""}>{c.nom}</option>
                 ))}
               </select>
               <p className="mt-1.5 text-[10px] leading-snug text-slate-400">
-                Pas d'inspection à faire : c'est le conducteur qui inspecte son camion. Ta journée démarre dès que tu confirmes.
+                {t("Pas d'inspection à faire : c'est le conducteur qui inspecte son camion. Ta journée démarre dès que tu confirmes.")}
               </p>
             </div>
             <Button
@@ -976,29 +980,29 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
               }
               className="w-full"
             >
-              <Check size={16} /> Confirmer — passager de {conducteur?.nom || "…"}
+              <Check size={16} /> {t("Confirmer — passager de")} {conducteur?.nom || "…"}
             </Button>
-            <Button variant="outline" onClick={() => setEtape("choix")} className="w-full">Retour</Button>
+            <Button variant="outline" onClick={() => setEtape("choix")} className="w-full">{t("Retour")}</Button>
           </div>
         ) : (
           <>
             <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
               <div>
-                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Numéro de camion</label>
+                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Numéro de camion")}</label>
                 {camionsConnus.length > 0 ? (
                   <select
                     value={camion}
                     onChange={(e) => setCamion(e.target.value)}
                     className="min-h-[48px] w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900"
                   >
-                    <option value="">— Choisis ton camion —</option>
+                    <option value="">{t("— Choisis ton camion —")}</option>
                     {(camionsParc.length > 0 ? camionsParc : camionsLocaux.map((n) => ({ nom: n }))).map((c) => {
                       // 🔧 Camion déclaré indisponible (au garage…) :
                       // grisé — impossible de le choisir par habitude.
                       const indispo = camionIndisponible(c);
                       return (
                         <option key={c.nom} value={c.nom} disabled={indispo}>
-                          {c.nom}{indispo ? ` — 🔧 ${c.indispoRaison || "indisponible"}` : ""}
+                          {c.nom}{indispo ? ` — 🔧 ${c.indispoRaison || t("indisponible")}` : ""}
                         </option>
                       );
                     })}
@@ -1010,17 +1014,17 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
                     <input
                       value={camion}
                       onChange={(e) => setCamion(e.target.value)}
-                      placeholder="Entre ton numéro de camion"
+                      placeholder={t("Entre ton numéro de camion")}
                       className="min-h-[48px] w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
                     />
                     <p className="mt-1 text-[10px] text-amber-600">
-                      {parcCharge ? "Aucun camion au parc — préviens l'administration." : "Liste des camions non chargée — saisie manuelle en dépannage."}
+                      {parcCharge ? t("Aucun camion au parc — préviens l'administration.") : t("Liste des camions non chargée — saisie manuelle en dépannage.")}
                     </p>
                   </>
                 )}
               </div>
               <div>
-                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Kilométrage actuel</label>
+                <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Kilométrage actuel")}</label>
                 <input
                   type="number"
                   inputMode="numeric"
@@ -1033,49 +1037,51 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Vérifications rapides</p>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">{t("Vérifications rapides")}</p>
               {CONTROLES_INSPECTION_TECH.map((c) => (
                 <div key={c} className="flex items-center justify-between border-t border-slate-100 py-2.5 first:border-t-0">
-                  <span className="text-sm font-semibold text-slate-700">{c}</span>
+                  {/* Affichage traduit — la CLÉ enregistrée reste le
+                      français (données du dossier véhicule). */}
+                  <span className="text-sm font-semibold text-slate-700">{t(c)}</span>
                   <div className="flex overflow-hidden rounded-full border border-slate-200">
                     <button onClick={() => setControles((p) => ({ ...p, [c]: "ok" }))} className={`px-3 py-1 text-[11px] font-bold ${controles[c] === "ok" ? "bg-emerald-500 text-white" : "text-slate-400"}`}>OK</button>
-                    <button onClick={() => setControles((p) => ({ ...p, [c]: "probleme" }))} className={`px-3 py-1 text-[11px] font-bold ${controles[c] === "probleme" ? "bg-red-500 text-white" : "text-slate-400"}`}>Problème</button>
+                    <button onClick={() => setControles((p) => ({ ...p, [c]: "probleme" }))} className={`px-3 py-1 text-[11px] font-bold ${controles[c] === "probleme" ? "bg-red-500 text-white" : "text-slate-400"}`}>{t("Problème")}</button>
                   </div>
                 </div>
               ))}
             </div>
 
             <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">Anomalie constatée (facultatif)</label>
+              <label className="block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Anomalie constatée (facultatif)")}</label>
               <input
                 value={remarque}
                 onChange={(e) => setRemarque(e.target.value)}
-                placeholder="Ex : feu arrière grillé"
+                placeholder={t("Ex : feu arrière grillé")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
               {/* Vraies photos — même composant que les bons de travail :
                   caméra ou galerie, compression avant envoi, et
                   téléversement vers le stockage Supabase. */}
               <ZonePhoto
-                titre="Photos de l'anomalie"
+                titre={t("Photos de l'anomalie")}
                 photos={photosAnomalie}
                 setPhotos={setPhotosAnomalie}
               />
               {anomalie && photosAnomalie.length === 0 && (
                 <p className="text-[11px] leading-snug text-amber-700">
-                  📷 Une photo aide beaucoup le bureau à juger de l&apos;urgence et à commander la bonne pièce.
+                  {t("📷 Une photo aide beaucoup le bureau à juger de l'urgence et à commander la bonne pièce.")}
                 </p>
               )}
             </div>
 
             {anomalie && (
               <p className="flex items-center gap-1.5 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                <AlertTriangle size={14} /> Anomalie détectée — l'administration sera notifiée.
+                <AlertTriangle size={14} /> {t("Anomalie détectée — l'administration sera notifiée.")}
               </p>
             )}
 
             <Button onClick={soumettre} disabled={!peutSoumettre} className="w-full">
-              Soumettre l'inspection
+              {t("Soumettre l'inspection")}
             </Button>
           </>
         )}
@@ -3394,6 +3400,7 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
 // SIGNATURE TACTILE
 // ============================================================
 function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommencee, onSignatureEffacee, lectureSeule, libelle }) {
+  const { t } = useLangue();
   const dessine = useRef(false);
 
   // L'ÉCRAN NE DOIT PAS BOUGER PENDANT LA SIGNATURE (constat des
@@ -3473,11 +3480,11 @@ function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommen
     <div>
       <div className="flex items-center justify-between">
         <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-          {libelle || "Signature *"}
+          {libelle || t("Signature *")}
         </label>
         {!lectureSeule && (
           <button onClick={effacer} className="text-xs font-semibold text-slate-400 underline">
-            Effacer
+            {t("Effacer")}
           </button>
         )}
       </div>
@@ -3739,6 +3746,10 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
 // FORMULAIRE BON DE TRAVAIL
 // ============================================================
 function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile }) {
+  // 🌎 Version anglaise (tranche « bon de travail », 2026-09-04) —
+  // interface seulement : le bon envoyé au client et les données
+  // enregistrées restent en français.
+  const { t } = useLangue();
   // ============================================================
   // TRAVAIL PARTAGÉ À PLUSIEURS TECHNICIENS
   // ------------------------------------------------------------
@@ -3922,7 +3933,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const lectureSeule = fermee && !modifAutorisee;
 
   const forceRevision = lignes.some((l) => l.prixNonListe);
-  const statutBon = forceRevision ? "En attente de révision de prix" : "Prêt à envoyer";
+  const statutBon = forceRevision ? t("En attente de révision de prix") : t("Prêt à envoyer");
   const total = lignes.reduce((s, l) => s + l.prix_vendant * l.quantite, 0);
 
   // Description + photo après-travaux obligatoires avant fermeture —
@@ -4441,16 +4452,16 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         <div className="rounded-full bg-emerald-100 p-4">
           <CheckCircle2 size={40} className="text-emerald-600" />
         </div>
-        <h2 className="text-xl font-extrabold text-slate-900">Bon de travail envoyé</h2>
-        <p className="text-sm text-slate-500">Statut : {statutBon}</p>
-        <p className="text-sm text-slate-500">Temps travaillé : {formatDuree(dureeEcoulee(tache))}</p>
+        <h2 className="text-xl font-extrabold text-slate-900">{t("Bon de travail envoyé")}</h2>
+        <p className="text-sm text-slate-500">{t("Statut :")} {statutBon}</p>
+        <p className="text-sm text-slate-500">{t("Temps travaillé :")} {formatDuree(dureeEcoulee(tache))}</p>
         <Button variant="outline" onClick={() => setMontrerConfirmation(false)} className="mt-4 px-6">
-          Ajouter une note ou une photo
+          {t("Ajouter une note ou une photo")}
         </Button>
         <Button onClick={onRetour} className="px-6">
-          Retour à l'horaire
+          {t("Retour à l'horaire")}
         </Button>
-        <p className="text-[11px] text-slate-400">Retour automatique dans quelques secondes…</p>
+        <p className="text-[11px] text-slate-400">{t("Retour automatique dans quelques secondes…")}</p>
         <PiedCopyright />
       </div>
     );
@@ -4462,10 +4473,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         <button onClick={onRetour} className="text-slate-500">
           <ChevronLeft size={22} />
         </button>
-        <h1 className="flex-1 text-base font-extrabold text-slate-900">Bon de travail</h1>
+        <h1 className="flex-1 text-base font-extrabold text-slate-900">{t("Bon de travail")}</h1>
         <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${enLigne ? "bg-emerald-100 text-emerald-700" : "bg-zinc-200 text-zinc-600"}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${enLigne ? "bg-emerald-500" : "bg-zinc-400"}`} />
-          {enLigne ? "En ligne" : "Hors ligne"}
+          {enLigne ? t("En ligne") : t("Hors ligne")}
         </span>
       </div>
 
@@ -4598,7 +4609,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             <div className="flex items-start gap-2">
               <MapPin size={16} className="mt-0.5 shrink-0 text-[#FF6A13]" />
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Adresse des travaux</p>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{t("Adresse des travaux")}</p>
                 <p className="mt-0.5 text-sm font-bold leading-snug text-slate-800">
                   {tache.adresseIntervention || tache.adresseTravaux}
                 </p>
@@ -4798,7 +4809,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         <div>
           <div className="mb-2 flex items-center justify-between">
             <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
-              Produits / services
+              {t("Produits / services")}
             </label>
           </div>
 
@@ -5052,7 +5063,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {/* PHOTOS */}
         <div className="grid grid-cols-2 gap-3">
           <ZonePhoto
-            titre="Photos avant"
+            titre={t("Photos avant")}
             photos={photosAvant}
             setPhotos={setPhotosAvant}
             onPhotosChange={(nouvelles) => commettrePhotos("photosAvant", nouvelles)}
@@ -5060,7 +5071,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             coffreCle={`${tache.id}|avant`}
           />
           <ZonePhoto
-            titre="Photos après"
+            titre={t("Photos après")}
             photos={photosApres}
             setPhotos={setPhotosApres}
             onPhotosChange={(nouvelles) => commettrePhotos("photosApres", nouvelles)}
@@ -5239,7 +5250,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {/* SIGNATURE */}
         <div className={`rounded-2xl border border-slate-200 bg-white p-4 ${clientAbsent ? "opacity-50" : ""}`}>
           <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-            Nom en lettres moulées {clientAbsent ? "(client absent)" : "*"}
+            {t("Nom en lettres moulées")} {clientAbsent ? t("(client absent)") : "*"}
           </label>
           <input
             type="text"
@@ -5375,7 +5386,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               aSignature={aSignature2}
               setASignature={setASignature2}
               canvasRef={canvasRef2}
-              libelle="2e signature *"
+              libelle={t("2e signature *")}
             />
           </div>
         )}
@@ -5391,14 +5402,14 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           <>
             {!peutEnvoyer && (
               <ul className="mb-2 space-y-0.5 text-center text-[11px] font-semibold text-slate-400">
-                {descriptionManquante && <li>La description (notes de terrain) est requise.</li>}
-                {photoApresManquante && <li>Au moins une photo « après travaux » est requise.</li>}
+                {descriptionManquante && <li>{t("La description (notes de terrain) est requise.")}</li>}
+                {photoApresManquante && <li>{t("Au moins une photo « après travaux » est requise.")}</li>}
                 {resteAFaireManquant && (
-                  <li>Tu as coché « travaux non terminés » — écris ce qui reste à faire.</li>
+                  <li>{t("Tu as coché « travaux non terminés » — écris ce qui reste à faire.")}</li>
                 )}
-                {(nomMoule.trim().length <= 2 || !aSignature) && <li>Le nom en lettres moulées et la signature sont requis.</li>}
+                {(nomMoule.trim().length <= 2 || !aSignature) && <li>{t("Le nom en lettres moulées et la signature sont requis.")}</li>}
                 {necessiteDeuxiemeSignature && (nomMoule2.trim().length <= 2 || !aSignature2) && (
-                  <li>La 2e signature client est requise pour valider la modification.</li>
+                  <li>{t("La 2e signature client est requise pour valider la modification.")}</li>
                 )}
               </ul>
             )}
@@ -5428,11 +5439,11 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 onClick={fermerLaJournee}
                 className="mb-2 min-h-[52px] w-full rounded-xl border-2 border-slate-300 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
               >
-                Terminer ma journée — je reviens demain
+                {t("Terminer ma journée — je reviens demain")}
               </button>
             )}
             <Button disabled={!peutEnvoyer} loading={envoiEnCours} onClick={demarrerFermetureTravaux} className="w-full tracking-wide">
-              {tache.envoye ? "METTRE À JOUR L'ENVOI" : tache.nbJoursPrevus > 1 ? "✓ TRAVAUX TERMINÉS" : "TERMINER ET ENVOYER"}
+              {tache.envoye ? t("METTRE À JOUR L'ENVOI") : tache.nbJoursPrevus > 1 ? t("✓ TRAVAUX TERMINÉS") : t("TERMINER ET ENVOYER")}
             </Button>
             {tache.nbJoursPrevus > 1 && (
               <p className="mt-1.5 text-center text-[11px] leading-snug text-slate-400">
