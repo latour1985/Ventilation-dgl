@@ -5385,3 +5385,20 @@ insert into journal_archive overriding system value select * from deplacees;
 select
   (select count(*) from journal_activite) as journal_actif,
   (select count(*) from journal_archive) as archive;
+
+-- ============================================================
+-- 132 - RESILIATION D'ABONNEMENT (2026-09-14)
+-- ============================================================
+-- Demande du proprietaire (console plateforme) : pouvoir annuler
+-- l'abonnement d'une entreprise cliente — le pendant definitif de la
+-- suspension. Statut « resilie » + acces coupe + date et raison
+-- consignees sur la fiche ; la reactivation remet le statut d'avant.
+-- Les donnees de l'entreprise restent INTACTES (Loi 25 : l'export
+-- demeure possible).
+alter table entreprises add column if not exists resilie_le timestamptz;
+alter table entreprises add column if not exists resilie_raison text;
+alter table entreprises add column if not exists statut_avant_resiliation text;
+
+-- Verification : les 3 colonnes existent.
+select column_name from information_schema.columns
+ where table_name = 'entreprises' and column_name like '%resili%';

@@ -38,6 +38,10 @@ import {
   creerEntreprisePlateforme,
 } from "@/lib/supabase/plateforme";
 import { listerRetoursTransmis, majRetour, sAbonnerRetours, LIBELLES_STATUT_RETOUR } from "@/lib/supabase/retours";
+// 🏠 La même autocomplétion Google que partout ailleurs (2026-09-14,
+// demande du propriétaire en créant sa première vraie entreprise
+// cliente) — une adresse propre du premier coup, bureau/local compris.
+import { AutocompleteAdresse } from "@/app/admin/partage";
 
 // 🧩 MODULES À LA CARTE — ce qu'une entreprise reçoit dans son forfait.
 // Décision du propriétaire (2026-08-15) : les besoins diffèrent selon le
@@ -65,6 +69,9 @@ const STATUTS = {
   fondateur: { label: "Pionnier", cls: "bg-amber-100 text-amber-800" },
   essai: { label: "Essai", cls: "bg-blue-100 text-blue-700" },
   payant: { label: "Payant", cls: "bg-emerald-100 text-emerald-700" },
+  // ❌ Abonnement résilié (2026-09-14, demande du propriétaire) — les
+  // données restent intactes, l'accès est coupé, réactivable en tout temps.
+  resilie: { label: "Résiliée", cls: "bg-red-600 text-white" },
 };
 
 function Bouton({ variant = "primary", className = "", children, ...props }) {
@@ -226,6 +233,37 @@ function TableauPlateforme({ session }) {
     setEntreprises((prev) => prev.map((x) => (x.id === e.id ? { ...x, suspendue: suspendre } : x)));
     await majEntreprisePlateforme(e.id, { suspendue: suspendre }).catch(() => charger());
   };
+  // ❌ RÉSILIATION D'ABONNEMENT (2026-09-14, demande du propriétaire) —
+  // le pendant définitif de la suspension : statut « Résiliée », accès
+  // coupé, date et raison consignées sur la fiche. RÉVERSIBLE : la
+  // réactivation remet le statut d'avant. Jamais pour la fiche
+  // Propriétaire (DGL). Filet colonne-manquante : sans le snippet 132,
+  // le statut et la coupure s'appliquent quand même.
+  const resilierAbonnement = async (e) => {
+    if (e.statut === "proprietaire") return;
+    if (e.statut === "resilie") {
+      if (!window.confirm(`Réactiver l'abonnement de « ${e.nom} » ? Elle retrouve son statut d'avant et l'accès.`)) return;
+      const retour = e.statutAvantResiliation || "payant";
+      setEntreprises((prev) => prev.map((x) => (x.id === e.id ? { ...x, statut: retour, suspendue: false, resilieLe: null, resilieRaison: "" } : x)));
+      const complets = { statut_plateforme: retour, suspendue: false, resilie_le: null, resilie_raison: null, statut_avant_resiliation: null };
+      await majEntreprisePlateforme(e.id, complets).catch(async (err) => {
+        if (/resilie|statut_avant/.test(String(err?.message || ""))) {
+          await majEntreprisePlateforme(e.id, { statut_plateforme: retour, suspendue: false }).catch(() => charger());
+        } else charger();
+      });
+      return;
+    }
+    if (!window.confirm(`Résilier l'abonnement de « ${e.nom} » ? L'accès sera coupé et la fiche marquée RÉSILIÉE — ses données restent intactes (Loi 25 : l'export reste possible). Réactivable en tout temps.`)) return;
+    const raison = window.prompt("Raison de la résiliation (facultatif — reste sur la fiche) :", "") || "";
+    const quand = new Date().toISOString();
+    setEntreprises((prev) => prev.map((x) => (x.id === e.id ? { ...x, statut: "resilie", suspendue: true, resilieLe: quand, resilieRaison: raison, statutAvantResiliation: e.statut } : x)));
+    const complets = { statut_plateforme: "resilie", suspendue: true, resilie_le: quand, resilie_raison: raison.trim() || null, statut_avant_resiliation: e.statut };
+    await majEntreprisePlateforme(e.id, complets).catch(async (err) => {
+      if (/resilie|statut_avant/.test(String(err?.message || ""))) {
+        await majEntreprisePlateforme(e.id, { statut_plateforme: "resilie", suspendue: true }).catch(() => charger());
+      } else charger();
+    });
+  };
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -270,6 +308,7 @@ function TableauPlateforme({ session }) {
             gestesLourds={clePrincipale}
             onExporter={exporter}
             onBasculerSuspension={basculerSuspension}
+            onResilier={resilierAbonnement}
             onCree={charger}
             onMaj={async (id, champs) => {
               setEntreprises((prev) => prev.map((x) => (x.id === id ? { ...x, ...champs } : x)));
@@ -554,7 +593,7 @@ function SectionEquipe({ session }) {
   );
 }
 
-function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, gestesLourds = true, onExporter, onBasculerSuspension, onMaj, onCree }) {
+function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, gestesLourds = true, onExporter, onBasculerSuspension, onResilier, onMaj, onCree }) {
   const [editionId, setEditionId] = useState(null);
   // 📇 FICHE DÉPLIABLE (2026-09-06 — retour du propriétaire) : cliquer
   // sur l'entreprise montre ses coordonnées complètes (adresse de
@@ -563,7 +602,7 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
   // 🏢 CRÉATION D'ENTREPRISE (2026-09-05 — après la sonde verte). Le
   // bouton décoratif devient réel : fiche + invitation de SON admin,
   // étiqueté à SA nouvelle bulle par la route service.
-  const CREATION_VIERGE = { nomLegal: "", nomCommercial: "", courrielEntreprise: "", telephone: "", adresse: "", statut: "essai", gratuitJusqua: "", adminNom: "", adminCourriel: "" };
+  const CREATION_VIERGE = { nomLegal: "", nomCommercial: "", courrielEntreprise: "", telephone: "", adresse: "", local: "", statut: "essai", gratuitJusqua: "", adminNom: "", adminCourriel: "" };
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   const [creation, setCreation] = useState(CREATION_VIERGE);
   const [envoiEnCours, setEnvoiEnCours] = useState(false);
@@ -578,7 +617,13 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
     }
     setEnvoiEnCours(true);
     setResultat(null);
-    const r = await creerEntreprisePlateforme(creation);
+    // Le bureau/local se fond dans l'adresse — une seule ligne propre
+    // sur la fiche et les factures.
+    const { local: _local, ...donnees } = creation;
+    donnees.adresse = creation.adresse
+      ? creation.adresse + (creation.local.trim() ? `, bureau ${creation.local.trim()}` : "")
+      : "";
+    const r = await creerEntreprisePlateforme(donnees);
     setEnvoiEnCours(false);
     if (!r?.fait) { setResultat({ erreur: r?.erreur || "Création impossible — réessaie." }); return; }
     setResultat({
@@ -628,8 +673,30 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                 className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
               <input value={creation.telephone} onChange={poserChamp("telephone")} placeholder="Téléphone (facultatif)"
                 className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
-              <input value={creation.adresse} onChange={poserChamp("adresse")} placeholder="Adresse complète (pour la facturation)"
-                className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs sm:col-span-2" />
+              <div className="sm:col-span-2">
+                {/* 🏠 Autocomplétion Google + bureau/local — l'adresse de
+                    facturation de l'entreprise, propre du premier coup. */}
+                {creation.adresse ? (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-2">
+                    <span className="min-w-0 truncate text-xs font-semibold text-slate-700">
+                      📍 {creation.adresse}{creation.local.trim() ? `, bureau ${creation.local.trim()}` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCreation((prev) => ({ ...prev, adresse: "", local: "" }))}
+                      className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2"
+                    >
+                      changer
+                    </button>
+                  </div>
+                ) : (
+                  <AutocompleteAdresse onSelection={(place) => setCreation((prev) => ({ ...prev, adresse: place.label }))} />
+                )}
+              </div>
+              {creation.adresse && (
+                <input value={creation.local} onChange={poserChamp("local")} placeholder="Bureau / local (optionnel) — ex. : 202"
+                  className="rounded-lg border border-slate-300 px-2.5 py-2 text-xs" />
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <select
@@ -713,7 +780,7 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                 </p>
               </button>
               <div className="flex items-center gap-1.5">
-                {e.suspendue && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-extrabold text-red-700">SUSPENDUE</span>}
+                {e.suspendue && e.statut !== "resilie" && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-extrabold text-red-700">SUSPENDUE</span>}
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${st.cls}`}>{st.label}</span>
               </div>
             </div>
@@ -924,14 +991,33 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                       <Download size={13} /> Exporter ses données
                     </Bouton>
                   )}
-                  {gestesLourds && e.statut !== "proprietaire" && (
+                  {gestesLourds && e.statut !== "proprietaire" && e.statut !== "resilie" && (
                     <Bouton variant={e.suspendue ? "outline" : "danger"} onClick={() => onBasculerSuspension(e)} className="min-h-0 px-3 py-1.5 text-xs">
                       {e.suspendue ? <><Play size={13} /> Réactiver</> : <><Pause size={13} /> Suspendre</>}
+                    </Bouton>
+                  )}
+                  {/* ❌ RÉSILIER / RÉACTIVER L'ABONNEMENT — le geste le
+                      plus lourd : clé principale seulement, jamais la
+                      fiche Propriétaire. Suspendre = temporaire ;
+                      résilier = fin d'entente, consignée. */}
+                  {gestesLourds && e.statut !== "proprietaire" && (
+                    <Bouton
+                      variant={e.statut === "resilie" ? "outline" : "danger"}
+                      onClick={() => onResilier(e)}
+                      className="min-h-0 px-3 py-1.5 text-xs"
+                    >
+                      {e.statut === "resilie" ? <><Play size={13} /> Réactiver l&apos;abonnement</> : <>❌ Résilier l&apos;abonnement</>}
                     </Bouton>
                   )}
                 </>
               )}
             </div>
+            {e.statut === "resilie" && (
+              <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] text-red-700">
+                ❌ Abonnement résilié{e.resilieLe ? ` le ${new Date(e.resilieLe).toLocaleDateString("fr-CA")}` : ""}
+                {e.resilieRaison ? ` — « ${e.resilieRaison} »` : ""} · ses données restent intactes (export possible), réactivable en tout temps.
+              </p>
+            )}
           </div>
         );
       })}

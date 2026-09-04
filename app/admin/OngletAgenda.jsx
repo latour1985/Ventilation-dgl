@@ -25,7 +25,7 @@ import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxH
 import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { AutocompleteAdresse, Button, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
+import { AutocompleteAdresse, Button, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -889,6 +889,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // sur le toit, et pré-remplit sa section « Unité vérifiée » (fini le
   // numéro de série retapé de travers). Clés `modele|serie`.
   const [unitesChoisies, setUnitesChoisies] = useState([]);
+  // 📍 Unités des AUTRES adresses : repliées par défaut (2026-09-14,
+  // règle du propriétaire : « les numéros doivent apparaître s'il
+  // s'agit de la même adresse que les travaux »).
+  const [autresUnitesOuvertes, setAutresUnitesOuvertes] = useState(false);
   const unitesConnuesDuClient = (clientId) => {
     const fiche = clients.find((x) => x.id === clientId);
     if (!fiche) return [];
@@ -909,8 +913,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           if (existe) {
             // La plus récente gagne l'emplacement manquant.
             if (ub.emplacement && !existe.emplacement) existe.emplacement = ub.emplacement;
+            // 📍 Idem pour l'ADRESSE où l'unité a été vue (2026-09-14,
+            // vécu JG Lessard : un entrepreneur a plusieurs chantiers —
+            // sans l'adresse, ses unités se mélangeaient toutes).
+            if (b.adresseTravaux && !existe.adresse) existe.adresse = b.adresseTravaux;
           } else {
-            unites.push({ cle, modele: ub.modele || "", serie: ub.serie || "", emplacement: ub.emplacement || "" });
+            unites.push({ cle, modele: ub.modele || "", serie: ub.serie || "", emplacement: ub.emplacement || "", adresse: b.adresseTravaux || "" });
           }
         });
       });
@@ -2743,31 +2751,82 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               {!estTypeSansClient(nouveauType) && nouveauClientId && (() => {
                 const connues = unitesConnuesDuClient(nouveauClientId);
                 if (connues.length === 0) return null;
+                // 📍 SEULES LES UNITÉS DE L'ADRESSE DES TRAVAUX s'affichent
+                // (2026-09-14, règle du propriétaire : « les numéros de
+                // modèle et série doivent apparaître s'il s'agit de la
+                // même adresse que les travaux ») — un entrepreneur a
+                // plusieurs chantiers. Les unités des AUTRES adresses
+                // restent accessibles derrière un déplieur ; si aucune
+                // correspondance n'est possible (adresse jamais notée),
+                // tout s'affiche groupé, rien ne disparaît.
+                const clientFiche = clients.find((c) => c.id === nouveauClientId);
+                const adresseChoisieTexte = adresseTravauxDifferente
+                  ? nouvelleAdresseTravaux?.label ||
+                    (adresseTravauxId
+                      ? libelleAdresse((clientFiche?.adresses || []).find((a) => a.id === adresseTravauxId) || {})
+                      : "")
+                  : adresseFacturationClient(clientFiche) || "";
+                const normaliser = (s) =>
+                  String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
+                const cible = normaliser(adresseChoisieTexte);
+                const correspond = (adr) => {
+                  if (!cible || !adr) return false;
+                  const n = normaliser(adr);
+                  return n.includes(cible.slice(0, 12)) || cible.includes(n.slice(0, 12));
+                };
+                const memes = connues.filter((u) => correspond(u.adresse));
+                const autres = connues.filter((u) => !correspond(u.adresse));
+                const filtrage = memes.length > 0; // sans correspondance : tout montrer
+                const CaseUnite = ({ u, montrerAdresse }) => (
+                  <label key={u.cle} className="flex items-start gap-1.5 rounded px-1 py-0.5 text-[11px] text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={unitesChoisies.includes(u.cle)}
+                      onChange={() =>
+                        setUnitesChoisies((prev) =>
+                          prev.includes(u.cle) ? prev.filter((x) => x !== u.cle) : [...prev, u.cle]
+                        )
+                      }
+                      className="mt-0.5 shrink-0 accent-[#131B2E]"
+                    />
+                    <span className="min-w-0">
+                      {u.emplacement ? <span className="mr-1 rounded bg-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-600">📍 {u.emplacement}</span> : null}
+                      <span className="font-semibold">{u.modele || "Modèle non relevé"}</span>
+                      {u.serie ? <span className="text-slate-500"> · Nº {u.serie}</span> : null}
+                      {montrerAdresse && (
+                        <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">
+                          📍 {u.adresse || "adresse non notée"}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                );
                 return (
                   <div>
                     <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
                       🔧 Unité(s) concernée(s) <span className="font-normal normal-case text-slate-400">— relevées lors de visites passées, optionnel</span>
                     </label>
-                    <div className="max-h-36 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1.5">
-                      {connues.map((u) => (
-                        <label key={u.cle} className="flex items-start gap-1.5 rounded px-1 py-0.5 text-[11px] text-slate-700">
-                          <input
-                            type="checkbox"
-                            checked={unitesChoisies.includes(u.cle)}
-                            onChange={() =>
-                              setUnitesChoisies((prev) =>
-                                prev.includes(u.cle) ? prev.filter((x) => x !== u.cle) : [...prev, u.cle]
-                              )
-                            }
-                            className="mt-0.5 shrink-0 accent-[#131B2E]"
-                          />
-                          <span className="min-w-0">
-                            {u.emplacement ? <span className="mr-1 rounded bg-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-600">📍 {u.emplacement}</span> : null}
-                            <span className="font-semibold">{u.modele || "Modèle non relevé"}</span>
-                            {u.serie ? <span className="text-slate-500"> · Nº {u.serie}</span> : null}
-                          </span>
-                        </label>
-                      ))}
+                    <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+                      {filtrage ? (
+                        <>
+                          <p className="px-1 text-[9px] font-bold uppercase tracking-wide text-emerald-600">
+                            📍 {adresseChoisieTexte} — l&apos;adresse des travaux ✓
+                          </p>
+                          {memes.map((u) => <CaseUnite key={u.cle} u={u} montrerAdresse={false} />)}
+                          {autres.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setAutresUnitesOuvertes((v) => !v)}
+                              className="mt-1 w-full rounded px-1 py-0.5 text-left text-[10px] font-bold text-slate-400 hover:text-slate-600"
+                            >
+                              {autresUnitesOuvertes ? "▾" : "▸"} Unités vues à d&apos;autres adresses ({autres.length})
+                            </button>
+                          )}
+                          {autresUnitesOuvertes && autres.map((u) => <CaseUnite key={u.cle} u={u} montrerAdresse={true} />)}
+                        </>
+                      ) : (
+                        connues.map((u) => <CaseUnite key={u.cle} u={u} montrerAdresse={!!u.adresse} />)
+                      )}
                     </div>
                     <p className="mt-0.5 text-[9px] text-slate-400">
                       Le technicien verra l&apos;unité en évidence sur sa fiche de tâche, et sa section « Unité vérifiée » sera pré-remplie.
@@ -2939,26 +2998,40 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                           <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                             Adresses enregistrées de {nomAffichageClient(client)}
                           </p>
-                          <input
-                            value={filtreAdresseTache}
-                            onChange={(e) => setFiltreAdresseTache(e.target.value)}
-                            placeholder="🔍 Filtrer les adresses…"
-                            className="mb-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                          />
-                          <select
-                            value={adresseTravauxId}
-                            onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
-                            className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                          >
-                            <option value="">— Choisir une adresse enregistrée —</option>
-                            {adressesFiltrees.map((a) => (
-                              <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
-                            ))}
-                          </select>
+                          {/* 🔍 Le filtre n'apparaît qu'à partir de 5
+                              adresses (2026-09-14, vécu : une NOUVELLE
+                              adresse tapée dans le filtre → « le chemin
+                              que je mets pour Google n'apparaît pas » —
+                              c'était le mauvais champ). Peu d'adresses =
+                              la liste suffit, aucun champ piège. */}
+                          {client.adresses.length > 4 && (
+                            <input
+                              value={filtreAdresseTache}
+                              onChange={(e) => setFiltreAdresseTache(e.target.value)}
+                              placeholder="🔍 Filtrer les adresses DÉJÀ enregistrées (pas pour une nouvelle)"
+                              className="mb-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                            />
+                          )}
+                          {adressesFiltrees.length === 0 ? (
+                            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-700">
+                              Aucune adresse enregistrée ne correspond à « {filtreAdresseTache.trim()} ». Pour une NOUVELLE adresse, utilise le champ ⤵ « Nouvelle adresse » juste en dessous.
+                            </p>
+                          ) : (
+                            <select
+                              value={adresseTravauxId}
+                              onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                            >
+                              <option value="">— Choisir une adresse enregistrée —</option>
+                              {adressesFiltrees.map((a) => (
+                                <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       );
                     })()}
-                    <p className="text-[10px] text-slate-400">Ou saisir une nouvelle adresse :</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">➕ Nouvelle adresse — tape-la ICI (suggestions Google) :</p>
                     <AutocompleteAdresse
                       onSelection={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
                     />
