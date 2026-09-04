@@ -123,7 +123,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "" });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false });
   // ✏️ FICHE D'UN BC (2026-08-26) — la ligne cliquée s'ouvre en fenêtre :
   // fournisseur, description, montant et RATTACHEMENT modifiables,
   // suppression en deux clics. `bcOuvert` = l'achat ; `bcEdit` = la
@@ -808,6 +808,20 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   className="min-w-0 flex-1"
                 />
               </div>
+              {/* 📦 INVENTAIRE COURANT (2026-09-06, demande du
+                  propriétaire : « comme ça on sait que c'est au
+                  bureau ») — la case marque l'achat comme du STOCK :
+                  visible sur le bon, dans la liste et dans le courriel
+                  au fournisseur. */}
+              <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={bcLibre.pourInventaire}
+                  onChange={(e) => setBcLibre((f) => ({ ...f, pourInventaire: e.target.checked }))}
+                  className="h-3.5 w-3.5 accent-[#FF6A13]"
+                />
+                📦 Inventaire courant — cet achat est du stock pour le bureau
+              </label>
               <p className="text-[9px] leading-snug text-slate-400">
                 <span className="font-bold">Montant HT</span> = le total de la facture du fournisseur, avant taxes
                 (les taxes sont récupérables, jamais un coût). Optionnel : à 0 $, la facture QuickBooks portant
@@ -923,7 +937,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                       if (c === "autre") return bcLibre.livraisonAutre.trim();
                       return "";
                     })();
-                    const descriptionFinale = `${(bcLibre.description || "").trim()}${livraison}${adresseLivraisonBc ? `\n📍 Livraison : ${adresseLivraisonBc}` : ""}`;
+                    const descriptionFinale = `${(bcLibre.description || "").trim()}${bcLibre.pourInventaire ? "\n📦 Pour l'inventaire courant (stock du bureau)" : ""}${livraison}${adresseLivraisonBc ? `\n📍 Livraison : ${adresseLivraisonBc}` : ""}`;
                     // 🤝 Montant HT laissé à 0 mais part attribuée tapée :
                     // la part DEVIENT le montant de l'achat (voir l'aide du
                     // champ) — plus jamais de part « ramenée à 0 ».
@@ -969,7 +983,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         coches: [courrielTape],
                       });
                     }
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "" });
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false });
                     setBcLibreOuvert(false);
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"
@@ -1000,6 +1014,11 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     ) : a2.clientId ? (
                       <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">👤 {a2.clientNom || "client"}</span>
                     ) : null}
+                    {/* 📦 Marqué « inventaire courant » à la création —
+                        on sait d'un œil que la boîte s'en va au bureau. */}
+                    {(a2.description || "").includes("Pour l'inventaire courant") && (
+                      <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">📦 STOCK</span>
+                    )}
                     {ecartQbPourBc(a2) && (
                       <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700" title="Le montant réel de QuickBooks diffère du montant saisi — ouvre la fiche pour valider">⚠️ écart QB {ecartQbPourBc(a2).ecart > 0 ? "+" : ""}{ecartQbPourBc(a2).ecart.toFixed(2)} $</span>
                     )}
