@@ -12,9 +12,11 @@ import { AlertCircle, AlertTriangle, Check, CheckCircle2, Cloud, FileText, MapPi
 import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
-import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
+import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
+import { creerFactureMaison, majFactureMaison, lienFactureMaison } from "@/lib/supabase/facturesMaison";
+import { calculerTaxesRegime } from "@/lib/taxesCanada";
 import { SectionFacturesMaison } from "./FacturesMaison";
 import { majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
@@ -2292,6 +2294,122 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     }
   };
 
+  // ============================================================
+  // 🧾 FACTURER UN BON SANS QUICKBOOKS (2026-09-06, GO du propriétaire)
+  // ------------------------------------------------------------
+  // Le chemin MAISON pour la pile « À facturer » : une entreprise sans
+  // connexion QuickBooks émet sa facture officielle (numérotation
+  // atomique, taxes du régime, page publique /facture/<jeton>) depuis
+  // le MÊME bouton que les autres. Le bon sort de la pile exactement
+  // comme avec QuickBooks — impossible de le facturer deux fois.
+  // v1 : bons simples. Facture groupée et facturation progressive d'un
+  // devis restent QuickBooks pour l'instant.
+  // ============================================================
+  const echeanceDepuisTerme = (terme) => {
+    const m = String(terme || "").match(/(\d+)/);
+    if (!m) return null;
+    const d = new Date(Date.now() + Number(m[1]) * 24 * 60 * 60 * 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const facturerBonMaison = async (id, choixCourriels) => {
+    const b = bons.find((x) => x.id === id);
+    if (!b) return;
+    const fiche = trouverClientDuBon(b);
+    const destinataires = listeDestinataires(choixCourriels).map((c) => c.email);
+    const lignesMaison = b.lignesNonListees?.length
+      ? b.lignesNonListees.map((l) => {
+          const montant = Math.round((parseFloat(l.prix) || 0) * 100) / 100;
+          const qte = Number(l.quantite) > 0 ? Number(l.quantite) : 1;
+          return {
+            description: l.description,
+            quantite: qte,
+            prix_unitaire: Number(l.prixUnitaire) > 0 ? Number(l.prixUnitaire) : Math.round((montant / qte) * 100) / 100,
+            montant,
+          };
+        })
+      : [{ description: b.projet || "Travaux", quantite: 1, prix_unitaire: Number(b.montant) || 0, montant: Number(b.montant) || 0 }];
+    const sousTotal = Math.round(lignesMaison.reduce((s, l) => s + l.montant, 0) * 100) / 100;
+    // Même défaut que la modale maison : Québec (TPS+TVQ) — le régime
+    // se choisit dans « Nouvelle facture » pour les cas hors Québec.
+    const regime = "qc";
+    const taxes = calculerTaxesRegime(sousTotal, regime);
+    const total = Math.round((sousTotal + taxes.reduce((s, t) => s + (Number(t.montant) || 0), 0)) * 100) / 100;
+    let creee;
+    try {
+      creee = await creerFactureMaison({
+        clientId: fiche?.id || null,
+        clientNom: b.client || "",
+        clientAdresse: fiche ? adresseFacturationClient(fiche) : "",
+        courriels: destinataires,
+        lignes: lignesMaison,
+        sousTotal,
+        taxes,
+        regimeTaxes: regime,
+        total,
+        terme: configEnt?.termePaiementDefaut || "Net 30",
+        dateEcheance: echeanceDepuisTerme(configEnt?.termePaiementDefaut || "Net 30"),
+        note: b.devisNumero ? `Bon de travail — devis ${b.devisNumero}` : "Bon de travail",
+      });
+    } catch (e) {
+      ajouterJournal(`⚠️ Facture maison NON créée pour « ${b.projet} » : ${e?.message || "erreur"} — le bon reste en attente.`);
+      return;
+    }
+    const lien = lienFactureMaison(creee);
+    let envoye = false;
+    if (destinataires.length > 0 && lien) {
+      const r = await envoyerCourriel({
+        a: destinataires,
+        sujet: `Facture ${creee.numero} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
+        html: gabaritFactureMaison({
+          config: configEnt,
+          numero: creee.numero,
+          clientNom: creee.clientNom,
+          total: `${creee.total.toFixed(2)} $`,
+          lien,
+          echeance: creee.dateEcheance,
+        }),
+      }).catch(() => ({}));
+      if (r?.envoye || r?.simule) {
+        envoye = true;
+        majFactureMaison(creee.id, { statut: "envoyee", envoyeeLe: new Date().toISOString(), courriels: destinataires }).catch(() => {});
+      }
+    }
+    // Le bon sort de la pile — même mécanique que le chemin QuickBooks.
+    const entree = {
+      id: `fact-${Date.now()}`,
+      montant: sousTotal,
+      type: "complete",
+      detail: "facture maison",
+      date: dateISO(new Date()),
+      numeroFactureQb: creee.numero,
+      factureMaisonId: creee.id,
+      courrielEnvoi: destinataires[0] || null,
+      courrielsEnvoi: destinataires,
+      envoiQb: envoye ? { statut: "envoyee", date: new Date().toISOString() } : null,
+    };
+    const nouvelles = [...(b.facturesEmises || []), entree];
+    setBons((prev) =>
+      prev.map((x) =>
+        x.id === id
+          ? { ...x, statutQb: "envoye", facturesEmises: nouvelles, courrielFacturation: destinataires[0] || null, courrielsFacturation: destinataires }
+          : x
+      )
+    );
+    if (String(b.id).startsWith("sbb-")) {
+      majFacturesEmises(String(b.id).slice(4), nouvelles, "envoye").catch(() =>
+        ajouterJournal("⚠️ Facture maison affichée mais NON enregistrée en base — vérifie la connexion.")
+      );
+    }
+    ajouterJournal(
+      `🧾 Facture MAISON ${creee.numero} — « ${b.projet} » (${b.client}) · ${sousTotal.toFixed(2)} $ HT` +
+        (envoye
+          ? ` · envoyée à ${destinataires.join(", ")}`
+          : destinataires.length > 0
+            ? " · ⚠️ courriel NON parti — bouton Renvoyer dans Factures maison"
+            : " · aucun destinataire — le lien vit dans Factures maison")
+    );
+  };
+
   const renvoyerFactureQb = async (b, f) => {
     const adresses = (f.courrielsEnvoi || []).filter(Boolean);
     if (adresses.length === 0) {
@@ -3598,6 +3716,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                   <Button onClick={() => setBonFacturationId(b.id)} className="mt-1 min-h-[40px] gap-1 px-3 py-1.5 text-[11px] md:min-h-0 md:px-2 md:py-1 md:text-[10px]">
                     <Check size={11} /> {montantCumule > 0 ? "Facturer le solde" : "Facturer"}
                   </Button>
+                ) : qbConnecte === false ? (
+                  /* 🧾 SANS QUICKBOOKS (2026-09-06) : le même geste émet
+                     la facture MAISON — numérotée, taxée, page publique. */
+                  <Button onClick={() => setBonEnvoiCourrielId(b.id)} className="min-h-[40px] gap-1 px-3 py-1.5 text-[11px] md:min-h-0 md:px-2 md:py-1 md:text-[10px]">
+                    🧾 Facturer (maison)
+                  </Button>
                 ) : (
                   <>
                     <span className="mb-1 flex items-center justify-end gap-1 text-[10px] font-bold text-amber-600">
@@ -3755,6 +3879,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           onFermer={() => setBonEnvoiCourrielId(null)}
           onConfirmer={(choix) => {
             setBonEnvoiCourrielId(null);
+            // 🧾 Sans QuickBooks : la facture MAISON part directement —
+            // pas de fenêtre paiement en ligne (QuickBooks Payments
+            // n'existe pas sans QuickBooks).
+            if (qbConnecte === false) {
+              facturerBonMaison(bonEnvoiCourriel.id, choix);
+              return;
+            }
             setPaiementAConfirmer({
               mode: "simple",
               bonId: bonEnvoiCourriel.id,

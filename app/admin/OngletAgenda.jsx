@@ -75,7 +75,15 @@ export function recalculerTransports(planning, sansTransport = new Set()) {
     // mais ne fabrique aucun bloc Transport Début/Fin. S'il partage la
     // journée avec une vraie tâche, les transports de la vraie tâche
     // s'installent normalement.
-    const deplacements = reelles.filter((t) => t?.typeTache !== "conge" && t?.type !== "conge");
+    // 📋 Même règle pour DIVERS (2026-09-06, demande du propriétaire —
+    // « rencontre chez Monolith » créait des transports) : une réunion
+    // ou un rendez-vous n'est pas un déplacement payé. La COURSE, elle,
+    // EST un déplacement, et le SHOP se rend à l'atelier — les deux
+    // gardent leurs transports. Une journée mixte (divers + vraie
+    // tâche) garde aussi les siens.
+    const deplacements = reelles.filter(
+      (t) => t?.typeTache !== "conge" && t?.type !== "conge" && t?.typeTache !== "divers" && t?.type !== "divers"
+    );
     if (deplacements.length === 0) return;
     const [date, employeId, heure] = cle.split("|");
     const g = `${date}|${employeId}`;
