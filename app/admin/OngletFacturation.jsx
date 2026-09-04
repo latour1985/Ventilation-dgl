@@ -1793,20 +1793,39 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         .map((e) => String(e).split("@")[1]?.toLowerCase())
         .filter(Boolean)
     );
-  const envoyerCopieInterne = async ({ numero, clientNom, totalHT, destinataires }) => {
+  const envoyerCopieInterne = async ({ numero, clientNom, totalHT, destinataires, lignes = null }) => {
     const doms = domainesInternes();
     if (doms.size === 0) return;
     const internes = (destinataires || [])
       .map((c) => (typeof c === "string" ? c : c?.email))
       .filter((e) => e && doms.has(String(e).split("@")[1]?.toLowerCase()));
     if (internes.length === 0) return;
+    // 🧾 LE DÉTAIL COMPLET dans la copie interne (2026-09-06, vécu ×2 :
+    // les courriels d'Intuit vers @ventilationdgl.com se perdent en
+    // silence malgré « EmailSent » au registre — liste de suppression
+    // Intuit). La copie Fluxya se suffit : lignes, taxes estimées,
+    // total — personne à l'interne n'a besoin du courriel Intuit.
+    const echap = (t) => String(t || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br/>");
+    const tableauLignes =
+      Array.isArray(lignes) && lignes.length > 0
+        ? `<table style="border-collapse:collapse;width:100%;margin:8px 0;font-size:13px">` +
+          lignes
+            .map(
+              (l) =>
+                `<tr><td style="border-bottom:1px solid #eee;padding:4px 8px 4px 0">${echap(l.description)}</td>` +
+                `<td style="border-bottom:1px solid #eee;padding:4px 0;text-align:right;white-space:nowrap">${(Number(l.montant) || 0).toFixed(2)} $</td></tr>`
+            )
+            .join("") +
+          `</table>`
+        : "";
     const r = await envoyerCourriel({
       a: internes,
       sujet: `Copie interne — Facture ${numero} — ${clientNom}`,
       html:
         `<p><b>Copie interne Fluxya</b> — la facture officielle (avec le lien de paiement) part par QuickBooks au client.</p>` +
-        `<p>Facture <b>Nº ${numero}</b> · ${clientNom}${Number(totalHT) > 0 ? ` · <b>${Number(totalHT).toFixed(2)} $ HT</b>` : ""}</p>` +
-        `<p>Destinataires choisis : ${(destinataires || []).map((c) => (typeof c === "string" ? c : c?.email)).filter(Boolean).join(", ")}</p>`,
+        `<p>Facture <b>Nº ${numero}</b> · ${echap(clientNom)}${Number(totalHT) > 0 ? ` · <b>${Number(totalHT).toFixed(2)} $ HT</b> (+ taxes)` : ""}</p>` +
+        tableauLignes +
+        `<p style="font-size:12px;color:#666">Destinataires choisis : ${(destinataires || []).map((c) => (typeof c === "string" ? c : c?.email)).filter(Boolean).join(", ")}</p>`,
     });
     ajouterJournal(
       r.envoye
@@ -2779,7 +2798,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         };
       })
     );
-    envoyerCopieInterne({ numero, clientNom, totalHT: total, destinataires });
+    envoyerCopieInterne({ numero, clientNom, totalHT: total, destinataires, lignes });
     ajouterJournal(
       `📅 Facture GROUPÉE ${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length} bons réunis, ${total.toFixed(2)} $ HT` +
         (r?.envoiQb?.envoyee
@@ -2865,7 +2884,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       );
     }
     if (r?.creee) {
-      envoyerCopieInterne({ numero: numeroReel, clientNom: b.client || "", totalHT: entree.montant, destinataires });
+      envoyerCopieInterne({ numero: numeroReel, clientNom: b.client || "", totalHT: entree.montant, destinataires, lignes });
     }
     ajouterJournal(
       r?.creee
