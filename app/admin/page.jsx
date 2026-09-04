@@ -3482,6 +3482,10 @@ function AppAdmin() {
           // 🗺️ Zone d'un appel retrouvée depuis l'agenda (les tâches y
           // portent leur fiche complète) — le bon de travail, lui, ne la
           // stocke pas. Repli : la file d'attente.
+          // 🗒️ La DEMANDE originale de l'agenda (2026-09-06) — la
+          // révision montre ce que le bureau avait demandé, pas
+          // seulement le rapport du technicien.
+          descriptionTachePour={(tacheId) => tacheParId(tacheId)?.description || null}
           zonePourTache={(tacheId) => {
             if (!tacheId) return null;
             for (const valeur of Object.values(planning)) {

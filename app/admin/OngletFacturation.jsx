@@ -547,7 +547,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null, descriptionTache = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -718,6 +718,10 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                   facturables (2026-09-03) — les repères de base pour
                   fixer un prix sans fouiller ailleurs. */}
               <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold text-slate-600">
+                {/* 👤 Le CLIENT en toutes lettres (2026-09-06, demande du
+                    propriétaire) — dans les repères, pas seulement dans
+                    le petit sous-titre de la fenêtre. */}
+                {(bon.client || be.client) && <span>👤 {bon.client || be.client}</span>}
                 {be.devisNumero && <span>📄 Devis {be.devisNumero}</span>}
                 {/* 📍 SANS adresse de travaux distincte (2026-09-06,
                     question du propriétaire : « pourquoi l'adresse
@@ -733,6 +737,17 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                   <span className="text-emerald-700">💰 {nbFacturables} homme{nbFacturables > 1 ? "s" : ""} facturable{nbFacturables > 1 ? "s" : ""} sur {equipe.length}</span>
                 )}
               </p>
+              {/* 🗒️ LA DEMANDE DE L'AGENDA (2026-09-06, demande du
+                  propriétaire : « remettre la description de la tâche
+                  pour savoir de quel sujet on parle ») — ce que le
+                  bureau avait demandé, AVANT le rapport du technicien.
+                  Cachée quand elle répète le rapport mot pour mot. */}
+              {descriptionTache && descriptionTache.trim() !== String(be.description || "").trim() && (
+                <div className="mt-1.5 rounded-lg bg-white p-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">🗒️ La demande (agenda)</p>
+                  <p className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{descriptionTache}</p>
+                </div>
+              )}
               {be.description && (
                 <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-700">{be.description}</p>
               )}
@@ -1455,7 +1470,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null }) {
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
@@ -4111,6 +4126,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
           facturables={facturablesAssignations}
           adresseRepli={adresseFacturationClient(trouverClientDuBon(bonAReviser)) || null}
+          descriptionTache={descriptionTachePour?.(bonAReviser.tacheId) || null}
           onBasculerFacturable={
             onBasculerFacturable
               ? (tacheId, courriel, val) => {
