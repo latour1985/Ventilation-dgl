@@ -1489,6 +1489,9 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
 }
 
 function MesHeures({ courriel, onRetour }) {
+  // 🌎 Version anglaise (tranche 5, 2026-09-04). Nommée `tr` et non `t` :
+  // ce composant utilise déjà `t` pour ses variables de travaux partout.
+  const { t: tr } = useLangue();
   // Heure de bascule « Nuit » : la même que celle réglée au bureau dans
   // les Paramètres — les deux écrans ne peuvent pas diverger.
   const heureNuit = Number(useEntreprise().heureBasculeNuit) || 16;
@@ -1514,7 +1517,7 @@ function MesHeures({ courriel, onRetour }) {
       })
       .catch(() => {
         if (annule) return;
-        setErreur("Impossible de charger tes heures — vérifie ta connexion et réessaie.");
+        setErreur(tr("Impossible de charger tes heures — vérifie ta connexion et réessaie."));
         setChargement(false);
       });
     return () => {
@@ -1598,7 +1601,7 @@ function MesHeures({ courriel, onRetour }) {
         <button onClick={onRetour} aria-label="Retour" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
           <ChevronLeft size={18} />
         </button>
-        <h1 className="text-base font-extrabold text-slate-900">🕐 Mes heures</h1>
+        <h1 className="text-base font-extrabold text-slate-900">{tr("🕐 Mes heures")}</h1>
       </div>
 
       <div className="flex-1 space-y-4 px-4 py-4">
@@ -1613,7 +1616,7 @@ function MesHeures({ courriel, onRetour }) {
         </div>
 
         {chargement ? (
-          <p className="py-8 text-center text-sm text-slate-400">Chargement de tes heures…</p>
+          <p className="py-8 text-center text-sm text-slate-400">{tr("Chargement de tes heures…")}</p>
         ) : erreur ? (
           <p className="rounded-xl border border-red-200 bg-red-50 p-4 text-center text-sm font-semibold text-red-600">{erreur}</p>
         ) : (
@@ -1645,25 +1648,25 @@ function MesHeures({ courriel, onRetour }) {
 
             {/* SOMMAIRE DE LA SEMAINE */}
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Total de la semaine</p>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{tr("Total de la semaine")}</p>
               <p className="mt-1 text-3xl font-extrabold tabular-nums text-slate-900">{aPayer.toFixed(2)} h</p>
               {totaux.report !== 0 && (
                 <p className="text-[11px] font-bold tabular-nums text-purple-600">
-                  {totaux.total.toFixed(2)} h travaillées {totaux.report > 0 ? "+" : ""}{totaux.report.toFixed(2)} h de correction reportée
+                  {totaux.total.toFixed(2)} {tr("h travaillées")} {totaux.report > 0 ? "+" : ""}{totaux.report.toFixed(2)} {tr("h de correction reportée")}
                 </p>
               )}
               <div className="mt-3 flex flex-wrap gap-1.5">
-                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-emerald-700">Chantier {totaux.chantier.toFixed(2)} h</span>
-                <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-bold tabular-nums text-slate-600">Transport {totaux.transport.toFixed(2)} h</span>
-                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-amber-700">Transp. journée {totaux.ccq.toFixed(2)} h</span>
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-emerald-700">{tr("Chantier")} {totaux.chantier.toFixed(2)} h</span>
+                <span className="rounded-full bg-slate-200 px-2.5 py-1 text-[11px] font-bold tabular-nums text-slate-600">{tr("Transport")} {totaux.transport.toFixed(2)} h</span>
+                <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-amber-700">{tr("Transp. journée")} {totaux.ccq.toFixed(2)} h</span>
                 {totaux.diner !== 0 && (
-                  <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-rose-700">Dîner {totaux.diner.toFixed(2)} h</span>
+                  <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-rose-700">{tr("Dîner")} {totaux.diner.toFixed(2)} h</span>
                 )}
                 {totaux.nuit !== 0 && (
                   <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-indigo-700">🌙 Nuit {totaux.nuit.toFixed(2)} h</span>
                 )}
                 {totaux.weekend !== 0 && (
-                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-sky-700">Sam/Dim {totaux.weekend.toFixed(2)} h</span>
+                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-sky-700">{tr("Sam/Dim")} {totaux.weekend.toFixed(2)} h</span>
                 )}
               </div>
             </div>
@@ -1706,8 +1709,8 @@ function MesHeures({ courriel, onRetour }) {
                             return (
                               <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5">
                                 <p className="min-w-0 flex-1 truncate text-[11px] text-slate-700">
-                                  <span className={`mr-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold ${cat.cls}`}>{cat.label}</span>
-                                  {t.titre || "Travail"}
+                                  <span className={`mr-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-extrabold ${cat.cls}`}>{tr(cat.label)}</span>
+                                  {t.titre || tr("Travail")}
                                 </p>
                                 <span className="flex shrink-0 items-center gap-1.5">
                                   {t.debutReel && t.finReelle && (
@@ -2291,29 +2294,29 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         {retourOuvert && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => !retourEnvoi && setRetourOuvert(false))(); }}>
             <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-extrabold text-slate-900">💬 Signaler / suggérer</h3>
+              <h3 className="text-base font-extrabold text-slate-900">{t("💬 Signaler / suggérer")}</h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                Ton message va au <span className="font-bold">bureau</span> — il vérifie, règle ou transmet au fabricant du logiciel.
+                {t("Ton message va au bureau — il vérifie, règle ou transmet au fabricant du logiciel.")}
               </p>
               <div className="mt-3 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
                 <button
                   onClick={() => setRetourType("bug")}
                   className={`min-h-[40px] rounded-lg text-xs font-extrabold ${retourType === "bug" ? "bg-white text-slate-900 shadow" : "text-slate-500"}`}
                 >
-                  🐛 Quelque chose bugge
+                  {t("🐛 Quelque chose bugge")}
                 </button>
                 <button
                   onClick={() => setRetourType("idee")}
                   className={`min-h-[40px] rounded-lg text-xs font-extrabold ${retourType === "idee" ? "bg-white text-slate-900 shadow" : "text-slate-500"}`}
                 >
-                  💡 J&apos;ai une idée
+                  {t("💡 J'ai une idée")}
                 </button>
               </div>
               <textarea
                 rows={3}
                 value={retourMessage}
                 onChange={(e) => setRetourMessage(e.target.value)}
-                placeholder={retourType === "bug" ? "Qu'est-ce qui bugge ? Où étais-tu dans l'app ?" : "Ton idée pour améliorer l'application…"}
+                placeholder={retourType === "bug" ? t("Qu'est-ce qui bugge ? Où étais-tu dans l'app ?") : t("Ton idée pour améliorer l'application…")}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
               />
               {retourFait && <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-700">{retourFait}</p>}
@@ -2322,11 +2325,11 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 disabled={retourEnvoi || !retourMessage.trim()}
                 className="mt-2 min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white disabled:opacity-40"
               >
-                {retourEnvoi ? "Envoi…" : "Envoyer au bureau"}
+                {retourEnvoi ? t("Envoi…") : t("Envoyer au bureau")}
               </button>
               {mesRetours !== null && mesRetours.length > 0 && (
                 <div className="mt-3 border-t border-slate-100 pt-2">
-                  <p className="mb-1 text-[10px] font-extrabold uppercase text-slate-400">Mes signalements</p>
+                  <p className="mb-1 text-[10px] font-extrabold uppercase text-slate-400">{t("Mes signalements")}</p>
                   <div className="space-y-1">
                     {mesRetours.slice(0, 8).map((r) => (
                       <div key={r.id} className="rounded-lg border border-slate-200 px-2.5 py-1.5">
@@ -2350,7 +2353,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 onClick={() => !retourEnvoi && setRetourOuvert(false)}
                 className="mt-2 min-h-[44px] w-full rounded-xl border border-slate-300 text-xs font-bold text-slate-600"
               >
-                Fermer
+                {t("Fermer")}
               </button>
             </div>
           </div>
@@ -2358,25 +2361,25 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         {courseOuverte && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => !courseEnCours && setCourseOuverte(false))(); }}>
             <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
-              <h3 className="text-base font-extrabold text-slate-900">🚗 Nouvelle course</h3>
+              <h3 className="text-base font-extrabold text-slate-900">{t("🚗 Nouvelle course")}</h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                Pour toi, aujourd&apos;hui. Aucun client, rien à facturer — tes heures sont payées et le bureau la voit dans l&apos;agenda.
+                {t("Pour toi, aujourd'hui. Aucun client, rien à facturer — tes heures sont payées et le bureau la voit dans l'agenda.")}
               </p>
-              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">Quoi ?</label>
+              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">{t("Quoi ?")}</label>
               <input
                 value={courseTitre}
                 onChange={(e) => setCourseTitre(e.target.value)}
-                placeholder="Ex : porter le camion 4 au garage"
+                placeholder={t("Ex : porter le camion 4 au garage")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
-              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Adresse (facultatif)</label>
+              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">{t("Adresse (facultatif)")}</label>
               <input
                 value={courseAdresse}
                 onChange={(e) => {
                   setCourseAdresse(e.target.value);
                   setCourseAdresseChoisie(false);
                 }}
-                placeholder="Ex : 123 rue du Garage, Blainville"
+                placeholder={t("Ex : 123 rue du Garage, Blainville")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
               {courseSuggestions.length > 0 && (
@@ -2397,16 +2400,16 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                   ))}
                 </div>
               )}
-              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Note (facultatif)</label>
+              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">{t("Note (facultatif)")}</label>
               <textarea
                 rows={2}
                 value={courseNote}
                 onChange={(e) => setCourseNote(e.target.value)}
-                placeholder="Détails utiles…"
+                placeholder={t("Détails utiles…")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
               {courseMsg === "ok" && (
-                <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">✅ Course créée — elle apparaît dans ton horaire.</p>
+                <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">{t("✅ Course créée — elle apparaît dans ton horaire.")}</p>
               )}
               {courseMsg.startsWith("erreur") && (
                 <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">
@@ -2418,10 +2421,10 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => setCourseOuverte(false)} disabled={courseEnCours} className="w-full">
-                  Annuler
+                  {t("Annuler")}
                 </Button>
                 <Button onClick={creerCourse} disabled={courseEnCours || !courseTitre.trim()} className="w-full">
-                  {courseEnCours ? "Création…" : "Créer la course"}
+                  {courseEnCours ? t("Création…") : t("Créer la course")}
                 </Button>
               </div>
             </div>
@@ -2433,36 +2436,36 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         {shopOuvert && (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; if (!shopEnCours) setShopOuvert(false); }}>
             <div className="w-full max-w-md rounded-2xl bg-white p-4">
-              <h3 className="text-base font-extrabold text-slate-900">🏭 Travail au shop</h3>
+              <h3 className="text-base font-extrabold text-slate-900">{t("🏭 Travail au shop")}</h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                Pour toi, aujourd&apos;hui. Aucun client, rien à facturer — tes heures sont payées et le bureau le voit dans l&apos;agenda.
+                {t("Pour toi, aujourd'hui. Aucun client, rien à facturer — tes heures sont payées et le bureau le voit dans l'agenda.")}
               </p>
-              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">Quoi ?</label>
+              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">{t("Quoi ?")}</label>
               <input
                 value={shopTitre}
                 onChange={(e) => setShopTitre(e.target.value)}
-                placeholder="Ex : fabrication de conduits, ménage du camion"
+                placeholder={t("Ex : fabrication de conduits, ménage du camion")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
-              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Note (facultatif)</label>
+              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">{t("Note (facultatif)")}</label>
               <textarea
                 rows={2}
                 value={shopNote}
                 onChange={(e) => setShopNote(e.target.value)}
-                placeholder="Détails utiles…"
+                placeholder={t("Détails utiles…")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
               {/* 🏗️ Le projet concerné — une PROPOSITION que le bureau
                   confirme (jamais de lien direct depuis le terrain). */}
               {(shopProjets || []).length > 0 && (
                 <>
-                  <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">C&apos;est pour un projet ? (facultatif)</label>
+                  <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">{t("C'est pour un projet ? (facultatif)")}</label>
                   <select
                     value={shopProjetId}
                     onChange={(e) => setShopProjetId(e.target.value)}
                     className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
                   >
-                    <option value="">Non — travail général au shop</option>
+                    <option value="">{t("Non — travail général au shop")}</option>
                     {(shopProjets || []).map((p) => (
                       <option key={p.id} value={p.id}>🏗️ {p.nom}</option>
                     ))}
@@ -2475,7 +2478,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 </>
               )}
               {shopMsg === "ok" && (
-                <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">✅ Tâche créée — elle apparaît dans ton horaire, pèse Débuter en arrivant.</p>
+                <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">{t("✅ Tâche créée — elle apparaît dans ton horaire, pèse Débuter en arrivant.")}</p>
               )}
               {shopMsg.startsWith("erreur") && (
                 <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">
@@ -2487,10 +2490,10 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <Button variant="outline" onClick={() => setShopOuvert(false)} disabled={shopEnCours} className="w-full">
-                  Annuler
+                  {t("Annuler")}
                 </Button>
                 <Button onClick={creerShop} disabled={shopEnCours || !shopTitre.trim()} className="w-full">
-                  {shopEnCours ? "Création…" : "Créer la tâche"}
+                  {shopEnCours ? t("Création…") : t("Créer la tâche")}
                 </Button>
               </div>
             </div>
