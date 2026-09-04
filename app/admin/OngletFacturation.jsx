@@ -1668,6 +1668,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       const trancheMin2 = Number(configEnt?.trancheFacturationMin) || 15;
       // Transport RÉEL du jour de CHAQUE homme — la règle 2 hommes
       // facture l'aller-retour explicitement, peu importe la zone.
+      // (2026-09-06 : JF a évoqué de limiter l'A/R au hors-zone, puis a
+      // dit « oublie ça » — la règle d'origine reste.)
       const transportDe = (s) =>
         (travaux || [])
           .filter(
