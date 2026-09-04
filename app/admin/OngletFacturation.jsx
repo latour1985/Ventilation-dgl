@@ -1808,7 +1808,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         .map((e) => String(e).split("@")[1]?.toLowerCase())
         .filter(Boolean)
     );
-  const envoyerCopieInterne = async ({ numero, clientNom, totalHT, destinataires, lignes = null }) => {
+  const envoyerCopieInterne = async ({ numero, clientNom, totalHT, destinataires, lignes = null, adresse = null }) => {
     const doms = domainesInternes();
     if (doms.size === 0) return;
     const internes = (destinataires || [])
@@ -1835,7 +1835,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         : "";
     const r = await envoyerCourriel({
       a: internes,
-      sujet: `Copie interne — Facture ${numero} — ${clientNom}`,
+      sujet: `Copie interne — Facture ${numero} — ${clientNom}${adresse ? ` — ${adresse}` : ""}`,
       html:
         `<p><b>Copie interne Fluxya</b> — la facture officielle (avec le lien de paiement) part par QuickBooks au client.</p>` +
         `<p>Facture <b>Nº ${numero}</b> · ${echap(clientNom)}${Number(totalHT) > 0 ? ` · <b>${Number(totalHT).toFixed(2)} $ HT</b> (+ taxes)` : ""}</p>` +
@@ -2421,7 +2421,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     if (destinataires.length > 0 && lien) {
       const r = await envoyerCourriel({
         a: destinataires,
-        sujet: `Facture ${creee.numero} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
+        sujet: `Facture ${creee.numero}${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviDuProjet(b.projetId) ? ` — Suivi ${suiviDuProjet(b.projetId)}` : ""} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
         html: gabaritFactureMaison({
           config: configEnt,
           numero: creee.numero,
@@ -2531,7 +2531,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       const jeton = await assurerJetonBon(rowId);
       const r = await envoyerCourriel({
         a: adresses,
-        sujet: `Vos travaux sont terminés — bon de travail (${configEnt.nomCommercial || configEnt.nomLegal})`,
+        sujet: `Vos travaux sont terminés — bon de travail${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviDuProjet(b.projetId) ? ` — Suivi ${suiviDuProjet(b.projetId)}` : ""} (${configEnt.nomCommercial || configEnt.nomLegal})`,
         html: gabaritBonTravail({ config: configEnt, clientNom: b.client, lien: lienBonPublic(jeton), joursValidite: JOURS_VALIDITE_BON }),
       });
       if (r.envoye) {
@@ -2813,7 +2813,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         };
       })
     );
-    envoyerCopieInterne({ numero, clientNom, totalHT: total, destinataires, lignes });
+    envoyerCopieInterne({ numero, clientNom, totalHT: total, destinataires, lignes, adresse: bonsDuGroupe[0]?.adresseTravaux || null });
     ajouterJournal(
       `📅 Facture GROUPÉE ${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length} bons réunis, ${total.toFixed(2)} $ HT` +
         (r?.envoiQb?.envoyee
@@ -2899,7 +2899,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       );
     }
     if (r?.creee) {
-      envoyerCopieInterne({ numero: numeroReel, clientNom: b.client || "", totalHT: entree.montant, destinataires, lignes });
+      envoyerCopieInterne({ numero: numeroReel, clientNom: b.client || "", totalHT: entree.montant, destinataires, lignes, adresse: b.adresseTravaux || null });
     }
     ajouterJournal(
       r?.creee

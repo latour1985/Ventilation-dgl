@@ -689,8 +689,8 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       sujet:
         (envoiDevis?.objet || "").trim() ||
         (dejaAccepte
-          ? `Votre copie du devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`
-          : `Devis ${devis.numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`),
+          ? `Votre copie du devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
+          : `Devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`),
       html: gabaritDevis({
         config: configEnt,
         numero: devis.numero,
@@ -1240,7 +1240,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     // « créé et envoyé » fictif.
     const r = await envoyerCourriel({
       a: destinataires.map((c) => c.email),
-      sujet: `Devis ${numero} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      sujet: `Devis ${numero}${adresseTravauxDevis ? ` — ${adresseTravauxDevis}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
       html: gabaritDevis({
         config: configEnt,
         numero,
