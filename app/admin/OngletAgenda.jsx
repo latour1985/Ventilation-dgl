@@ -1459,11 +1459,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         .filter(Boolean)
         .join(", ");
       ajouterJournal(
-        `📋 Tâche créée et placée directement dans l'horaire — ${libelleType} (${client?.nom})${suffixeProjet}${enPlus.length > 0 ? ` — équipe : ${nomsEquipe}` : ""}`
+        `📋 Tâche créée et placée directement dans l'horaire — ${libelleType}${client?.nom ? ` (${client.nom})` : ""}${suffixeProjet}${enPlus.length > 0 ? ` — équipe : ${nomsEquipe}` : ""}`
       );
     } else {
       setTachesAttente((prev) => [nouvelle, ...prev]);
-      ajouterJournal(`📋 Tâche créée — ${libelleType} (${client?.nom})${suffixeProjet}`);
+      ajouterJournal(`📋 Tâche créée — ${libelleType}${client?.nom ? ` (${client.nom})` : ""}${suffixeProjet}`);
     }
 
     viderFormulaireTache();
