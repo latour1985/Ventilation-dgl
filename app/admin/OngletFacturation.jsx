@@ -1588,12 +1588,23 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // 👥 2 hommes facturables et plus : le prix de zone ne s'applique
     // plus — le régime « minimum d'heures » (lignesTempsSupp) fait tout.
     if (sourcesFacturables(b).length >= 2) return [];
-    if (depotPayePour(b.tacheId)) return []; // la base est déjà payée — la déduction s'en charge
     const zone = zonePourTache ? zonePourTache(b.tacheId) : null;
     if (!zone || zone === "hors_zone") return [];
     const prixZone = Number(prixDepots?.[zone]) || 0;
     if (prixZone <= 0) return [];
-    return [{ description: `Appel de service — ${zone} (aucun dépôt perçu d'avance)`, prix: prixZone }];
+    // 💰 AVEC dépôt payé, la base se facture AUSSI (2026-09-06, vécu :
+    // total à −227,50 $) — la déduction automatique du dépôt (−260)
+    // n'a de sens que si la base qu'il couvrait est sur la facture :
+    // base + surplus − dépôt = le surplus, l'histoire complète sur un
+    // seul document. Sans dépôt : la base se facture tout court.
+    return [
+      {
+        description: depotPayePour(b.tacheId)
+          ? `Appel de service — ${zone}`
+          : `Appel de service — ${zone} (aucun dépôt perçu d'avance)`,
+        prix: prixZone,
+      },
+    ];
   };
   const lignesTempsSupp = (b) => {
     // ⏱️ TEMPS ET MATÉRIEL (2026-09-03, demande du propriétaire : « les
