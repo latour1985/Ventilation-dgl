@@ -50,7 +50,7 @@ export const ONGLETS_PROJET = [
 ];
 
 
-export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQuickBooks, syncQbEnCours, peutSyncQb }) {
+export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onMajSuivi = null, onSyncQuickBooks, syncQbEnCours, peutSyncQb }) {
   // Utilise la ventilation calculée par calculerRentabiliteProjet (même
   // logique par employé que r.coutMainOeuvre) — plus de recalcul au taux fixe.
   const coutMainOeuvreChantier = r.coutMainOeuvreChantier || 0;
@@ -99,6 +99,21 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onSyncQu
             <span className={`h-2 w-2 shrink-0 rounded-full ${sante.pastille}`} />
             {sante.niveau === "rouge" ? "Santé : à risque" : sante.niveau === "jaune" ? "Santé : à surveiller" : "Santé : bonne"}
           </span>
+          {/* 🔢 Nº DE SUIVI DU CLIENT (2026-09-06, demande du
+              propriétaire) : son PO à lui — il part sur CHAQUE facture
+              QuickBooks du projet (champ « Nº de suivi »). */}
+          {onMajSuivi && (
+            <label className="flex items-center gap-1 text-[10px] text-slate-400">
+              🔢 Suivi client
+              <input
+                value={projet.numeroSuiviClient || ""}
+                onChange={(e) => onMajSuivi(e.target.value)}
+                placeholder="PO / nº du client"
+                className="w-28 rounded-full border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
+                title="Le numéro de suivi (PO) fourni par le client — il partira dans le champ « Nº de suivi » de chaque facture QuickBooks de ce projet."
+              />
+            </label>
+          )}
         </div>
         <Button
           variant="outline"
@@ -1099,7 +1114,7 @@ export function OngletFacturationProjet({ r, devisDuClient }) {
 }
 
 
-export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onMajReprise, onChangerStatut, onRenommer, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
+export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onMajReprise, onChangerStatut, onRenommer, onMajSuivi = null, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
   const [ongletActif, setOngletActif] = useState("apercu");
   const configProj = useEntreprise();
   const r = useMemo(
@@ -1164,7 +1179,7 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
         <div className="overflow-y-auto p-5">
           {ongletActif === "apercu" && (
             <>
-              <OngletApercuProjet projet={projet} r={r} sante={sante} onChangerStatut={onChangerStatut} onSyncQuickBooks={onSyncQuickBooks} syncQbEnCours={syncQbEnCours} peutSyncQb={peutSyncQb} />
+              <OngletApercuProjet projet={projet} r={r} sante={sante} onChangerStatut={onChangerStatut} onMajSuivi={onMajSuivi} onSyncQuickBooks={onSyncQuickBooks} syncQbEnCours={syncQbEnCours} peutSyncQb={peutSyncQb} />
               {/* 📋 DEVIS RATTACHÉS (2026-08-30, devis multiples par
                   projet) : l'original ET les extras — le budget du projet
                   est leur somme, chacun reste consultable. */}
@@ -1957,6 +1972,9 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
           onFermer={() => setProjetOuvertId(null)}
           onAjouterBC={ajouterBonCommandeProjet}
           onChangerStatut={changerStatutProjet}
+          onMajSuivi={(valeur) =>
+            setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, numeroSuiviClient: valeur } : px)))
+          }
           onSyncQuickBooks={onSyncQuickBooks}
           peutSyncQb={peutSyncQb}
           syncQbEnCours={syncQbEnCours}

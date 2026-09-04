@@ -2021,6 +2021,9 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
           onFermer={() => setProjetOuvertId(null)}
           onAjouterBC={ajouterBonCommandeProjet}
           onChangerStatut={changerStatutProjet}
+          onMajSuivi={(valeur) =>
+            setProjets((prev) => prev.map((px) => (px.id === projetOuvert.id ? { ...px, numeroSuiviClient: valeur } : px)))
+          }
           onSyncQuickBooks={onSyncQuickBooksProjets}
           peutSyncQb={peutSyncQb}
           syncQbEnCours={syncQbEnCours}

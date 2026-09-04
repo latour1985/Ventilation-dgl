@@ -5102,3 +5102,15 @@ create index if not exists idx_inventaire_entreprise on inventaire_articles (ent
 
 -- Verification : la table existe et la RLS est active.
 select relname, relrowsecurity from pg_class where relname = 'inventaire_articles';
+
+-- ============================================================
+-- 127 - N° DE SUIVI DU CLIENT SUR LES PROJETS (2026-09-06)
+-- ============================================================
+-- Demande du proprietaire : les clients donnent leur numero de suivi
+-- (PO) par projet — il part sur CHAQUE facture QuickBooks du projet
+-- (champ « N° de suivi »).
+alter table projets_app add column if not exists numero_suivi_client text;
+
+-- Verification : la colonne existe.
+select column_name from information_schema.columns
+ where table_name = 'projets_app' and column_name = 'numero_suivi_client';

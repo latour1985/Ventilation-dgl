@@ -2305,6 +2305,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // v1 : bons simples. Facture groupée et facturation progressive d'un
   // devis restent QuickBooks pour l'instant.
   // ============================================================
+  // 🔢 Le Nº de suivi du CLIENT (PO) du projet lié — part dans le champ
+  // « Nº de suivi » de la facture QuickBooks (2026-09-06).
+  const suiviDuProjet = (projetId, projetNom = null) => {
+    const p = (projets || []).find((x) => x.id === projetId) || (projetNom ? (projets || []).find((x) => x.nom === projetNom) : null);
+    return (p?.numeroSuiviClient || "").trim() || null;
+  };
   const echeanceDepuisTerme = (terme) => {
     const m = String(terme || "").match(/(\d+)/);
     if (!m) return null;
@@ -2685,6 +2691,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const r = await creerFactureQbo({
       clientId: fiche?.id || null,
       clientNom,
+      // 📅 Date du bon le plus récent du groupe (décision 2026-09-06) —
+      // chaque ligne garde SA date de travaux. 🔢 Suivi du projet.
+      dateFacture: bonsDuGroupe.map((x) => x.date).filter(Boolean).sort().slice(-1)[0] || null,
+      numeroSuivi: suiviDuProjet(bonsDuGroupe[0]?.projetId, groupe.projetNom),
       lignes,
       termePaiement: configEnt?.termePaiementDefaut || "Net 30",
       reference: groupe.projetNom || "travaux",
@@ -2771,6 +2781,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const r = await creerFactureQbo({
       clientId: fiche?.id || null,
       clientNom: b.client,
+      // 📅 Date des travaux (décision du propriétaire, 2026-09-06 —
+      // mise en garde taxes donnée) + 🔢 suivi du projet lié.
+      dateFacture: b.date || null,
+      numeroSuivi: suiviDuProjet(b.projetId),
       lignes,
       termePaiement: configEnt?.termePaiementDefaut || "Net 30",
       reference: b.projet || "travaux",
@@ -2876,6 +2890,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const rQbo = await creerFactureQbo({
       clientId: fiche?.id || null,
       clientNom: bons.find((x) => x.id === bonId)?.client || "",
+      // 🔢 Suivi du projet lié — la facture progressive garde la date
+      // d'émission (facturation périodique, pas une date de travaux).
+      numeroSuivi: suiviDuProjet(bons.find((x) => x.id === bonId)?.projetId),
       lignes: lignesEnvoyees,
       termePaiement: configEnt?.termePaiementDefaut || "Net 30",
       reference: `${bons.find((x) => x.id === bonId)?.devisNumero || "travaux"}`,

@@ -189,6 +189,15 @@ export async function POST(request) {
         : {}),
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
+      // 📅 DATE DE LA FACTURE = DATE DES TRAVAUX (2026-09-06, décision
+      // du propriétaire, mise en garde taxes donnée) : quand l'appelant
+      // fournit la date des travaux, elle devient TxnDate — sinon
+      // QuickBooks met la date du jour, comme avant.
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(String(corps?.dateFacture || "")) ? { TxnDate: corps.dateFacture } : {}),
+      // 🔢 Nº DE SUIVI DU CLIENT (2026-09-06, demande du propriétaire :
+      // « les clients nous demandent de mettre leur numéro selon les
+      // projets ») — rempli dans le champ « Nº de suivi » de QuickBooks.
+      ...(String(corps?.numeroSuivi || "").trim() ? { TrackingNum: String(corps.numeroSuivi).trim().slice(0, 31) } : {}),
       // 🍁 Nos montants sont HORS TAXES — QuickBooks ajoute TPS/TVQ.
       ...proprietesTaxe(codeTaxe),
       ...(envoyerA.length > 0 ? { BillEmail: { Address: envoyerA.join(", ") } } : {}),
