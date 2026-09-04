@@ -1663,8 +1663,21 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     //   • 2 hommes et plus sont FACTURABLES (minimum chacun).
     // Le SEUL cas sans minimum : plusieurs sur place mais UN seul
     // facturable (l'autre en 🤝 aide interne) — là, heures réelles.
-    // Chauffeur au taux vendant, passager au taux moins camion. Pas de
-    // transport compté : le minimum couvre le déplacement, c'est son rôle.
+    // Chauffeur au taux vendant, passager au taux moins camion.
+    // 🚗 TRANSPORT COMPTÉ AUSSI (2026-09-06, règle du propriétaire :
+    // « nous payons les gars durant le transport ») — l'aller-retour
+    // réel de chaque homme s'ajoute à ses heures, comme pour l'appel
+    // à 2 hommes.
+    const transportTM = (s) =>
+      (travaux || [])
+        .filter(
+          (t) =>
+            t.supabase &&
+            t.estTransport &&
+            (t.employeEmail || "").toLowerCase() === (s.employeEmail || "").toLowerCase() &&
+            t.date === (s.date || b.date)
+        )
+        .reduce((somme, t) => somme + (Number(t.heures) || 0), 0);
     const nbTravailleursTM = (((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || [b]))
       .filter((s) => (Number(s.heures) || 0) > 0).length;
     if (estTempsMateriel && (sources.length >= 2 || nbTravailleursTM === 1)) {
@@ -1673,17 +1686,20 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       return sources
         .map((s) => ({
           nom: s.employeNom || "",
-          heures: Number(s.heures) || 0,
+          site: Number(s.heures) || 0,
+          transport: transportTM(s),
           passager: (inspections || []).some((i) => i.date === (s.date || b.date) && i.passagerDeNom && i.technicienNom === s.employeNom),
         }))
         .sort((a, x) => (a.passager ? 1 : 0) - (x.passager ? 1 : 0))
         .map((s) => {
           const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
-          const arrondiH = (Math.ceil(Math.round(s.heures * 60) / trancheTM) * trancheTM) / 60;
+          const brutH = s.site + s.transport;
+          const arrondiH = (Math.ceil(Math.round(brutH * 60) / trancheTM) * trancheTM) / 60;
           const factH = Math.max(minTM, arrondiH);
           return {
             description:
-              `Main-d'œuvre — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ${s.heures.toFixed(2)} h` +
+              `Main-d'œuvre — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ${s.site.toFixed(2)} h sur place` +
+              `${s.transport > 0 ? ` + ${s.transport.toFixed(2)} h transport` : ""}` +
               `${factH > arrondiH ? ` (minimum ${minTM} h appliqué)` : ""} = ${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
             prix: Math.round(factH * taux * 100) / 100,
           };
@@ -1741,8 +1757,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // jamais compté. Toujours du temps RÉEL pointé — jamais le bloc
     // d'agenda.
     const horsZone = (zonePourTache ? zonePourTache(b.tacheId) : null) === "hors_zone";
+    // 🚗 Le transport réel compte : HORS ZONE pour les appels, et
+    // TOUJOURS en temps & matériel (2026-09-06, règle du propriétaire —
+    // « nous payons les gars durant le transport »). Zones 1-2-3-4 des
+    // appels : le prix de zone l'inclut déjà.
     const transportReelDe = (s) =>
-      horsZone
+      horsZone || estTempsMateriel
         ? (travaux || [])
             .filter(
               (t) =>
@@ -1762,6 +1782,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       .map((s) => ({
         nom: s.employeNom || "",
         heures: (Number(s.heures) || 0) + transportReelDe(s),
+        transport: transportReelDe(s),
         passager: estPassager(s.employeNom, s.date || b.date),
       }))
       .sort((a, x) => (a.passager ? 1 : 0) - (x.passager ? 1 : 0));
@@ -1782,7 +1803,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       const taux = s.passager ? Math.max(0, tauxV - camion) : tauxV;
       lignes.push({
         description:
-          `${estTempsMateriel ? "Main-d'œuvre" : "Temps supplémentaire"}${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""}${!estTempsMateriel && horsZone ? " (hors zone — transport compté)" : ""} : ` +
+          `${estTempsMateriel ? "Main-d'œuvre" : "Temps supplémentaire"}${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""}${!estTempsMateriel && horsZone ? " (hors zone — transport compté)" : ""}${estTempsMateriel && s.transport > 0 ? ` (incl. ${s.transport.toFixed(2)} h transport)` : ""} : ` +
           `${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
         prix: Math.round(factH * taux * 100) / 100,
       });
