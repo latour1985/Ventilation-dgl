@@ -645,6 +645,17 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           : `Devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
     });
   };
+  // 🔔 RELANCE EN UN CLIC (2026-09-04, chantier approuvé — JAMAIS
+  // automatique) : même panneau d'envoi, mais le courriel dit
+  // « petit rappel » et la trace s'écrit sur le devis (relances).
+  const ouvrirRelanceDevis = (devis) => {
+    ouvrirEnvoiDevis(devis);
+    setEnvoiDevis((prev) => ({
+      ...prev,
+      relance: true,
+      objet: `Rappel — Devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+    }));
+  };
   const envoyerDevisParCourriel = async (devis) => {
     const extra = (envoiDevis?.extra || "").trim();
     const adresses = [...new Set([...(envoiDevis?.choisis || []), ...(extra ? [extra] : [])])];
@@ -667,6 +678,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEnvoiDevisEnCours(true);
     // Jeton valide — PROLONGÉ s'il est expiré (jamais remplacé : les
     // courriels déjà envoyés portent cette adresse-là).
+    // `devisCourant` suit les mises à jour (jeton, relances) pour ne
+    // jamais réécrire une version périmée du devis.
+    let devisCourant = devis;
     let jeton = devis.jetonPublic;
     const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
     if (!jeton || perime) {
@@ -674,6 +688,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       const expire = new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString();
       const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
+      devisCourant = maj;
       try {
         await persisterDevis(maj);
       } catch {
@@ -683,6 +698,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       }
     }
     const dejaAccepte = devis.reponseClient === "accepte";
+    const estRelance = !!envoiDevis?.relance && !dejaAccepte;
     const r = await envoyerCourriel({
       a: adresses,
       // L'objet ajusté dans le panneau d'envoi fait foi ; sinon le défaut.
@@ -698,15 +714,28 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         total: null,
         lien: lienDevisPublic(jeton),
         dejaAccepte,
+        relance: estRelance,
       }),
     });
     setEnvoiDevisEnCours(false);
     if (r.envoye) {
-      ajouterJournal(
-        dejaAccepte
-          ? `✉️ Copie du devis ${devis.numero} (déjà accepté) renvoyée à ${adresses.join(", ")}.`
-          : `✉️ Devis ${devis.numero} ENVOYÉ à ${adresses.join(", ")} — le client peut répondre en ligne.`
-      );
+      if (estRelance) {
+        // 🔔 La trace de la relance vit SUR le devis — la carte montre
+        // « relancé N fois » et on sait quand ne pas harceler.
+        const majRelance = {
+          ...devisCourant,
+          relances: [...(devisCourant.relances || []), { date: new Date().toISOString(), courriels: adresses }],
+        };
+        setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? majRelance : d)));
+        persisterDevis(majRelance).catch(() => {});
+        ajouterJournal(`🔔 RELANCE du devis ${devis.numero} envoyée à ${adresses.join(", ")}.`);
+      } else {
+        ajouterJournal(
+          dejaAccepte
+            ? `✉️ Copie du devis ${devis.numero} (déjà accepté) renvoyée à ${adresses.join(", ")}.`
+            : `✉️ Devis ${devis.numero} ENVOYÉ à ${adresses.join(", ")} — le client peut répondre en ligne.`
+        );
+      }
       setEnvoiDevis(null);
     } else if (r.simule) {
       ajouterJournal(
@@ -1729,13 +1758,29 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     répondu, ET aussi pour un devis DÉJÀ ACCEPTÉ (le client
                     a perdu sa copie et la redemande). */}
                 {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId !== affichee.id && (
-                  <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                    {affichee.reponseClient === "accepte" ? "✉️ Renvoyer la copie au client" : "✉️ Envoyer au client"}
-                  </Button>
+                  <div className="mt-2 flex gap-1.5">
+                    <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="min-h-0 flex-1 gap-1.5 py-2 text-xs">
+                      {affichee.reponseClient === "accepte" ? "✉️ Renvoyer la copie au client" : "✉️ Envoyer au client"}
+                    </Button>
+                    {/* 🔔 RELANCE EN UN CLIC — devis parti mais sans
+                        réponse : courriel de rappel prérédigé, trace sur
+                        la carte. JAMAIS automatique (règle du
+                        propriétaire). */}
+                    {!affichee.reponseClient && affichee.statut !== "brouillon" && (
+                      <Button variant="outline" onClick={() => ouvrirRelanceDevis(affichee)} className="min-h-0 shrink-0 gap-1 py-2 text-xs">
+                        🔔 Relancer
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {estActive && !affichee.reponseClient && (affichee.relances || []).length > 0 && (
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    🔔 Relancé {affichee.relances.length} fois — dernière le {new Date(affichee.relances[affichee.relances.length - 1].date).toLocaleDateString("fr-CA")}
+                  </p>
                 )}
                 {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId === affichee.id && (
                   <div className="mt-2 rounded-xl border border-slate-300 bg-slate-50 p-2.5">
-                    <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">{affichee.reponseClient === "accepte" ? "Renvoyer la copie à :" : "Envoyer le devis à :"}</p>
+                    <p className="mb-1.5 text-[10px] font-bold uppercase text-slate-400">{envoiDevis.relance ? "🔔 Relancer le devis à :" : affichee.reponseClient === "accepte" ? "Renvoyer la copie à :" : "Envoyer le devis à :"}</p>
                     {/* ✉️ L'objet du courriel, modifiable — l'adresse des
                         travaux dedans aide le client à retrouver le devis. */}
                     <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Objet du courriel</label>
@@ -1789,7 +1834,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                         disabled={envoiDevisEnCours || (envoiDevis.choisis.length === 0 && !envoiDevis.extra.trim())}
                         className="min-h-0 flex-1 py-1.5 text-xs"
                       >
-                        {envoiDevisEnCours ? "Envoi…" : "Envoyer"}
+                        {envoiDevisEnCours ? "Envoi…" : envoiDevis.relance ? "🔔 Envoyer la relance" : "Envoyer"}
                       </Button>
                       <Button variant="outline" onClick={() => setEnvoiDevis(null)} className="min-h-0 py-1.5 text-xs">
                         Annuler

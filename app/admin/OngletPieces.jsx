@@ -124,6 +124,10 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
   const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false });
+  // 📦➕ Réception d'un BC « stock » vers l'inventaire (étage 2) — le
+  // compteur force la section Inventaire à se recharger après coup.
+  const [receptionBc, setReceptionBc] = useState(null); // null | achat libre
+  const [invVersion, setInvVersion] = useState(0);
   // ✏️ FICHE D'UN BC (2026-08-26) — la ligne cliquée s'ouvre en fenêtre :
   // fournisseur, description, montant et RATTACHEMENT modifiables,
   // suppression en deux clics. `bcOuvert` = l'achat ; `bcEdit` = la
@@ -589,7 +593,16 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
 
       {/* 📦 INVENTAIRE COURANT (2026-09-04, demande du propriétaire) —
           la liste vivante de l'atelier, à côté des bons de commande. */}
-      <SectionInventaire ajouterJournal={ajouterJournal} peutModifier={peutCommander} nomUtilisateur={nomUtilisateur} />
+      <SectionInventaire key={invVersion} ajouterJournal={ajouterJournal} peutModifier={peutCommander} nomUtilisateur={nomUtilisateur} />
+      {receptionBc && (
+        <ModalReceptionInventaire
+          bc={receptionBc}
+          onFermer={() => setReceptionBc(null)}
+          onFait={() => setInvVersion((v) => v + 1)}
+          ajouterJournal={ajouterJournal}
+          nomUtilisateur={nomUtilisateur}
+        />
+      )}
 
       {/* ➕ BON DE COMMANDE LIBRE — « 4 rouleaux de tape » : pas de tâche,
           pas de pièce client. Attribué à un PROJET = entre dans ses coûts
@@ -1045,6 +1058,17 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     className="shrink-0 rounded-lg border border-slate-200 px-1.5 py-1 text-[10px] font-bold text-slate-500 hover:border-blue-300 hover:text-blue-700"
                   >
                     📧
+                  </button>
+                )}
+                {/* 📦➕ La boîte est arrivée — ajouter son contenu à
+                    l'inventaire courant (bons marqués STOCK seulement). */}
+                {peutCommander && (a2.description || "").includes("Pour l'inventaire courant") && (
+                  <button
+                    onClick={() => setReceptionBc(a2)}
+                    title="Commande reçue — ajouter au stock de l'inventaire courant"
+                    className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1 text-[10px] font-bold text-amber-700 hover:border-amber-400 active:scale-95"
+                  >
+                    📦➕
                   </button>
                 )}
                 </div>
@@ -1911,6 +1935,94 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
 // par entreprise. Les automatismes (réception d'un BC → stock, stock
 // utilisé → décrément, seuil minimum) viendront UN PAR UN sur demande.
 // ============================================================
+// ============================================================
+// 📦➕ RÉCEPTION D'UN BC « STOCK » VERS L'INVENTAIRE (2026-09-04,
+// étage 2 approuvé) — la boîte arrive au bureau : on tape quoi et
+// combien, l'inventaire monte, le journal garde la trace avec le
+// numéro du bon. Un article à la fois, autant de fois que la boîte
+// contient de choses ; article inconnu = créé sur place.
+// ============================================================
+function ModalReceptionInventaire({ bc, onFermer, onFait, ajouterJournal, nomUtilisateur }) {
+  const [articles, setArticles] = useState([]);
+  const [nom, setNom] = useState("");
+  const [quantite, setQuantite] = useState(0);
+  const [unite, setUnite] = useState("");
+  const [ajouts, setAjouts] = useState([]); // récapitulatif de la séance
+  useEffect(() => {
+    listerInventaire().then(setArticles).catch(() => {});
+  }, []);
+  const existant = articles.find((a) => a.nom.trim().toLowerCase() === nom.trim().toLowerCase());
+  const ajouter = async () => {
+    const q = Number(quantite) || 0;
+    if (!nom.trim() || q <= 0) return;
+    const a = existant
+      ? { ...existant, quantite: Math.round(((Number(existant.quantite) || 0) + q) * 100) / 100 }
+      : { id: `inv-${Date.now()}`, nom: nom.trim(), quantite: q, unite: unite.trim(), emplacement: "", seuilAlerte: 0 };
+    try {
+      await sauvegarderArticleInventaire(a);
+      ajouterJournal?.(
+        existant
+          ? `📦 Réception ${bc.numeroBc || "BC"} — ${a.nom} : ${existant.quantite} → ${a.quantite} ${a.unite || ""} — par ${nomUtilisateur || "bureau"}`
+          : `📦 Réception ${bc.numeroBc || "BC"} — nouvel article : ${a.nom} (${q} ${a.unite || ""}) — par ${nomUtilisateur || "bureau"}`
+      );
+      setArticles((prev) => (existant ? prev.map((x) => (x.id === a.id ? a : x)) : [...prev, a]));
+      setAjouts((prev) => [...prev, `${a.nom} +${q} ${a.unite || ""}`]);
+      setNom(""); setQuantite(0); setUnite("");
+      onFait?.();
+    } catch {
+      ajouterJournal?.(`⚠️ Réception ${bc.numeroBc || "BC"} : « ${nom.trim()} » NON enregistré — vérifie la connexion.`);
+    }
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) onFermer(); }}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-5">
+        <div className="mb-1 flex items-start justify-between">
+          <h3 className="text-sm font-extrabold text-slate-900">📦 Réception — {bc.numeroBc || "bon de commande"}</h3>
+          <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+        </div>
+        <p className="mb-3 text-[11px] text-slate-400">La commande est arrivée : ajoute ce qu&apos;elle contient à l&apos;inventaire courant. Un article connu s&apos;additionne ; un nouveau se crée.</p>
+        <div className="space-y-2">
+          <div>
+            <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Article</label>
+            <input
+              value={nom}
+              onChange={(e) => setNom(e.target.value)}
+              list="reception-articles"
+              placeholder="Nom — choisis dans la liste ou tape un nouveau"
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+            <datalist id="reception-articles">
+              {articles.map((a) => <option key={a.id} value={a.nom} />)}
+            </datalist>
+            {existant && (
+              <p className="mt-0.5 text-[10px] text-emerald-600">✓ Article connu — en stock : {existant.quantite} {existant.unite || ""}{existant.emplacement ? ` · 📍 ${existant.emplacement}` : ""}</p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <div>
+              <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Quantité reçue</label>
+              <InputNombreDecimal valeur={quantite} onChange={setQuantite} className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-xs tabular-nums" />
+            </div>
+            {!existant && (
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Unité</label>
+                <input value={unite} onChange={(e) => setUnite(e.target.value)} placeholder="pi, un…" className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+              </div>
+            )}
+          </div>
+          {ajouts.length > 0 && (
+            <p className="rounded-lg bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">✓ Ajoutés : {ajouts.join(" · ")}</p>
+          )}
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button variant="outline" onClick={onFermer} className="min-h-0 py-2 text-xs">{ajouts.length > 0 ? "Terminé" : "Annuler"}</Button>
+            <Button disabled={!nom.trim() || !(Number(quantite) > 0)} onClick={ajouter} className="min-h-0 py-2 text-xs">➕ Ajouter au stock</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
   const [ouvert, setOuvert] = useState(false);
   const [articles, setArticles] = useState([]);
@@ -1937,13 +2049,24 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
     persister({ ...a, quantite: apres }, `📦 Inventaire — ${a.nom} : ${avant} → ${apres} ${a.unite || ""} — par ${nomUtilisateur || "bureau"}`);
   };
   const f = filtre.trim().toLowerCase();
-  const visibles = articles.filter((a) => !f || `${a.nom} ${a.emplacement}`.toLowerCase().includes(f));
+  // 🛒 SEUIL « À COMMANDER » (2026-09-04, étage 2 approuvé) — un
+  // article dont la quantité tombe AU seuil ou dessous se signale tout
+  // seul : badge rouge, compte dans l'entête, filtre en un clic.
+  const aCommander = (a) => (Number(a.seuilAlerte) || 0) > 0 && (Number(a.quantite) || 0) <= Number(a.seuilAlerte);
+  const nbACommander = articles.filter(aCommander).length;
+  const [filtreSeuil, setFiltreSeuil] = useState(false);
+  const visibles = articles.filter((a) => (!f || `${a.nom} ${a.emplacement}`.toLowerCase().includes(f)) && (!filtreSeuil || aCommander(a)));
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3">
       <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
         <div>
           <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
             📦 Inventaire courant <span className="text-slate-400">({articles.length})</span>
+            {nbACommander > 0 && (
+              <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-700">
+                🛒 {nbACommander} à commander
+              </span>
+            )}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-400">Ce qui dort à l&apos;atelier — quantités ajustables, chaque mouvement au journal</p>
         </div>
@@ -1958,8 +2081,16 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
               placeholder="Filtrer — nom ou emplacement…"
               className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
             />
+            {nbACommander > 0 && (
+              <button
+                onClick={() => setFiltreSeuil((v) => !v)}
+                className={`shrink-0 rounded-lg border px-2 py-1.5 text-[11px] font-bold active:scale-95 ${filtreSeuil ? "border-red-300 bg-red-50 text-red-700" : "border-slate-300 text-slate-600"}`}
+              >
+                🛒 À commander ({nbACommander})
+              </button>
+            )}
             {peutModifier && !nouveau && (
-              <Button variant="outline" onClick={() => setNouveau({ nom: "", quantite: "", unite: "", emplacement: "" })} className="min-h-0 shrink-0 py-1.5 text-xs">
+              <Button variant="outline" onClick={() => setNouveau({ nom: "", quantite: "", unite: "", emplacement: "", seuilAlerte: "" })} className="min-h-0 shrink-0 py-1.5 text-xs">
                 ➕ Article
               </Button>
             )}
@@ -1970,10 +2101,14 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
               <InputNombreDecimal valeur={nouveau.quantite === "" ? 0 : Number(nouveau.quantite)} onChange={(v) => setNouveau((p) => ({ ...p, quantite: v }))} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-xs tabular-nums" />
               <input value={nouveau.unite} onChange={(e) => setNouveau((p) => ({ ...p, unite: e.target.value }))} placeholder="unité (pi, un…)" className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
               <input value={nouveau.emplacement} onChange={(e) => setNouveau((p) => ({ ...p, emplacement: e.target.value }))} placeholder="emplacement (étagère B…)" className="min-w-[130px] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+              <label className="flex items-center gap-1 text-[10px] text-slate-400" title="Alerte « à commander » quand la quantité tombe à ce seuil ou dessous — vide = pas d'alerte">
+                🛒 seuil
+                <InputNombreDecimal valeur={nouveau.seuilAlerte === "" ? 0 : Number(nouveau.seuilAlerte)} onChange={(v) => setNouveau((p) => ({ ...p, seuilAlerte: v }))} className="w-16 rounded-lg border border-slate-300 px-2 py-1.5 text-right text-xs tabular-nums" />
+              </label>
               <Button
                 disabled={!nouveau.nom.trim()}
                 onClick={() => {
-                  const a = { id: `inv-${Date.now()}`, nom: nouveau.nom.trim(), quantite: Number(nouveau.quantite) || 0, unite: nouveau.unite.trim(), emplacement: nouveau.emplacement.trim() };
+                  const a = { id: `inv-${Date.now()}`, nom: nouveau.nom.trim(), quantite: Number(nouveau.quantite) || 0, unite: nouveau.unite.trim(), emplacement: nouveau.emplacement.trim(), seuilAlerte: Number(nouveau.seuilAlerte) || 0 };
                   persister(a, `📦 Inventaire — article ajouté : ${a.nom} (${a.quantite} ${a.unite || ""}) — par ${nomUtilisateur || "bureau"}`);
                   setNouveau(null);
                 }}
@@ -1989,6 +2124,11 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
               <span className="min-w-0 flex-1 font-semibold text-slate-800">
                 {a.nom}
                 {a.emplacement && <span className="ml-1.5 font-normal text-slate-400">📍 {a.emplacement}</span>}
+                {aCommander(a) && (
+                  <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700" title={`Quantité (${a.quantite}) au seuil (${a.seuilAlerte}) ou dessous`}>
+                    🛒 à commander
+                  </span>
+                )}
               </span>
               {peutModifier && (
                 <button onClick={() => ajuster(a, -1)} className="h-7 w-7 rounded-lg border border-slate-300 font-bold text-slate-600 active:scale-95">−</button>
@@ -2007,6 +2147,20 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
                 <button onClick={() => ajuster(a, 1)} className="h-7 w-7 rounded-lg border border-slate-300 font-bold text-slate-600 active:scale-95">+</button>
               )}
               <span className="w-12 text-[10px] text-slate-400">{a.unite || ""}</span>
+              {peutModifier && (
+                <label className="flex items-center gap-0.5 text-[10px] text-slate-400" title="Seuil « à commander » — vide ou 0 = pas d'alerte">
+                  🛒
+                  <InputNombreDecimal
+                    valeur={a.seuilAlerte || 0}
+                    onChange={(v) => {
+                      const seuil = Math.max(0, Number(v) || 0);
+                      if (seuil === (a.seuilAlerte || 0)) return;
+                      persister({ ...a, seuilAlerte: seuil }, `📦 Inventaire — ${a.nom} : seuil « à commander » ${a.seuilAlerte || 0} → ${seuil} — par ${nomUtilisateur || "bureau"}`);
+                    }}
+                    className="w-14 rounded-lg border border-slate-200 px-1.5 py-1 text-right text-[11px] tabular-nums text-slate-500"
+                  />
+                </label>
+              )}
               {peutModifier && (
                 <button
                   onClick={() => {

@@ -5327,3 +5327,61 @@ select tablename, policyname, cmd from pg_policies
    and tablename in ('permissions_utilisateurs', 'repertoire_employes',
                      'prix_depots', 'taux_metiers', 'entreprises')
  order by tablename, policyname;
+
+-- ============================================================
+-- 129 - INVENTAIRE ETAGE 2 : SEUIL « A COMMANDER » (2026-09-04)
+-- ============================================================
+-- Chantier approuve par le proprietaire : chaque article peut porter
+-- un seuil — quantite au seuil ou dessous = badge rouge « a
+-- commander » dans la section Inventaire courant (Pieces).
+-- (La reception d'un BC « stock » vers l'inventaire, elle, n'a pas
+-- besoin de colonne : elle additionne les quantites existantes.)
+alter table inventaire_articles add column if not exists seuil_alerte numeric;
+
+-- Verification : la colonne existe.
+select column_name from information_schema.columns
+ where table_name = 'inventaire_articles' and column_name = 'seuil_alerte';
+
+-- ============================================================
+-- 130 - RELANCES DE DEVIS EN UN CLIC (2026-09-04)
+-- ============================================================
+-- Chantier approuve par le proprietaire : bouton « Relancer » sur un
+-- devis parti mais sans reponse — courriel de rappel preredige,
+-- JAMAIS automatique. La colonne garde la trace des relances
+-- ([{ date, courriels }]) : la carte montre « relance N fois ».
+alter table devis_app add column if not exists relances jsonb;
+
+-- Verification : la colonne existe.
+select column_name from information_schema.columns
+ where table_name = 'devis_app' and column_name = 'relances';
+
+-- ============================================================
+-- 131 - MENAGE DU JOURNAL : LE DELUGE ARCHIVE (2026-09-04)
+-- ============================================================
+-- Vecu : du 27 aout au 1er septembre, la sauvegarde automatique
+-- croyait chaque fiche « jamais ecrite » et inondait le journal de
+-- faux « affiche localement mais NON enregistre » (22 705 entrees
+-- pour des fiches parfaitement en base). Corrige le 2026-09-02 (la
+-- memoire de la sauvegarde est semee au chargement) — zero nouvelle
+-- entree depuis. Ce snippet ARCHIVE le bruit (jamais efface, regle
+-- maison) : les entrees demenagent dans journal_archive, table
+-- verrouillee a double tour (aucune policy — service seulement).
+create table if not exists journal_archive (like journal_activite including all);
+alter table journal_archive enable row level security;
+
+with deplacees as (
+  delete from journal_activite
+  where texte like '%affiché localement mais NON enregistré — vérifie la connexion%'
+    and created_at < '2026-09-02'
+  returning *
+)
+-- OVERRIDING SYSTEM VALUE : la colonne id de l'archive est auto-
+-- generee (copie du journal) — on lui impose les numeros d'origine
+-- pour que chaque entree garde son identite. (Vecu : premier passage
+-- refuse avec l'erreur 428C9.)
+insert into journal_archive overriding system value select * from deplacees;
+
+-- Verification : le journal actif retombe sous ~1 000 entrees.
+select
+  (select count(*) from journal_activite) as journal_actif,
+  (select count(*) from journal_archive) as archive;
