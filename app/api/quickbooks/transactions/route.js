@@ -18,7 +18,7 @@
 //   { nonConnecte: true }   — config posée mais OAuth pas encore fait
 //   { transactions: [...] } — la vraie liste
 
-import { configQuickbooksPresente, jetonAccesValide, requeteQbo, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { configQuickbooksPresente, jetonAccesValide, requeteQbo, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur } from "@/lib/quickbooksServeur";
 
 // Date locale (règle gelée : jamais toISOString pour une date calendrier).
 function dateLocale(d) {
@@ -72,6 +72,11 @@ export async function GET(request) {
   }
   // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
   const entrepriseId = entrepriseDuCompte(utilisateur);
+  // 🔒 RLS phase 3 : les transactions comptables sont une affaire de
+  // bureau — cette route n'avait AUCUNE garde de rôle avant.
+  if ((await roleServeur(utilisateur)) === "Technicien") {
+    return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
+  }
   if (!configQuickbooksPresente()) {
     return Response.json({ simule: true });
   }

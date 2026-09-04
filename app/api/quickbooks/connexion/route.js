@@ -20,13 +20,15 @@
 // on refuse.
 
 import { configQuickbooksPresente, urlRedirectionQb, utilisateurDepuisJeton, entrepriseDuCompte, environnementQb, clesIntuit } from "@/lib/quickbooksServeur";
+// 🔒 RLS phase 3 : le rôle vient de la table des permissions.
+import { roleServeur } from "@/lib/quickbooksServeur";
 
 export async function GET(request) {
   const enTete = request.headers.get("authorization") || "";
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
-  if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
+  if ((await roleServeur(utilisateur)) === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
   // 🏢 MULTI-QUICKBOOKS (2026-09-08) : le verrou « DGL seulement » du

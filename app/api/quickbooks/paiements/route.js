@@ -19,8 +19,8 @@ import {
   jetonAccesValide,
   utilisateurDepuisJeton,
   requeteQbo,
-  clientSupabaseService,
   entrepriseDuCompte,
+  roleServeur,
 } from "@/lib/quickbooksServeur";
 
 // Une facture QuickBooks → l'essentiel pour l'écran. Le statut se
@@ -50,17 +50,9 @@ export async function POST(request) {
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
   const entrepriseId = entrepriseDuCompte(utilisateur);
-  // 🔒 Le rôle se lit dans la TABLE des permissions (RLS phase 2,
-  // snippet 128) — user_metadata est modifiable par l'utilisateur
-  // lui-même, on ne s'y fie plus. Sans ligne : Technicien.
-  const admin = clientSupabaseService();
-  const { data: ligneRole } = await admin
-    .from("permissions_utilisateurs")
-    .select("role")
-    .eq("email", (utilisateur.email || "").toLowerCase())
-    .eq("entreprise_id", entrepriseId)
-    .maybeSingle();
-  if ((ligneRole?.role || "Technicien") === "Technicien") {
+  // 🔒 Le rôle se lit dans la TABLE des permissions — l'aide partagée
+  // roleServeur (RLS phase 3) remplace la copie locale d'origine.
+  if ((await roleServeur(utilisateur)) === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
   if (!configQuickbooksPresente()) return Response.json({ simule: true });

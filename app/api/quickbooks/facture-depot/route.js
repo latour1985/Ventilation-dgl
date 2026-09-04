@@ -35,6 +35,8 @@ import {
   proprietesTaxe,
   envoyerFactureParQb,
   environnementQb, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+// 🔒 RLS phase 3 : le rôle vient de la table des permissions.
+import { roleServeur } from "@/lib/quickbooksServeur";
 // (Les helpers d'écriture vivent dans quickbooksServeur.js — partagés
 // avec les routes facture, estimate et clients-sync.)
 
@@ -48,7 +50,7 @@ export async function POST(request) {
   // Les techniciens n'émettent pas de factures — tous les rôles de
   // bureau (admins, répartiteur...) le peuvent : ce sont eux qui créent
   // les appels de service.
-  if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
+  if ((await roleServeur(utilisateur)) === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
   if (!configQuickbooksPresente()) return Response.json({ simule: true });

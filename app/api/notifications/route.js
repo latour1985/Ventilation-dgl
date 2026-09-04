@@ -9,7 +9,7 @@
 // un abonnement expiré (410/404) est effacé tout seul.
 
 import webpush from "web-push";
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -43,7 +43,8 @@ export async function POST(request) {
 
   // ---- ENVOYER : réservé au bureau ----
   if (corps?.action === "envoyer") {
-    if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
+    // 🔒 RLS phase 3 : rôle lu de la table des permissions.
+    if ((await roleServeur(utilisateur)) === "Technicien") {
       return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
     }
     const clePublique = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;

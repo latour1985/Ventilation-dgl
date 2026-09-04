@@ -36,6 +36,8 @@ import {
   jetonAccesValide,
   requeteQbo,
   utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+// 🔒 RLS phase 3 : le rôle vient de la table des permissions.
+import { roleServeur } from "@/lib/quickbooksServeur";
 
 // Protection contre l'injection dans une requête QBO (mêmes guillemets
 // simples que le reste des routes QuickBooks).
@@ -53,7 +55,7 @@ export async function POST(request) {
 
   // Un TECHNICIEN n'a rien à faire ici : les dépôts sont une affaire de
   // bureau (et son application ne montre aucun montant d'argent).
-  if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
+  if ((await roleServeur(utilisateur)) === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
 

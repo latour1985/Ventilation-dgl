@@ -11,7 +11,7 @@
 // que la cible ; un Admin régulier ne touche pas au compte d'un
 // administrateur ; personne ne se désactive soi-même.
 
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur } from "@/lib/quickbooksServeur";
 
 const ROLES_ADMINS = ["Admin principal", "Admin régulier"];
 
@@ -20,7 +20,9 @@ export async function POST(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const appelant = await utilisateurDepuisJeton(jeton);
   if (!appelant) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
-  const roleAppelant = String(appelant.user_metadata?.role || "").trim();
+  // 🔒 RLS phase 3 : rôle lu de la table des permissions, jamais du
+  // profil falsifiable — la porte des comptes est la plus sensible.
+  const roleAppelant = await roleServeur(appelant);
   if (!ROLES_ADMINS.includes(roleAppelant)) {
     return Response.json({ erreur: "Réservé aux administrateurs." }, { status: 403 });
   }
@@ -59,7 +61,9 @@ export async function POST(request) {
   if (entrepriseDuCompte(cible) !== entrepriseDuCompte(appelant)) {
     return Response.json({ erreur: "Ce compte n'appartient pas à votre entreprise." }, { status: 403 });
   }
-  const roleCible = String(cible.user_metadata?.role || "").trim();
+  // Le rôle de la CIBLE aussi vient de la table (un admin dont le
+  // profil dirait « Technicien » resterait protégé).
+  const roleCible = await roleServeur(cible);
   if (ROLES_ADMINS.includes(roleCible) && roleAppelant !== "Admin principal") {
     return Response.json({ erreur: "Seul l'Admin principal peut désactiver un administrateur." }, { status: 403 });
   }

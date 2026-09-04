@@ -22,7 +22,7 @@
 // Une ligne au journal d'activité confirme chaque passage — le bureau
 // voit la ceinture se boucler sans ouvrir Supabase.
 
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur } from "@/lib/quickbooksServeur";
 
 // TOUTES les tables applicatives — la liste de l'export Loi 25
 // (lib/supabase/plateforme.js) PLUS les tables arrivées depuis
@@ -52,9 +52,10 @@ export async function GET(request) {
     const utilisateur = jeton ? await utilisateurDepuisJeton(jeton) : null;
     // 🔐 GRAND SOIR : la sauvegarde exporte TOUTE la base — reservee aux
     // admins DGL (ou au sceau plateforme), jamais a une entreprise d'essai.
+    // 🔒 RLS phase 3 : rôle lu de la table des permissions.
     estAdmin =
       !!utilisateur &&
-      String(utilisateur.user_metadata?.role || "").trim() !== "Technicien" &&
+      (await roleServeur(utilisateur)) !== "Technicien" &&
       (entrepriseDuCompte(utilisateur) === "dgl" || utilisateur.app_metadata?.plateforme === true);
     // CRON_SECRET défini = porte fermée à tout le reste.
     if (secretCron && !estAdmin) {

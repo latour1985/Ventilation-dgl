@@ -56,16 +56,20 @@ export async function POST(request) {
     // lire la piste d'audit. La table permissions_utilisateurs, elle,
     // n'est modifiable que par un Admin principal (RLS) : c'est ELLE
     // qui fait foi ; le profil ne sert que de repli si aucune fiche.
-    let roleReel = String(utilisateur.user_metadata?.role || "").trim();
+    // 🔒 RLS phase 3 (2026-09-04) : le repli sur le profil disparaît —
+    // depuis le snippet 128, chaque compte a sa ligne de permissions.
+    // Sans ligne (ou table injoignable) : Technicien, jamais plus.
+    let roleReel = "Technicien";
     try {
       const { data: fiche } = await admin
         .from("permissions_utilisateurs")
         .select("role")
         .eq("email", (utilisateur.email || "").toLowerCase())
+        .eq("entreprise_id", entrepriseDuCompte(utilisateur))
         .maybeSingle();
       if (fiche?.role) roleReel = String(fiche.role).trim();
     } catch {
-      // table indisponible — le repli (profil) s'applique
+      // table indisponible — Technicien par prudence
     }
     if (roleReel === "Technicien") {
       return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });

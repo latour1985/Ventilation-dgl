@@ -25,6 +25,8 @@ import {
   articleServiceQboPour,
   codeTaxeVente,
   proprietesTaxe, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+// 🔒 RLS phase 3 : le rôle vient de la table des permissions.
+import { roleServeur } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -33,7 +35,7 @@ export async function POST(request) {
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
   // 🏢 Chaque route sert l'entreprise DU DEMANDEUR — et aucune autre.
   const entrepriseId = entrepriseDuCompte(utilisateur);
-  if (String(utilisateur.user_metadata?.role || "").trim() === "Technicien") {
+  if ((await roleServeur(utilisateur)) === "Technicien") {
     return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
   }
   if (!configQuickbooksPresente()) return Response.json({ simule: true });
