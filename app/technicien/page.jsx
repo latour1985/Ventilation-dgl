@@ -749,58 +749,60 @@ function PiedCopyright() {
 // ============================================================
 function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, tacheBloquante, inspectionRequise, labelDebuter, labelTerminer, chargementDebuter, chargementTerminer, fermetureGuidee = false, onAllerSigner = null }) {
   const duree = formatDuree(dureeEcoulee(tache));
+  // 🌎 Version anglaise (tranche « app technicien », 2026-09-04).
+  const { t } = useLangue();
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Temps sur la tâche</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("Temps sur la tâche")}</p>
           <p className="mt-0.5 font-mono text-2xl font-extrabold tabular-nums text-slate-900">{duree}</p>
         </div>
         {tache.etat === "en_cours" && (
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-            EN COURS
+            {t("EN COURS")}
           </span>
         )}
         {tache.etat === "en_pause" && (
-          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">EN PAUSE</span>
+          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">{t("EN PAUSE")}</span>
         )}
         {tache.etat === "complete" && (
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">TERMINÉ</span>
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500">{t("TERMINÉ")}</span>
         )}
       </div>
 
       {tacheBloquante && tache.etat !== "complete" && (
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-slate-100 p-3 text-xs font-semibold text-slate-600">
           <Lock size={14} className="mt-0.5 shrink-0" />
-          Termine d'abord « {tacheBloquante.titre || tacheBloquante.clientNom} » avant de commencer celle-ci — une seule tâche à la fois.
+          {t("Termine d'abord «")} {tacheBloquante.titre || tacheBloquante.clientNom} {t("» avant de commencer celle-ci — une seule tâche à la fois.")}
         </div>
       )}
 
       {inspectionRequise && !tacheBloquante && tache.etat === "a_faire" && (
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-700">
           <Lock size={14} className="mt-0.5 shrink-0" />
-          Fais d'abord ton inspection du véhicule (« Transport — Début de journée ») pour pouvoir démarrer. Tu peux quand même consulter les détails.
+          {t("Fais d'abord ton inspection du véhicule (« Transport — Début de journée ») pour pouvoir démarrer. Tu peux quand même consulter les détails.")}
         </div>
       )}
 
       <div className="mt-3 grid grid-cols-2 gap-2">
         {tache.etat === "a_faire" && (
           <Button onClick={onDemarrer} disabled={!!tacheBloquante || inspectionRequise} loading={chargementDebuter} className="col-span-2">
-            <Play size={16} /> {labelDebuter || "Débuter la tâche"}
+            <Play size={16} /> {t(labelDebuter || "Débuter la tâche")}
           </Button>
         )}
         {tache.etat === "en_cours" && (
           <>
             <Button variant="outline" onClick={onPause}>
-              <Pause size={15} /> Pause (non compté)
+              <Pause size={15} /> {t("Pause (non compté)")}
             </Button>
             {fermetureGuidee ? (
-              <Button onClick={onAllerSigner}>✍️ Terminer → signer</Button>
+              <Button onClick={onAllerSigner}>{t("✍️ Terminer → signer")}</Button>
             ) : (
               <Button onClick={onTerminer} loading={chargementTerminer}>
-                <Square size={15} /> {labelTerminer || "Terminer"}
+                <Square size={15} /> {t(labelTerminer || "Terminer")}
               </Button>
             )}
           </>
@@ -808,13 +810,13 @@ function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, 
         {tache.etat === "en_pause" && (
           <>
             <Button onClick={onReprendre} disabled={!!tacheBloquante}>
-              <Play size={15} /> Reprendre
+              <Play size={15} /> {t("Reprendre")}
             </Button>
             {fermetureGuidee ? (
-              <Button onClick={onAllerSigner}>✍️ Terminer → signer</Button>
+              <Button onClick={onAllerSigner}>{t("✍️ Terminer → signer")}</Button>
             ) : (
               <Button onClick={onTerminer} loading={chargementTerminer}>
-                <Square size={15} /> {labelTerminer || "Terminer"}
+                <Square size={15} /> {t(labelTerminer || "Terminer")}
               </Button>
             )}
           </>
@@ -825,17 +827,14 @@ function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, 
           facturer au client). */}
       {tache.etat === "en_pause" && (
         <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-snug text-amber-800">
-          ⏸️ En pause — le chrono est arrêté : ce temps ne sera ni compté sur la tâche ni facturé.
-          Parti chercher du matériel ? Crée une <span className="font-bold">🚗 course</span> (écran d&apos;accueil) :
-          ce déplacement restera payé sans être facturé au client.
+          {t("⏸️ En pause — le chrono est arrêté : ce temps ne sera ni compté sur la tâche ni facturé. Parti chercher du matériel ? Crée une 🚗 course (écran d'accueil) : ce déplacement restera payé sans être facturé au client.")}
         </p>
       )}
       {/* ✍️ FERMETURE GUIDÉE — la tâche client se ferme par la
           signature, jamais par un raccourci (rien ne peut être oublié). */}
       {fermetureGuidee && tache.etat !== "a_faire" && tache.etat !== "complete" && (
         <p className="mt-3 rounded-xl bg-orange-50 p-3 text-[11px] leading-snug text-orange-800">
-          Cette tâche se termine par le <span className="font-bold">bon de travail en bas</span> (signature du client,
-          client absent, ou collègue qui a fait signer) — la fermeture est automatique après l&apos;envoi.
+          {t("Cette tâche se termine par le bon de travail en bas (signature du client, client absent, ou collègue qui a fait signer) — la fermeture est automatique après l'envoi.")}
         </p>
       )}
     </div>
@@ -1872,6 +1871,8 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
   // lui-même, aujourd'hui seulement — la planification reste au bureau.
   // Heures payées (catégorie « divers »), jamais de facturation.
   const [courseOuverte, setCourseOuverte] = useState(false);
+  // 🌎 Version anglaise (tranche « app technicien », 2026-09-04).
+  const { t } = useLangue();
   const [courseTitre, setCourseTitre] = useState("");
   const [courseAdresse, setCourseAdresse] = useState("");
   const [courseNote, setCourseNote] = useState("");
@@ -2163,14 +2164,14 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
             )}
             <BoutonLangue sombre />
             <button onClick={onDeconnexion} className="flex items-center gap-1 text-xs font-semibold text-slate-400">
-              <LogOut size={13} /> Déconnexion
+              <LogOut size={13} /> {t("Déconnexion")}
             </button>
           </div>
         </div>
-        <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-white">Bonjour, {nomTechnicien || "technicien"}</h1>
+        <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-white">{t("Bonjour,")} {nomTechnicien || t("technicien")}</h1>
         {!enLigne && (
           <p className="mt-1 text-[11px] text-zinc-300">
-            Tes données sont sauvegardées localement et se synchroniseront au retour de la connexion.
+            {t("Tes données sont sauvegardées localement et se synchroniseront au retour de la connexion.")}
           </p>
         )}
         {erreurSync && (
@@ -2185,25 +2186,24 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         {chronosOublies.length > 0 && (
           <div className="mt-4 rounded-xl border-2 border-red-400 bg-red-500 p-3">
             <p className="flex items-center gap-1.5 text-sm font-extrabold text-white">
-              <AlertTriangle size={16} className="shrink-0" /> Chrono encore parti
+              <AlertTriangle size={16} className="shrink-0" /> {t("Chrono encore parti")}
             </p>
-            {chronosOublies.map((t) => (
-              <div key={t.id} className="mt-2">
+            {chronosOublies.map((tc) => (
+              <div key={tc.id} className="mt-2">
                 <p className="text-[13px] leading-snug text-white">
-                  « <span className="font-bold">{t.titre || "Tâche"}</span> » tourne depuis{" "}
-                  <span className="font-extrabold tabular-nums">{Math.floor(dureeEcoulee(t) / 3600)} h</span>. L&apos;as-tu oublié ?
+                  « <span className="font-bold">{tc.titre || t("Tâche")}</span> » {t("tourne depuis")}{" "}
+                  <span className="font-extrabold tabular-nums">{Math.floor(dureeEcoulee(tc) / 3600)} h</span>. {t("L'as-tu oublié ?")}
                 </p>
                 <button
-                  onClick={() => onCorrigerChrono(t.id)}
+                  onClick={() => onCorrigerChrono(tc.id)}
                   className="mt-1.5 min-h-[44px] w-full rounded-lg bg-white text-sm font-extrabold text-red-600 active:scale-[0.99]"
                 >
-                  Corriger mon heure de fin
+                  {t("Corriger mon heure de fin")}
                 </button>
               </div>
             ))}
             <p className="mt-2 text-[11px] leading-snug text-red-100">
-              Après {HEURES_AVANT_PLAFOND} h ({HEURES_AVANT_PLAFOND_TRANSPORT} h pour un transport), la tâche se ferme
-              seule et sa durée est plafonnée — le bureau devra corriger tes heures.
+              {t("Après")} {HEURES_AVANT_PLAFOND} h ({HEURES_AVANT_PLAFOND_TRANSPORT} {t("h pour un transport")}), {t("la tâche se ferme seule et sa durée est plafonnée — le bureau devra corriger tes heures.")}
             </p>
           </div>
         )}
@@ -2211,7 +2211,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
         <div className="mt-4 flex items-center gap-2 rounded-xl bg-white/10 px-4 py-3">
           <CheckCircle2 size={18} className="text-[#FF6A13]" />
           <span className="text-sm font-medium text-white">
-            {complete} / {total} tâches complétées
+            {complete} / {total} {t("tâches complétées")}
           </span>
         </div>
       </div>
@@ -2219,21 +2219,21 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
       {/* BARRE DE NAVIGATION TEMPORELLE */}
       <div className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
-          <button onClick={() => setModeVue("jour")} className={clsOnglet(modeVue === "jour")}>Jour</button>
-          <button onClick={() => setModeVue("semaine")} className={clsOnglet(modeVue === "semaine")}>Semaine</button>
+          <button onClick={() => setModeVue("jour")} className={clsOnglet(modeVue === "jour")}>{t("Jour")}</button>
+          <button onClick={() => setModeVue("semaine")} className={clsOnglet(modeVue === "semaine")}>{t("Semaine")}</button>
         </div>
         {/* MES HEURES — consultation de sa semaine de paie (lecture seule). */}
         <button
           onClick={onOuvrirMesHeures}
           className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:bg-slate-100"
         >
-          🕐 Mes heures de la semaine
+          {t("🕐 Mes heures de la semaine")}
         </button>
         <button
           onClick={() => setCourseOuverte(true)}
           className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:bg-slate-100"
         >
-          🚗 Course / déplacement (sans client)
+          {t("🚗 Course / déplacement (sans client)")}
         </button>
         {/* 🏭 TRAVAIL AU SHOP (demande du propriétaire, 2026-08-19) : il
             finit sa dernière tâche, arrive au bureau — ses heures
@@ -2242,7 +2242,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           onClick={() => setShopOuvert(true)}
           className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:bg-slate-100"
         >
-          🏭 Travail au shop (atelier)
+          {t("🏭 Travail au shop (atelier)")}
         </button>
         {/* 💬 SIGNALER / SUGGÉRER — écrit au BUREAU (pas à Fluxya
             directement) : l'admin trie, puis transmet si c'est fondé. */}
@@ -2250,7 +2250,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           onClick={ouvrirRetour}
           className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:bg-slate-100"
         >
-          💬 Signaler un problème / proposer une idée
+          {t("💬 Signaler un problème / proposer une idée")}
         </button>
         {/* 🔔 NOTIFICATIONS PUSH (2026-08-18) : « nouvelle tâche »,
             « matériel commandé » — reçues même application fermée.
@@ -2266,17 +2266,17 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
             disabled={etatPush === "demande"}
             className="mb-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 text-xs font-extrabold text-amber-800 active:bg-amber-100 disabled:opacity-60"
           >
-            {etatPush === "demande" ? "Activation…" : "🔔 Activer les notifications (nouvelle tâche, matériel…)"}
+            {etatPush === "demande" ? t("Activation…") : t("🔔 Activer les notifications (nouvelle tâche, matériel…)")}
           </button>
         )}
         {etatPush === "active" && (
           <p className="mb-2 rounded-xl bg-emerald-50 px-3 py-2 text-center text-[11px] font-bold text-emerald-700">
-            ✅ Notifications activées — tu recevras les nouvelles tâches sur ce téléphone.
+            {t("✅ Notifications activées — tu recevras les nouvelles tâches sur ce téléphone.")}
           </p>
         )}
         {etatPush === "refuse" && (
           <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-center text-[11px] font-bold text-red-700">
-            Notifications refusées — réactive-les dans les réglages du navigateur si tu changes d'idée.
+            {t("Notifications refusées — réactive-les dans les réglages du navigateur si tu changes d'idée.")}
           </p>
         )}
         {/* 💬 FENÊTRE SIGNALER / SUGGÉRER — 15 secondes, faisable avec
