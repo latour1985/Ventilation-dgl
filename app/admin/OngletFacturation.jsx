@@ -547,7 +547,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -719,7 +719,16 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                   fixer un prix sans fouiller ailleurs. */}
               <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold text-slate-600">
                 {be.devisNumero && <span>📄 Devis {be.devisNumero}</span>}
-                {be.adresseTravaux && <span>📍 {be.adresseTravaux}</span>}
+                {/* 📍 SANS adresse de travaux distincte (2026-09-06,
+                    question du propriétaire : « pourquoi l'adresse
+                    n'apparaît pas ? ») : la convention veut que null =
+                    même adresse que la facturation — alors on MONTRE
+                    l'adresse de facturation au lieu de rien. */}
+                {be.adresseTravaux ? (
+                  <span>📍 {be.adresseTravaux}</span>
+                ) : adresseRepli ? (
+                  <span>📍 {adresseRepli} <span className="font-normal text-slate-400">(adresse de facturation)</span></span>
+                ) : null}
                 {nbFacturables != null && equipe.length > 0 && (
                   <span className="text-emerald-700">💰 {nbFacturables} homme{nbFacturables > 1 ? "s" : ""} facturable{nbFacturables > 1 ? "s" : ""} sur {equipe.length}</span>
                 )}
@@ -4069,6 +4078,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           depotPaye={depotPayePour(bonAReviser.tacheId)}
           piecePrepayee={piecePrepayeePour(bonAReviser.tacheId)}
           facturables={facturablesAssignations}
+          adresseRepli={adresseFacturationClient(trouverClientDuBon(bonAReviser)) || null}
           onBasculerFacturable={
             onBasculerFacturable
               ? (tacheId, courriel, val) => {

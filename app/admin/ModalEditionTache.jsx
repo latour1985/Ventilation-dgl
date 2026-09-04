@@ -11,7 +11,7 @@ import { Check, Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { AutocompleteAdresse, Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [] }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
@@ -255,7 +255,17 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900">{dejaPlanifiee ? "Modifier la tâche" : "Édition rapide"}</h3>
-            <p className="text-xs text-slate-500">{tache.titre || tache.clientNom}</p>
+            <p className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+              {tache.titre || tache.clientNom}
+              {/* 🏷️ LE TYPE, visible d'entrée (2026-09-06, demande du
+                  propriétaire : « voir quel type de tâche est attribué
+                  quand on ouvre la tâche »). */}
+              {TYPE_INFO(tache.typeTache || tache.type)?.label && (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                  {TYPE_INFO(tache.typeTache || tache.type).label}
+                </span>
+              )}
+            </p>
           </div>
           <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
         </div>
