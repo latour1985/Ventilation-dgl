@@ -13,7 +13,7 @@ import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
-import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo } from "@/lib/quickbooksClient";
+import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo } from "@/lib/quickbooksClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
 import { creerFactureMaison, majFactureMaison, lienFactureMaison } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
@@ -2378,6 +2378,26 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const [paiementsEnCours, setPaiementsEnCours] = useState(false);
   const [paiementsLusA, setPaiementsLusA] = useState(null);
   const [arOuvert, setArOuvert] = useState(false);
+  // ⏱️ TEMPS DE PAIEMENT MOYEN PAR CLIENT (2026-09-06, demande du
+  // propriétaire) — lu du registre QuickBooks à l'ouverture du bloc
+  // (plusieurs requêtes : on ne le lit que si on veut le voir).
+  const [delaisPaiement, setDelaisPaiement] = useState(null); // null = jamais lu
+  const [delaisEnCours, setDelaisEnCours] = useState(false);
+  const [delaisOuvert, setDelaisOuvert] = useState(false);
+  const actualiserDelais = async () => {
+    if (delaisEnCours) return;
+    setDelaisEnCours(true);
+    try {
+      const r = await lireDelaisPaiementQbo();
+      if (Array.isArray(r?.clients)) {
+        setDelaisPaiement(r);
+      } else if (r?.erreur) {
+        ajouterJournal(`⚠️ Temps de paiement illisibles : ${r.erreur}`);
+      }
+    } finally {
+      setDelaisEnCours(false);
+    }
+  };
   const actualiserPaiements = async () => {
     if (paiementsEnCours) return;
     setPaiementsEnCours(true);
@@ -3652,6 +3672,79 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                 className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 active:scale-95 disabled:opacity-50"
               >
                 {paiementsEnCours ? "Lecture…" : "🔄 Actualiser"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      )}
+
+      {/* ⏱️ TEMPS DE PAIEMENT PAR CLIENT (2026-09-06, demande du
+          propriétaire) — qui paie vite, qui traîne : paiements des 12
+          derniers mois lus du registre QuickBooks, un délai par facture
+          soldée (dernier paiement − émission), moyenne et pire cas par
+          client. Les plus lents en tête. Lecture seule. */}
+      {qbConnecte !== false && (
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <button
+          onClick={() => {
+            setDelaisOuvert((v) => !v);
+            if (delaisPaiement === null && !delaisEnCours) actualiserDelais();
+          }}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+        >
+          <p className="min-w-0 text-[11px] font-bold text-slate-700">
+            ⏱️ Temps de paiement par client
+            {delaisPaiement?.global && (
+              <span className="ml-1 font-semibold text-slate-500">
+                — moyenne {delaisPaiement.global.moyenneJours} jour{delaisPaiement.global.moyenneJours > 1 ? "s" : ""} ({delaisPaiement.global.nb} facture{delaisPaiement.global.nb > 1 ? "s" : ""} payée{delaisPaiement.global.nb > 1 ? "s" : ""} sur 12 mois)
+              </span>
+            )}
+          </p>
+          <span className="shrink-0 text-xs text-slate-400">{delaisOuvert ? "▾" : "▸"}</span>
+        </button>
+        {delaisOuvert && (
+          <div className="border-t border-slate-100 px-3 pb-3 pt-2">
+            {delaisEnCours && delaisPaiement === null ? (
+              <p className="py-2 text-center text-xs text-slate-400">Lecture du registre QuickBooks…</p>
+            ) : delaisPaiement === null ? (
+              <p className="py-2 text-center text-xs text-slate-400">Rien lu encore — bouton « Actualiser » ci-dessous.</p>
+            ) : (delaisPaiement.clients || []).length === 0 ? (
+              <p className="py-2 text-center text-xs text-slate-400">Aucune facture payée trouvée sur les 12 derniers mois — ce tableau se remplira tout seul.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[11px]">
+                  <thead>
+                    <tr className="text-[10px] uppercase text-slate-400">
+                      <th className="py-1 pr-2 font-semibold">Client</th>
+                      <th className="py-1 pr-2 text-right font-semibold">Factures payées</th>
+                      <th className="py-1 pr-2 text-right font-semibold">Délai moyen</th>
+                      <th className="py-1 pr-2 text-right font-semibold">Pire délai</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {delaisPaiement.clients.map((c) => (
+                      <tr key={c.nom} className={`border-t border-slate-100 ${c.moyenneJours > 45 ? "text-red-700" : c.moyenneJours > 30 ? "text-amber-700" : "text-slate-600"}`}>
+                        <td className="py-1 pr-2 font-semibold">{c.nom}</td>
+                        <td className="py-1 pr-2 text-right tabular-nums">{c.nb}</td>
+                        <td className="py-1 pr-2 text-right font-bold tabular-nums whitespace-nowrap">{c.moyenneJours} j</td>
+                        <td className="py-1 pr-2 text-right tabular-nums whitespace-nowrap">{c.pireJours} j</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Paiements des 12 derniers mois{delaisPaiement.depuis ? ` (depuis le ${delaisPaiement.depuis})` : ""} — une facture payée en plusieurs versements compte à son DERNIER versement. Ambre : plus de 30 jours · rouge : plus de 45 jours.
+                </p>
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-end">
+              <button
+                onClick={actualiserDelais}
+                disabled={delaisEnCours}
+                className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 active:scale-95 disabled:opacity-50"
+              >
+                {delaisEnCours ? "Lecture…" : "🔄 Actualiser"}
               </button>
             </div>
           </div>
