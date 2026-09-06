@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
-import { listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
+import { listerLegendes, sauvegarderLegende, televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import TermesConditions from "@/components/TermesConditions";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 // ⚠️ Cycle assumé partage ↔ OngletParametres : les deux ne se lisent
@@ -37,6 +37,62 @@ import { SEUIL_ENTRETIEN_KM, SEUIL_ENTRETIEN_MOIS } from "./OngletInspectionsVeh
 // dans chaque fichier (voir le fichier Button.jsx fourni séparément
 // pour la version destinée à un vrai projet Next.js).
 // ============================================================
+// ============================================================
+// 📷 PHOTOS D'UN BON DE COMMANDE (2026-09-06, demande du propriétaire :
+// « pouvoir ajouter des photos au bon de commande fournisseur, partout
+// où il est possible d'en envoyer un »). Téléversées tout de suite
+// (Supabase Storage, URL publique) ; le courriel du BC les affiche.
+// Réutilisé par : BC de projet, BC libre, commande de pièce.
+// ============================================================
+export function ChampPhotosBc({ photos = [], onChange, libelle = "📷 Photos pour le fournisseur (facultatif)" }) {
+  const [televersement, setTeleversement] = useState(false);
+  const ajouter = async (e) => {
+    const fichiers = Array.from(e.target.files || []).slice(0, 6);
+    e.target.value = "";
+    if (fichiers.length === 0) return;
+    setTeleversement(true);
+    const urls = [];
+    let echecs = 0;
+    for (const f of fichiers) {
+      try {
+        urls.push(await televerserPieceJointeTache(f));
+      } catch {
+        echecs += 1;
+      }
+    }
+    setTeleversement(false);
+    if (urls.length) onChange([...(photos || []), ...urls].slice(0, 6));
+    if (echecs > 0) window.alert(`${echecs} photo${echecs > 1 ? "s" : ""} n'a pas pu être téléversée — réessaie.`);
+  };
+  return (
+    <div>
+      <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{libelle}</label>
+      {(photos || []).length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
+          {photos.map((u) => (
+            <span key={u} className="relative inline-block">
+              <img src={u} alt="" className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
+              <button
+                type="button"
+                onClick={() => onChange(photos.filter((x) => x !== u))}
+                title="Retirer cette photo"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[10px] font-bold text-white"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1.5 text-[11px] font-bold ${televersement ? "border-slate-200 text-slate-300" : "border-slate-300 text-slate-500 hover:border-slate-400"}`}>
+        {televersement ? "⏳ Téléversement…" : "📷 Ajouter des photos"}
+        <input type="file" accept="image/*" multiple disabled={televersement} onChange={ajouter} className="hidden" />
+      </label>
+      <p className="mt-0.5 text-[9px] text-slate-400">Jusqu&apos;à 6 photos — elles s&apos;affichent directement dans le courriel du fournisseur.</p>
+    </div>
+  );
+}
+
 export function Button({ variant = "primary", loading = false, loadingText = "Chargement...", disabled = false, className = "", children, ...props }) {
   const base =
     "inline-flex items-center justify-center gap-2 rounded-xl font-bold min-h-[44px] touch-manipulation transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 disabled:cursor-not-allowed";

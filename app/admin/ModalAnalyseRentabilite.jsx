@@ -10,7 +10,7 @@ import { X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { bornesPeriodeAnalyse, dateISO, ITEMS_PAR_PAGE } from "./partage";
 
-export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], onFermer }) {
+export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], depots = {}, onFermer }) {
   // 🧾 DÉPENSES QUICKBOOKS RATTACHÉES (2026-08-26) — l'écran ne les
   // recevait même pas : un achat fait dans QuickBooks pour une job
   // n'apparaissait donc dans AUCUN coût ici, quoi qu'on fasse.
@@ -224,15 +224,26 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
           .reduce((s, a) => s + (a.montantAttribue != null ? a.montantAttribue : a.montantHT), 0);
         // 🧾 Dépense QuickBooks rattachée À CETTE TÂCHE (2026-08-26).
         const coutQb = depensesQbParTache.get(b.tacheId) || 0;
+        // 💰 LE DÉPÔT PAYÉ COMPTE COMME DU FACTURÉ (2026-09-06, vécu par
+        // le propriétaire : « le calcul du dépôt déjà payé n'est pas là,
+        // ça fausse les marges »). L'argent du dépôt est ENCAISSÉ ; la
+        // facture finale, elle, le DÉDUIT (ligne négative) — additionner
+        // les deux donne donc le vrai revenu, jamais un double compte.
+        const depotTache = depots?.[b.tacheId];
+        const depotPaye =
+          depotTache && (depotTache.statut === "paye" || depotTache.statut === "paye_manuellement")
+            ? Number(depotTache.montantHT) || 0
+            : 0;
+        const facture = b.facture + depotPaye;
         const cout = coutMo + coutMateriel + coutStock + coutAchats + coutQb;
-        const marge = b.facture > 0 ? ((b.facture - cout) / b.facture) * 100 : null;
+        const marge = facture > 0 ? ((facture - cout) / facture) * 100 : null;
         const statutTexte =
           b.statutQb === "retire"
             ? b.retraitRaison === "client_maison" ? "🏠 Maison" : "🛡️ Garantie"
             : b.retraitStatut === "reporte"
               ? "🔄 Reporté"
               : b.statutQb === "envoye" || b.facture > 0 ? "Facturé" : "À facturer";
-        return { cle: b.tacheId, nom: b.projet, clientNom: b.client, date: b.date, heures, facture: b.facture, cout, marge, statutTexte };
+        return { cle: b.tacheId, nom: b.projet, clientNom: b.client, date: b.date, heures, facture, cout, marge, statutTexte };
       })
       .sort((a, b2) => (a.date < b2.date ? 1 : -1));
   })();
@@ -539,7 +550,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
             </div>
           </div>
           <p className="mt-0.5 text-[10px] text-slate-400">
-            Coût réel = heures réelles × taux gelé + camion (inspection du jour){vueTaches === "taches" ? " + matériel au coûtant du devis quand la tâche y est rattachée" : ""}.
+            Coût réel = heures réelles × taux gelé + camion (inspection du jour){vueTaches === "taches" ? " + matériel au coûtant du devis quand la tâche y est rattachée" : ""}. Le facturé inclut le dépôt payé (la facture finale le déduit — jamais compté deux fois).
             Les retraits (garantie, maison) et reports restent visibles : ils ont coûté même s'ils ne rapportent rien.
           </p>
           {parTacheLignes.length === 0 ? (

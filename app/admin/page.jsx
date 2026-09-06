@@ -3136,6 +3136,7 @@ function AppAdmin() {
         <OngletTableauDeBord
           reponsesClients={reponsesClientsATraiter}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
+          depots={depots}
           ajouterJournal={ajouterJournal}
           projets={projets}
           travaux={travaux}
@@ -3469,6 +3470,7 @@ function AppAdmin() {
           // nom de l'admin (traçabilité de l'attribution).
           projets={projets}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
+          depots={depots}
           // Synchronisation lancée TOUT DE SUITE après une facture libre
           // rattachée à un projet : sans elle, le montant n'apparaissait
           // qu'au prochain clic manuel et on croyait que rien n'avait
@@ -3541,6 +3543,7 @@ function AppAdmin() {
           utilisateurs={utilisateursActifs}
           ajouterJournal={ajouterJournal}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
+          depots={depots}
           // Droit sur les heures : admins = ajustement DIRECT ; répartiteur
           // = PROPOSITION à valider par un admin ; sinon consultation.
           droitHeures={
@@ -3881,6 +3884,7 @@ function AppAdmin() {
         <OngletAide
           session={session}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
+          depots={depots}
           ajouterJournal={ajouterJournal}
         />
       )}

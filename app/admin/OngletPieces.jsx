@@ -18,7 +18,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
-import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, SelecteurCibleAchat, Button, libelleAdresse, todayISO } from "./partage";
+import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, SelecteurCibleAchat, Button, libelleAdresse, todayISO } from "./partage";
 
 export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
@@ -123,7 +123,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [] });
   // 📦➕ Réception d'un BC « stock » vers l'inventaire (étage 2) — le
   // compteur force la section Inventaire à se recharger après coup.
   const [receptionBc, setReceptionBc] = useState(null); // null | achat libre
@@ -190,7 +190,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
     const r = await envoyerCourriel({
       a: offreEnvoiBc.coches,
       sujet: `Bon de commande ${offreEnvoiBc.numero} — ${configEnt.nomLegal}`,
-      html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description }),
+      html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description, photos: offreEnvoiBc.photos || [] }),
       // La réponse du fournisseur revient à celui qui a commandé.
       copieExpediteur: true,
       // 📧 Copie permanente des BC (réglage d'entreprise, ex. commande@).
@@ -219,6 +219,9 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // la pièce concernée, pas dans une alerte générique.
   const [envoiBcEnCours, setEnvoiBcEnCours] = useState(null);
   const [messageEnvoiBc, setMessageEnvoiBc] = useState(null); // { id, texte, ok }
+  // 📷 Photos jointes au BC d'une PIÈCE — choisies sur la carte juste
+  // avant l'envoi (état local, la photo sert au courriel).
+  const [photosEnvoiBc, setPhotosEnvoiBc] = useState({});
   const envoyerBcParApplication = async (p) => {
     const adresses = courrielsFournisseur(p);
     if (adresses.length === 0) return;
@@ -226,7 +229,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
     const r = await envoyerCourriel({
       a: adresses,
       sujet: `Bon de commande ${p.numeroBc || ""} — ${configEnt.nomLegal}`,
-      html: gabaritBonCommande({ config: configEnt, piece: p }),
+      html: gabaritBonCommande({ config: configEnt, piece: p, photos: photosEnvoiBc[p.id] || [] }),
       // Celui qui commande reçoit la copie, et la réponse du fournisseur
       // (« impossible le 14, je peux le 18 ») lui revient directement.
       copieExpediteur: true,
@@ -786,6 +789,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                 placeholder="Description — ex : 4 rouleaux de tape aluminium"
                 className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
               />
+              <ChampPhotosBc photos={bcLibre.photos || []} onChange={(liste) => setBcLibre((f) => ({ ...f, photos: liste }))} />
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="flex items-center gap-1 text-[10px] text-slate-400">
                   Montant HT
@@ -969,6 +973,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         numero,
                         fournisseur: fiche.nom,
                         description: descriptionFinale,
+                        photos: bcLibre.photos || [],
                         courriels: fiche.courriels,
                         coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
                       });
@@ -992,11 +997,12 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         numero,
                         fournisseur: nomF || "fournisseur",
                         description: descriptionFinale,
+                        photos: bcLibre.photos || [],
                         courriels: [{ id: "libre", label: "Commande", email: courrielTape, defaut: true }],
                         coches: [courrielTape],
                       });
                     }
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false });
+                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [] });
                     setBcLibreOuvert(false);
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"
@@ -1555,6 +1561,13 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                             Envoyer — d'où la confirmation manuelle. */}
                         {p.statut === "commandee" && courrielsFournisseur(p).length > 0 && (
                           <>
+                            <div className="w-full">
+                              <ChampPhotosBc
+                                photos={photosEnvoiBc[p.id] || []}
+                                onChange={(liste) => setPhotosEnvoiBc((prev) => ({ ...prev, [p.id]: liste }))}
+                                libelle="📷 Photos pour ce BC (facultatif)"
+                              />
+                            </div>
                             <Button
                               onClick={() => envoyerBcParApplication(p)}
                               disabled={envoiBcEnCours === p.id}

@@ -16,7 +16,7 @@ import { envoyerCourriel, gabaritBcSimple } from "@/lib/courriels";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { poserCopieBc } from "@/lib/supabase/entreprise";
-import { AutocompleteAdresse, Button, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, ChampPhotosBc, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
 import { lireEstimateQbo } from "@/lib/quickbooksClient";
 
 // Projets / chantiers au long cours — lient un client, des tâches de
@@ -586,6 +586,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
   const [bcNumero, setBcNumero] = useState("");
   const [bcDescription, setBcDescription] = useState("");
   const [bcLivraison, setBcLivraison] = useState(""); // 📦 date souhaitée
+  const [bcPhotos, setBcPhotos] = useState([]); // 📷 photos pour le fournisseur
   const [modalFournisseur, setModalFournisseur] = useState(false);
   // Envoi du BC au fournisseur : choix des adresses avant création.
   const [envoiOuvert, setEnvoiOuvert] = useState(false);
@@ -667,7 +668,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
       const r = await envoyerCourriel({
         a: destinataires,
         sujet: `Bon de commande ${numero} — ${configBc.nomLegal}`,
-        html: gabaritBcSimple({ config: configBc, numeroBc: numero, description: descriptionBc, adresseLivraison }),
+        html: gabaritBcSimple({ config: configBc, numeroBc: numero, description: descriptionBc, adresseLivraison, photos: bcPhotos }),
         // La réponse du fournisseur (« pas en stock avant le 12 »)
         // revient à celui qui a commandé.
         copieExpediteur: true,
@@ -705,6 +706,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
     setBcMontant("");
     setBcNumero("");
     setBcDescription("");
+    setBcPhotos([]);
     setBcLivraison("");
     setCourrielsChoisis([]);
   };
@@ -887,6 +889,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
             className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
           />
         </label>
+        <ChampPhotosBc photos={bcPhotos} onChange={setBcPhotos} />
         <Button variant="outline" onClick={demarrerAjoutBC} disabled={!fournisseurChoisi} className="w-full min-h-0 py-1.5 text-xs">
           <Plus size={12} /> {fournisseurChoisi && (fournisseurChoisi.courriels || []).length > 0 ? "Créer et envoyer le BC" : "Ajouter le BC"}
         </Button>
