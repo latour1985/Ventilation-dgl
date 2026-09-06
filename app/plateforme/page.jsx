@@ -214,6 +214,12 @@ function TableauPlateforme({ session }) {
     setMessage(`Export de ${e.nom} en cours…`);
     try {
       const donnees = await exporterEntreprise(e.id);
+      // La route service répond { erreur } si le sceau ou la lecture
+      // manque — jamais un fichier vide qui aurait l'air d'un export.
+      if (donnees?.erreur) {
+        setMessage(`⚠️ Export de ${e.nom} refusé : ${donnees.erreur}`);
+        return;
+      }
       const blob = new Blob([JSON.stringify(donnees, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

@@ -697,6 +697,17 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   L&apos;entête et la signature de {configEnt.nomCommercial || configEnt.nomLegal} s&apos;ajoutent automatiquement autour de ce texte.
                 </p>
               </div>
+              {/* 📷 PHOTOS DANS LE PANNEAU D'ENVOI (2026-09-06) — le
+                  RENVOI d'un bon déjà créé partait toujours sans photos
+                  (elles ne vivent pas sur la fiche de l'achat) : le choix
+                  se fait ICI, pour tout envoi — création comme renvoi. */}
+              <div className="mt-2">
+                <ChampPhotosBc
+                  photos={offreEnvoiBc.photos || []}
+                  onChange={(liste) => setOffreEnvoiBc((p) => ({ ...p, photos: liste }))}
+                  libelle="📷 Photos jointes à cet envoi (facultatif)"
+                />
+              </div>
               <div className="mt-2 flex gap-1.5">
                 <Button
                   loading={envoiBcLibreEnCours}
@@ -1056,6 +1067,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         numero: a2.numeroBc || "(sans nº)",
                         fournisseur: a2.fournisseurNom || "le fournisseur",
                         description: a2.description || "",
+                        photos: [],
                         courriels: fiche?.courriels || [],
                         coches: (fiche?.courriels || []).filter((c) => c.defaut).map((c) => c.email),
                       });
