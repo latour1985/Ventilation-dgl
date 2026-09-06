@@ -1702,7 +1702,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       const cumul = { facture: 0, cout: 0, heures: 0, jobs: 0 };
                       const tachesVues = new Set();
                       bonsDuClient.forEach((b) => {
-                        cumul.facture += (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+                        cumul.facture += (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
                         const cleTache = b.tacheId || b.id;
                         if (tachesVues.has(cleTache)) return; // heures/matériel comptés UNE fois par tâche
                         tachesVues.add(cleTache);

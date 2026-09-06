@@ -89,6 +89,18 @@ export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, onRenvoyerVers = n
         // approuvé) — solde réel lu du registre : payée, en retard, ou
         // en attente. Absent tant que la lecture n'a pas eu lieu.
         const p = paiements && f.qboInvoiceId ? paiements[String(f.qboInvoiceId)] : null;
+        // ❌ Facture ANNULÉE (VOID) dans QuickBooks : barrée, montant
+        // exclu de tous les cumuls — le bon redevient facturable.
+        if (f.annuleeQb) {
+          return (
+            <div key={f.id} className="rounded-lg bg-slate-100 px-1.5 py-1 text-left text-[10px] text-slate-400">
+              <p>
+                <span className="font-semibold line-through">{f.numeroFactureQb}</span> — <span className="line-through">{Number(f.montant).toFixed(2)} $</span> ({f.detail}) · {f.date}
+                <span className="ml-1.5 font-bold text-slate-500">❌ Annulée dans QuickBooks{f.annuleeQbLe ? ` le ${new Date(f.annuleeQbLe).toLocaleDateString("fr-CA")}` : ""}</span>
+              </p>
+            </div>
+          );
+        }
         return (
         <div key={f.id} className="rounded-lg bg-slate-50 px-1.5 py-1 text-left text-[10px] text-slate-500">
           <p>
@@ -177,11 +189,13 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
   // On additionne donc TOUT ce qui a été facturé contre ce devis, quelle
   // que soit la tâche, le technicien ou la date.
   // (Calculé AVANT les états : le champ « % » démarre au % restant.)
+  // (Les factures annulées dans QuickBooks — annuleeQb — ne comptent
+  // jamais : leur montant redevient facturable.)
   const montantCumule = devis?.numero
     ? (tousLesBons || [])
         .filter((b) => b.devisNumero === devis.numero)
-        .reduce((s, b) => s + (b.facturesEmises || []).reduce((x, f) => x + f.montant, 0), 0)
-    : (bon.facturesEmises || []).reduce((s, f) => s + f.montant, 0);
+        .reduce((s, b) => s + (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((x, f) => x + f.montant, 0), 0)
+    : (bon.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + f.montant, 0);
   const montantDevis = devis ? devis.totalVendant : bon.montant;
   const montantRestant = Math.max(0, montantDevis - montantCumule);
   const frequence = bon.frequenceFacturationAnnuelle || 4;
@@ -2026,7 +2040,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     bonsGroupes.forEach((b) => {
       if (!b.devisNumero) return;
       cumulParDevis[b.devisNumero] =
-        (cumulParDevis[b.devisNumero] || 0) + (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+        (cumulParDevis[b.devisNumero] || 0) + (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
     });
     const sansSolde = new Set();
     Object.entries(cumulParDevis).forEach(([numero, cumul]) => {
@@ -2129,7 +2143,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // impossible de les facturer deux fois.
   // ============================================================
   const resteAFacturerDe = (b) => {
-    const cumule = (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+    // Une facture annulée (VOID QuickBooks) libère son montant.
+    const cumule = (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
     return Math.max(0, (Number(b.montant) || 0) - cumule);
   };
   const groupesAFacturer = useMemo(() => {
@@ -2192,7 +2207,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const envoisAConfirmer =
     configEnt?.envoiAutoFactureQb === true
       ? bonsGroupes.reduce(
-          (s, x) => s + (x.facturesEmises || []).filter((f) => f.qboInvoiceId && f.envoiQb?.statut !== "envoyee").length,
+          (s, x) => s + (x.facturesEmises || []).filter((f) => f.qboInvoiceId && !f.annuleeQb && f.envoiQb?.statut !== "envoyee").length,
           0
         )
       : 0;
@@ -2369,13 +2384,42 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     try {
       const ids = [];
       bons.forEach((x) => (x.facturesEmises || []).forEach((f) => {
-        if (f.qboInvoiceId) ids.push(String(f.qboInvoiceId));
+        if (f.qboInvoiceId && !f.annuleeQb) ids.push(String(f.qboInvoiceId));
       }));
       const [rSoldes, rOuvertes] = await Promise.all([
         ids.length > 0 ? lireSoldesQbo(ids) : Promise.resolve({ factures: {} }),
         lireComptesARecevoirQbo(),
       ]);
       if (rSoldes?.factures) setPaiements(rSoldes.factures);
+      // ❌ FACTURE ANNULÉE (VOID) DANS QUICKBOOKS (2026-09-06, demande du
+      // propriétaire : « si une facture est annulée, le montant doit
+      // s'ajuster ») — au registre, un VOID remet la facture à 0 $ sans
+      // la supprimer. Fluxya n'émet JAMAIS de facture à 0 $ : total à
+      // zéro = annulée. On la marque (annuleeQb), TOUS les cumuls
+      // l'ignorent (revenus, marges, reste à facturer), et le bon
+      // RETOURNE « à facturer » si son montant n'est plus couvert.
+      if (rSoldes?.factures) {
+        setBons((prev) => prev.map((x) => {
+          let change = false;
+          const liste = (x.facturesEmises || []).map((f) => {
+            if (f.annuleeQb || !f.qboInvoiceId || (Number(f.montant) || 0) <= 0) return f;
+            const solde = rSoldes.factures[String(f.qboInvoiceId)];
+            if (!solde || (Number(solde.total) || 0) !== 0) return f;
+            change = true;
+            ajouterJournal(
+              `❌ Facture ${f.numeroFactureQb || solde.numero || ""} (${(Number(f.montant) || 0).toFixed(2)} $ HT · ${x.client || x.projet || ""}) ANNULÉE dans QuickBooks — retirée des revenus et des marges, le montant redevient facturable.`
+            );
+            return { ...f, annuleeQb: true, annuleeQbLe: new Date().toISOString() };
+          });
+          if (!change) return x;
+          const cumulValide = liste.filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+          const statut = x.statutQb === "envoye" && cumulValide < (Number(x.montant) || 0) - 0.01 ? "a_facturer" : x.statutQb;
+          if (String(x.id).startsWith("sbb-")) {
+            majFacturesEmises(String(x.id).slice(4), liste, statut === "envoye" ? "envoye" : "a_facturer").catch(() => {});
+          }
+          return { ...x, facturesEmises: liste, statutQb: statut };
+        }));
+      }
       if (Array.isArray(rOuvertes?.ouvertes)) {
         setComptesAR(rOuvertes.ouvertes);
         setArTronque(!!rOuvertes.tronque);
@@ -2591,7 +2635,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const verifierTousEnvois = async () => {
     const aVerifier = [];
     bons.forEach((x) => (x.facturesEmises || []).forEach((f) => {
-      if (f.qboInvoiceId) aVerifier.push({ bonId: x.id, factureLigneId: f.id, qbId: f.qboInvoiceId });
+      if (f.qboInvoiceId && !f.annuleeQb) aVerifier.push({ bonId: x.id, factureLigneId: f.id, qbId: f.qboInvoiceId });
     }));
     if (aVerifier.length === 0) {
       ajouterJournal("Aucune facture QuickBooks à vérifier — rien d'émis encore.");
@@ -3099,7 +3143,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             envoiQb,
           },
         ];
-        const cumul = nouvelles.reduce((s, f) => s + f.montant, 0);
+        const cumul = nouvelles.filter((f) => !f.annuleeQb).reduce((s, f) => s + f.montant, 0);
         const total = devisCourant ? devisCourant.totalVendant : b.montant;
         const complet = cumul >= total - 0.01;
         return { ...b, facturesEmises: nouvelles, statutQb: complet ? "envoye" : "en_attente" };
@@ -3114,7 +3158,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         { id: `fact-${Date.now()}`, montant, type, detail, date: dateISO(new Date()), numeroFactureQb, qboInvoiceId: rQbo?.factureId || null, courrielEnvoi: destinataires[0]?.email || null, courrielsEnvoi: destinataires.map((c) => c.email), envoiQb },
       ];
       const totalAttendu = devisCourant ? devisCourant.totalVendant : b.montant;
-      const cumulPersiste = listePersistee.reduce((x, f) => x + f.montant, 0);
+      const cumulPersiste = listePersistee.filter((f) => !f.annuleeQb).reduce((x, f) => x + f.montant, 0);
       majFacturesEmises(String(b.id).slice(4), listePersistee, cumulPersiste >= totalAttendu - 0.01 ? "envoye" : "a_facturer").catch(() =>
         ajouterJournal("⚠️ Facture émise affichée mais NON enregistrée en base — vérifie la connexion.")
       );
@@ -3659,7 +3703,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             : b.type === "appel_service"
             ? "bg-teal-500"
             : "bg-amber-400";
-          const montantCumule = (b.facturesEmises || []).reduce((s, f) => s + f.montant, 0);
+          const montantCumule = (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + f.montant, 0);
           const devisAssocie = devisType || contrat ? devisListe.find((d) => d.numero === b.devisNumero) : null;
           const montantDevisTotal = devisAssocie ? devisAssocie.totalVendant : b.montant;
           // 📱 flex-wrap (séance 3 mobile) : sur téléphone, la colonne

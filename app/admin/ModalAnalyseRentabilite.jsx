@@ -95,10 +95,23 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
     const coutMo = facturable.reduce((s, t) => s + coutMoDe(t) + coutCamionDe(t), 0);
     const coutInvisible = invisible.reduce((s, t) => s + coutMoDe(t), 0);
     const heuresInvisibles = invisible.reduce((s, t) => s + (Number(t.heures) || 0), 0);
-    const revenus = (bons || []).reduce(
-      (s, b) => s + (b.facturesEmises || []).filter((f) => dedans(f.date)).reduce((x, f) => x + (Number(f.montant) || 0), 0),
+    // ❌ Une facture ANNULÉE (VOID) dans QuickBooks ne compte plus —
+    // l'argent n'est jamais entré (marquée annuleeQb par la lecture des
+    // paiements, onglet Facturation).
+    const revenusFactures = (bons || []).reduce(
+      (s, b) => s + (b.facturesEmises || []).filter((f) => !f.annuleeQb && dedans(f.date)).reduce((x, f) => x + (Number(f.montant) || 0), 0),
       0
     );
+    // 💰 LES DÉPÔTS PAYÉS SONT DU REVENU (2026-09-06, question du
+    // propriétaire) — même règle que le tableau par tâche plus bas : le
+    // dépôt est ENCAISSÉ, la facture finale le DÉDUIT — jamais compté
+    // deux fois. Daté du jour du paiement (date locale).
+    const revenusDepots = Object.values(depots || {}).reduce((s, d) => {
+      if (!d || (d.statut !== "paye" && d.statut !== "paye_manuellement")) return s;
+      const datePaye = d.payeLe ? dateISO(new Date(d.payeLe)) : dateISO(new Date());
+      return dedans(datePaye) ? s + (Number(d.montantHT) || 0) : s;
+    }, 0);
+    const revenus = revenusFactures + revenusDepots;
     // 📦 MATÉRIEL ET ACHATS (2026-08-26) — ces tuiles n'en tenaient
     // aucun compte (« avant matériaux — QuickBooks : Phase 4 »), alors
     // que le tableau du bas les comptait déjà : le MÊME écran affichait
@@ -122,7 +135,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
       .reduce((s, t) => s + (Number(t.amountHT) || 0), 0);
     const coutMateriaux = coutStock + coutAchats + coutQb;
     const margeOp = revenus > 0 ? ((revenus - coutMo - coutMateriaux) / revenus) * 100 : null;
-    return { revenus, coutMo, coutMateriaux, coutInvisible, heuresInvisibles, margeOp, travauxPeriode };
+    return { revenus, revenusDepots, coutMo, coutMateriaux, coutInvisible, heuresInvisibles, margeOp, travauxPeriode };
   };
 
   const debutFiscal = configEnt?.debutAnneeFiscale || "01-01";
@@ -156,7 +169,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
       if (!b.devisNumero || !(b.facturesEmises || []).length) return;
       const e = parDevis.get(b.devisNumero) || { tacheIds: [], facture: 0 };
       e.tacheIds.push(b.tacheId);
-      e.facture += (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+      e.facture += (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
       parDevis.set(b.devisNumero, e);
     });
     const lignes = [];
@@ -197,7 +210,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
     const parId = new Map();
     (bons || []).forEach((b) => {
       if (!b.tacheId || !dedans(b.date)) return;
-      const facture = (b.facturesEmises || []).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+      const facture = (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
       const e = parId.get(b.tacheId);
       if (e) { e.facture += facture; return; }
       parId.set(b.tacheId, { ...b, facture });
@@ -305,7 +318,9 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
       m.set(nom, e);
     });
     return [...m.values()]
-      .map((e) => ({ ...e, profit: e.facture - e.cout, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : 0 }))
+      // Sans facturé, la marge n'existe pas : « — » plutôt qu'un faux
+      // 0 % à côté d'une perte (question du propriétaire, 2026-09-06).
+      .map((e) => ({ ...e, profit: e.facture - e.cout, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : null }))
       .sort((a, b) => b.facture - a.facture);
   })();
 
@@ -372,6 +387,9 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-[9px] font-extrabold uppercase text-slate-400">Revenus facturés</p>
             <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-900">{fmt$(stats.revenus)}</p>
+            {stats.revenusDepots > 0 && (
+              <p className="text-[10px] text-slate-500">dont {fmt$(stats.revenusDepots)} de dépôts payés</p>
+            )}
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-[9px] font-extrabold uppercase text-slate-400">Main-d'œuvre + camion</p>
@@ -531,7 +549,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
                       <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{c.jobs}</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(c.facture)}</td>
                       <td className={`py-1.5 pr-2 text-right font-bold tabular-nums ${c.profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(c.profit)}</td>
-                      <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(c.marge)}`}>{c.marge.toFixed(0)} %</td>
+                      <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(c.marge)}`}>{c.marge == null ? "—" : `${c.marge.toFixed(0)} %`}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -36,7 +36,15 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
   const aSurveiller = analyse
     .filter((x) => x.sante.niveau !== "vert")
     .sort((a, b) => rang[a.sante.niveau] - rang[b.sante.niveau]);
-  const margeMoyenne = analyse.length ? analyse.reduce((s, x) => s + x.r.pourcentageMarge, 0) / analyse.length : 0;
+  // 📊 MARGE MOYENNE HONNÊTE (2026-09-06, question du propriétaire) : un
+  // projet vendu mais PAS COMMENCÉ (aucune heure, aucune dépense) affiche
+  // 100 % de marge par construction — le compter gonflait la moyenne.
+  // Seuls les projets avec de l'ACTIVITÉ réelle comptent ; aucun projet
+  // actif avec activité = « — », jamais un faux 100 %.
+  const projetsAvecActivite = analyse.filter((x) => (x.r.coutTotalReel || 0) > 0 || (x.r.totalHeures || 0) > 0);
+  const margeMoyenne = projetsAvecActivite.length
+    ? projetsAvecActivite.reduce((s, x) => s + x.r.pourcentageMarge, 0) / projetsAvecActivite.length
+    : null;
   // 📊 Analyse de rentabilité — ouverte par la tuile « Marge moyenne ».
   const [analyseOuverte, setAnalyseOuverte] = useState(false);
 
@@ -183,8 +191,8 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         </button>
         <button onClick={() => setAnalyseOuverte(true)} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-left active:scale-[0.99]">
           <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-500">{t("Marge moyenne")}</p>
-          <p className="mt-1 text-3xl font-extrabold tabular-nums text-emerald-700">{margeMoyenne.toFixed(0)}%</p>
-          <p className="mt-1 text-[11px] text-emerald-600">{t("projets actifs · cliquer pour l'analyse")}</p>
+          <p className="mt-1 text-3xl font-extrabold tabular-nums text-emerald-700">{margeMoyenne == null ? "—" : `${margeMoyenne.toFixed(0)}%`}</p>
+          <p className="mt-1 text-[11px] text-emerald-600">{t(margeMoyenne == null ? "aucun projet commencé · cliquer pour l'analyse" : "projets avec activité · cliquer pour l'analyse")}</p>
         </button>
       </div>
 
