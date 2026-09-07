@@ -588,13 +588,22 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                   </label>
                 ))}
               </div>
-              <p className="mt-1 text-[10px] text-slate-400">
-                {employeIds.length === 0
-                  ? "Aucun technicien coché — seule la durée est enregistrée, la tâche reste en attente."
-                  : employeIds.length === 1
-                  ? "La tâche sera placée dans l'horaire de ce technicien."
-                  : `La tâche sera placée chez ${employeIds.length} techniciens (même date/heure/durée) — ajuste ensuite chacun individuellement en cliquant son bloc.`}
-              </p>
+              {/* ⚠️ EN AMBRE ET SANS DÉTOUR (2026-09-06, vécu : « je
+                  choisis la date du 15 et il ne la cédule pas ») : la
+                  note grise passait inaperçue — choisir une date sans
+                  cocher personne laissait croire que ça planifiait. */}
+              {employeIds.length === 0 ? (
+                <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800">
+                  ⚠️ Aucun technicien coché : malgré la date choisie, la tâche RESTERA en attente
+                  (date et heure mémorisées sur sa carte). Coche un technicien ci-dessus pour la placer à l&apos;horaire le {date}.
+                </p>
+              ) : (
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {employeIds.length === 1
+                    ? "La tâche sera placée dans l'horaire de ce technicien."
+                    : `La tâche sera placée chez ${employeIds.length} techniciens (même date/heure/durée) — ajuste ensuite chacun individuellement en cliquant son bloc.`}
+                </p>
+              )}
             </div>
           )}
 

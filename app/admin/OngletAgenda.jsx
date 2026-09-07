@@ -3782,6 +3782,16 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                               Pour créer la tâche, il manque : {raisons.join(" · ")}.
                             </p>
                           )}
+                          {/* 📅 DATE SANS TECHNICIEN (2026-09-06, vécu : « je
+                              choisis la date du 15 et il ne la cédule pas ») :
+                              une date seule ne suffit pas à placer la tâche —
+                              on le DIT avant la création, plus de surprise. */}
+                          {raisons.length === 0 && nouvelleDate && !nouveauEmployeId && !depotRequis && (
+                            <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800">
+                              📅 Date choisie SANS technicien : la tâche ira dans « Tâches en attente » (sa date est mémorisée).
+                              Choisis un technicien ci-dessus pour la placer directement à l&apos;horaire le {nouvelleDate}.
+                            </p>
+                          )}
                           <div className="flex items-center gap-2">
                             <Button
                               onClick={() => creerTache(false)}
@@ -4106,12 +4116,16 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     💰 Dépôt reçu manuellement…
                   </Button>
                 )}
-                {/* DÉPÔT PAYÉ + TECHNICIEN/DATE RÉSERVÉS D'AVANCE :
-                    placement à l'horaire en un seul clic. */}
+                {/* TECHNICIEN/DATE RÉSERVÉS D'AVANCE : placement à
+                    l'horaire en un seul clic. Offert aussi aux tâches
+                    SANS dépôt (2026-09-06, vécu : une tâche ordinaire
+                    avec date et technicien prévus n'avait AUCUN bouton
+                    sur ordinateur — « Assigner » est mobile seulement).
+                    Avec dépôt : seulement une fois payé, comme avant. */}
                 {!lectureSeule &&
                   t.technicienPrevu &&
                   t.datePrevue &&
-                  ["paye", "paye_manuellement"].includes(depotDe(t.id)?.statut) && (
+                  (!depotDe(t.id) || ["paye", "paye_manuellement"].includes(depotDe(t.id)?.statut)) && (
                     <Button
                       onClick={() => {
                         assigner(t, t.technicienPrevu, new Date(`${t.datePrevue}T00:00:00`), t.heurePrevue || "07:00");
