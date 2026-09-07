@@ -5402,3 +5402,83 @@ alter table entreprises add column if not exists statut_avant_resiliation text;
 -- Verification : les 3 colonnes existent.
 select column_name from information_schema.columns
  where table_name = 'entreprises' and column_name like '%resili%';
+
+-- ============================================================
+-- 135 - DEMANDES DE LA PAGE DE VENTE (2026-09-07)
+-- ============================================================
+-- Le formulaire public de fluxya.app (essai gratuit / soumission)
+-- depose chaque demande ici. AUCUNE politique RLS : seule la cle
+-- service (routes /api/demandes) lit et ecrit — un visiteur ne peut
+-- pas fouiller les demandes des autres.
+create table if not exists demandes_fluxya (
+  id uuid primary key default gen_random_uuid(),
+  type text not null default 'essai',
+  entreprise text,
+  nom text,
+  courriel text,
+  telephone text,
+  nb_utilisateurs text,
+  message text,
+  statut text not null default 'nouvelle',
+  traite_par text,
+  traite_le timestamptz,
+  created_at timestamptz default now()
+);
+alter table demandes_fluxya enable row level security;
+
+-- ============================================================
+-- 136 - ANNULATION D'ABONNEMENT PAR LE CLIENT (2026-09-07)
+-- ============================================================
+-- L'admin principal d'une entreprise cliente annule LUI-MEME son
+-- abonnement (Parametres -> Abonnement). L'acces continue jusqu'a la
+-- fin de la periode deja payee (le mois est ancre sur la date
+-- d'inscription), puis la fiche bascule TOUTE SEULE a « Resiliee »
+-- (mecanique du snippet 132). La console /plateforme affiche le
+-- compte a rebours ; l'ecran admin du client se ferme a la date.
+alter table entreprises add column if not exists annulation_demandee_le timestamptz;
+alter table entreprises add column if not exists annulation_effet_le date;
+alter table entreprises add column if not exists annulation_par text;
+alter table entreprises add column if not exists annulation_raison text;
+
+-- Verification : les 4 colonnes existent.
+select column_name from information_schema.columns
+ where table_name = 'entreprises' and column_name like 'annulation%';
+
+
+-- ============================================================
+-- 133 - LIEN D'AVIS GOOGLE (2026-09-06)
+-- Courriel de fin de travaux : invitation a laisser un avis Google
+-- (jamais sur un retour sous garantie). PASSE par l'owner.
+-- ============================================================
+alter table entreprises add column if not exists lien_avis_google text;
+
+
+-- ============================================================
+-- 134 - SYSTEME COMPTABLE + CONNEXION SAGE (2026-09-07)
+-- Chantier Sage phase 1 : selecteur par entreprise (quickbooks defaut /
+-- sage / aucun) + table des jetons Sage (RLS sans politique = cle
+-- service seulement, meme regle que quickbooks_connexion). PASSE.
+-- ============================================================
+alter table entreprises add column if not exists systeme_comptable text default 'quickbooks';
+create table if not exists sage_connexion (
+  entreprise_id text primary key,
+  access_token text,
+  refresh_token text,
+  access_expire_a timestamptz,
+  refresh_expire_a timestamptz,
+  business_id text,
+  business_nom text,
+  pays text,
+  connecte_par text,
+  updated_at timestamptz default now()
+);
+alter table sage_connexion enable row level security;
+
+
+-- ============================================================
+-- 137 - LIEN SAGE DES CLIENTS (2026-09-07)
+-- Chantier Sage phase 2 : l'identifiant du contact Sage se memorise sur
+-- la fiche client (meme role que quickbooks_customer_id) — homonymes
+-- RELIES, jamais dupliques.
+-- ============================================================
+alter table clients_app add column if not exists sage_contact_id text;
