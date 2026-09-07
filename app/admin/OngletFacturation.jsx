@@ -14,6 +14,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo } from "@/lib/quickbooksClient";
+import { creerFactureSage as creerFactureSageCopie } from "@/lib/sageClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
 import { creerFactureMaison, majFactureMaison, lienFactureMaison } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
@@ -2600,6 +2601,31 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         majFactureMaison(creee.id, { statut: "envoyee", envoyeeLe: new Date().toISOString(), courriels: destinataires }).catch(() => {});
       }
     }
+    // 🧾 COPIE COMPTABLE DANS SAGE (chantier Sage phase 3, 2026-09-07) :
+    // la facture du CLIENT reste la maison (numéro, page publique,
+    // courriel déjà partis) — Sage reçoit son pendant comptable, notre
+    // numéro en référence. Un échec ne casse RIEN : la facture maison
+    // est valide, le journal dit quoi re-pousser.
+    let numeroSage = null;
+    let sageInvoiceId = null;
+    if ((configEnt?.systemeComptable || "quickbooks") === "sage") {
+      const rs = await creerFactureSageCopie({
+        clientId: fiche?.id || null,
+        clientNom: b.client || "",
+        lignes: lignesMaison.map((l) => ({ description: l.description, quantite: l.quantite, prixUnitaire: l.prix_unitaire })),
+        reference: creee.numero,
+        date: dateISO(new Date()),
+      }).catch(() => ({}));
+      if (rs?.factureId) {
+        sageInvoiceId = rs.factureId;
+        numeroSage = rs.numero || null;
+        ajouterJournal(`🧾 Copie comptable créée dans Sage${numeroSage ? ` — Nº ${numeroSage}` : ""} (référence ${creee.numero}).`);
+      } else {
+        ajouterJournal(
+          `⚠️ Facture ${creee.numero} émise et envoyée, mais la copie comptable Sage a ÉCHOUÉ : ${rs?.erreur || (rs?.nonConnecte ? "Sage non connecté" : "erreur")} — à re-pousser (la facture du client, elle, est valide).`
+        );
+      }
+    }
     // Le bon sort de la pile — même mécanique que le chemin QuickBooks.
     const entree = {
       id: `fact-${Date.now()}`,
@@ -2609,6 +2635,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       date: dateISO(new Date()),
       numeroFactureQb: creee.numero,
       factureMaisonId: creee.id,
+      ...(sageInvoiceId ? { sageInvoiceId, numeroSage } : {}),
       courrielEnvoi: destinataires[0] || null,
       courrielsEnvoi: destinataires,
       envoiQb: envoye ? { statut: "envoyee", date: new Date().toISOString() } : null,
@@ -4290,8 +4317,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             setBonEnvoiCourrielId(null);
             // 🧾 Sans QuickBooks : la facture MAISON part directement —
             // pas de fenêtre paiement en ligne (QuickBooks Payments
-            // n'existe pas sans QuickBooks).
-            if (qbConnecte === false) {
+            // n'existe pas sans QuickBooks). 🧮 Une entreprise sur SAGE
+            // ou « aucun » prend AUSSI ce chemin (chantier Sage phase 3 :
+            // la copie comptable part vers Sage après la facture maison).
+            if (qbConnecte === false || (configEnt?.systemeComptable || "quickbooks") !== "quickbooks") {
               facturerBonMaison(bonEnvoiCourriel.id, choix);
               return;
             }
