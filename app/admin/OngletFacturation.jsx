@@ -2696,7 +2696,15 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       const r = await envoyerCourriel({
         a: adresses,
         sujet: `Vos travaux sont terminés — bon de travail${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviDuProjet(b.projetId) ? ` — Suivi ${suiviDuProjet(b.projetId)}` : ""} (${configEnt.nomCommercial || configEnt.nomLegal})`,
-        html: gabaritBonTravail({ config: configEnt, clientNom: b.client, lien: lienBonPublic(jeton), joursValidite: JOURS_VALIDITE_BON }),
+        html: gabaritBonTravail({
+          config: configEnt,
+          clientNom: b.client,
+          lien: lienBonPublic(jeton),
+          joursValidite: JOURS_VALIDITE_BON,
+          // ⭐ Avis Google — jamais sur un retour sous garantie (retrait
+          // demandé ou validé « garantie » sur ce bon).
+          lienAvis: b.retraitRaison === "garantie" || b.garantie ? null : String(configEnt?.lienAvisGoogle || "").trim() || null,
+        }),
       });
       if (r.envoye) {
         marquerBonEnvoyeClient(rowId).catch(() => {});

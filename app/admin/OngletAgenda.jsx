@@ -765,6 +765,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const [tempsSurProjet, setTempsSurProjet] = useState(false);
   // --- Dépôt préalable (coché d'office pour les appels de service) ---
   const [depotRequis, setDepotRequis] = useState(true);
+  // 🛡️ Retour sous garantie (2026-09-06, décision du propriétaire) —
+  // la marque voyage avec la tâche (donnees) jusqu'au technicien : le
+  // courriel de fin de travaux OMET alors la demande d'avis Google (la
+  // pièce est parfois garantie mais pas le temps — client mécontent).
+  const [garantieRetour, setGarantieRetour] = useState(false);
   const [depotMontant, setDepotMontant] = useState("");
   // 🗺️ ZONE DE TARIFICATION — INDÉPENDANTE DU DÉPÔT (2026-08-25,
   // demande du propriétaire). Avant, la zone se choisissait DANS le
@@ -1374,6 +1379,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       nouvelle.zoneAppel = zoneAppelChoix === "hors_zone" ? "hors_zone" : zoneAppelChoix || null;
     }
 
+    // 🛡️ Retour sous garantie — le courriel de fin de travaux ne
+    // demandera pas d'avis Google pour cette tâche.
+    if (garantieRetour) nouvelle.garantie = true;
+
     // 🔧 Unités cochées : elles voyagent avec la tâche (donnees) — la
     // fiche du technicien les affiche et « Unité vérifiée » se
     // pré-remplit avec le VRAI numéro de série au lieu d'une saisie.
@@ -1490,6 +1499,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // fermer sans créer gardait tout en silence et la prochaine ouverture
   // tombait sur une page déjà commencée).
   const viderFormulaireTache = () => {
+    setGarantieRetour(false);
     setDepotMontant("");
     setZoneAppelChoix("");
     setDepotEmails([]);
@@ -2015,6 +2025,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // rien à changer (voir la modale : elles ne partent que modifiées).
       ...(champs.projetId !== undefined ? { projetId: champs.projetId } : {}),
       ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
+      // 🛡️ Retour sous garantie — clé absente = marque inchangée.
+      ...(champs.garantie !== undefined ? { garantie: champs.garantie } : {}),
     };
     if (champs.employeId) {
       // « conserver » : une modification/un déplacement ne repose jamais
@@ -2037,7 +2049,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2051,6 +2063,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(adresseIntervention !== undefined ? { adresseTravaux, adresseIntervention, adresseUnite: adresseUnite || null } : {}),
       description: description ?? tache.description,
       contactSurPlace: contactSurPlace !== undefined ? contactSurPlace : tache.contactSurPlace || null,
+      // 🛡️ Retour sous garantie — clé absente = marque inchangée.
+      ...(garantie !== undefined ? { garantie } : {}),
     };
     // Assignation multiple : tous les techniciens cochés reçoivent la
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
@@ -3429,6 +3443,26 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     supplémentaire (temps réel sur place seulement — jamais le bloc d&apos;agenda).
                   </p>
                 </div>
+              )}
+
+              {/* 🛡️ RETOUR SOUS GARANTIE — la marque suit la tâche jusqu'au
+                  technicien : pas de demande d'avis Google dans le courriel
+                  de fin de travaux (2026-09-06, décision du propriétaire). */}
+              {!estTypeSansClient(nouveauType) && (
+                <label className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs font-bold ${garantieRetour ? "border-slate-400 bg-slate-100 text-slate-800" : "border-slate-200 text-slate-600"}`}>
+                  <input
+                    type="checkbox"
+                    checked={garantieRetour}
+                    onChange={(e) => setGarantieRetour(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+                  />
+                  <span>
+                    🛡️ Retour sous garantie
+                    <span className="block text-[10px] font-normal text-slate-500">
+                      Le courriel de fin de travaux ne demandera pas d&apos;avis Google au client pour cette visite.
+                    </span>
+                  </span>
+                </label>
               )}
 
               {/* DÉPÔT PRÉALABLE — jamais pour les types SANS CLIENT (divers, course, shop, congé) : pas de client, pas de dépôt (2026-09-04). */}

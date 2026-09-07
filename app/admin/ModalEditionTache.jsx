@@ -32,6 +32,9 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [sauterFeries, setSauterFeries] = useState(!!tache.sauterFeries);
   const [employeId, setEmployeId] = useState(employeIdInitial || "");
   const [description, setDescription] = useState(tache.description || "");
+  // 🛡️ Retour sous garantie — corrigeable après coup : le courriel de
+  // fin de travaux omet alors la demande d'avis Google (2026-09-06).
+  const [garantieRetour, setGarantieRetour] = useState(!!tache.garantie);
   // 📇 Contact sur place — repris du carnet du client ; « actuel »
   // couvre un contact déjà attaché à la tâche mais absent du carnet
   // (retiré du carnet, ou client non résolu). ⚠️ On vérifie VRAIMENT
@@ -236,6 +239,9 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       heureDebut,
       description,
       contactSurPlace: contactChoisi,
+      // 🛡️ Transmis SEULEMENT s'il a changé — une clé absente laisse
+      // l'existant tranquille (même règle que les rattachements).
+      ...(garantieRetour !== !!tache.garantie ? { garantie: garantieRetour } : {}),
       // 🏗️/📄 Rattachements — transmis SEULEMENT s'ils ont changé : une
       // clé absente laisse l'existant tranquille (les heures déjà
       // pointées ne sont alors jamais réécrites pour rien).
@@ -604,6 +610,25 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
             />
           </div>
+
+          {/* 🛡️ RETOUR SOUS GARANTIE — corrigeable ici après coup : pas de
+              demande d'avis Google dans le courriel de fin de travaux. */}
+          {!estConge && (
+            <label className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs font-bold ${garantieRetour ? "border-slate-400 bg-slate-100 text-slate-800" : "border-slate-200 text-slate-600"}`}>
+              <input
+                type="checkbox"
+                checked={garantieRetour}
+                onChange={(e) => setGarantieRetour(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+              />
+              <span>
+                🛡️ Retour sous garantie
+                <span className="block text-[10px] font-normal text-slate-500">
+                  Le courriel de fin de travaux ne demandera pas d&apos;avis Google au client pour cette visite.
+                </span>
+              </span>
+            </label>
+          )}
 
           {/* 📇 CONTACT SUR PLACE — se confirme souvent APRÈS la création
               (« finalement c'est le concierge qui t'ouvre ») ; la mise à

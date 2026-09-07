@@ -4394,6 +4394,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             clientNom: tache.clientNom || "",
             lien: lienBonPublic(jetonBon),
             joursValidite: JOURS_VALIDITE_BON,
+            // ⭐ Demande d'avis Google — JAMAIS sur un retour sous
+            // garantie (décision du propriétaire : la pièce est parfois
+            // garantie mais pas le temps — client mécontent).
+            lienAvis: tache.garantie ? null : String(configEnt?.lienAvisGoogle || "").trim() || null,
           }),
         });
         if (r.envoye) marquerBonEnvoyeClient(bonRowId).catch(() => {});

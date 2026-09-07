@@ -746,6 +746,18 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
                 </span>
               </span>
             </label>
+            {/* ⭐ LIEN D'AVIS GOOGLE (2026-09-06, idée du propriétaire) —
+                collé une fois ici, il s'ajoute au courriel « Vos travaux
+                sont terminés ». JAMAIS sur un retour sous garantie (la
+                pièce est parfois garantie mais pas le temps — client
+                mécontent, mauvais moment). Vide = aucun bloc. */}
+            <ChampParametre
+              {...propsChamp}
+              cle="lienAvisGoogle"
+              libelle="⭐ Lien d'avis Google"
+              placeholder="https://g.page/r/…"
+              aide="Colle ici le lien « Demander des avis » de ton profil d'entreprise Google. Il s'ajoute au courriel de fin de travaux (« Satisfait des travaux ? Laissez-nous un avis ⭐ ») — sauf pour les tâches marquées 🛡️ Retour sous garantie. Vide = jamais de demande d'avis."
+            />
             {/* 🧾 ENVOI AUTOMATIQUE DES FACTURES — le même réglage que la
                 console plateforme : chaque entreprise décide. */}
             <label className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${brouillon.envoiAutoFactureQb === true ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-200 text-slate-600"}`}>
