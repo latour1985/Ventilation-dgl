@@ -35,6 +35,13 @@ export async function GET(request) {
   url.searchParams.set("scope", "full_access");
   url.searchParams.set("redirect_uri", urlRedirectionSage(request));
   url.searchParams.set("state", state);
+  // 🌍 RÉGION FORCÉE (facultatif, ?pays=gb) — vécu 2026-09-07 : sans
+  // filtre, Sage routait vers l'aile Amérique du Nord (« We're creating
+  // your account » en boucle) alors que l'essai de test vit au
+  // Royaume-Uni. La règle Sage : la région doit être CELLE de
+  // l'entreprise qui autorise.
+  const pays = (new URL(request.url).searchParams.get("pays") || "").toLowerCase();
+  if (/^[a-z]{2}$/.test(pays)) url.searchParams.set("country", pays);
 
   return new Response(JSON.stringify({ url: url.toString() }), {
     status: 200,
