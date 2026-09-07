@@ -15,6 +15,21 @@ import { sauvegarderClient } from "@/lib/supabase/clients";
 import { listerFacturesLibres } from "@/lib/supabase/facturesLibres";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { synchroniserClientsQbo } from "@/lib/quickbooksClient";
+import { synchroniserClientsSage } from "@/lib/sageClient";
+
+// 🧮 LA SYNCHRO SUIT LE SYSTÈME COMPTABLE (2026-09-07, vécu par le
+// propriétaire sur l'entreprise test Sage : « ça semble faire une
+// tentative de synchronisation avec QuickBooks et non Sage ») — chaque
+// appel passe par ici : QuickBooks, Sage, ou rien du tout (« aucun »).
+function syncClientComptable(config, options) {
+  const systeme = config?.systemeComptable || "quickbooks";
+  if (systeme === "sage") return synchroniserClientsSage(options);
+  if (systeme === "aucun") return Promise.resolve({ aucun: true });
+  return synchroniserClientsQbo(options);
+}
+function nomCompta(config) {
+  return (config?.systemeComptable || "quickbooks") === "sage" ? "Sage" : "QuickBooks";
+}
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ModalDetailProjet } from "./OngletProjets";
@@ -700,7 +715,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
     );
     ajouterJournal(`✏️ Courriel corrigé sur la fiche : ${propre}`);
     // La fiche QuickBooks suit — plus jamais de divergence.
-    synchroniserClientsQbo({ clientId, forcer: true }).catch(() => {});
+    syncClientComptable(configClients, { clientId, forcer: true }).catch(() => {});
     return true;
   };
 
@@ -726,7 +741,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
     );
     const c = clients.find((x) => x.id === clientId);
     ajouterJournal(`📧 Courriel "${nouveauCourrielLabel.trim() || "Autre"}" ajouté pour ${c?.nom} (${nouveauCourrielEmail.trim()})`);
-    synchroniserClientsQbo({ clientId, forcer: true }).catch(() => {});
+    syncClientComptable(configClients, { clientId, forcer: true }).catch(() => {});
     setNouveauCourrielLabel("");
     setNouveauCourrielEmail("");
   };
@@ -754,7 +769,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
       )
     );
     // Le courriel PAR DÉFAUT est celui que QuickBooks utilise — il suit.
-    synchroniserClientsQbo({ clientId, forcer: true }).catch(() => {});
+    syncClientComptable(configClients, { clientId, forcer: true }).catch(() => {});
   };
 
   const [travailOuvertId, setTravailOuvertId] = useState(null);
@@ -994,31 +1009,38 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
       syncQb: "en_cours",
     };
     setClients((prev) => [...prev, nouveauClient]);
-    ajouterJournal(`👤 Client "${nouveauClient.nom}" créé — transfert vers QuickBooks en cours...`);
+    const compta = nomCompta(configClients);
+    const sansCompta = (configClients?.systemeComptable || "quickbooks") === "aucun";
+    ajouterJournal(sansCompta ? `👤 Client "${nouveauClient.nom}" créé` : `👤 Client "${nouveauClient.nom}" créé — transfert vers ${compta} en cours...`);
     setFormulaireOuvert(false);
     reinitialiserFormulaire();
 
-    // VRAI transfert QuickBooks (2026-08-15) — décision du propriétaire :
-    // TOUS les clients existent dans QuickBooks (sa pratique d'avant,
-    // quand ses devis s'y faisaient). Persistance d'abord, puis liaison.
+    // VRAI transfert vers la comptabilité (2026-08-15, décision du
+    // propriétaire : TOUS les clients existent dans la comptabilité) —
+    // QuickBooks OU Sage selon le système choisi ; « aucun » = fiche
+    // locale seulement. Persistance d'abord, puis liaison.
     sauvegarderClient(nouveauClient)
-      .then(() => synchroniserClientsQbo({ clientId: id }))
+      .then(() => syncClientComptable(configClients, { clientId: id }))
       .then((r) => {
+        if (r?.aucun) {
+          setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "synchronise" } : c)));
+          return;
+        }
         if (r?.fait > 0) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "synchronise" } : c)));
-          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans QuickBooks`);
+          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans ${compta}`);
         } else if (r?.simule) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
-          ajouterJournal("🧪 QuickBooks non configuré ici — client local seulement (normal en développement)");
+          ajouterJournal(`🧪 ${compta} non configuré ici — client local seulement (normal en développement)`);
         } else if (r?.nonConnecte) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
-          ajouterJournal("🔌 QuickBooks non connecté — le client sera repris par « Synchroniser les clients » (Paramètres → Connexions)");
+          ajouterJournal(`🔌 ${compta} non connecté — le client sera repris par « Synchroniser les clients » (Paramètres → Connexions)`);
         } else {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
           ajouterJournal(`⚠️ Client "${nouveauClient.nom}" non transféré : ${(r?.erreurs || [])[0] || r?.erreur || "erreur"} — repris plus tard par la synchronisation`);
         }
       })
-      .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement mais transfert QuickBooks à reprendre`));
+      .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement${sansCompta ? "" : ` mais transfert ${compta} à reprendre`}`));
   };
 
   // ⬇️ VRAIE DESCENTE QuickBooks → Fluxya (2026-08-29 — remplace la
@@ -1057,7 +1079,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
             seul ce qui touche les PRIX reste à l'Admin principal.
             🧭 UN SEUL CHEMIN (2026-09-03) : bouton invisible pour une
             entreprise SANS QuickBooks — rien à synchroniser. */}
-        {qbConnecte !== false && (
+        {(configClients?.systemeComptable || "quickbooks") === "quickbooks" && qbConnecte !== false && (
           <Button
             variant="outline"
             onClick={peutSyncQb ? synchroniserDepuisQuickbooks : undefined}
@@ -1271,7 +1293,20 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                 className="flex w-full items-start justify-between gap-2 p-3.5 text-left"
               >
                 <p className="text-sm font-bold text-slate-900">{c.nom}</p>
-                {c.quickbooksCustomerId ? (
+                {/* 🧮 Le badge suit le SYSTÈME COMPTABLE (2026-09-07) :
+                    Sage = lien Sage, QuickBooks = nº QuickBooks,
+                    « aucun » = pas de badge (rien à synchroniser). */}
+                {(configClients?.systemeComptable || "quickbooks") === "aucun" ? null : configClients?.systemeComptable === "sage" ? (
+                  c.sageContactId ? (
+                    <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                      Sage ✓
+                    </span>
+                  ) : (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                      Synchronisation...
+                    </span>
+                  )
+                ) : c.quickbooksCustomerId ? (
                   <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
                     {c.quickbooksCustomerId}
                   </span>
@@ -2189,6 +2224,9 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
 // L'enregistrement des clients est assuré par la sauvegarde automatique
 // de l'App (voir « SAUVEGARDE AUTOMATIQUE ») — aucun appel à faire ici.
 export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFermer, onSelection }) {
+  // 🧮 Le système comptable de l'entreprise — la synchro du client
+  // fraîchement créé suit le même aiguillage que l'onglet Clients.
+  const configNc = useEntreprise();
   const [ncPrenom, setNcPrenom] = useState("");
   const [ncNomFamille, setNcNomFamille] = useState("");
   const [ncEntreprise, setNcEntreprise] = useState("");
@@ -2244,32 +2282,39 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
       syncQb: "en_cours",
     };
     setClients((prev) => [...prev, nouveauClient]);
-    ajouterJournal(`👤 Client "${nouveauClient.nom}" créé — transfert vers QuickBooks en cours...`);
+    const compta = nomCompta(configNc);
+    const sansCompta = (configNc?.systemeComptable || "quickbooks") === "aucun";
+    ajouterJournal(sansCompta ? `👤 Client "${nouveauClient.nom}" créé` : `👤 Client "${nouveauClient.nom}" créé — transfert vers ${compta} en cours...`);
     // La FICHE accompagne l'id (2026-09-04, vécu Luis Gonzalez) : le
     // formulaire de tâche doit précocher les courriels de dépôt de ce
     // client tout neuf — or sa liste `clients` ne le contient pas encore
     // (l'état vient d'être posé). L'objet évite la course.
     onSelection?.(id, nouveauClient);
     onFermer();
-    // VRAI transfert QuickBooks — même flux que l'onglet Clients.
+    // VRAI transfert vers la comptabilité — même aiguillage que
+    // l'onglet Clients (QuickBooks, Sage, ou « aucun »).
     sauvegarderClient(nouveauClient)
-      .then(() => synchroniserClientsQbo({ clientId: id }))
+      .then(() => syncClientComptable(configNc, { clientId: id }))
       .then((r) => {
+        if (r?.aucun) {
+          setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "synchronise" } : c)));
+          return;
+        }
         if (r?.fait > 0) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "synchronise" } : c)));
-          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans QuickBooks`);
+          ajouterJournal(`🔄 Client "${nouveauClient.nom}" créé/relié dans ${compta}`);
         } else if (r?.simule) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
-          ajouterJournal("🧪 QuickBooks non configuré ici — client local seulement (normal en développement)");
+          ajouterJournal(`🧪 ${compta} non configuré ici — client local seulement (normal en développement)`);
         } else if (r?.nonConnecte) {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
-          ajouterJournal("🔌 QuickBooks non connecté — le client sera repris par « Synchroniser les clients » (Paramètres → Connexions)");
+          ajouterJournal(`🔌 ${compta} non connecté — le client sera repris par « Synchroniser les clients » (Paramètres → Connexions)`);
         } else {
           setClients((prev) => prev.map((c) => (c.id === id ? { ...c, syncQb: "a_faire" } : c)));
           ajouterJournal(`⚠️ Client "${nouveauClient.nom}" non transféré : ${(r?.erreurs || [])[0] || r?.erreur || "erreur"} — repris plus tard par la synchronisation`);
         }
       })
-      .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement mais transfert QuickBooks à reprendre`));
+      .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement${sansCompta ? "" : ` mais transfert ${compta} à reprendre`}`));
   };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
