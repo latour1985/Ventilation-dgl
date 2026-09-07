@@ -13,9 +13,112 @@
 // l'interface rappelle la route tant que `termine` est faux.
 
 import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur } from "@/lib/quickbooksServeur";
-import { configSagePresente, jetonAccesValideSage, contactSagePour, mettreAJourContactSage } from "@/lib/sageServeur";
+import { configSagePresente, jetonAccesValideSage, contactSagePour, mettreAJourContactSage, requeteSage } from "@/lib/sageServeur";
 
 const MAX_PAR_PASSE = 40;
+
+// Même normalisation que côté admin : minuscules, accents retirés.
+function nomNormalise(n) {
+  return String(n || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// ------------------------------------------------------------
+// 🡇 LA DESCENTE : Sage → Fluxya (2026-09-07, vécu par l'owner : « j'ai
+// créé 2 contacts sur Sage et ils ne sont pas arrivés sur Fluxya »).
+// Même moule que descendreClientsQbo : toute la liste des clients Sage
+// (pages de 100), puis trois familles — déjà reliés (rien), homonymes
+// (raccord du lien, jamais de doublon), inconnus (fiche créée avec
+// courriel/téléphone/adresse). Idempotente : les fiches créées portent
+// l'id déterministe « sgc-<entreprise>-<idSage> ».
+// ------------------------------------------------------------
+async function descendreClientsSage(acces, admin, entrepriseId) {
+  const fiches = [];
+  for (let depart = 0; ; depart += 1000) {
+    const { data, error } = await admin
+      .from("clients_app")
+      .select("id, nom, entreprise, sage_contact_id")
+      .eq("entreprise_id", entrepriseId)
+      .range(depart, depart + 999);
+    if (error) throw new Error(`Lecture des fiches : ${error.message}`);
+    fiches.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  const dejaRelies = new Set(fiches.map((f) => f.sage_contact_id).filter(Boolean));
+  const parNom = new Map();
+  fiches.forEach((f) => {
+    [f.nom, f.entreprise].forEach((n) => {
+      const cle = nomNormalise(n);
+      if (cle && !parNom.has(cle)) parNom.set(cle, f);
+    });
+  });
+
+  // Tous les clients Sage — attributes=all ramène courriel, téléphone
+  // et adresse principale dans la même lecture (pas d'appel par fiche).
+  const contactsSage = [];
+  for (let page = 1; page <= 50; page++) {
+    const lu = await requeteSage(
+      acces,
+      `contacts?contact_type_id=CUSTOMER&items_per_page=100&page=${page}&attributes=all`
+    );
+    const items = lu?.$items || [];
+    contactsSage.push(...items);
+    if (items.length < 100) break;
+  }
+
+  let relies = 0;
+  const aCreer = [];
+  for (const s of contactsSage) {
+    const idSage = String(s.id || "");
+    const nomSage = String(s.name || s.displayed_as || "").trim();
+    if (!idSage || !nomSage || dejaRelies.has(idSage)) continue;
+    const fiche = parNom.get(nomNormalise(nomSage));
+    if (fiche) {
+      // Homonyme d'une fiche SANS lien → raccord (jamais de doublon).
+      if (!fiche.sage_contact_id) {
+        const { error } = await admin
+          .from("clients_app")
+          .update({ sage_contact_id: idSage })
+          .eq("id", fiche.id)
+          .is("sage_contact_id", null);
+        if (!error) {
+          fiche.sage_contact_id = idSage;
+          relies++;
+        }
+      }
+      continue;
+    }
+    const adr = s.main_address || null;
+    const adresse = adr
+      ? [adr.address_line_1, adr.address_line_2, adr.city, adr.postal_code].filter(Boolean).join(", ")
+      : "";
+    const email = String(s.email || "").trim();
+    aCreer.push({
+      id: `sgc-${entrepriseId}-${idSage}`,
+      nom: nomSage,
+      courriels: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+        ? [{ id: `cc-sg-${idSage}`, label: "Sage", email, defaut: true }]
+        : [],
+      telephone: s.telephone || s.mobile || null,
+      adresse_facturation: adresse || null,
+      sage_contact_id: idSage,
+      entreprise_id: entrepriseId,
+    });
+  }
+
+  let crees = 0;
+  for (let i = 0; i < aCreer.length; i += 200) {
+    const lot = aCreer.slice(i, i + 200);
+    const { error } = await admin.from("clients_app").upsert(lot, { onConflict: "id" });
+    if (error) throw new Error(`Création des fiches : ${error.message}`);
+    crees += lot.length;
+  }
+  return { totalSage: contactsSage.length, relies, crees };
+}
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -44,6 +147,16 @@ export async function POST(request) {
   if (!acces) return Response.json({ nonConnecte: true });
 
   const admin = clientSupabaseService();
+
+  // 🡇 LE SENS INVERSE — Sage → Fluxya (voir descendreClientsSage).
+  if (corps?.descendre === true) {
+    try {
+      const r = await descendreClientsSage(acces, admin, entrepriseId);
+      return Response.json(r);
+    } catch (e) {
+      return Response.json({ erreur: String(e?.message || "Sage injoignable — réessaie.") }, { status: 502 });
+    }
+  }
 
   // La liste à traiter : un seul client, ou tous ceux pas encore reliés
   // — TOUJOURS bornée à l'entreprise du demandeur.

@@ -1043,6 +1043,30 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
       .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement${sansCompta ? "" : ` mais transfert ${compta} à reprendre`}`));
   };
 
+  // ⬇️ DESCENTE Sage → Fluxya (2026-09-07, vécu : « j'ai créé 2
+  // contacts sur Sage et ils ne sont pas arrivés ») — même geste que la
+  // descente QuickBooks, pour les entreprises sur Sage.
+  const synchroniserDepuisSage = async () => {
+    if (syncEnCours) return;
+    setSyncEnCours(true);
+    const r = await synchroniserClientsSage({ descendre: true });
+    setSyncEnCours(false);
+    if (r?.erreur || r?.nonConnecte || r?.simule) {
+      ajouterJournal(
+        `⚠️ Descente des clients Sage impossible : ${r?.erreur || (r?.nonConnecte ? "Sage non connecté (Paramètres → Connexions)" : "mode simulé — clés absentes")}`
+      );
+      return;
+    }
+    setDejaSyncQb(true);
+    if ((r?.crees || 0) === 0 && (r?.relies || 0) === 0) {
+      ajouterJournal(`✅ Clients à jour avec Sage — ${r?.totalSage ?? 0} clients vérifiés, rien de nouveau.`);
+      return;
+    }
+    ajouterJournal(
+      `⬇️ Clients Sage descendus : ${r?.crees || 0} fiche${(r?.crees || 0) > 1 ? "s" : ""} créée${(r?.crees || 0) > 1 ? "s" : ""}, ${r?.relies || 0} reliée${(r?.relies || 0) > 1 ? "s" : ""} par nom (sur ${r?.totalSage ?? 0} clients Sage).`
+    );
+  };
+
   // ⬇️ VRAIE DESCENTE QuickBooks → Fluxya (2026-08-29 — remplace la
   // simulation de démonstration qui vivait ici depuis les débuts et
   // inventait un faux client). Décision du propriétaire : TOUS les
@@ -1090,6 +1114,19 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
           >
             {!syncEnCours && (peutSyncQb ? <RefreshCw size={13} /> : <Lock size={13} />)}
             {dejaSyncQb ? "✓ Synchroniser depuis QuickBooks" : "Synchroniser depuis QuickBooks"}
+          </Button>
+        )}
+        {configClients?.systemeComptable === "sage" && (
+          <Button
+            variant="outline"
+            onClick={peutSyncQb ? synchroniserDepuisSage : undefined}
+            disabled={!peutSyncQb}
+            loading={syncEnCours}
+            title={peutSyncQb ? undefined : "Réservé aux administrateurs"}
+            className="min-h-0 px-3 py-1.5 text-xs"
+          >
+            {!syncEnCours && (peutSyncQb ? <RefreshCw size={13} /> : <Lock size={13} />)}
+            {dejaSyncQb ? "✓ Synchroniser depuis Sage" : "Synchroniser depuis Sage"}
           </Button>
         )}
       </div>
