@@ -3174,7 +3174,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               {!estTypeSansClient(nouveauType) && (
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                    {nouveauType === "devis" ? "…ou entre un Nº de devis manuellement (devis fait hors de l'app)" : nouveauType === "entretien_contrat" ? "…ou entre le Nº de l'ancien contrat / devis (d'avant Fluxya)" : "Nº de devis existant (QuickBooks)"} <span className="font-normal normal-case text-slate-400">— optionnel</span>
+                    {nouveauType === "devis" ? "…ou entre un Nº de devis manuellement (devis fait hors de l'app)" : nouveauType === "entretien_contrat" ? "…ou entre le Nº de l'ancien contrat / devis (d'avant Fluxya)" : (configEnt?.systemeComptable || "quickbooks") === "quickbooks" ? "Nº de devis existant (QuickBooks)" : "Nº de devis existant (d'avant Fluxya)"} <span className="font-normal normal-case text-slate-400">— optionnel</span>
                   </label>
                   <div className="flex gap-1.5">
                     <input
@@ -3186,6 +3186,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       placeholder="Ex. : 1057 ou DEV-2024-312"
                       className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-64"
                     />
+                    {/* 🧮 « Vérifier » lit QuickBooks — masqué hors QuickBooks
+                        (chantier Sage, 2026-09-07 : « si le client a Sage, ça
+                        doit provenir de Sage et non de QuickBooks » — la
+                        lecture des devis Sage aura son bouton quand elle
+                        sera bâtie). */}
+                    {(configEnt?.systemeComptable || "quickbooks") === "quickbooks" && (
                     <button
                       type="button"
                       onClick={verifierDevisQbo}
@@ -3194,6 +3200,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     >
                       {verifDevisQbo?.etat === "cherche" ? "…" : "🔎 Vérifier"}
                     </button>
+                    )}
                   </div>
                   {/* Le verdict — une faute de frappe attrapée ICI coûte
                       dix fois moins cher qu'à la facturation. */}
@@ -3216,7 +3223,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     </p>
                   )}
                   <p className="mt-0.5 text-[9px] text-slate-400">
-                    {nouveauType === "devis"
+                    {(configEnt?.systemeComptable || "quickbooks") !== "quickbooks"
+                      ? "Le numéro suivra la tâche jusqu'au bon de travail et à la facturation comme référence — écris l'essentiel dans la description pour le technicien."
+                      : nouveauType === "devis"
                       ? "Le numéro suivra la tâche jusqu'au bon de travail et à la facturation. S'il existe dans QuickBooks, son total et ses lignes seront relus à la facturation (solde anti-dépassement compris) — écris quand même l'essentiel dans la description pour le technicien."
                       : "Pour la transition : le numéro suivra la tâche jusqu'au bon de travail et à la facturation, et son contenu sera relu depuis QuickBooks au moment de facturer."}
                   </p>

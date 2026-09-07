@@ -779,6 +779,12 @@ export function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }
 // qui vont chez le client.
 
 export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems, onDesactiverItem, onReactiverItem, estAdminPrincipal }) {
+  // 🧮 Le bouton QuickBooks se masque hors QuickBooks (chantier Sage,
+  // 2026-09-07, règle du propriétaire : « s'il n'y a pas de ces listes
+  // avec Sage, il faut les enlever — laisser l'import par Excel »).
+  // Un catalogue lu de Sage (products/services) pourra revenir plus
+  // tard avec son propre titre.
+  const configCatalogue = useEntreprise();
   const [ouvert, setOuvert] = useState(false);
   const [recherche, setRecherche] = useState("");
   const [categorie, setCategorie] = useState("");
@@ -1150,7 +1156,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
                 <Plus size={13} /> Nouvel item
               </Button>
             )}
-            {estAdminPrincipal && (
+            {estAdminPrincipal && (configCatalogue?.systemeComptable || "quickbooks") === "quickbooks" && (
               <Button
                 variant="outline"
                 onClick={() => { setSourceMaj("quickbooks"); analyserSyncQb(); }}

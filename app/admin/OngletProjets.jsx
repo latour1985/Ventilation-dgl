@@ -51,6 +51,10 @@ export const ONGLETS_PROJET = [
 
 
 export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onMajSuivi = null, onSyncQuickBooks, syncQbEnCours, peutSyncQb }) {
+  // 🧮 Le bouton « Synchroniser QuickBooks » se masque hors QuickBooks
+  // (chantier Sage, 2026-09-07) — la lecture des transactions Sage
+  // aura son propre bouton quand elle sera bâtie.
+  const configApercu = useEntreprise();
   // Utilise la ventilation calculée par calculerRentabiliteProjet (même
   // logique par employé que r.coutMainOeuvre) — plus de recalcul au taux fixe.
   const coutMainOeuvreChantier = r.coutMainOeuvreChantier || 0;
@@ -115,6 +119,7 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onMajSui
             </label>
           )}
         </div>
+        {(configApercu?.systemeComptable || "quickbooks") === "quickbooks" && (
         <Button
           variant="outline"
           onClick={peutSyncQb ? onSyncQuickBooks : undefined}
@@ -125,6 +130,7 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onMajSui
         >
           {!syncQbEnCours && (peutSyncQb ? <RefreshCw size={12} /> : <Lock size={12} />)} Synchroniser QuickBooks
         </Button>
+        )}
       </div>
 
       {/* BARRE DE PROGRESSION FINANCIÈRE */}
@@ -1670,6 +1676,9 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
               <LayoutGrid size={12} /> Kanban
             </button>
           </div>
+          {/* 🧮 Masqué hors QuickBooks (chantier Sage, 2026-09-07) — la
+              lecture des transactions Sage aura son propre bouton. */}
+          {(configHub?.systemeComptable || "quickbooks") === "quickbooks" && (
           <Button
             variant="outline"
             onClick={peutSyncQb ? onSyncQuickBooks : undefined}
@@ -1680,6 +1689,7 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
           >
             {!syncQbEnCours && (peutSyncQb ? <RefreshCw size={12} /> : <Lock size={12} />)} Synchroniser QuickBooks
           </Button>
+          )}
         </div>
       </div>
 
