@@ -594,7 +594,7 @@ function EcranEntente({ config, session, onAcceptee }) {
   );
 }
 
-function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme, achatsLibres = [], pieces = [], projets = [], devisPourTache = null, onOuvrirCommandes = null, onOuvrirProjet = null }) {
+function OngletRecherche({ clients, devisListe, onOuvrirDevis, onOuvrirClient = null, terme, setTerme, achatsLibres = [], pieces = [], projets = [], devisPourTache = null, onOuvrirCommandes = null, onOuvrirProjet = null }) {
   const q = terme.trim().toLowerCase();
   const resultats = terme.trim() ? clients.filter((c) => correspond(c, terme)) : [];
 
@@ -774,18 +774,28 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, terme, setTerme, 
         <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Clients ({resultats.length})</p>
       )}
       <div className="space-y-2">
+        {/* 👤 CLIENT CLIQUABLE (2026-09-06, vécu : « ça m'apporte à la
+            liste et non au dossier ») — toute la carte ouvre le DOSSIER
+            du client, comme le menu déroulant de l'en-tête. */}
         {resultats.map((c) => (
-          <div key={c.id} className="rounded-xl border border-slate-200 bg-white p-3.5">
+          <div
+            key={c.id}
+            onClick={() => onOuvrirClient?.(c)}
+            className={`rounded-xl border border-slate-200 bg-white p-3.5 ${onOuvrirClient ? "cursor-pointer hover:border-[#FF6A13] hover:bg-orange-50" : ""}`}
+          >
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-sm font-bold text-slate-900">{nomAffichageClient(c)}</p>
                 {c.entreprise && <p className="text-xs font-semibold text-[#131B2E]">{c.entreprise}</p>}
               </div>
-              {c.quickbooksCustomerId && (
-                <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                  {c.quickbooksCustomerId}
-                </span>
-              )}
+              <div className="flex shrink-0 items-center gap-1.5">
+                {c.quickbooksCustomerId && (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                    {c.quickbooksCustomerId}
+                  </span>
+                )}
+                {onOuvrirClient && <span className="text-[10px] font-bold text-[#FF6A13]">Ouvrir ›</span>}
+              </div>
             </div>
             <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
               {(c.courriels || []).map((cc) => (
@@ -3054,12 +3064,17 @@ function AppAdmin() {
                   ),
                 ].slice(0, 4);
                 const ouvrirClient = (c) => {
-                  setCibleRecherche({ clientId: c.id, numeroDevis: null });
+                  // `coup` change à chaque clic : recliquer le même
+                  // résultat rouvre le dossier même refermé entre-temps.
+                  setCibleRecherche({ clientId: c.id, numeroDevis: null, coup: Date.now() });
                   setOnglet("clients");
                   setListeRechercheOuverte(false);
                 };
                 const ouvrirDevis = (d) => {
-                  setCibleRecherche({ clientId: d.clientId, numeroDevis: d.numero });
+                  // Un devis d'avant le champ clientId : on retrouve la
+                  // fiche par le NOM — sans ça, aucun dossier ne s'ouvrait.
+                  const idClient = d.clientId || clients.find((c) => c.nom === d.clientNom)?.id || null;
+                  setCibleRecherche({ clientId: idClient, numeroDevis: d.numero, coup: Date.now() });
                   setOnglet("clients");
                   setListeRechercheOuverte(false);
                 };
@@ -3190,7 +3205,12 @@ function AppAdmin() {
           onOuvrirDevis={(d) => {
             // Amène directement au devis : onglet Clients, dossier du
             // client ouvert, devis mis en évidence dans sa section.
-            setCibleRecherche({ clientId: d.clientId, numeroDevis: d.numero });
+            const idClient = d.clientId || clients.find((c) => c.nom === d.clientNom)?.id || null;
+            setCibleRecherche({ clientId: idClient, numeroDevis: d.numero, coup: Date.now() });
+            setOnglet("clients");
+          }}
+          onOuvrirClient={(c) => {
+            setCibleRecherche({ clientId: c.id, numeroDevis: null, coup: Date.now() });
             setOnglet("clients");
           }}
           achatsLibres={achatsLibres}
@@ -3226,6 +3246,7 @@ function AppAdmin() {
           setFournisseurs={setFournisseurs}
           clientCible={cibleRecherche?.clientId}
           devisCible={cibleRecherche?.numeroDevis}
+          cibleCoup={cibleRecherche?.coup}
           onNouvelleVersionDevis={(d) => {
             setDevisAReviser(d);
             setOnglet("devis");

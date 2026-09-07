@@ -15,8 +15,10 @@ import { sauvegarderClient } from "@/lib/supabase/clients";
 import { listerFacturesLibres } from "@/lib/supabase/facturesLibres";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { synchroniserClientsQbo } from "@/lib/quickbooksClient";
+import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
+import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ModalDetailProjet } from "./OngletProjets";
-import { Button, BarrePagination, ITEMS_PAR_PAGE, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
+import { Button, BarrePagination, ITEMS_PAR_PAGE, ModalSelectionCourriel, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
 
 export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, onNouvelleVersion }) {
   const [dossierOuvert, setDossierOuvert] = useState(null);
@@ -390,7 +392,7 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
 
 
 
-export function DetailTravail({ travail, clients, onFermer, onReactiver }) {
+export function DetailTravail({ travail, clients, onFermer, onReactiver, bonLie = null, onRenvoyerBon = null }) {
   const [apercuClientOuvert, setApercuClientOuvert] = useState(false);
   const complete = travail.statut === "complete";
   return (
@@ -419,6 +421,22 @@ export function DetailTravail({ travail, clients, onFermer, onReactiver }) {
           <Button variant="outline" onClick={() => setApercuClientOuvert(true)} className="mb-3 w-full min-h-0 gap-1.5 py-2 text-xs">
             <FileText size={13} /> Voir version client
           </Button>
+        )}
+
+        {/* 📸 (RE)ENVOYER LE BON AU CLIENT (2026-09-06, demande du
+            propriétaire : « je ne peux pas renvoyer un bon de travail
+            au client ») — le même envoi que l'onglet Facturation,
+            accessible depuis le dossier : courriel jamais reçu, adresse
+            corrigée, client qui redemande sa copie. */}
+        {complete && bonLie && onRenvoyerBon && (
+          <Button variant="outline" onClick={() => onRenvoyerBon(bonLie)} className="mb-3 w-full min-h-0 gap-1.5 py-2 text-xs">
+            <Mail size={13} /> {bonLie.envoyeClientLe ? "Renvoyer le bon au client" : "Envoyer le bon au client"}
+          </Button>
+        )}
+        {complete && bonLie?.envoyeClientLe && (
+          <p className="-mt-2 mb-3 text-center text-[10px] font-bold text-emerald-600">
+            📸 Déjà envoyé le {new Date(bonLie.envoyeClientLe).toLocaleDateString("fr-CA")}
+          </p>
         )}
 
         {travail.estTransport && (
@@ -557,7 +575,7 @@ export const LigneProjetClient = React.memo(function LigneProjetClient({ p, trav
 });
 
 
-export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], piecesCommandees = [], qbConnecte = null }) {
+export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, cibleCoup = null, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], piecesCommandees = [], qbConnecte = null }) {
   // Taux camion par défaut — pour le coût réel des travaux du client.
   const configClients = useEntreprise();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
@@ -577,21 +595,52 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
   const [clientOuvertId, setClientOuvertId] = useState(null);
   // ✏️ Fiche client en cours de MODIFICATION (fenêtre d'édition).
   const [clientEnEditionId, setClientEnEditionId] = useState(null);
-  // Arrivée depuis la RECHERCHE RAPIDE : le dossier du client visé
-  // s'ouvre tout seul (et son devis est mis en évidence par DevisDuClient).
-  useEffect(() => {
-    if (clientCible) setClientOuvertId(clientCible);
-  }, [clientCible, devisCible]);
   // Recherche rapide dans la liste des clients (nom, entreprise,
   // courriel, téléphone, adresse, nº QuickBooks).
   const [rechercheClients, setRechercheClients] = useState("");
   const qClients = rechercheClients.trim().toLowerCase();
   // 📄 Pagination (2026-08-26) : 10 fiches par page — sans recherche,
   // TOUTE la liste s'affichait (mur garanti à 200 clients). Taper une
-  // recherche ramène page 1.
+  // recherche ramène page 1 — sauf quand la recherche RAPIDE vient de
+  // déposer la page du client visé dans pageCibleRef (voir plus bas).
   const [pageClients, setPageClients] = useState(1);
   const refListeClients = useRef(null);
-  useEffect(() => { setPageClients(1); }, [qClients]);
+  const pageCibleRef = useRef(null);
+  useEffect(() => {
+    if (pageCibleRef.current) {
+      setPageClients(pageCibleRef.current);
+      pageCibleRef.current = null;
+    } else {
+      setPageClients(1);
+    }
+  }, [qClients]);
+  // Arrivée depuis la RECHERCHE RAPIDE : le dossier du client visé
+  // s'ouvre tout seul (et son devis est mis en évidence par DevisDuClient).
+  // 📄 BOGUE VÉCU (2026-09-06, capture du propriétaire) : le dossier
+  // s'« ouvrait » bien… mais la LISTE EST PAGINÉE (10 fiches) — un
+  // client en page 3 ne se rendait jamais à l'écran, la recherche
+  // semblait n'amener qu'à la liste. On SAUTE donc à sa page, on efface
+  // le filtre local (il aurait pu le cacher aussi), et on défile
+  // jusqu'à sa carte. `cibleCoup` change à CHAQUE clic : recliquer le
+  // même client rouvre son dossier même s'il venait d'être refermé.
+  useEffect(() => {
+    if (!clientCible) return;
+    setClientOuvertId(clientCible);
+    const index = clients.findIndex((x) => x.id === clientCible);
+    const page = index >= 0 ? Math.floor(index / ITEMS_PAR_PAGE) + 1 : 1;
+    if (rechercheClients.trim()) {
+      // Le reset « recherche changée → page 1 » passera après nous :
+      // on lui laisse la page visée dans la boîte aux lettres.
+      pageCibleRef.current = page;
+      setRechercheClients("");
+    } else {
+      setPageClients(page);
+    }
+    setTimeout(() => {
+      document.getElementById(`fiche-client-${clientCible}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientCible, devisCible, cibleCoup]);
   const clientsFiltres = !qClients
     ? clients
     : clients.filter((c) =>
@@ -710,6 +759,46 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
 
   const [travailOuvertId, setTravailOuvertId] = useState(null);
   const travailOuvert = travaux.find((t) => t.id === travailOuvertId) || null;
+  // 📸 (RE)ENVOI DU BON AU CLIENT depuis le dossier (2026-09-06) — le
+  // bon de la tâche du travail ouvert, s'il est synchronisé (le lien
+  // public exige la ligne Supabase). Une tâche multi-jours suffixe le
+  // tacheId (::date) : on compare la racine.
+  const bonDuTravailOuvert = (() => {
+    if (!travailOuvert?.tacheId) return null;
+    const racine = String(travailOuvert.tacheId).split("::")[0];
+    return (bons || []).find((b) => b.tacheId === racine && String(b.id).startsWith("sbb-")) || null;
+  })();
+  const [renvoiBonPour, setRenvoiBonPour] = useState(null); // bon à (re)envoyer
+  const envoyerBonDepuisDossier = async (b, choix) => {
+    const adresses = [...new Set((choix || []).map((cc) => cc.email))].filter(Boolean);
+    if (adresses.length === 0) return;
+    try {
+      const rowId = String(b.id).slice(4);
+      const jeton = await assurerJetonBon(rowId);
+      const r = await envoyerCourriel({
+        a: adresses,
+        sujet: `Vos travaux sont terminés — bon de travail${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""} (${configClients.nomCommercial || configClients.nomLegal})`,
+        html: gabaritBonTravail({
+          config: configClients,
+          clientNom: b.client,
+          lien: lienBonPublic(jeton),
+          joursValidite: JOURS_VALIDITE_BON,
+          // ⭐ Avis Google — jamais sur un retour sous garantie.
+          lienAvis: b.retraitRaison === "garantie" || b.garantie ? null : String(configClients?.lienAvisGoogle || "").trim() || null,
+        }),
+      });
+      if (r.envoye) {
+        marquerBonEnvoyeClient(rowId).catch(() => {});
+        ajouterJournal(`📸 Bon de travail de ${b.client} (R)ENVOYÉ à ${adresses.join(", ")} depuis le dossier client — lien valide ${JOURS_VALIDITE_BON} jours.`);
+      } else if (r.simule) {
+        ajouterJournal(`🔧 Envoi SIMULÉ du bon au client (service de courriels non configuré) — le lien existe : ${lienBonPublic(jeton)}`);
+      } else {
+        ajouterJournal(`⚠️ Bon de travail de ${b.client} NON envoyé — ${r.erreur}`);
+      }
+    } catch {
+      ajouterJournal("⚠️ Bon de travail NON envoyé — le lien n'a pas pu être créé. Réessaie.");
+    }
+  };
   const [projetOuvertId, setProjetOuvertId] = useState(null);
   const projetOuvert = projets.find((p) => p.id === projetOuvertId) || null;
   const [formulaireProjetPourClient, setFormulaireProjetPourClient] = useState(null); // clientId ou null
@@ -1176,7 +1265,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
         {clientsFiltres.slice((Math.min(pageClients, Math.max(1, Math.ceil(clientsFiltres.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageClients, Math.max(1, Math.ceil(clientsFiltres.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((c) => {
           const ouvert = clientOuvertId === c.id;
           return (
-            <div key={c.id} className="rounded-xl border border-slate-200 bg-white">
+            <div key={c.id} id={`fiche-client-${c.id}`} className="rounded-xl border border-slate-200 bg-white">
               <button
                 onClick={() => setClientOuvertId(ouvert ? null : c.id)}
                 className="flex w-full items-start justify-between gap-2 p-3.5 text-left"
@@ -1999,6 +2088,40 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
           clients={clients}
           onFermer={() => setTravailOuvertId(null)}
           onReactiver={reactiverModification}
+          bonLie={bonDuTravailOuvert}
+          onRenvoyerBon={(b) => setRenvoiBonPour(b)}
+        />
+      )}
+      {/* 📸 Choix des destinataires pour le (re)envoi du bon — la même
+          fenêtre que partout ailleurs (fiche du client, ajout possible). */}
+      {renvoiBonPour && (
+        <ModalSelectionCourriel
+          client={
+            clients.find((x) => x.id === renvoiBonPour.clientId) ||
+            clients.find((x) => x.nom === renvoiBonPour.client) ||
+            null
+          }
+          onAjouterFiche={(email) => {
+            const fiche =
+              clients.find((x) => x.id === renvoiBonPour.clientId) ||
+              clients.find((x) => x.nom === renvoiBonPour.client);
+            if (!fiche || !email) return;
+            setClients((prev) =>
+              prev.map((c) => {
+                if (c.id !== fiche.id) return c;
+                if ((c.courriels || []).some((cc) => (cc.email || "").toLowerCase() === email.toLowerCase())) return c;
+                return { ...c, courriels: [...(c.courriels || []), { id: `cc-${Date.now()}`, label: "Ajouté à l'envoi", email, defaut: (c.courriels || []).length === 0 }] };
+              })
+            );
+            ajouterJournal(`💾 ${email} ajouté à la fiche du client.`);
+          }}
+          contexte={`Bon de travail — descriptif avec photos, SANS prix (« ${renvoiBonPour.projet || renvoiBonPour.client || ""} »)`}
+          onFermer={() => setRenvoiBonPour(null)}
+          onConfirmer={(choix) => {
+            const b = renvoiBonPour;
+            setRenvoiBonPour(null);
+            envoyerBonDepuisDossier(b, choix);
+          }}
         />
       )}
       {projetOuvert && (
