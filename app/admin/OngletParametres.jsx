@@ -11,6 +11,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { supabase } from "@/lib/supabase/client";
 import { etatQuickbooks, synchroniserClientsQbo } from "@/lib/quickbooksClient";
+import { etatSage, demarrerConnexionSage } from "@/lib/sageClient";
 import { listerCompteurs, reglerProchainNumero } from "@/lib/supabase/compteurs";
 import { Button, tauxAffiche } from "./partage";
 
@@ -224,6 +225,89 @@ export function CarteConnexionQuickbooks({ estAdminPrincipal }) {
             </button>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+
+// ------------------------------------------------------------
+// 🟢 CONNEXION SAGE BUSINESS CLOUD (chantier Sage, 2026-09-07 — GO du
+// propriétaire « on y va avec sage cloud »). Le même moule que la carte
+// QuickBooks : état réel lu de /api/sage/etat (jamais les jetons),
+// bouton de connexion qui quitte vers l'écran d'autorisation Sage.
+// Phase 1 : la CONNEXION seulement — clients et factures suivront.
+// ------------------------------------------------------------
+export function CarteConnexionSage({ estAdminPrincipal }) {
+  const [etat, setEtat] = useState(null); // null = vérification en cours
+  const [verifEnCours, setVerifEnCours] = useState(false);
+  const verifier = async () => {
+    setVerifEnCours(true);
+    const e = await etatSage();
+    setEtat(e && typeof e === "object" ? e : { erreur: "Réponse illisible." });
+    setVerifEnCours(false);
+  };
+  useEffect(() => {
+    let actif = true;
+    etatSage().then((e) => {
+      if (actif) setEtat(e && typeof e === "object" ? e : { erreur: "Réponse illisible." });
+    });
+    return () => { actif = false; };
+  }, []);
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Sage Business Cloud</p>
+      <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+        Relie la comptabilité Sage (en ligne) de l&apos;entreprise. Phase 1 du chantier : la connexion —
+        clients et factures suivront dans les prochaines étapes.
+      </p>
+      {etat === null ? (
+        <p className="text-xs text-slate-400">Vérification de la connexion…</p>
+      ) : etat.erreur ? (
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <p className="font-bold">⚠️ Impossible de vérifier la connexion Sage</p>
+          <p className="mt-0.5 text-[11px]">{etat.erreur}</p>
+          <button
+            onClick={verifier}
+            disabled={verifEnCours}
+            className="mt-1.5 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-bold text-amber-800 disabled:opacity-50"
+          >
+            {verifEnCours ? "Vérification…" : "🔄 Revérifier"}
+          </button>
+        </div>
+      ) : !etat.configure ? (
+        <p className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-600">
+          🧪 <span className="font-bold">Clés absentes</span> — les variables SAGE_CLIENT_ID et SAGE_CLIENT_SECRET
+          ne sont pas encore posées sur le serveur (inscription développeur sur developer.sage.com, puis clés dans
+          Vercel — même recette que pour Intuit).
+        </p>
+      ) : etat.connecte ? (
+        <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          ✅ <span className="font-bold">Connecté</span>
+          {etat.businessNom ? <> — dossier « {etat.businessNom} »</> : null}
+          {etat.expireLe ? (
+            <>
+              <br />
+              Connexion valide jusqu&apos;au {new Date(etat.expireLe).toLocaleDateString("fr-CA")} — elle se
+              renouvelle toute seule à chaque utilisation.
+            </>
+          ) : null}
+        </p>
+      ) : estAdminPrincipal ? (
+        <button
+          onClick={async () => {
+            const r = await demarrerConnexionSage();
+            if (r?.url) window.location.href = r.url;
+            else window.alert(r?.erreur || "Connexion impossible — réessaie.");
+          }}
+          className="inline-flex items-center gap-2 rounded-xl bg-[#131B2E] px-4 py-2.5 text-sm font-extrabold text-white active:scale-[0.99]"
+        >
+          <RefreshCw size={14} /> Connecter Sage
+        </button>
+      ) : (
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+          <Lock size={12} /> Connexion réservée à l&apos;Admin principal.
+        </p>
       )}
     </div>
   );
@@ -836,12 +920,57 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
       {/* ---------------- 4. CONNEXIONS ---------------- */}
       {ongletActif === "connexions" && (
         <div className="space-y-3">
-          <CarteConnexionQuickbooks estAdminPrincipal={estAdminPrincipal} />
+          {/* 🧮 SYSTÈME COMPTABLE (chantier Sage, 2026-09-07) — chaque
+              entreprise choisit SA comptabilité, exactement comme le
+              propriétaire l'a demandé (« en sélection selon le système
+              comptable comme QuickBooks fonctionne »). Le choix décide
+              quelle carte de connexion s'affiche ; QuickBooks reste le
+              défaut — rien ne change pour les entreprises existantes. */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">🧮 Système comptable</p>
+            <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
+              La comptabilité à laquelle Fluxya se branche pour cette entreprise. Enregistre après avoir changé.
+            </p>
+            <div className="space-y-1.5">
+              {[
+                { id: "quickbooks", libelle: "QuickBooks en ligne", detail: "Factures, devis, dépôts, paiements — l'intégration complète." },
+                { id: "sage", libelle: "Sage Business Cloud (Sage en ligne)", detail: "Chantier en cours — phase 1 : la connexion. Clients et factures suivront." },
+                { id: "aucun", libelle: "Aucun", detail: "Fluxya fonctionne sans comptabilité branchée (factures maison seulement)." },
+              ].map((o) => (
+                <label
+                  key={o.id}
+                  className={`flex items-start gap-2.5 rounded-lg border p-2.5 ${(brouillon.systemeComptable || "quickbooks") === o.id ? "border-[#131B2E] bg-slate-50" : "border-slate-200"}`}
+                >
+                  <input
+                    type="radio"
+                    name="systeme-comptable"
+                    checked={(brouillon.systemeComptable || "quickbooks") === o.id}
+                    disabled={!estAdminPrincipal}
+                    onChange={() => champ("systemeComptable", o.id)}
+                    className="mt-0.5 h-4 w-4 accent-[#131B2E]"
+                  />
+                  <span>
+                    <span className="block text-xs font-bold text-slate-800">{o.libelle}</span>
+                    <span className="block text-[10px] text-slate-500">{o.detail}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {(brouillon.systemeComptable || "quickbooks") === "quickbooks" && (
+            <CarteConnexionQuickbooks estAdminPrincipal={estAdminPrincipal} />
+          )}
+          {brouillon.systemeComptable === "sage" && (
+            <CarteConnexionSage estAdminPrincipal={estAdminPrincipal} />
+          )}
 
           {/* 📅 DATE-PLANCHER (2026-08-28, snippet SQL 81) — l'historique
               d'avant Fluxya reste dans QuickBooks : sans coûts en face,
               l'importer fabriquerait des marges fausses et des centaines
-              de cartes « à rattacher ». Modifiable en tout temps. */}
+              de cartes « à rattacher ». Modifiable en tout temps.
+              (Spécifique à QuickBooks — masqué pour Sage/Aucun.) */}
+          {(brouillon.systemeComptable || "quickbooks") === "quickbooks" && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">📅 Historique lu dans QuickBooks</p>
             <p className="mt-0.5 mb-3 text-[11px] text-slate-400">
@@ -894,6 +1023,7 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               </label>
             </div>
           </div>
+          )}
         </div>
       )}
 
