@@ -21,8 +21,11 @@
 
 import { useState, useRef, useEffect } from "react";
 
-export default function InputNombreDecimal({ valeur, onChange, className, onBlur, ...props }) {
-  const [texte, setTexte] = useState(String(valeur));
+export default function InputNombreDecimal({ valeur, onChange, className, onBlur, videSiZero = false, ...props }) {
+  // `videSiZero` (2026-09-08) : un champ FACULTATIF (ex. prix unitaire)
+  // affiche vide plutôt que « 0 » — le placeholder reste visible.
+  const versTexte = (v) => (videSiZero && (v === 0 || v === "" || v == null) ? "" : String(v));
+  const [texte, setTexte] = useState(versTexte(valeur));
   const enFocus = useRef(false);
 
   // Resynchronise l'affichage si la valeur change depuis l'EXTÉRIEUR du
@@ -31,7 +34,8 @@ export default function InputNombreDecimal({ valeur, onChange, className, onBlur
   // cours de frappe serait immédiatement réécrit (« 0 ») et la saisie
   // des décimales deviendrait impossible.
   useEffect(() => {
-    if (!enFocus.current) setTexte(String(valeur));
+    if (!enFocus.current) setTexte(versTexte(valeur));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valeur]);
 
   return (
@@ -40,7 +44,7 @@ export default function InputNombreDecimal({ valeur, onChange, className, onBlur
       inputMode="decimal"
       value={texte}
       onFocus={() => { enFocus.current = true; }}
-      onBlur={(e) => { enFocus.current = false; setTexte(String(valeur)); onBlur?.(e); }}
+      onBlur={(e) => { enFocus.current = false; setTexte(versTexte(valeur)); onBlur?.(e); }}
       onChange={(e) => {
         const brut = e.target.value;
         if (!/^-?\d*[.,]?\d*$/.test(brut)) return;

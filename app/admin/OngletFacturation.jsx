@@ -683,7 +683,11 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     // Nom en tête, détail en dessous — sauf si le détail répète déjà le
     // nom (certaines fiches du catalogue commencent par leur propre nom).
     const texte = !detail ? nom : detail.toUpperCase().startsWith(nom.toUpperCase()) ? detail : `${nom}\n${detail}`;
-    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: texte, prix: produit.prix_vendant ?? 0 }]);
+    // 🔢 Le prix du catalogue arrive comme PRIX UNITAIRE (2026-09-08,
+    // demande du propriétaire) : la case « × Prix unitaire » se remplit,
+    // et changer la quantité recalcule le total tout seul.
+    const pu = Number(produit.prix_vendant) > 0 ? Number(produit.prix_vendant) : "";
+    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: texte, quantite: 1, prixUnitaire: pu, prix: produit.prix_vendant ?? 0 }]);
   };
 
   const retirerItem = (id) => {
@@ -869,34 +873,38 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                     et la quantité voyage jusqu'à la colonne Qté de
                     QuickBooks. Prix unitaire vide = mode simple, le
                     Prix se tape directement comme avant. */}
+                {/* 🔢 Composant maison partout (2026-09-08, demande du
+                    propriétaire : « 15.5 et 15,5 ») — les <input
+                    type=number> natifs refusaient le point ou la virgule
+                    selon la langue du navigateur. */}
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <span className="text-[11px] text-slate-400">Qté</span>
-                  <input
-                    type="number" min={0} step="0.01" value={it.quantite ?? 1}
-                    onChange={(e) => {
-                      const q = parseFloat(e.target.value) || 0;
+                  <InputNombreDecimal
+                    valeur={it.quantite ?? 1}
+                    onChange={(q) => {
                       const pu = parseFloat(it.prixUnitaire) || 0;
                       majItem(it.id, { quantite: q, ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100 } : {}) });
                     }}
                     className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
                   />
                   <span className="text-[11px] text-slate-400">× Prix unitaire ($)</span>
-                  <input
-                    type="number" min={0} step="0.01" value={it.prixUnitaire ?? ""}
+                  <InputNombreDecimal
+                    valeur={it.prixUnitaire === "" || it.prixUnitaire == null ? 0 : Number(it.prixUnitaire)}
+                    videSiZero
                     placeholder="—"
-                    onChange={(e) => {
-                      const pu = parseFloat(e.target.value) || 0;
+                    onChange={(pu) => {
                       const q = Number(it.quantite) > 0 ? Number(it.quantite) : 1;
-                      majItem(it.id, { prixUnitaire: e.target.value === "" ? "" : pu, ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100, quantite: q } : {}) });
+                      // 0 = case vidée : retour au mode simple (Prix tapé à la main).
+                      majItem(it.id, { prixUnitaire: pu > 0 ? pu : "", ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100, quantite: q } : {}) });
                     }}
                     className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
                   />
                   <span className="text-[11px] text-slate-400">= Prix ($)</span>
-                  <input
-                    type="number" min={0} step="0.01" value={it.prix}
+                  <InputNombreDecimal
+                    valeur={it.prix}
                     readOnly={parseFloat(it.prixUnitaire) > 0}
                     title={parseFloat(it.prixUnitaire) > 0 ? "Calculé : quantité × prix unitaire (vide le prix unitaire pour taper le total à la main)" : ""}
-                    onChange={(e) => majItem(it.id, { prix: parseFloat(e.target.value) || 0 })}
+                    onChange={(v) => majItem(it.id, { prix: v })}
                     className={`w-28 rounded-lg border px-2 py-1 text-right text-sm font-bold tabular-nums ${parseFloat(it.prixUnitaire) > 0 ? "border-slate-200 bg-slate-50 text-slate-600" : "border-slate-300"}`}
                   />
                 </div>
@@ -3363,7 +3371,31 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                                     ✏️ Réviser
                                   </button>
                                 ) : (
-                                  <span className="shrink-0 font-bold tabular-nums text-slate-600">{resteAFacturerDe(bx).toFixed(2)} $</span>
+                                  <span className="flex shrink-0 items-center gap-1.5">
+                                    <span className="font-bold tabular-nums text-slate-600">{resteAFacturerDe(bx).toFixed(2)} $</span>
+                                    {/* 🧾 UN BON À LA FOIS (2026-09-08, demande du
+                                        propriétaire : « il faut pouvoir les envoyer
+                                        une à la fois ») — chaque bon prêt a SON
+                                        bouton ; le gros bouton du groupe reste pour
+                                        la facture groupée, au choix. */}
+                                    {estAdminPrincipal && (
+                                      <button
+                                        onClick={() =>
+                                          setGroupeAFacturer({
+                                            bons: [bx],
+                                            clientNom: g.client,
+                                            projetNom: sg.projet?.nom || null,
+                                            total: resteAFacturerDe(bx),
+                                            client: (clientsFacturation || []).find((c) => c.nom === g.client) || null,
+                                          })
+                                        }
+                                        title="Facturer CE bon seulement — une facture pour lui seul"
+                                        className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-700 active:scale-95"
+                                      >
+                                        🧾 Facturer
+                                      </button>
+                                    )}
+                                  </span>
                                 )}
                               </div>
                             ))}

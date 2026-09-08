@@ -2816,7 +2816,18 @@ function AppAdmin() {
 
     sonder();
     const minuterie = setInterval(sonder, INTERVALLE_DEPOTS);
+    // 👁️ SONDAGE AU RETOUR SUR L'ONGLET (2026-09-08, vécu : dépôt payé
+    // dans QuickBooks pendant que Louise travaillait dans ses AUTRES
+    // onglets — la sonde saute quand l'onglet est caché, le dépôt est
+    // resté verrouillé et elle l'a débloqué à la main). Dès que
+    // l'onglet redevient visible : sondage immédiat, plus d'attente du
+    // prochain tour de 3 minutes.
+    const auRetour = () => {
+      if (typeof document !== "undefined" && !document.hidden) sonder();
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", auRetour);
     return () => {
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", auRetour);
       annule = true;
       clearInterval(minuterie);
     };
@@ -3226,6 +3237,7 @@ function AppAdmin() {
           setFournisseurs={setFournisseurs}
           clientCible={cibleRecherche?.clientId}
           devisCible={cibleRecherche?.numeroDevis}
+          planning={planning}
           onNouvelleVersionDevis={(d) => {
             setDevisAReviser(d);
             setOnglet("devis");
