@@ -5579,7 +5579,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 Le courriel dit : dépôt bien reçu, rendez-vous confirmé le {dateLisibleC}
                 {t.adresseIntervention || t.adresseTravaux ? `, ${t.adresseIntervention || t.adresseTravaux}` : ""}
                 {t.technicienPrevu ? `, technicien ${employes.find((e) => e.id === t.technicienPrevu)?.nom || ""}` : ""} —
-                <span className="font-bold"> sans l&apos;heure</span> : « l&apos;heure exacte vous sera confirmée la veille ».
+                <span className="font-bold"> sans l&apos;heure</span> : « nous vous contacterons la veille pour confirmer le rendez-vous ».
               </p>
               {contactsC.length === 0 && (
                 <p className="mb-2 text-[11px] font-semibold text-amber-700">Ce client n&apos;a aucun courriel dans sa fiche — inscris une adresse ci-dessous.</p>
