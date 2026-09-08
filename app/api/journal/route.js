@@ -75,9 +75,15 @@ export async function POST(request) {
       return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
     }
     const limite = Math.min(500, Math.max(1, parseInt(corps?.limite) || 300));
+    // 🔐 CLOISON D'ENTREPRISE (2026-09-08, vécu : « les journaux se
+    // croisent entre entreprises ») — la clé service passe OUTRE la RLS,
+    // donc SANS ce filtre un admin d'une autre entreprise voyait le
+    // journal de DGL (et vice-versa). On ne rend QUE les lignes de
+    // l'entreprise de l'appelant.
     const { data, error } = await admin
       .from("journal_activite")
       .select("id, texte, created_at")
+      .eq("entreprise_id", entrepriseDuCompte(utilisateur))
       .order("created_at", { ascending: false })
       .limit(limite);
     if (error) return Response.json({ erreur: error.message }, { status: 502 });
