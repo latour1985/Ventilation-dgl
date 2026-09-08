@@ -2597,7 +2597,19 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
             5 par page. Tous les devis d'un client sont dans <span className="font-bold">son dossier</span> (onglet Clients), et la{" "}
             <span className="font-bold">recherche rapide</span> les trouve par numéro, client ou produit.
           </p>
-          {dossiersDevis.length === 0 && <p className="px-1 text-xs text-slate-400">Aucun devis pour le moment.</p>}
+          {/* 📭 ÉCRAN VIDE QUI EXPLIQUE (2026-09-07) — dire quoi faire,
+              pas juste constater le vide. */}
+          {dossiersDevis.length === 0 && (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5 text-center">
+              <p className="text-sm font-bold text-slate-700">Aucun devis pour le moment.</p>
+              <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-slate-500">
+                Clique <span className="font-bold">« ➕ Nouveau devis »</span> en haut : tu choisis le client, tu ajoutes
+                tes items (ils viennent de ta liste de prix — onglet Tarifs), et le devis part par courriel avec un lien
+                où le client peut <span className="font-bold">accepter en ligne</span>. Une fois accepté, il se transforme
+                en tâche puis en facture — sans rien retaper.
+              </p>
+            </div>
+          )}
           {/* UNE CARTE PAR DOSSIER — la version active est affichée ; les
               révisions précédentes s'atteignent par les onglets. */}
           {dossiersDevis.slice((Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / DEVIS_PAR_PAGE))) - 1) * DEVIS_PAR_PAGE, Math.min(pageDevis, Math.max(1, Math.ceil(dossiersDevis.length / DEVIS_PAR_PAGE))) * DEVIS_PAR_PAGE).map((dossier) => rendreCarteDossier(dossier))}

@@ -1307,6 +1307,24 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
             Aucun client ne correspond à « {rechercheClients.trim()} ».
           </p>
         )}
+        {/* 📭 ÉCRAN VIDE QUI EXPLIQUE (2026-09-07) — une entreprise toute
+            neuve doit savoir par où commencer, pas deviner. */}
+        {!qClients && clients.length === 0 && (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5 text-center">
+            <p className="text-sm font-bold text-slate-700">Aucun client pour l&apos;instant — trois façons de commencer :</p>
+            <ul className="mx-auto mt-2 max-w-md space-y-1 text-left text-xs text-slate-500">
+              <li>➕ <span className="font-bold">Nouveau client</span> (juste au-dessus) — crée ta première fiche à la main ;</li>
+              {(configClients?.systemeComptable || "quickbooks") === "quickbooks" && (
+                <li>🔄 <span className="font-bold">Synchroniser depuis QuickBooks</span> (en haut à droite) — descend tous tes clients existants d&apos;un coup ;</li>
+              )}
+              {configClients?.systemeComptable === "sage" && (
+                <li>🔄 <span className="font-bold">Synchroniser depuis Sage</span> (en haut à droite) — descend tous tes clients existants d&apos;un coup ;</li>
+              )}
+              <li>📄 <span className="font-bold">Import en lot</span> — un fichier CSV/Excel de ton ancien système (bouton dans la liste quand tu en as un).</li>
+            </ul>
+            <p className="mt-2 text-[11px] text-slate-400">Chaque fiche suit ensuite le client partout : tâches, devis, factures, historique.</p>
+          </div>
+        )}
         {clientEnEditionId && (() => {
           const cible = clients.find((x) => x.id === clientEnEditionId);
           if (!cible) return null;

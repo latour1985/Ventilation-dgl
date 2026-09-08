@@ -3351,9 +3351,15 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
             📋 À facturer — par client et par projet
           </p>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Rien à facturer pour l&apos;instant. Dès qu&apos;un bon de travail est prêt, il apparaît ici, regroupé
-            par client puis par chantier — avec le bouton qui réunit tout un mois en UNE facture.
+          {/* 📭 ÉCRAN VIDE QUI EXPLIQUE (2026-09-07, vécu par le
+              propriétaire : tout à 0, il a cru à un bogue) — dire
+              POURQUOI c'est vide et OÙ est le travail en amont. */}
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+            Rien à facturer pour l&apos;instant — c&apos;est normal : un bon de travail arrive ici
+            <span className="font-bold"> quand un technicien TERMINE une tâche</span> (bouton « Terminer et envoyer »
+            sur son téléphone). Une tâche encore à l&apos;horaire, en attente de dépôt ou pas commencée n&apos;apparaît
+            pas encore — elle est dans l&apos;<span className="font-bold">Agenda</span>. Dès que des travaux se
+            terminent, ils atterrissent ici, regroupés par client puis par chantier.
           </p>
         </div>
       )}
