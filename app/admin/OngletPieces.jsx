@@ -124,6 +124,78 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
   const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [] });
+  // 📍 RAPPEL D'ADRESSE (2026-09-09, demande du propriétaire) — avant de
+  // créer un BC libre sans adresse choisie (resté sur « atelier » par
+  // défaut) ET qui n'est pas du stock d'inventaire, une fenêtre demande
+  // de confirmer : livrer à l'atelier, ou revenir choisir le chantier.
+  const [rappelAdresseBc, setRappelAdresseBc] = useState(false);
+  // Création du bon libre — extraite pour être appelée soit directement,
+  // soit après le rappel d'adresse (2026-09-09).
+  const executerCreationBc = async () => {
+    setRappelAdresseBc(false);
+    setBcLibreEnCours(true);
+    const livraison = bcLibre.livraisonEstimee
+      ? `\n📦 Livraison souhaitée : ${new Date(`${bcLibre.livraisonEstimee}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`
+      : "";
+    const tL = bcLibre.tacheId ? (tachesPourAchat || []).find((x) => x.id === bcLibre.tacheId) : null;
+    const clL = bcLibre.clientId ? (clients || []).find((x) => x.id === bcLibre.clientId) : null;
+    const prL = bcLibre.projetId ? (projets || []).find((x) => x.id === bcLibre.projetId) : null;
+    const adresseLivraisonBc = (() => {
+      const c = bcLibre.livraisonChoix;
+      if (c === "atelier") return configEnt.adresse ? `Atelier — ${configEnt.adresse}` : "";
+      if (c === "tache") return tL?.adresse || "";
+      if (c.startsWith("ca:")) {
+        const a = (clL?.adresses || []).find((x) => x.id === c.slice(3));
+        return a ? `${clL.nom} — ${a.nom ? `${a.nom} · ` : ""}${libelleAdresse(a)}` : "";
+      }
+      if (c === "cfact") return clL?.adresseFacturation ? `${clL.nom} — ${clL.adresseFacturation}` : "";
+      if (c === "projet") return prL ? `Projet ${prL.nom} — ${prL.adresseLivraison || prL.adresseTravaux || ""}` : "";
+      if (c === "autre") return bcLibre.livraisonAutre.trim();
+      return "";
+    })();
+    const descriptionFinale = `${(bcLibre.description || "").trim()}${bcLibre.pourInventaire ? "\n📦 Pour l'inventaire courant (stock du bureau)" : ""}${livraison}${adresseLivraisonBc ? `\n📍 Livraison : ${adresseLivraisonBc}` : ""}`;
+    const partTapee = Number(bcLibre.montantAttribue) || 0;
+    const montantEffectif = (Number(bcLibre.montantHT) || 0) <= 0 && partTapee > 0 ? partTapee : bcLibre.montantHT;
+    const numero = await onCreerBcLibre?.({ ...bcLibre, montantHT: montantEffectif, description: descriptionFinale });
+    setBcLibreEnCours(false);
+    setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
+    const fiche = ficheFournisseurParNom(bcLibre.fournisseurNom);
+    const courrielTape = bcLibre.courrielFournisseur.trim();
+    const courrielTapeValide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(courrielTape);
+    if (fiche && (fiche.courriels || []).length > 0) {
+      setOffreEnvoiBc({
+        numero,
+        fournisseur: fiche.nom,
+        description: descriptionFinale,
+        photos: bcLibre.photos || [],
+        courriels: fiche.courriels,
+        coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
+      });
+    } else if (!fiche && courrielTapeValide) {
+      const nomF = bcLibre.fournisseurNom.trim();
+      if (bcLibre.enregistrerFournisseur && nomF) {
+        const nouveauF = {
+          id: `f-${Date.now()}`,
+          nom: nomF,
+          courriels: [{ id: `fc-${Date.now()}`, label: "Commande", email: courrielTape, defaut: true }],
+        };
+        setFournisseurs?.((prev) => [...(prev || []), nouveauF]);
+        sauvegarderFournisseur(nouveauF)
+          .then(() => ajouterJournal?.(`🏭 Fournisseur « ${nomF} » ajouté au répertoire (${courrielTape}).`))
+          .catch(() => ajouterJournal?.(`⚠️ Fournisseur « ${nomF} » affiché mais NON enregistré au répertoire — réessaie.`));
+      }
+      setOffreEnvoiBc({
+        numero,
+        fournisseur: nomF || "fournisseur",
+        description: descriptionFinale,
+        photos: bcLibre.photos || [],
+        courriels: [{ id: "libre", label: "Commande", email: courrielTape, defaut: true }],
+        coches: [courrielTape],
+      });
+    }
+    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [] });
+    setBcLibreOuvert(false);
+  };
   // 📦➕ Réception d'un BC « stock » vers l'inventaire (étage 2) — le
   // compteur force la section Inventaire à se recharger après coup.
   const [receptionBc, setReceptionBc] = useState(null); // null | achat libre
@@ -607,6 +679,27 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
         />
       )}
 
+      {/* 📍 RAPPEL D'ADRESSE DE LIVRAISON (2026-09-09, demande du
+          propriétaire) — le BC est resté sur « atelier » sans choix
+          explicite et ce n'est pas du stock d'inventaire : on confirme
+          avant d'envoyer, plutôt que de livrer au bureau par défaut une
+          pièce destinée à un chantier. */}
+      {rappelAdresseBc && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setRappelAdresseBc(false); }}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <h3 className="text-sm font-extrabold text-slate-900">📍 Adresse de livraison ?</h3>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+              Aucune adresse de livraison n&apos;a été choisie — le bon partirait <span className="font-bold">livré à l&apos;atelier</span>
+              {configEnt.adresse ? ` (${configEnt.adresse})` : ""}. Si cette pièce s&apos;en va sur un chantier, reviens choisir l&apos;adresse.
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-2">
+              <Button onClick={() => setRappelAdresseBc(false)} className="min-h-0 py-2 text-xs">← Retour choisir l&apos;adresse</Button>
+              <Button variant="outline" onClick={executerCreationBc} className="min-h-0 py-2 text-xs">Livrer à l&apos;atelier quand même</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ➕ BON DE COMMANDE LIBRE — « 4 rouleaux de tape » : pas de tâche,
           pas de pièce client. Attribué à un PROJET = entre dans ses coûts
           matériaux (mécanisme existant) ; sinon achat général. */}
@@ -940,81 +1033,14 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   loading={bcLibreEnCours}
                   disabled={!(bcLibre.description || "").trim()}
                   onClick={async () => {
-                    setBcLibreEnCours(true);
-                    // 📦 La livraison souhaitée voyage DANS la description :
-                    // elle suit le bon partout (liste, journal, courriel)
-                    // sans nouvelle colonne.
-                    const livraison = bcLibre.livraisonEstimee
-                      ? `\n📦 Livraison souhaitée : ${new Date(`${bcLibre.livraisonEstimee}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`
-                      : "";
-                    // 📍 L'adresse de livraison choisie suit le bon partout
-                    // (liste, dossier, courriel au fournisseur).
-                    const tL = bcLibre.tacheId ? (tachesPourAchat || []).find((x) => x.id === bcLibre.tacheId) : null;
-                    const clL = bcLibre.clientId ? (clients || []).find((x) => x.id === bcLibre.clientId) : null;
-                    const prL = bcLibre.projetId ? (projets || []).find((x) => x.id === bcLibre.projetId) : null;
-                    const adresseLivraisonBc = (() => {
-                      const c = bcLibre.livraisonChoix;
-                      if (c === "atelier") return configEnt.adresse ? `Atelier — ${configEnt.adresse}` : "";
-                      if (c === "tache") return tL?.adresse || "";
-                      if (c.startsWith("ca:")) {
-                        const a = (clL?.adresses || []).find((x) => x.id === c.slice(3));
-                        return a ? `${clL.nom} — ${a.nom ? `${a.nom} · ` : ""}${libelleAdresse(a)}` : "";
-                      }
-                      if (c === "cfact") return clL?.adresseFacturation ? `${clL.nom} — ${clL.adresseFacturation}` : "";
-                      if (c === "projet") return prL ? `Projet ${prL.nom} — ${prL.adresseLivraison || prL.adresseTravaux || ""}` : "";
-                      if (c === "autre") return bcLibre.livraisonAutre.trim();
-                      return "";
-                    })();
-                    const descriptionFinale = `${(bcLibre.description || "").trim()}${bcLibre.pourInventaire ? "\n📦 Pour l'inventaire courant (stock du bureau)" : ""}${livraison}${adresseLivraisonBc ? `\n📍 Livraison : ${adresseLivraisonBc}` : ""}`;
-                    // 🤝 Montant HT laissé à 0 mais part attribuée tapée :
-                    // la part DEVIENT le montant de l'achat (voir l'aide du
-                    // champ) — plus jamais de part « ramenée à 0 ».
-                    const partTapee = Number(bcLibre.montantAttribue) || 0;
-                    const montantEffectif = (Number(bcLibre.montantHT) || 0) <= 0 && partTapee > 0 ? partTapee : bcLibre.montantHT;
-                    const numero = await onCreerBcLibre?.({ ...bcLibre, montantHT: montantEffectif, description: descriptionFinale });
-                    setBcLibreEnCours(false);
-                    setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
-                    // 📧 Le fournisseur est au répertoire avec des
-                    // courriels ? On offre l'envoi direct du bon.
-                    const fiche = ficheFournisseurParNom(bcLibre.fournisseurNom);
-                    const courrielTape = bcLibre.courrielFournisseur.trim();
-                    const courrielTapeValide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(courrielTape);
-                    if (fiche && (fiche.courriels || []).length > 0) {
-                      setOffreEnvoiBc({
-                        numero,
-                        fournisseur: fiche.nom,
-                        description: descriptionFinale,
-                        photos: bcLibre.photos || [],
-                        courriels: fiche.courriels,
-                        coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
-                      });
-                    } else if (!fiche && courrielTapeValide) {
-                      // 🏭 FOURNISSEUR HORS RÉPERTOIRE avec courriel tapé :
-                      // l'envoi s'offre pareil — et la fiche s'enregistre
-                      // au répertoire (si coché) pour la prochaine fois.
-                      const nomF = bcLibre.fournisseurNom.trim();
-                      if (bcLibre.enregistrerFournisseur && nomF) {
-                        const nouveauF = {
-                          id: `f-${Date.now()}`,
-                          nom: nomF,
-                          courriels: [{ id: `fc-${Date.now()}`, label: "Commande", email: courrielTape, defaut: true }],
-                        };
-                        setFournisseurs?.((prev) => [...(prev || []), nouveauF]);
-                        sauvegarderFournisseur(nouveauF)
-                          .then(() => ajouterJournal?.(`🏭 Fournisseur « ${nomF} » ajouté au répertoire (${courrielTape}).`))
-                          .catch(() => ajouterJournal?.(`⚠️ Fournisseur « ${nomF} » affiché mais NON enregistré au répertoire — réessaie.`));
-                      }
-                      setOffreEnvoiBc({
-                        numero,
-                        fournisseur: nomF || "fournisseur",
-                        description: descriptionFinale,
-                        photos: bcLibre.photos || [],
-                        courriels: [{ id: "libre", label: "Commande", email: courrielTape, defaut: true }],
-                        coches: [courrielTape],
-                      });
+                    // 📍 Garde-fou : aucune adresse choisie (resté sur
+                    // « atelier ») et ce n'est pas du stock → on demande
+                    // confirmation avant d'envoyer.
+                    if (bcLibre.livraisonChoix === "atelier" && !bcLibre.pourInventaire) {
+                      setRappelAdresseBc(true);
+                      return;
                     }
-                    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [] });
-                    setBcLibreOuvert(false);
+                    await executerCreationBc();
                   }}
                   className="min-h-0 flex-1 py-1.5 text-xs"
                 >

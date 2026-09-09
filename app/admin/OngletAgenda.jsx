@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { Briefcase, Car, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, MapPin, Pencil, Plus, User, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { envoyerCourriel, gabaritConfirmationRdv } from "@/lib/courriels";
 import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { estCourrielST } from "@/lib/supabase/sousTraitants";
 import { estFerieCcq, marqueurCcq } from "@/lib/calendrierCcq";
@@ -473,6 +474,45 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // (cases de la fiche + autre adresse, ajoutable au dossier) au lieu
   // d'envoyer directement au courriel par défaut.
   const [renvoiDepot, setRenvoiDepot] = useState(null); // { tache, depot, coches, extra, extraAuDossier, enCours }
+  // 📅 CONFIRMATION DE RENDEZ-VOUS (2026-09-08, demande du propriétaire :
+  // « lorsque nous recevons le dépôt, envoyer un courriel de
+  // confirmation du rendez-vous ») — même patron que le renvoi de
+  // dépôt : adresses de la fiche cochables, envoi PAR le bureau.
+  const [confirmationRdv, setConfirmationRdv] = useState(null); // { tache, coches, extra, enCours, envoyees }
+  const ouvrirConfirmationRdv = (t) => {
+    const fiche = (clients || []).find((c) => c.id === t.clientId || c.nom === t.clientNom);
+    const defaut = courrielDefautClient(fiche)?.email || "";
+    setConfirmationRdv({ tache: t, coches: defaut ? [defaut] : [], extra: "", enCours: false });
+  };
+  const executerConfirmationRdv = async () => {
+    const { tache: t, coches, extra } = confirmationRdv;
+    const extraCourriel = extra.trim().toLowerCase();
+    const adresses = [...new Set([...coches, ...(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extraCourriel) ? [extraCourriel] : [])])];
+    if (adresses.length === 0 || !t.datePrevue) return;
+    setConfirmationRdv((p) => ({ ...p, enCours: true }));
+    const dateLisible = new Date(`${t.datePrevue}T12:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const technicienNom = t.technicienPrevu ? employes.find((e) => e.id === t.technicienPrevu)?.nom || "" : "";
+    const r = await envoyerCourriel({
+      a: adresses,
+      sujet: `Votre rendez-vous est confirmé — ${dateLisible} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
+      html: gabaritConfirmationRdv({
+        config: configEnt,
+        clientNom: t.clientNom || "",
+        date: dateLisible,
+        adresse: t.adresseIntervention || t.adresseTravaux || "",
+        technicien: technicienNom,
+        depotRecu: true,
+      }),
+    });
+    ajouterJournal(
+      r?.envoye
+        ? `📅 Confirmation de rendez-vous (${dateLisible} — heure confirmée la veille) ENVOYÉE à ${adresses.join(", ")} — « ${t.titre || t.clientNom} ».`
+        : r?.simule
+          ? "🔧 Confirmation de rendez-vous SIMULÉE — le service de courriels n'est pas configuré ici."
+          : `⚠️ Confirmation de rendez-vous NON envoyée${r?.erreur ? ` — ${r.erreur}` : ""} — réessaie.`
+    );
+    setConfirmationRdv(null);
+  };
   const ouvrirRenvoiDepot = (t, d) => {
     const fiche = (clients || []).find((c) => c.id === t.clientId || c.nom === t.clientNom);
     const defaut = (d.prospectCourriel || "").trim() || courrielDefautClient(fiche)?.email || "";
@@ -956,6 +996,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         total: Number(r.total) || 0,
         nbLignes: (r.lignes || []).length,
         clientNomQbo: r.clientNomQbo || null,
+        // 📋 On GARDE les lignes du devis QBO (2026-09-08, demande du
+        // propriétaire) : leur description ira sur la facture, et le
+        // total servira de plafond au compteur anti-dépassement.
+        lignes: Array.isArray(r.lignes) ? r.lignes : [],
       });
     } else if (r?.trouve === false) {
       setVerifDevisQbo({ etat: "introuvable" });
@@ -3993,9 +4037,22 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   }
                   if (d.statut === "paye" || d.statut === "paye_manuellement") {
                     return (
-                      <p className="mt-1 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700">
-                        💰 DÉPÔT REÇU{d.modePaiement ? ` (${d.modePaiement})` : ""} — planifiable
-                      </p>
+                      <span className="mt-1 inline-flex flex-wrap items-center gap-1">
+                        <p className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700">
+                          💰 DÉPÔT REÇU{d.modePaiement ? ` (${d.modePaiement})` : ""} — planifiable
+                        </p>
+                        {/* 📅 Confirmer le rendez-vous au client — offert
+                            dès que la tâche porte une date prévue. */}
+                        {!lectureSeule && t.datePrevue && (
+                          <button
+                            onClick={() => ouvrirConfirmationRdv(t)}
+                            title="Envoie au client la confirmation de son rendez-vous (date, heure, adresse, technicien)"
+                            className="rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[9px] font-bold text-emerald-700 active:scale-95"
+                          >
+                            📧 Confirmer le rendez-vous
+                          </button>
+                        )}
+                      </span>
                     );
                   }
                   const heuresRestantes = Math.max(0, Math.round((new Date(d.dateLimite).getTime() - Date.now()) / 3600000));
@@ -5551,6 +5608,72 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 <Button variant="outline" onClick={() => setRenvoiDepot(null)} className="min-h-0 py-2 text-xs">Annuler</Button>
                 <Button loading={renvoiDepot.enCours} disabled={nbAdresses === 0} onClick={executerRenvoiDepot} className="min-h-0 py-2 text-xs">
                   Renvoyer{nbAdresses > 1 ? ` (${nbAdresses} adresses)` : ""}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {/* 📅 MODALE — CONFIRMATION DE RENDEZ-VOUS (dépôt reçu) */}
+      {confirmationRdv && (() => {
+        const t = confirmationRdv.tache;
+        const ficheC = (clients || []).find((c) => c.id === t.clientId || c.nom === t.clientNom);
+        const contactsC = (ficheC?.courriels || [])
+          .map((c) => (typeof c === "string" ? { email: c } : c))
+          .filter((c) => c?.email);
+        const extraValideC = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(confirmationRdv.extra.trim());
+        const nbAdressesC = new Set([...confirmationRdv.coches, ...(extraValideC ? [confirmationRdv.extra.trim().toLowerCase()] : [])]).size;
+        const dateLisibleC = t.datePrevue ? new Date(`${t.datePrevue}T12:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" }) : "";
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget && !confirmationRdv.enCours) setConfirmationRdv(null); }}>
+            <div className="w-full max-w-sm rounded-2xl bg-white p-4">
+              <div className="mb-2 flex items-start justify-between">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">📅 Confirmer le rendez-vous</h3>
+                  <p className="text-[11px] text-slate-500">
+                    {t.clientNom || t.titre} — {dateLisibleC}{t.heurePrevue ? ` à ${t.heurePrevue}` : ""}
+                  </p>
+                </div>
+                <button onClick={() => !confirmationRdv.enCours && setConfirmationRdv(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+              </div>
+              <p className="mb-2 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] text-emerald-800">
+                Le courriel dit : dépôt bien reçu, rendez-vous confirmé le {dateLisibleC}
+                {t.adresseIntervention || t.adresseTravaux ? `, ${t.adresseIntervention || t.adresseTravaux}` : ""}
+                {t.technicienPrevu ? `, technicien ${employes.find((e) => e.id === t.technicienPrevu)?.nom || ""}` : ""} —
+                <span className="font-bold"> sans l&apos;heure</span> : « nous vous contacterons la veille pour confirmer le rendez-vous ».
+              </p>
+              {contactsC.length === 0 && (
+                <p className="mb-2 text-[11px] font-semibold text-amber-700">Ce client n&apos;a aucun courriel dans sa fiche — inscris une adresse ci-dessous.</p>
+              )}
+              <div className="space-y-1">
+                {contactsC.map((c) => (
+                  <label key={c.email} className="flex items-center gap-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={confirmationRdv.coches.includes(c.email)}
+                      onChange={() =>
+                        setConfirmationRdv((p) => ({
+                          ...p,
+                          coches: p.coches.includes(c.email) ? p.coches.filter((x) => x !== c.email) : [...p.coches, c.email],
+                        }))
+                      }
+                      className="h-4 w-4 accent-[#FF6A13]"
+                    />
+                    <span className="min-w-0 truncate font-semibold">{c.email}</span>
+                    {c.label ? <span className="shrink-0 text-[10px] text-slate-400">({c.label}{c.defaut ? " · défaut" : ""})</span> : null}
+                  </label>
+                ))}
+              </div>
+              <input
+                value={confirmationRdv.extra}
+                onChange={(e) => setConfirmationRdv((p) => ({ ...p, extra: e.target.value }))}
+                placeholder="Autre adresse — optionnel"
+                className="mt-2 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-xs"
+              />
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => setConfirmationRdv(null)} className="min-h-0 py-2 text-xs">Annuler</Button>
+                <Button loading={confirmationRdv.enCours} disabled={nbAdressesC === 0} onClick={executerConfirmationRdv} className="min-h-0 py-2 text-xs">
+                  📧 Envoyer la confirmation
                 </Button>
               </div>
             </div>

@@ -590,7 +590,36 @@ export const LigneProjetClient = React.memo(function LigneProjetClient({ p, trav
 });
 
 
-export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, cibleCoup = null, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], piecesCommandees = [], qbConnecte = null }) {
+// (Fusion des deux postes, 2026-09-09 : `cibleCoup` — recherche qui
+// rouvre le même dossier — ET `planning` — rendez-vous à venir.)
+export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, cibleCoup = null, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], piecesCommandees = [], qbConnecte = null, planning = {} }) {
+  // 📅 RENDEZ-VOUS À VENIR (2026-09-08, demande du propriétaire :
+  // « ce client est cédulé pour le 9 septembre et je ne peux pas le
+  // voir ») — le dossier montre les tâches PLANIFIÉES du client, sans
+  // fouiller l'agenda jour par jour. Une entrée par tâche et par
+  // journée, les techniciens regroupés.
+  const rendezVousAVenir = (c) => {
+    const aujourdhui = new Date().toLocaleDateString("fr-CA");
+    const parCle = new Map();
+    Object.entries(planning || {}).forEach(([cle, valeur]) => {
+      const [date, employeId, heure] = cle.split("|");
+      if (!date || date < aujourdhui) return;
+      (Array.isArray(valeur) ? valeur : valeur ? [valeur] : []).forEach((t) => {
+        if (!t || t.est_tache_systeme) return;
+        if (!(t.clientId === c.id || (t.clientNom && t.clientNom === c.nom))) return;
+        const groupe = `${t.id || t.titre}|${date}`;
+        const nomTech = (utilisateurs || []).find((u) => u.id === employeId)?.nom || String(employeId || "").replace(/^u-/, "").split("@")[0];
+        const existant = parCle.get(groupe);
+        if (existant) {
+          if (!existant.techniciens.includes(nomTech)) existant.techniciens.push(nomTech);
+          if (heure && (!existant.heure || heure < existant.heure)) existant.heure = heure;
+        } else {
+          parCle.set(groupe, { date, heure: heure || "", titre: t.titre || t.typeTache || "Tâche", techniciens: [nomTech] });
+        }
+      });
+    });
+    return [...parCle.values()].sort((a, b) => (a.date + a.heure).localeCompare(b.date + b.heure));
+  };
   // Taux camion par défaut — pour le coût réel des travaux du client.
   const configClients = useEntreprise();
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
@@ -1480,6 +1509,23 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       📌 {c.note}
                     </p>
                   )}
+
+                  {(() => {
+                    const rdv = rendezVousAVenir(c);
+                    if (rdv.length === 0) return null;
+                    return (
+                      <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2">
+                        <p className="mb-1 text-[11px] font-bold uppercase text-emerald-700">📅 Rendez-vous à venir ({rdv.length})</p>
+                        {rdv.map((r, i) => (
+                          <p key={i} className="text-[11px] leading-snug text-emerald-800">
+                            <span className="font-bold">{new Date(`${r.date}T12:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" })}</span>
+                            {r.heure ? ` à ${r.heure}` : ""} — {r.titre}
+                            <span className="text-emerald-600"> · {r.techniciens.join(", ")}</span>
+                          </p>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   <div className="mt-2 border-t border-slate-100 pt-2">
                     <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase text-slate-400">

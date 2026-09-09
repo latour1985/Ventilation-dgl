@@ -193,7 +193,12 @@ function decalerHeure(heure, minutes) {
 // sont retires. Le transport journalier CCQ entre deux clients reste :
 // c'est du temps de travail, toujours paye. Meme juge que l'admin
 // (transportQuotidienPayePour — regle entreprise + derogation fiche).
-function completerTransportsJournee(tachesEntree, transportDebutFin = true) {
+function completerTransportsJournee(tachesEntree, transportDebutFin = true, datesSansVehicule = null) {
+  // 🚶 JOURNÉE SANS VÉHICULE (2026-09-08, vécu : « quand je clique pas
+  // de camion, la tâche Transport reste à faire ») — le technicien à
+  // pied ou passager n'a AUCUN transport Début/Fin à pointer : ces
+  // blocs, jamais commencés, disparaissent pour ces journées-là.
+  const sansVeh = datesSansVehicule instanceof Set ? datesSansVehicule : new Set();
   // MIGRATION de nom : ce transport a porté deux noms avant « Transport
   // journalier » — « Transport CCQ », puis « Transport durant la
   // journée ». Le titre est figé à la création de la carte : sans ce
@@ -217,12 +222,16 @@ function completerTransportsJournee(tachesEntree, transportDebutFin = true) {
   // Option transport ETEINTE : les blocs Debut/Fin jamais commences
   // disparaissent (ceux avec du temps couru restent — on ne jette
   // jamais des minutes travaillees).
-  const tachesFiltrees = transportDebutFin
-    ? taches
-    : taches.filter(
-        (t) =>
-          !(t.type === "transport" && (t.momentTransport === "debut" || t.momentTransport === "fin") && t.etat === "a_faire" && (t.tempsAccumuleSec || 0) === 0)
-      );
+  const estBlocDebutFinVierge = (t) =>
+    t.type === "transport" && (t.momentTransport === "debut" || t.momentTransport === "fin") && t.etat === "a_faire" && (t.tempsAccumuleSec || 0) === 0;
+  const tachesFiltrees = taches.filter((t) => {
+    if (!estBlocDebutFinVierge(t)) return true;
+    // Option transport éteinte OU journée sans véhicule : le bloc vierge
+    // disparaît (on ne jette jamais un transport déjà commencé).
+    if (!transportDebutFin) return false;
+    if (sansVeh.has(t.date)) return false;
+    return true;
+  });
   // 1) REPOSITIONNE les transports existants : si une tâche est ajoutée
   // plus tard dans la journée, le « Transport — Fin de journée » se
   // replace automatiquement APRÈS elle (et le Début avant la première).
@@ -256,10 +265,11 @@ function completerTransportsJournee(tachesEntree, transportDebutFin = true) {
     const secteurPremiere = trieesPourSecteur[0]?.secteur || "commercial";
     const secteurDerniere = trieesPourSecteur[trieesPourSecteur.length - 1]?.secteur || "commercial";
     const gabarit = { type: "transport", date, etat: "a_faire", tempsAccumuleSec: 0, tempsDebutSegment: null, kilometres: 0 };
-    if (transportDebutFin && !resultat.some((t) => t.type === "transport" && t.momentTransport === "debut" && t.date === date)) {
+    // Journée sans véhicule : aucun bloc Début/Fin n'est (re)créé.
+    if (transportDebutFin && !sansVeh.has(date) && !resultat.some((t) => t.type === "transport" && t.momentTransport === "debut" && t.date === date)) {
       resultat.push({ ...gabarit, secteur: secteurPremiere, id: `transport-debut-${date}`, momentTransport: "debut", heure: decalerHeure(heures[0], -30), titre: "Transport — Début de journée" });
     }
-    if (transportDebutFin && !resultat.some((t) => t.type === "transport" && t.momentTransport === "fin" && t.date === date)) {
+    if (transportDebutFin && !sansVeh.has(date) && !resultat.some((t) => t.type === "transport" && t.momentTransport === "fin" && t.date === date)) {
       resultat.push({ ...gabarit, secteur: secteurDerniere, id: `transport-fin-${date}`, momentTransport: "fin", heure: decalerHeure(heures[heures.length - 1], 150), titre: "Transport — Fin de journée" });
     }
     // 3) TRANSPORT CCQ entre chaque paire de tâches consécutives (2 tâches
@@ -5646,6 +5656,10 @@ function AppTechnicien() {
   const [transportDebutFin, setTransportDebutFin] = useState(true);
   const transportDebutFinRef = useRef(true);
   transportDebutFinRef.current = transportDebutFin;
+  // 🚶 Les journées où le technicien a déclaré « pas de véhicule » — le
+  // ref suit toujours la dernière valeur (mis à jour après la
+  // déclaration de inspectionsParDate, plus bas).
+  const datesSansVehiculeRef = useRef(new Set());
   // Durée de la pause dîner non payée (Paramètres de l'entreprise).
   const minutesDiner = Number(useEntreprise().minutesDiner) || 30;
   const [connecte, setConnecte] = useState(false);
@@ -5726,7 +5740,7 @@ function AppTechnicien() {
               : d;
           });
           const locales = prev.filter((t) => !t.supabase);
-          return completerTransportsJournee([...locales, ...enrichies], transportDebutFinRef.current);
+          return completerTransportsJournee([...locales, ...enrichies], transportDebutFinRef.current, datesSansVehiculeRef.current);
         });
       } catch {
         // table absente ou hors-ligne — l'app locale continue sans blocage
@@ -5784,7 +5798,7 @@ function AppTechnicien() {
         const paye = v === "oui" ? true : v === "non" ? false : configTech?.transportQuotidienPaye !== false;
         setTransportDebutFin(paye);
         // Le moteur repasse tout de suite : blocs retires ou recrees.
-        setTaches((prev) => completerTransportsJournee(prev, paye));
+        setTaches((prev) => completerTransportsJournee(prev, paye, datesSansVehiculeRef.current));
       })
       .catch(() => {});
     return () => { annule = true; };
@@ -5828,6 +5842,12 @@ function AppTechnicien() {
   // moment de lancer le « Transport — Début de journée » de cette date.
   const [inspectionsParDate, setInspectionsParDate] = useState({});
   const inspectionFaitePour = (date) => !!inspectionsParDate[date];
+  // Recalcule le ref des journées sans véhicule à chaque changement.
+  datesSansVehiculeRef.current = new Set(
+    Object.entries(inspectionsParDate)
+      .filter(([, rec]) => rec?.sansVehicule)
+      .map(([date]) => date)
+  );
   const [vue, setVue] = useState("accueil");
   // ⬅️ BOUTON RETOUR (Android / navigateur) : ferme la fiche de tâche
   // ou l'écran Mes heures au lieu de quitter l'application — le
@@ -6675,6 +6695,14 @@ function AppTechnicien() {
       }
       return maj;
     });
+    // 🚶 PAS DE VÉHICULE : les blocs Transport Début/Fin de la journée
+    // disparaissent TOUT DE SUITE (2026-09-08) — sinon ils restaient
+    // « à faire » jusqu'au prochain rechargement. Le ref est mis à jour
+    // ici même pour que le recalcul en tienne compte immédiatement.
+    if (donnees.sansVehicule) {
+      datesSansVehiculeRef.current = new Set([...datesSansVehiculeRef.current, dateCible]);
+      setTaches((prev) => completerTransportsJournee(prev, transportDebutFinRef.current, datesSansVehiculeRef.current));
+    }
     // Écriture réelle dans Supabase (inspections_vehicules) — l'onglet
     // admin la voit en direct. En cas d'échec réseau, l'inspection reste
     // valable localement (le déblocage des tâches n'attend pas le serveur).
