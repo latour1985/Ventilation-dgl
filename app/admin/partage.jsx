@@ -19,6 +19,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
 import { listerLegendes, sauvegarderLegende, televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
+import { listerModelesEtapes, sauvegarderModeleEtapes } from "@/lib/supabase/modelesEtapes";
 import TermesConditions from "@/components/TermesConditions";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 // ⚠️ Cycle assumé partage ↔ OngletParametres : les deux ne se lisent
@@ -1086,6 +1087,38 @@ export function nomClientNormalise(nom) {
 // ============================================================
 export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
   const [texte, setTexte] = useState("");
+  // 📋 MODÈLES (v2, 2026-09-09) — chargés à la première ouverture du
+  // sélecteur ; « Enregistrer comme modèle » fige les textes courants.
+  const [modeles, setModeles] = useState(null); // null = jamais chargés
+  const [modeleMsg, setModeleMsg] = useState(null);
+  const chargerModeles = async () => {
+    try {
+      setModeles(await listerModelesEtapes());
+    } catch (e) {
+      setModeles([]);
+      setModeleMsg(/modeles_etapes/.test(String(e?.message)) ? "Passe le SQL « 140 - Modèles d'étapes » pour activer les modèles." : "Modèles illisibles — réessaie.");
+    }
+  };
+  const appliquerModele = (m) => {
+    // Les étapes du modèle S'AJOUTENT (sans doublon de texte) — on peut
+    // combiner un modèle et des étapes tapées à la main.
+    const dejaLa = new Set((etapes || []).map((e) => String(e.texte).toLowerCase()));
+    const neuves = (m.etapes || [])
+      .filter((e) => !dejaLa.has(String(e.texte).toLowerCase()))
+      .map((e, i) => ({ id: `et-${Date.now()}-${i}`, texte: e.texte, fait: false }));
+    if (neuves.length > 0) onChange([...(etapes || []), ...neuves]);
+  };
+  const enregistrerCommeModele = async () => {
+    const nom = window.prompt("Nom du modèle (ex. : Installation thermopompe) :", "");
+    if (!nom || !nom.trim()) return;
+    try {
+      await sauvegarderModeleEtapes(nom, etapes);
+      setModeleMsg(`✅ Modèle « ${nom.trim()} » enregistré — offert à la prochaine tâche.`);
+      setModeles(null); // rechargés à la prochaine ouverture
+    } catch (e) {
+      setModeleMsg(/modeles_etapes/.test(String(e?.message)) ? "Passe le SQL « 140 - Modèles d'étapes » pour activer les modèles." : "Enregistrement impossible — réessaie.");
+    }
+  };
   const ajouter = () => {
     const propre = texte.trim();
     if (!propre) return;
@@ -1131,6 +1164,41 @@ export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
           ➕
         </button>
       </div>
+      {/* 📋 MODÈLES — recharger des étapes standard, ou figer la liste
+          courante comme modèle réutilisable (v2, 2026-09-09). */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <select
+          value=""
+          onMouseDown={() => { if (modeles === null) chargerModeles(); }}
+          onFocus={() => { if (modeles === null) chargerModeles(); }}
+          onChange={(e) => {
+            const m = (modeles || []).find((x) => x.id === e.target.value);
+            if (m) appliquerModele(m);
+            e.target.value = "";
+          }}
+          className="rounded-lg border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-600 outline-none"
+        >
+          <option value="">📋 Depuis un modèle…</option>
+          {modeles === null ? (
+            <option disabled>Chargement…</option>
+          ) : modeles.length === 0 ? (
+            <option disabled>Aucun modèle enregistré encore</option>
+          ) : (
+            modeles.map((m) => (
+              <option key={m.id} value={m.id}>{m.nom} ({m.etapes.length} étapes)</option>
+            ))
+          )}
+        </select>
+        {(etapes || []).length > 0 && (
+          <button
+            onClick={enregistrerCommeModele}
+            className="text-[10px] font-semibold text-slate-400 underline underline-offset-2 hover:text-slate-600"
+          >
+            💾 Enregistrer ces étapes comme modèle
+          </button>
+        )}
+      </div>
+      {modeleMsg && <p className="mt-1 text-[10px] font-bold text-amber-700">{modeleMsg}</p>}
     </div>
   );
 }

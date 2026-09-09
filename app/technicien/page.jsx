@@ -26,7 +26,7 @@ import PanneauNotesPerso from "@/components/PanneauNotesPerso";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { pushSupporte, activerNotificationsPush, resouscrireSiPermis } from "@/lib/notificationsPush";
-import { googlePlacesDisponible, nouveauJeton, chercherAdresses } from "@/lib/googlePlaces";
+import { googlePlacesDisponible, nouveauJeton, chercherAdresses, geocoderAdresse } from "@/lib/googlePlaces";
 import { listerTachesPourEmploye, sAbonnerTachesAssignees, etatEquipeTache, creerCourseTechnicien, creerTravailShopTechnicien, listerProjetsPourTechnicien, declarerEquipeTerminee, signalerDepartPremier, majStatutAssignation } from "@/lib/supabase/tachesAssignees";
 import { enregistrerTravailEffectue, travailDejaEnregistre, infoTravailEnregistre } from "@/lib/supabase/travauxEffectues";
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
@@ -3607,11 +3607,18 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
     setEstimationEnCours(true);
     const position = await capturerPositionGps();
     // L'estimation vise la destination RÉELLE du retour (l'adresse de
-    // l'entreprise, selon ses Paramètres). Sans coordonnées connues
-    // (entreprise cliente : adresse en texte seulement), pas de calcul
-    // à vol d'oiseau possible — le guidage Google reste disponible.
-    if (position && destination?.lat != null && destination?.lng != null) {
-      const distance = Math.round(distanceKm(position.lat, position.lng, destination.lat, destination.lng) * 10) / 10;
+    // l'entreprise, selon ses Paramètres). 📍 GÉOCODAGE PARESSEUX
+    // (2026-09-09, vécu sur l'entreprise test : « Estimation
+    // indisponible ») : une adresse SANS coordonnées (entreprise
+    // cliente) se géocode ici même via Google Places — une fois, puis
+    // en cache. Échec = le message d'avant, jamais bloquant.
+    let cible = destination;
+    if (cible && (cible.lat == null || cible.lng == null) && cible.ligne1) {
+      const geo = await geocoderAdresse(cible.ligne1);
+      if (geo) cible = { ...cible, ...geo };
+    }
+    if (position && cible?.lat != null && cible?.lng != null) {
+      const distance = Math.round(distanceKm(position.lat, position.lng, cible.lat, cible.lng) * 10) / 10;
       const dureeMin = Math.round((distance / VITESSE_MOYENNE_ESTIMATION_KMH) * 60);
       setEstimationRetour({ distanceKm: distance, dureeMin });
     } else if (position) {

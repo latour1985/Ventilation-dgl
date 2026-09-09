@@ -3927,7 +3927,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         <input
           value={rechercheFact}
           onChange={(e) => setRechercheFact(e.target.value)}
-          placeholder="Rechercher — job, client, nº de devis, nº de facture QuickBooks…"
+          placeholder={`Rechercher — job, client, nº de devis, nº de facture${(configEnt?.systemeComptable || "quickbooks") === "quickbooks" ? " QuickBooks" : ""}…`}
           className="w-full text-sm outline-none"
         />
         {rechercheFact && (

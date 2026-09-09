@@ -5521,3 +5521,28 @@ create trigger trg_entreprise_notes_perso before insert on notes_perso
 -- faitLe}]. Facultative - null quand la tache n en avait pas.
 -- ============================================================
 alter table bons_travail add column if not exists etapes jsonb;
+
+
+-- ============================================================
+-- 140 - MODELES D ETAPES (v2 de la checklist) (2026-09-09)
+-- Des listes d etapes standard (ex. Installation thermopompe = 8
+-- etapes), definies une fois et rechargees a la creation des taches.
+-- Par entreprise, partagees par tout le bureau (cloison standard).
+-- ============================================================
+create table if not exists modeles_etapes (
+  id text primary key,
+  entreprise_id text not null default 'dgl',
+  nom text not null,
+  etapes jsonb not null default '[]'::jsonb,
+  cree_le timestamptz default now()
+);
+create index if not exists idx_modeles_etapes_entreprise on modeles_etapes (entreprise_id);
+alter table modeles_etapes enable row level security;
+drop policy if exists "iso_modeles_etapes" on modeles_etapes;
+create policy "iso_modeles_etapes" on modeles_etapes
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton())
+  with check (entreprise_id = public.entreprise_du_jeton());
+drop trigger if exists trg_entreprise_modeles_etapes on modeles_etapes;
+create trigger trg_entreprise_modeles_etapes before insert on modeles_etapes
+  for each row execute function public.poser_entreprise_id();

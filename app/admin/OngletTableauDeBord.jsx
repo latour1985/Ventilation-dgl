@@ -71,6 +71,46 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         onTraiterDevis={() => setOnglet("devis")}
       />
 
+      {/* 📥 À FAIRE AUJOURD'HUI (2026-09-09, GO du propriétaire) — TOUT
+          ce qui attend une action, rassemblé en une carte : le journal
+          dit tout, mais il faut le lire ; ici, un clic = l'écran
+          concerné. La carte disparaît quand tout est réglé. */}
+      {(() => {
+        const retoursAPlanifier = (bons || []).filter((b) => b.travauxNonTermines && b.statutQb !== "retire").length;
+        const depotsQuiExpirent = Object.values(depots || {}).filter((d) => {
+          if (d?.statut !== "en_attente_paiement" || !d?.dateLimite) return false;
+          const restant = new Date(d.dateLimite).getTime() - Date.now();
+          return restant > 0 && restant < 6 * 60 * 60 * 1000; // moins de 6 h
+        }).length;
+        const reponsesATraiter = (reponsesClients || []).filter((r) => r.genre !== "refuse").length;
+        const items = [
+          compteAlertes > 0 && { cle: "factures", texte: `${compteAlertes} facture${compteAlertes > 1 ? "s" : ""} à émettre / réviser`, onglet: "facturation", icone: "🧾" },
+          compteAttente > 0 && { cle: "planifier", texte: `${compteAttente} tâche${compteAttente > 1 ? "s" : ""} à planifier`, onglet: "agenda", icone: "📅" },
+          retoursAPlanifier > 0 && { cle: "retours", texte: `${retoursAPlanifier} retour${retoursAPlanifier > 1 ? "s" : ""} 🚧 à planifier (travaux non terminés)`, onglet: "facturation", icone: "🚧" },
+          depotsQuiExpirent > 0 && { cle: "depots", texte: `${depotsQuiExpirent} dépôt${depotsQuiExpirent > 1 ? "s" : ""} qui expire${depotsQuiExpirent > 1 ? "nt" : ""} dans moins de 6 h`, onglet: "agenda", icone: "⏳" },
+          reponsesATraiter > 0 && { cle: "reponses", texte: `${reponsesATraiter} réponse${reponsesATraiter > 1 ? "s" : ""} de client${reponsesATraiter > 1 ? "s" : ""} à traiter`, onglet: "devis", icone: "💬" },
+        ].filter(Boolean);
+        if (items.length === 0) return null;
+        return (
+          <div className="rounded-2xl border-2 border-[#FF6A13]/30 bg-white p-4">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-[#FF6A13]">📥 {t("À faire aujourd'hui")}</p>
+            <div className="mt-2 space-y-1">
+              {items.map((it) => (
+                <button
+                  key={it.cle}
+                  onClick={() => setOnglet(it.onglet)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-semibold text-slate-700 hover:bg-orange-50"
+                >
+                  <span className="shrink-0">{it.icone}</span>
+                  <span className="min-w-0 flex-1">{it.texte}</span>
+                  <span className="shrink-0 text-[10px] font-bold text-[#FF6A13]">Ouvrir ›</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 📱 AUJOURD'HUI SUR LE TERRAIN — TÉLÉPHONE (2026-08-21)
           ------------------------------------------------------------
           La première question d'un admin sur la route est toujours la
