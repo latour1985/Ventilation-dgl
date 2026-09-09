@@ -6,11 +6,11 @@
 // (2026-08-28). Extraction MÉCANIQUE : aucun comportement ne change,
 // le code est déplacé tel quel — seuls des export/import s'ajoutent.
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Pencil, Phone } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { joursBloques, cleJour, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
-import { HEURES, dateISO, ajouterJours, dimancheDeSemaineISO, ITEMS_PAR_PAGE, Button, DefilementHorizontal } from "./partage";
+import { dateISO, ajouterJours, dimancheDeSemaineISO, Button, DefilementHorizontal } from "./partage";
 
 // ============================================================
 // TABLEAU DE BORD (accueil — vue d'ensemble)

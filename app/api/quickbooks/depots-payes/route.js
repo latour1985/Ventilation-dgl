@@ -88,7 +88,7 @@ export async function POST(request) {
   // Un dépôt payé COMPTANT/CHÈQUE (confirmé à la main) n'est jamais
   // touché : annuler sa facture dans QuickBooks est du ménage
   // comptable, pas un désistement du client.
-  let aReverifier = [];
+  let aReverifier;
   {
     const [{ data: fils }, { data: payesAvant }] = await Promise.all([
       admin.from("taches_attente").select("id").eq("entreprise_id", entrepriseId),

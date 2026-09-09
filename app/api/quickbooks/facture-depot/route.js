@@ -34,7 +34,7 @@ import {
   codeTaxeVente,
   proprietesTaxe,
   envoyerFactureParQb,
-  environnementQb, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+  entrepriseDuCompte } from "@/lib/quickbooksServeur";
 // 🔒 RLS phase 3 : le rôle vient de la table des permissions.
 import { roleServeur } from "@/lib/quickbooksServeur";
 // (Les helpers d'écriture vivent dans quickbooksServeur.js — partagés

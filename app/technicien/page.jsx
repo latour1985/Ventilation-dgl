@@ -7,9 +7,7 @@ import {
   Clock, User, Loader2, Play, Pause, Square, Car, Lock, LogOut, RotateCcw, X, FileText, Check, Phone,
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
-import ChampMotDePasse from "@/components/ChampMotDePasse";
 import ConnexionTechnicien from "@/components/ConnexionTechnicien";
-import Logo from "@/components/Logo";
 import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
 import { permissionsEffectives } from "@/lib/permissions";
 import { enregistrerInspection } from "@/lib/supabase/inspections";
@@ -97,15 +95,6 @@ const CLIENTS = [];
 
 const PRODUITS_CATALOGUE = [];
 
-// Taux utilisés pour estimer le coût du déplacement (à déplacer dans
-// une table de configuration Supabase — ex: table `parametres_paie`).
-const TAUX_KM = 0.68; // $/km
-const TAUX_HORAIRE_DEPLACEMENT = 45.0; // $/heure
-
-// 🧹 Journées de démonstration PURGÉES (2026-09-06) — la journée d'un
-// technicien vient de l'agenda de SON entreprise (Supabase), sinon vide.
-const TACHES_INITIALES = [];
-
 // Clé utilisée pour la persistance locale des tâches (mode hors-ligne).
 // ⚠️ localStorage n'est pas disponible dans l'aperçu Artifact de
 // Claude.ai (bac à sable) — ces fonctions échouent silencieusement
@@ -140,9 +129,6 @@ function ajouterCamionConnu(nom) {
   }
 }
 
-// Types d'intervention affichés sur les vignettes de bon de travail.
-const TYPES_INTERVENTION = ["Installation", "Réparation", "Entretien", "Inspection"];
-
 // --- Helpers de date (en heure LOCALE, jamais UTC, pour éviter tout
 // décalage de jour selon le fuseau horaire) ---
 function isoLocal(d) {
@@ -150,11 +136,6 @@ function isoLocal(d) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const j = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${j}`;
-}
-function isoAvecDecalage(nbJours) {
-  const d = new Date();
-  d.setDate(d.getDate() + nbJours);
-  return isoLocal(d);
 }
 function dateDepuisIso(iso) {
   return new Date(`${iso}T00:00:00`);
@@ -314,21 +295,6 @@ function completerTransportsJournee(tachesEntree, transportDebutFin = true, date
   });
 }
 
-function tachesParDefaut() {
-  return completerTransportsJournee(
-    TACHES_INITIALES.map((t) => ({
-      ...t,
-      // Date calculée par rapport à aujourd'hui (à partir de jourOffset)
-      // pour que la vue Semaine ait toujours du contenu autour du jour actuel.
-      date: isoAvecDecalage(t.jourOffset || 0),
-      etat: "a_faire",
-      tempsAccumuleSec: 0,
-      tempsDebutSegment: null,
-      kilometres: 0,
-    }))
-  );
-}
-
 // Les URL.createObjectURL des photos ne survivent pas à un
 // rafraîchissement de page — on ne garde que les métadonnées (tailles)
 // à la sauvegarde, pas l'aperçu de l'image elle-même. Le dessin de la
@@ -427,24 +393,12 @@ function sauvegarderFileAttente(file) {
 const ANNEE = new Date().getFullYear();
 
 // ============================================================
-// ⚠️ MODE DÉVELOPPEMENT — À DÉSACTIVER AVANT LA MISE EN PRODUCTION
-// Permet de se connecter avec le nom d'utilisateur "admin" sans mot
-// de passe, pour accélérer les tests pendant la programmation.
-// Mettre à `false` (ou retirer complètement ce bloc et son usage
-// dans soumettreIdentifiants) avant de déployer l'application aux
-// vrais utilisateurs — sinon n'importe qui peut se connecter en
-// admin sans mot de passe.
-// ============================================================
-const MODE_DEVELOPPEMENT = true;
-const NOM_UTILISATEUR_DEV = "admin";
-
-// ============================================================
 // UTILITAIRES
 // ============================================================
-function formatKo(bytes) {
-  return `${Math.round(bytes / 1024)} Ko`;
-}
-
+// (🧹 Audit 2026-09-09 : l'ancien écran de connexion de démonstration
+// — « admin » sans mot de passe, MODE_DEVELOPPEMENT — a été SUPPRIMÉ.
+// Il n'était plus jamais affiché depuis Supabase Auth, mais un audit
+// l'aurait signalé à raison. La seule porte est Supabase.)
 function formatDuree(secondes) {
   const s = Math.max(0, Math.floor(secondes));
   const h = Math.floor(s / 3600);
@@ -1102,127 +1056,6 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
   );
 }
 
-// ============================================================
-// ÉCRAN ACCUEIL
-// ============================================================
-// ============================================================
-// ÉCRAN DE CONNEXION
-// Compte simulé pour la démo — en prod, l'authentification et le
-// mot de passe vivent dans Supabase Auth, jamais côté client.
-// ============================================================
-function EcranConnexion({ compte, setCompte, onConnecte }) {
-  const [etape, setEtape] = useState("identifiants"); // "identifiants" | "creation_mdp"
-  const [nomUtilisateur, setNomUtilisateur] = useState("");
-  const [motDePasse, setMotDePasse] = useState("");
-  const [nouveauMdp, setNouveauMdp] = useState("");
-  const [confirmationMdp, setConfirmationMdp] = useState("");
-  const [erreur, setErreur] = useState("");
-
-  const soumettreIdentifiants = () => {
-    // ⚠️ Contournement de mot de passe réservé au développement — voir
-    // la constante MODE_DEVELOPPEMENT en haut du fichier.
-    if (MODE_DEVELOPPEMENT && nomUtilisateur.trim().toLowerCase() === NOM_UTILISATEUR_DEV) {
-      setErreur("");
-      onConnecte(NOM_UTILISATEUR_DEV);
-      return;
-    }
-
-    if (nomUtilisateur.trim().toLowerCase() !== compte.nomUtilisateur) {
-      setErreur("Nom d'utilisateur introuvable.");
-      return;
-    }
-    setErreur("");
-    if (!compte.motDePasse) {
-      setEtape("creation_mdp");
-      return;
-    }
-    if (motDePasse !== compte.motDePasse) {
-      setErreur("Mot de passe incorrect.");
-      return;
-    }
-    onConnecte(compte.nomUtilisateur);
-  };
-
-  const creerMotDePasse = () => {
-    if (nouveauMdp.length < 6) {
-      setErreur("Le mot de passe doit contenir au moins 6 caractères.");
-      return;
-    }
-    if (nouveauMdp !== confirmationMdp) {
-      setErreur("Les mots de passe ne correspondent pas.");
-      return;
-    }
-    setCompte((prev) => ({ ...prev, motDePasse: nouveauMdp }));
-    setErreur("");
-    onConnecte(compte.nomUtilisateur);
-  };
-
-  return (
-    <div className="flex min-h-full flex-col items-center justify-center bg-[#131B2E] px-6">
-      <div className="w-full max-w-xs">
-        <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#FF6A13]">
-            <Lock size={24} className="text-white" />
-          </div>
-          <div className="flex justify-center"><Logo variant="compact" sombre /></div>
-          <p className="text-xs text-slate-400">Portail technicien</p>
-          {MODE_DEVELOPPEMENT && (
-            <p className="mt-2 rounded-full bg-amber-400/20 px-3 py-1 text-[10px] font-bold text-amber-300">
-              MODE DÉVELOPPEMENT — "{NOM_UTILISATEUR_DEV}" sans mot de passe
-            </p>
-          )}
-        </div>
-
-        {etape === "identifiants" ? (
-          <div className="space-y-3">
-            <input
-              value={nomUtilisateur}
-              onChange={(e) => setNomUtilisateur(e.target.value)}
-              placeholder="Nom d'utilisateur"
-              className="w-full rounded-xl border border-slate-600 bg-white/5 px-4 py-3.5 text-sm text-white placeholder:text-slate-400"
-            />
-            <ChampMotDePasse
-              value={motDePasse}
-              onChange={(e) => setMotDePasse(e.target.value)}
-              placeholder="Mot de passe"
-              className="w-full rounded-xl border border-slate-600 bg-white/5 px-4 py-3.5 text-sm text-white placeholder:text-slate-400"
-            />
-            {erreur && <p className="text-xs font-semibold text-red-400">{erreur}</p>}
-            <Button onClick={soumettreIdentifiants} className="w-full">
-              Se connecter
-            </Button>
-            <p className="text-center text-[11px] text-slate-400">
-              Première connexion ? Entre ton nom d'utilisateur — tu pourras créer ton mot de passe à l'étape suivante.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-center text-xs text-slate-300">
-              Première connexion pour <span className="font-bold text-white">{nomUtilisateur}</span> — crée ton mot de passe.
-            </p>
-            <ChampMotDePasse
-              value={nouveauMdp}
-              onChange={(e) => setNouveauMdp(e.target.value)}
-              placeholder="Nouveau mot de passe (6 caractères min.)"
-              className="w-full rounded-xl border border-slate-600 bg-white/5 px-4 py-3.5 text-sm text-white placeholder:text-slate-400"
-            />
-            <ChampMotDePasse
-              value={confirmationMdp}
-              onChange={(e) => setConfirmationMdp(e.target.value)}
-              placeholder="Confirmer le mot de passe"
-              className="w-full rounded-xl border border-slate-600 bg-white/5 px-4 py-3.5 text-sm text-white placeholder:text-slate-400"
-            />
-            {erreur && <p className="text-xs font-semibold text-red-400">{erreur}</p>}
-            <Button onClick={creerMotDePasse} className="w-full">
-              Créer le mot de passe et me connecter
-            </Button>
-          </div>
-        )}
-      </div>
-      <p className="mt-8 text-[10px] text-slate-500">Fluxya · © {ANNEE} Ventilation DGL inc.</p>
-    </div>
-  );
-}
 
 // ============================================================
 // MES HEURES — le technicien consulte SES heures de la semaine de paie
@@ -4331,7 +4164,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       // c'est moi le dernier — je poursuis et crée le bon. Garde
       // anti-doublon : si un coéquipier l'a déjà créé, on s'arrête.
       // ------------------------------------------------------------
-      let dernierEnRealite = false;
+      let dernierEnRealite;
       try {
         // Petit délai : le temps que les heures du coéquipier (parties
         // en même temps que les miennes) soient visibles côté serveur.
@@ -5914,7 +5747,6 @@ function AppTechnicien() {
     };
   }, [session]);
   const [role, setRole] = useState("employe"); // "admin" | "employe" — déterminé à la connexion
-  const [compte, setCompte] = useState({ nomUtilisateur: "mgagnon", motDePasse: null });
   // Nom affiché dans « Bonjour, … » : métadonnées du compte si définies,
   // sinon le nom de la FICHE DU RÉPERTOIRE des employés (matché par
   // courriel), sinon le début du courriel en dernier recours.

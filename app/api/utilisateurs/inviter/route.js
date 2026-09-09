@@ -166,8 +166,8 @@ export async function POST(request) {
   // n'est vérifié qu'au clic volontaire sur le bouton (verifyOtp). Les
   // robots d'aperçu chargent la page sans rien consommer.
   const origine = new URL(request.url).origin;
-  let jetonHache = null;
-  let idCompteInvite = null;
+  let jetonHache;
+  let idCompteInvite;
   let typeLien = "invite";
   let nouveau = true;
   try {

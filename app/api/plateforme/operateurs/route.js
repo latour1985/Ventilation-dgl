@@ -134,7 +134,7 @@ export async function POST(request) {
     // 🤝 CIBLE = CLÉ PRINCIPALE → DEUX clés doivent valider.
     if (niveauDe(cible) === "cle-principale") {
       const cleDemande = `revocation-${cible.id}`;
-      let demande = null;
+      let demande;
       try {
         const { data } = await admin.from("plateforme_config").select("valeur").eq("cle", cleDemande).maybeSingle();
         demande = data?.valeur ? JSON.parse(data.valeur) : null;
@@ -215,7 +215,7 @@ export async function POST(request) {
     // console… sauf au niveau clé principale. Pour les autres niveaux :
     // un courriel dédié à la console.
     if (niveau !== "cle-principale") {
-      let compteExistant = null;
+      let compteExistant;
       let page = 1;
       for (;;) {
         const { data } = await admin.auth.admin.listUsers({ page, perPage: 200 });
@@ -236,9 +236,9 @@ export async function POST(request) {
     // d'employés : lien vers NOTRE page avec le jeton haché, vérifié
     // seulement au clic humain (les robots d'aperçu ne consomment rien).
     const origine = new URL(request.url).origin;
-    let jetonHache = null;
+    let jetonHache;
     let typeLien = "invite";
-    let idCompte = null;
+    let idCompte;
     try {
       const { data, error } = await admin.auth.admin.generateLink({
         type: "invite",

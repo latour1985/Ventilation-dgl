@@ -14,7 +14,7 @@ import { taxesDepot } from "@/lib/supabase/depots";
 import { listerCatalogueRetires, margePourcent, profitDollars, vendantPourMarge } from "@/lib/supabase/catalogue";
 import { listerItemsQbo } from "@/lib/quickbooksClient";
 import { itemsDepuisCsv, itemsDepuisLignes } from "@/lib/importCatalogue";
-import { Button, correspond, tauxAffiche, zonesEffectives, METIERS_BUREAU, METIERS_TERRAIN, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
+import { Button, zonesEffectives, METIERS_BUREAU, METIERS_TERRAIN, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier } from "./partage";
 
 // ============================================================
 // ONGLET TARIFS — grille des taux horaires + liste de prix des dépôts
@@ -941,7 +941,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
     setSyncErreur("");
     setSourceMaj("csv");
     setSyncQb("analyse");
-    let texte = "";
+    let texte;
     try {
       texte = await fichier.text();
     } catch {

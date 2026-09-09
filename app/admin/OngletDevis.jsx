@@ -20,7 +20,7 @@ import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
 import { ModalNouveauClient } from "./OngletClients";
-import { ApercuDevisClient, AutocompleteAdresse, BarrePagination, Button, FREQUENCES_CONTRAT, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
+import { ApercuDevisClient, AutocompleteAdresse, BarrePagination, Button, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurItem, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
 
 // Taux coûtant moyen de l'équipe, lu dans la GRILLE CCQ de l'entreprise
 // (2026-08-28) : le champ « taux prévu » se pré-remplit avec un chiffre
@@ -816,7 +816,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // hors de l'écran. On amène donc l'écran jusqu'à elle : bonne page,
   // dossier ouvert, défilement centré, et un surlignage de 2,5 s pour
   // que l'œil la retrouve tout de suite.
-  const [dossierSurligne, setDossierSurligne] = useState(null);
+  const [dossierSurligne, _setDossierSurligne] = useState(null);
   // 🪟 FENÊTRE CONTEXTUELLE (2026-08-30, demande du propriétaire) :
   // « Voir le devis » et « Nouvelle version » ouvrent maintenant le
   // dossier PAR-DESSUS la liste — plus de descente jusqu'à la carte.

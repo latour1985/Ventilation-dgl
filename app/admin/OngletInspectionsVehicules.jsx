@@ -5,7 +5,7 @@
 // INSPECTIONS + ENTRETIEN DES VÉHICULES — tranche T3 du découpage de
 // page.jsx (2026-08-28). Extraction MÉCANIQUE : rien ne change.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
 import { sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { Button, PhotosInspection, todayISO, joursDepuis, moisDepuis, dateISO, ITEMS_PAR_PAGE, BarrePagination } from "./partage";

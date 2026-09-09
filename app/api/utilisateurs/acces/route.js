@@ -43,7 +43,7 @@ export async function POST(request) {
 
   const admin = clientSupabaseService();
   // Retrouver le compte par courriel (pagination large).
-  let cible = null;
+  let cible;
   let page = 1;
   for (;;) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });

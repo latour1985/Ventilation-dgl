@@ -163,8 +163,8 @@ export async function POST(request) {
 
   // ---- L'invitation de SON admin — compte neuf, role Admin principal ----
   const origine = new URL(request.url).origin;
-  let jetonHache = null;
-  let idCompte = null;
+  let jetonHache;
+  let idCompte;
   try {
     const { data, error } = await admin.auth.admin.generateLink({
       type: "invite",

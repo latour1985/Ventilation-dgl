@@ -18,7 +18,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
-import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, SelecteurCibleAchat, Button, libelleAdresse, todayISO } from "./partage";
+import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, SelecteurCibleAchat, Button, libelleAdresse } from "./partage";
 
 export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).

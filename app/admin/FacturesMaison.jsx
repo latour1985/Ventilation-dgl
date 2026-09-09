@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { envoyerCourriel, gabaritFactureMaison } from "@/lib/courriels";
-import { REGIMES_TAXES, calculerTaxesRegime, regimeTaxes } from "@/lib/taxesCanada";
+import { REGIMES_TAXES, calculerTaxesRegime } from "@/lib/taxesCanada";
 import {
   creerFactureMaison,
   listerFacturesMaison,

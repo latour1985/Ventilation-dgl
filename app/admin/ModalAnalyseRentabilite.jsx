@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
-import { bornesPeriodeAnalyse, dateISO, ITEMS_PAR_PAGE } from "./partage";
+import { bornesPeriodeAnalyse, dateISO } from "./partage";
 
 export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], depots = {}, onFermer }) {
   // 🧾 DÉPENSES QUICKBOOKS RATTACHÉES (2026-08-26) — l'écran ne les

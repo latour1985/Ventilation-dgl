@@ -6,7 +6,7 @@
 // decoupage de page.jsx (2026-09-01). Extraction MECANIQUE : aucun
 // comportement ne change — seuls des export/import s'ajoutent.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronRight, FileText } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { useLangue } from "@/lib/i18n";

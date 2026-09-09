@@ -562,15 +562,6 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       .filter((t) => t.supabase && t.tacheId && t.employeEmail)
       .map((t) => [`${cleTacheDesHeures(t.tacheId)}|${t.employeEmail.toLowerCase()}`, t])
   );
-  // Nombre de JOURNÉES déjà pointées sur un chantier — sert au « 2/3 »
-  // affiché sur le bloc : un bloc gris trois jours de suite ne dit pas
-  // si le technicien y est allé.
-  const joursPointes = (tache, emp) => {
-    const courriel = (emp?.courriel || "").toLowerCase();
-    return (travaux || []).filter(
-      (t) => t.supabase && cleTacheDesHeures(t.tacheId) === tache.id && (t.employeEmail || "").toLowerCase() === courriel
-    ).length;
-  };
   const travailTermine = (tache, emp) =>
     travauxParCle.get(`${tache.id}|${(emp?.courriel || "").toLowerCase()}`);
   // VERT = TRAVAUX FERMÉS, pas « une journée pointée ». Sur un chantier
@@ -757,7 +748,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // ASSISTANT EN 2 ÉTAPES (demande du propriétaire, 2026-08-17) : le
   // TYPE d'abord (grandes tuiles), puis un formulaire qui ne montre que
   // les cases utiles à ce type.
-  const [etapeTypeTache, setEtapeTypeTache] = useState(true);
+  const [_etapeTypeTache, setEtapeTypeTache] = useState(true);
   const [adresseCourseLibre, setAdresseCourseLibre] = useState("");
   // 📎 PIÈCES JOINTES (photos du site, plans PDF) — téléversées dès la
   // sélection, transmises au technicien AVEC la tâche (via donnees).

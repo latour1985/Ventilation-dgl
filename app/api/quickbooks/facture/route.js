@@ -29,7 +29,7 @@ import {
   codeTaxeVente,
   proprietesTaxe,
   envoyerFactureParQb,
-  environnementQb, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+  entrepriseDuCompte } from "@/lib/quickbooksServeur";
 // 🔒 RLS phase 3 : le rôle vient de la table des permissions.
 import { roleServeur } from "@/lib/quickbooksServeur";
 
@@ -256,7 +256,7 @@ export async function POST(request) {
         // c'est le LIEN vers la page officielle qui part sur CHAQUE
         // facture, même patron que les courriels de dépôt. L'origine est
         // lue de la demande : fluxya.app en production, localhost en dev.
-        let lienConditions = "";
+        let lienConditions;
         try {
           // « ?e=<entreprise> » : la page montre le nom et le logo de la
           // bonne compagnie (2026-09-04).
