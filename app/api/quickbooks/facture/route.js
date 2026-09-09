@@ -140,13 +140,41 @@ export async function POST(request) {
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
 
-    // Échéance : terme de paiement des Paramètres (ex. « Net 30 »).
+    // Échéance : terme de paiement choisi à l'envoi (ex. « Net 30 »,
+    // « Payable sur réception »). « Payable sur réception » = 0 jour.
+    const termeTexte = String(corps?.termePaiement || "").trim();
+    const surReception = /r[ée]ception|receipt/i.test(termeTexte);
     const joursTerme = (() => {
-      const m = String(corps?.termePaiement || "").match(/(\d+)/);
+      if (surReception) return 0;
+      const m = termeTexte.match(/(\d+)/);
       return m ? Math.min(120, Math.max(0, parseInt(m[1], 10))) : 30;
     })();
     const echeance = new Date(Date.now() + joursTerme * 24 * 60 * 60 * 1000);
     const dateLocale = `${echeance.getFullYear()}-${String(echeance.getMonth() + 1).padStart(2, "0")}-${String(echeance.getDate()).padStart(2, "0")}`;
+
+    // 💳 LE CHAMP « MODALITÉS » DE QUICKBOOKS (SalesTermRef) — 2026-09-08,
+    // demande du propriétaire : le terme doit APPARAÎTRE dans QuickBooks
+    // (pas juste une date d'échéance muette). On cherche le Term par son
+    // nombre de jours (le plus fiable, indépendant de la langue du
+    // fichier), sinon par son nom ; introuvable = on laisse la date
+    // d'échéance faire le travail, sans bloquer la facture.
+    let salesTermId = null;
+    try {
+      const rep = await requeteQbo(acces, "select * from Term maxresults 100");
+      const termes = rep?.Term || [];
+      // Ordre du repérage (vécu : « Net 30 » tombait sur un terme
+      // personnalisé « Ferblanterie JBM » qui a aussi 30 jours) :
+      //   1) nom EXACT (« Net 30 » → « Net 30 », pas un homonyme) ;
+      //   2) pour « sur réception » : un nom qui parle de réception ;
+      //   3) en dernier recours seulement, le nombre de jours.
+      const trouve =
+        termes.find((t) => (t.Name || "").toLowerCase() === termeTexte.toLowerCase()) ||
+        (surReception && termes.find((t) => /r[ée]ception|receipt|due on/i.test(t.Name || ""))) ||
+        termes.find((t) => Number(t.DueDays) === joursTerme);
+      if (trouve?.Id) salesTermId = trouve.Id;
+    } catch {
+      // liste des termes illisible — la date d'échéance reste le filet
+    }
 
     // Les adresses d'envoi — QuickBooks enverra SA facture officielle
     // à ces courriels tout de suite après la création.
@@ -191,6 +219,8 @@ export async function POST(request) {
         : {}),
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
+      // 💳 Le terme officiel de QuickBooks, quand on l'a trouvé.
+      ...(salesTermId ? { SalesTermRef: { value: salesTermId } } : {}),
       // 📅 DATE DE LA FACTURE = DATE DES TRAVAUX (2026-09-06, décision
       // du propriétaire, mise en garde taxes donnée) : quand l'appelant
       // fournit la date des travaux, elle devient TxnDate — sinon

@@ -1656,8 +1656,21 @@ export function libelleDestinataires(choix) {
 }
 
 
-export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer, onAjouterFiche = null }) {
+// 💳 MODALITÉS DE PAIEMENT (2026-09-08, demande du propriétaire) — les
+// termes offerts, alignés sur QuickBooks. « Payable sur réception » =
+// dû tout de suite (remplace « Comptant », mot choisi par le
+// propriétaire).
+export const MODALITES_PAIEMENT = ["Payable sur réception", "Net 15", "Net 30", "Net 45", "Net 60"];
+
+export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer, onAjouterFiche = null, avecModalites = false, termeDefaut = "Net 30" }) {
   const courriels = client?.courriels || [];
+  // Terme pré-rempli : celui du client s'il en a un de connu, sinon le
+  // défaut de l'entreprise. Ne s'affiche que pour les vraies factures
+  // (avecModalites) — jamais pour un simple renvoi ou un bon de travail.
+  const [modalite, setModalite] = useState(() => {
+    const duClient = String(client?.termeFacturation || "").trim();
+    return MODALITES_PAIEMENT.includes(duClient) ? duClient : (MODALITES_PAIEMENT.includes(termeDefaut) ? termeDefaut : "Net 30");
+  });
   const [selectionIds, setSelectionIds] = useState(() => {
     const parDefaut = courrielDefautClient(client);
     return parDefaut ? [parDefaut.id] : [];
@@ -1758,13 +1771,31 @@ export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer
             </label>
           )}
         </div>
+        {avecModalites && (
+          <div className="mt-3">
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">💳 Modalités de paiement (envoyées à QuickBooks)</label>
+            <select
+              value={modalite}
+              onChange={(e) => setModalite(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#FF6A13]"
+            >
+              {MODALITES_PAIEMENT.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={onFermer}>Annuler</Button>
           <Button
             disabled={selection.length + extras.length === 0}
             onClick={() => {
               if (ajouterAFiche && onAjouterFiche) extras.forEach((x) => onAjouterFiche(x.email));
-              onConfirmer([...selection, ...extras]);
+              // Le terme voyage AVEC la liste (propriété sur le tableau) —
+              // les appelants qui ne lisent que les courriels ne changent pas.
+              const choix = [...selection, ...extras];
+              if (avecModalites) choix.modalites = modalite;
+              onConfirmer(choix);
             }}
           >
             Envoyer{selection.length + extras.length > 1 ? ` (${selection.length + extras.length})` : ""}

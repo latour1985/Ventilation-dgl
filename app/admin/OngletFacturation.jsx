@@ -609,6 +609,35 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   });
   const [attestation, setAttestation] = useState(false);
 
+  // 📋 DEVIS QUICKBOOKS RELU EN DIRECT (2026-09-08, demande du
+  // propriétaire) : quand le bon porte un numéro de devis, on relit
+  // l'estimate dans QuickBooks pour AVOIR sous les yeux son total (ne
+  // pas dépasser) et ses lignes avec description (les mettre sur la
+  // facture, pas juste les notes de terrain). Lecture seule, sans
+  // blocage : QuickBooks absent = la boîte ne s'affiche simplement pas.
+  const [devisQbo, setDevisQbo] = useState(null);
+  useEffect(() => {
+    const numero = String(bon.devisNumero || "").trim();
+    if (!numero) return;
+    let annule = false;
+    lireEstimateQbo(numero)
+      .then((r) => {
+        if (!annule && r?.trouve) {
+          setDevisQbo({ total: Number(r.total) || 0, lignes: Array.isArray(r.lignes) ? r.lignes : [] });
+        }
+      })
+      .catch(() => {});
+    return () => { annule = true; };
+  }, [bon.devisNumero]);
+  const insererLigneDevis = (l) => {
+    const pu = Number(l.prixUnitaire) > 0 ? Number(l.prixUnitaire) : "";
+    const qte = Number(l.quantite) > 0 ? Number(l.quantite) : 1;
+    setItems((prev) => [
+      ...prev,
+      { id: `devis-${Date.now()}`, description: l.description || "Item du devis", quantite: qte, prixUnitaire: pu, prix: Math.round(qte * (Number(pu) || 0) * 100) / 100 },
+    ]);
+  };
+
   // 🔁 RESYNCHRONISATION DES LIGNES SUGGÉRÉES (2026-09-04) : quand un
   // 💰/🤝 bascule dans le récit ci-contre, le parent recalcule
   // lignesSuggerees — les lignes auto (« supp- ») sont remplacées par
@@ -844,6 +873,38 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
 
         {/* ---- PANNEAU DROIT : L'ACTION (items, total, sorties) ---- */}
         <div className="space-y-3 p-5 pt-3 lg:min-h-0 lg:overflow-y-auto">
+          {/* 📋 LE DEVIS QUICKBOOKS (relu en direct) — son total sert de
+              repère (ne pas dépasser) et chaque ligne s'insère en un clic
+              sur la facture, avec sa description. */}
+          {devisQbo && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-2.5">
+              <p className="text-[11px] font-bold text-sky-800">
+                📋 Devis QuickBooks #{bon.devisNumero} — total {devisQbo.total.toFixed(2)} $ HT
+              </p>
+              {total > devisQbo.total + 0.01 && (
+                <p className="mt-0.5 text-[11px] font-bold text-red-600">
+                  ⚠️ La facture ({total.toFixed(2)} $) DÉPASSE le devis de {(total - devisQbo.total).toFixed(2)} $.
+                </p>
+              )}
+              {devisQbo.lignes.length > 0 && (
+                <div className="mt-1.5 space-y-1">
+                  <p className="text-[10px] font-bold uppercase text-sky-700">Lignes du devis — clique pour les ajouter à la facture</p>
+                  {devisQbo.lignes.map((l, i) => (
+                    <button
+                      key={i}
+                      onClick={() => insererLigneDevis(l)}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-sky-200 bg-white px-2 py-1 text-left text-[11px] hover:border-sky-400 active:scale-[0.99]"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-slate-700">➕ {l.description}</span>
+                      <span className="shrink-0 font-bold tabular-nums text-slate-600">
+                        {Number(l.quantite) > 1 ? `${l.quantite} × ` : ""}{(Number(l.prixUnitaire) || 0).toFixed(2)} $
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-500">Items à facturer (description + prix séparés)</label>
             {items.map((it, i) => (
@@ -2721,7 +2782,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       clientId: donnees.client?.id || null,
       clientNom: nomClient,
       lignes: lignes.map((l) => ({ description: l.description, montant: l.montant })),
-      termePaiement: configEnt?.termePaiementDefaut || "Net 30",
+      termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: donnees.reference || "Facture",
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
@@ -2860,7 +2921,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       dateFacture: bonsDuGroupe.map((x) => x.date).filter(Boolean).sort().slice(-1)[0] || null,
       numeroSuivi: suiviDuProjet(bonsDuGroupe[0]?.projetId, groupe.projetNom),
       lignes,
-      termePaiement: configEnt?.termePaiementDefaut || "Net 30",
+      termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: groupe.projetNom || "travaux",
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
@@ -2950,7 +3011,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       dateFacture: b.date || null,
       numeroSuivi: suiviDuProjet(b.projetId),
       lignes,
-      termePaiement: configEnt?.termePaiementDefaut || "Net 30",
+      termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: b.projet || "travaux",
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
@@ -3058,7 +3119,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // d'émission (facturation périodique, pas une date de travaux).
       numeroSuivi: suiviDuProjet(bons.find((x) => x.id === bonId)?.projetId),
       lignes: lignesEnvoyees,
-      termePaiement: configEnt?.termePaiementDefaut || "Net 30",
+      termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: `${bons.find((x) => x.id === bonId)?.devisNumero || "travaux"}`,
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
@@ -4172,6 +4233,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           client={trouverClientDuBon(bonEnvoiCourriel)}
           onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(bonEnvoiCourriel)?.id, email)}
           contexte={`Facture — "${bonEnvoiCourriel.projet}" (${bonEnvoiCourriel.montant.toFixed(2)} $)`}
+          avecModalites={qbConnecte !== false}
+          termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setBonEnvoiCourrielId(null)}
           onConfirmer={(choix) => {
             setBonEnvoiCourrielId(null);
@@ -4198,6 +4261,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           client={trouverClientDuBon(bonFactureEnAttente)}
           onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(bonFactureEnAttente)?.id, email)}
           contexte={`Facture progressive — "${bonFactureEnAttente.projet}" (${factureEnAttenteCourriel.montant.toFixed(2)} $)`}
+          avecModalites={qbConnecte !== false}
+          termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setFactureEnAttenteCourriel(null)}
           onConfirmer={(courrielChoisi) => {
             const { bonId, ...info } = factureEnAttenteCourriel;
@@ -4251,6 +4316,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
               ? `cette facture groupée (${groupeAFacturer.bons.length} bons, ${groupeAFacturer.total.toFixed(2)} $)`
               : "cette facture"
           }
+          avecModalites={qbConnecte !== false}
+          termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setGroupeAFacturer(null)}
           onConfirmer={(choix) => {
             const g = groupeAFacturer;
@@ -4286,6 +4353,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           client={courrielFactureLibre.client}
           onAjouterFiche={(email) => onAjouterCourrielClient?.(courrielFactureLibre.client?.id, email)}
           contexte="cette facture"
+          avecModalites={qbConnecte !== false}
+          termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setCourrielFactureLibre(null)}
           onConfirmer={(choix) => {
             const d = courrielFactureLibre;

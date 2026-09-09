@@ -991,6 +991,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         total: Number(r.total) || 0,
         nbLignes: (r.lignes || []).length,
         clientNomQbo: r.clientNomQbo || null,
+        // 📋 On GARDE les lignes du devis QBO (2026-09-08, demande du
+        // propriétaire) : leur description ira sur la facture, et le
+        // total servira de plafond au compteur anti-dépassement.
+        lignes: Array.isArray(r.lignes) ? r.lignes : [],
       });
     } else if (r?.trouve === false) {
       setVerifDevisQbo({ etat: "introuvable" });
