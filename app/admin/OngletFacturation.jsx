@@ -4045,6 +4045,14 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                     lendemain. Ce que le technicien a écrit sur le
                     terrain est repris mot pour mot — c'est là-dessus
                     que le retour se planifie. */}
+                {/* ✅ Étapes de la job — le compte se voit d'un coup d'œil
+                    sur la carte (2026-09-09). */}
+                {Array.isArray(b.etapes) && b.etapes.length > 0 && (
+                  <p className={`mt-1 rounded-lg px-2 py-1 text-[10px] font-bold ${b.etapes.every((e) => e.fait) ? "bg-emerald-50 text-emerald-700" : "bg-orange-50 text-orange-800"}`}>
+                    ✅ Étapes : {b.etapes.filter((e) => e.fait).length}/{b.etapes.length}
+                    {!b.etapes.every((e) => e.fait) && <span className="font-semibold"> — restantes : {b.etapes.filter((e) => !e.fait).map((e) => e.texte).join(" · ")}</span>}
+                  </p>
+                )}
                 {b.travauxNonTermines && (
                   <p className="mt-1 whitespace-pre-line rounded-lg border-2 border-orange-400 bg-orange-50 px-2 py-1.5 text-[11px] leading-snug text-orange-900">
                     🚧 <span className="font-extrabold">TRAVAUX NON TERMINÉS — il faut retourner sur place.</span>

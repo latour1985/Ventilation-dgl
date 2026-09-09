@@ -26,7 +26,7 @@ import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxH
 import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { AutocompleteAdresse, Button, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
+import { AutocompleteAdresse, Button, EditeurEtapesJob, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -810,6 +810,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // courriel de fin de travaux OMET alors la demande d'avis Google (la
   // pièce est parfois garantie mais pas le temps — client mécontent).
   const [garantieRetour, setGarantieRetour] = useState(false);
+  // ✅ Étapes de la job (2026-09-09) — FACULTATIVES à la création :
+  // celui qui les attribue n'est souvent pas celui qui met à l'horaire
+  // (elles s'ajoutent aussi après coup dans la fiche ✏️).
+  const [etapesNouvelle, setEtapesNouvelle] = useState([]);
   const [depotMontant, setDepotMontant] = useState("");
   // 🗺️ ZONE DE TARIFICATION — INDÉPENDANTE DU DÉPÔT (2026-08-25,
   // demande du propriétaire). Avant, la zone se choisissait DANS le
@@ -1427,6 +1431,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // demandera pas d'avis Google pour cette tâche.
     if (garantieRetour) nouvelle.garantie = true;
 
+    // ✅ Étapes de la job — la checklist voyage au technicien (donnees).
+    if (etapesNouvelle.length > 0) nouvelle.etapes = etapesNouvelle;
+
     // 🔧 Unités cochées : elles voyagent avec la tâche (donnees) — la
     // fiche du technicien les affiche et « Unité vérifiée » se
     // pré-remplit avec le VRAI numéro de série au lieu d'une saisie.
@@ -1544,6 +1551,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // tombait sur une page déjà commencée).
   const viderFormulaireTache = () => {
     setGarantieRetour(false);
+    setEtapesNouvelle([]);
     setDepotMontant("");
     setZoneAppelChoix("");
     setDepotEmails([]);
@@ -2073,6 +2081,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(champs.garantie !== undefined ? { garantie: champs.garantie } : {}),
       // 📎 Pièces jointes ajoutées après coup — clé absente = inchangées.
       ...(champs.piecesJointes !== undefined ? { piecesJointes: champs.piecesJointes } : {}),
+      // ✅ Étapes de la job — clé absente = inchangées.
+      ...(champs.etapes !== undefined ? { etapes: champs.etapes } : {}),
     };
     if (champs.employeId) {
       // « conserver » : une modification/un déplacement ne repose jamais
@@ -2095,7 +2105,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2113,6 +2123,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(garantie !== undefined ? { garantie } : {}),
       // 📎 Pièces jointes ajoutées après coup — clé absente = inchangées.
       ...(piecesJointes !== undefined ? { piecesJointes } : {}),
+      // ✅ Étapes de la job — clé absente = inchangées.
+      ...(etapes !== undefined ? { etapes } : {}),
     };
     // Assignation multiple : tous les techniciens cochés reçoivent la
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
@@ -2734,6 +2746,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </div>
                 )}
               </div>
+
+              {/* ✅ ÉTAPES DE LA JOB — facultatives ici : elles s'ajoutent
+                  aussi APRÈS coup dans la fiche ✏️ (celui qui les attribue
+                  n'est souvent pas celui qui met à l'horaire). */}
+              {!estTypeSansClient(nouveauType) && (
+                <EditeurEtapesJob etapes={etapesNouvelle} onChange={setEtapesNouvelle} compact />
+              )}
               {/* 📌 NOTE GÉNÉRALE DU CLIENT (2026-08-30) — l'aide-mémoire
                   de la fiche ressurgit AU MOMENT DE DÉCIDER : c'est ici
                   qu'un « mauvais payeur — exiger un dépôt » doit se lire,

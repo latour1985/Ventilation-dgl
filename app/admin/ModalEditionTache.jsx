@@ -12,7 +12,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { AutocompleteAdresse, Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [] }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
@@ -42,6 +42,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // dès la sélection ; l'enregistrement les transmet au technicien via
   // la fiche (donnees), comme celles de la création.
   const [pjTache, setPjTache] = useState(() => (Array.isArray(tache.piecesJointes) ? tache.piecesJointes : []));
+  // ✅ Étapes de la job — ajoutables ICI en tout temps (2026-09-09 :
+  // celui qui attribue les étapes n'est souvent pas celui qui a créé
+  // la tâche). Une étape déjà cochée sur le terrain s'affiche ✓.
+  const [etapesTache, setEtapesTache] = useState(() => (Array.isArray(tache.etapes) ? tache.etapes : []));
   const [pjTelevers, setPjTelevers] = useState(false);
   const ajouterPjEdition = async (fichiers) => {
     setPjTelevers(true);
@@ -267,6 +271,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       ...(garantieRetour !== !!tache.garantie ? { garantie: garantieRetour } : {}),
       // 📎 Pièces jointes — transmises seulement si elles ont changé.
       ...(JSON.stringify(pjTache) !== JSON.stringify(tache.piecesJointes || []) ? { piecesJointes: pjTache } : {}),
+      // ✅ Étapes de la job — transmises seulement si elles ont changé.
+      ...(JSON.stringify(etapesTache) !== JSON.stringify(tache.etapes || []) ? { etapes: etapesTache } : {}),
       // 🏗️/📄 Rattachements — transmis SEULEMENT s'ils ont changé : une
       // clé absente laisse l'existant tranquille (les heures déjà
       // pointées ne sont alors jamais réécrites pour rien).
@@ -678,6 +684,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               <p className="mt-0.5 text-[9px] leading-snug text-slate-400">N&apos;oublie pas « Enregistrer les modifications » en bas — c&apos;est lui qui les envoie au technicien.</p>
             </div>
           )}
+
+          {/* ✅ ÉTAPES DE LA JOB — ajoutables/retirables ici en tout
+              temps ; le technicien les coche sur le terrain. */}
+          {!estConge && <EditeurEtapesJob etapes={etapesTache} onChange={setEtapesTache} />}
 
           {/* 🛡️ RETOUR SOUS GARANTIE — corrigeable ici après coup : pas de
               demande d'avis Google dans le courriel de fin de travaux. */}

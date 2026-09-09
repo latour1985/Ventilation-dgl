@@ -3974,6 +3974,13 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // recevrait une alerte vide, impossible à planifier. On exige le
   // texte, comme on exige la description.
   const resteAFaireManquant = !!tache.travauxNonTermines && (tache.resteAFaire || "").trim().length < 5;
+  // ✅ ÉTAPES DE LA JOB (2026-09-09, demande du propriétaire) — la
+  // checklist posée par le bureau. Des étapes NON COCHÉES à la
+  // fermeture = travaux non terminés : on l'exige (avec un bouton qui
+  // pré-remplit « ce qui reste à faire » — jamais un blocage muet).
+  const etapesJob = Array.isArray(tache.etapes) ? tache.etapes : [];
+  const etapesRestantes = etapesJob.filter((e) => !e.fait);
+  const etapesBloquent = etapesRestantes.length > 0 && !tache.travauxNonTermines;
   // SIGNATURE DU CLIENT : exigée UNIQUEMENT du dernier à fermer.
   // Un technicien qui part avant ses collègues enregistre ses heures et
   // s'en va — c'est celui qui finit avec le client qui fait signer.
@@ -3982,6 +3989,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     !descriptionManquante &&
     !photoApresManquante &&
     !resteAFaireManquant &&
+    !etapesBloquent &&
     (jeSuisLeDernier
       ? clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions)
       : true);
@@ -4384,6 +4392,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         // sans le savoir, et le retour se planifie sur du concret.
         travauxNonTermines: !!tache.travauxNonTermines,
         resteAFaire: tache.resteAFaire || null,
+        // ✅ La checklist suit le bon (cochée/pas cochée, par qui) —
+        // consultable ensuite au dossier client (snippet 139).
+        etapes: Array.isArray(tache.etapes) && tache.etapes.length > 0 ? tache.etapes : null,
       };
     // 👥 LE BON PORTE TOUTE L'ÉQUIPE (2026-08-27) : photos et notes des
     // coéquipiers qui ont déjà fermé rejoignent le bon du dernier —
@@ -5059,6 +5070,69 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             vivait dans la tête du technicien jusqu'au prochain matin.
             La case est FERMÉE par défaut : le cas normal, c'est fini.
             ============================================================ */}
+        {/* ✅ ÉTAPES DE LA JOB (2026-09-09, demande du propriétaire) —
+            la checklist du bureau, à cocher au fur et à mesure. Chaque
+            coche retient qui et quand. Des étapes restantes à la
+            fermeture ⇒ « travaux non terminés » (bouton pré-rempli). */}
+        {etapesJob.length > 0 && (
+          <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
+              ✅ Étapes de la job{" "}
+              <span className="font-semibold normal-case text-slate-400">
+                ({etapesJob.length - etapesRestantes.length}/{etapesJob.length})
+              </span>
+            </p>
+            {etapesJob.map((e) => (
+              <label
+                key={e.id}
+                className={`flex min-h-[52px] cursor-pointer items-center gap-3 rounded-xl border p-3 ${e.fait ? "border-emerald-200 bg-emerald-50" : "border-slate-200"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={!!e.fait}
+                  disabled={lectureSeule}
+                  onChange={() => {
+                    const nomMoi = session?.user?.user_metadata?.nom || session?.user?.email || "";
+                    const maj = etapesJob.map((x) =>
+                      x.id === e.id
+                        ? { ...x, fait: !e.fait, faitPar: !e.fait ? nomMoi : null, faitLe: !e.fait ? new Date().toISOString() : null }
+                        : x
+                    );
+                    onMajTache(tache.id, { etapes: maj });
+                  }}
+                  className="h-6 w-6 shrink-0 accent-emerald-600"
+                />
+                <span className={`min-w-0 flex-1 text-[13px] font-semibold leading-snug ${e.fait ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                  {e.texte}
+                </span>
+                {e.fait && e.faitPar && (
+                  <span className="shrink-0 text-[9px] font-bold text-emerald-600">✓ {String(e.faitPar).split("@")[0]}</span>
+                )}
+              </label>
+            ))}
+            {etapesBloquent && !lectureSeule && (
+              <div className="rounded-xl border border-orange-300 bg-orange-50 p-2.5">
+                <p className="text-[11px] font-bold leading-snug text-orange-900">
+                  ⚠️ {etapesRestantes.length} étape{etapesRestantes.length > 1 ? "s" : ""} pas cochée{etapesRestantes.length > 1 ? "s" : ""}. Si c&apos;est fait, coche — sinon :
+                </p>
+                <button
+                  onClick={() =>
+                    onMajTache(tache.id, {
+                      travauxNonTermines: true,
+                      resteAFaire: [String(tache.resteAFaire || "").trim() || null, ...etapesRestantes.map((e) => `- ${e.texte}`)]
+                        .filter(Boolean)
+                        .join("\n"),
+                    })
+                  }
+                  className="mt-1.5 w-full rounded-lg bg-orange-600 px-3 py-2 text-xs font-extrabold text-white active:scale-[0.99]"
+                >
+                  🚧 Marquer « travaux non terminés » (le reste à faire se pré-remplit)
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {!lectureSeule && (
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">État des travaux</p>
@@ -5450,6 +5524,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 {photoApresManquante && <li>{t("Au moins une photo « après travaux » est requise.")}</li>}
                 {resteAFaireManquant && (
                   <li>{t("Tu as coché « travaux non terminés » — écris ce qui reste à faire.")}</li>
+                )}
+                {etapesBloquent && (
+                  <li>{etapesRestantes.length} étape{etapesRestantes.length > 1 ? "s" : ""} de la job pas cochée{etapesRestantes.length > 1 ? "s" : ""} — coche-{etapesRestantes.length > 1 ? "les" : "la"}, ou marque « travaux non terminés » (bouton dans la section Étapes).</li>
                 )}
                 {(nomMoule.trim().length <= 2 || !aSignature) && <li>{t("Le nom en lettres moulées et la signature sont requis.")}</li>}
                 {necessiteDeuxiemeSignature && (nomMoule2.trim().length <= 2 || !aSignature2) && (

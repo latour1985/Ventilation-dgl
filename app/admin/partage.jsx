@@ -1077,6 +1077,64 @@ export function nomClientNormalise(nom) {
 // dépassé, ou hors ligne, on retombe sur la saisie libre avec ville
 // obligatoire. Créer un client ne doit jamais dépendre d'un tiers.
 // ============================================================
+// ============================================================
+// ✅ ÉTAPES DE LA JOB (2026-09-09, demande du propriétaire) — l'éditeur
+// PARTAGÉ entre la création de tâche et la fiche d'édition :
+// facultatif, ajoutable en tout temps (celui qui attribue les étapes
+// n'est souvent pas celui qui met la tâche à l'horaire). Le technicien
+// coche sur le terrain ; une étape déjà cochée s'affiche ✓ ici.
+// ============================================================
+export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
+  const [texte, setTexte] = useState("");
+  const ajouter = () => {
+    const propre = texte.trim();
+    if (!propre) return;
+    onChange([...(etapes || []), { id: `et-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, texte: propre, fait: false }]);
+    setTexte("");
+  };
+  return (
+    <div>
+      <label className={`mb-1 block font-bold text-slate-500 ${compact ? "text-[10px]" : "text-xs"}`}>
+        ✅ Étapes de la job <span className="font-normal text-slate-400">(facultatif — le technicien les coche sur le terrain)</span>
+      </label>
+      {(etapes || []).length > 0 && (
+        <div className="mb-1.5 space-y-1">
+          {(etapes || []).map((e, i) => (
+            <div key={e.id || i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] ${e.fait ? "bg-emerald-50 text-slate-400" : "bg-slate-50 text-slate-700"}`}>
+              <span className="shrink-0">{e.fait ? "✅" : "⬜"}</span>
+              <span className={`min-w-0 flex-1 font-semibold ${e.fait ? "line-through" : ""}`}>{e.texte}</span>
+              {e.fait && e.faitPar && <span className="shrink-0 text-[9px] font-bold text-emerald-600">{String(e.faitPar).split("@")[0]}</span>}
+              <button
+                onClick={() => onChange((etapes || []).filter((_, j) => j !== i))}
+                className="shrink-0 font-bold text-slate-400 hover:text-red-600"
+                aria-label="Retirer l'étape"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-center gap-1.5">
+        <input
+          value={texte}
+          onChange={(e) => setTexte(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); ajouter(); } }}
+          placeholder="Ex. : Rough du 2e étage (Entrée pour ajouter)"
+          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs outline-none"
+        />
+        <button
+          onClick={ajouter}
+          disabled={!texte.trim()}
+          className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          ➕
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AutocompleteAdresse({ onSelection }) {
   const [texte, setTexte] = useState("");
   const [ouvert, setOuvert] = useState(false);

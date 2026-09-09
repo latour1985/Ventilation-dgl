@@ -454,6 +454,25 @@ export function DetailTravail({ travail, clients, onFermer, onReactiver, bonLie 
           </p>
         )}
 
+        {/* ✅ ÉTAPES DE LA JOB au dossier (2026-09-09) — six mois plus
+            tard, on voit encore ce qui avait été fait, et par qui. */}
+        {complete && Array.isArray(bonLie?.etapes) && bonLie.etapes.length > 0 && (
+          <div className="mb-3 rounded-xl bg-slate-50 p-3">
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              ✅ Étapes de la job ({bonLie.etapes.filter((e) => e.fait).length}/{bonLie.etapes.length})
+            </p>
+            <div className="space-y-1">
+              {bonLie.etapes.map((e, i) => (
+                <p key={e.id || i} className={`flex items-center gap-1.5 text-xs ${e.fait ? "text-slate-600" : "font-bold text-orange-700"}`}>
+                  <span className="shrink-0">{e.fait ? "✅" : "⬜"}</span>
+                  <span className={`min-w-0 flex-1 ${e.fait ? "" : ""}`}>{e.texte}</span>
+                  {e.fait && e.faitPar && <span className="shrink-0 text-[9px] font-bold text-emerald-600">{String(e.faitPar).split("@")[0]}</span>}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
         {travail.estTransport && (
           <div className="mb-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-3">
             <div>

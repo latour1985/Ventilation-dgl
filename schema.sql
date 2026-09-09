@@ -5512,3 +5512,12 @@ create policy "iso_notes_perso" on notes_perso
 drop trigger if exists trg_entreprise_notes_perso on notes_perso;
 create trigger trg_entreprise_notes_perso before insert on notes_perso
   for each row execute function public.poser_entreprise_id();
+
+
+-- ============================================================
+-- 139 - ETAPES DE LA JOB SUR LE BON (2026-09-09)
+-- La checklist (posee par le bureau, cochee sur le terrain) suit le
+-- bon de travail jusqu au dossier client : [{id, texte, fait, faitPar,
+-- faitLe}]. Facultative - null quand la tache n en avait pas.
+-- ============================================================
+alter table bons_travail add column if not exists etapes jsonb;
