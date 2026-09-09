@@ -71,6 +71,57 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         onTraiterDevis={() => setOnglet("devis")}
       />
 
+      {/* 🚀 CHECKLIST DE BIENVENUE (2026-09-09, GO du propriétaire) —
+          pour qu'une NOUVELLE entreprise passe d'« essai abandonné » à
+          « cliente équipée » : les 5 réglages qui comptent, avec une
+          barre de progression et un bouton par étape. La carte
+          disparaît d'elle-même quand tout est fait (DGL ne la voit
+          jamais). */}
+      {(() => {
+        const coordonneesOk = !!(configTdb?.courriel && configTdb?.telephone && configTdb?.adresse);
+        const logoOk = !!configTdb?.logoDonnees;
+        const tauxOk =
+          Object.values(tauxMetiers || {}).some((niveaux) =>
+            Object.values(niveaux || {}).some((v) => Number(v) > 0)
+          ) || (utilisateurs || []).some((u) => Number(u.tauxHoraire) > 0);
+        const clientOk = (clients || []).length > 0;
+        const tacheOk = (travaux || []).length > 0 || Object.keys(planning || {}).length > 0 || (bons || []).length > 0;
+        const etapes = [
+          { fait: coordonneesOk, texte: "Coordonnées de l'entreprise (courriel, téléphone, adresse)", onglet: "parametres", icone: "🏢" },
+          { fait: logoOk, texte: "Logo (il s'imprime en haut de tes documents)", onglet: "parametres", icone: "🖼️" },
+          { fait: tauxOk, texte: "Taux horaires coûtants (le vrai calcul des marges en dépend)", onglet: "tarifs", icone: "💲" },
+          { fait: clientOk, texte: "Premier client au dossier", onglet: "clients", icone: "👤" },
+          { fait: tacheOk, texte: "Première tâche à l'agenda", onglet: "agenda", icone: "📅" },
+        ];
+        const faites = etapes.filter((e) => e.fait).length;
+        if (faites === etapes.length) return null;
+        return (
+          <div className="rounded-2xl border-2 border-sky-200 bg-sky-50/50 p-4">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[10px] font-extrabold uppercase tracking-wide text-sky-700">🚀 {t("Bien démarrer avec Fluxya")}</p>
+              <span className="text-[10px] font-bold tabular-nums text-sky-600">{faites}/{etapes.length}</span>
+            </div>
+            <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sky-100">
+              <div className="h-full rounded-full bg-sky-500 transition-all" style={{ width: `${(faites / etapes.length) * 100}%` }} />
+            </div>
+            <div className="mt-2 space-y-1">
+              {etapes.map((e) => (
+                <button
+                  key={e.texte}
+                  onClick={() => !e.fait && setOnglet(e.onglet)}
+                  disabled={e.fait}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs ${e.fait ? "text-slate-400" : "font-semibold text-slate-700 hover:bg-sky-100"}`}
+                >
+                  <span className="shrink-0">{e.fait ? "✅" : e.icone}</span>
+                  <span className={`min-w-0 flex-1 ${e.fait ? "line-through" : ""}`}>{e.texte}</span>
+                  {!e.fait && <span className="shrink-0 text-[10px] font-bold text-sky-600">{t("Configurer")} ›</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 📥 À FAIRE AUJOURD'HUI (2026-09-09, GO du propriétaire) — TOUT
           ce qui attend une action, rassemblé en une carte : le journal
           dit tout, mais il faut le lire ; ici, un clic = l'écran
