@@ -5482,3 +5482,33 @@ alter table sage_connexion enable row level security;
 -- RELIES, jamais dupliques.
 -- ============================================================
 alter table clients_app add column if not exists sage_contact_id text;
+
+
+-- ============================================================
+-- 138 - MES NOTES (bloc-notes personnel a cocher) (2026-09-09)
+-- Demande du proprietaire : une place ou toutes ses notes sont
+-- regroupees, a cocher quand c est fait - admin ET technicien.
+-- PRIVE : chacun ne voit que SES notes (courriel du jeton), cloisonne
+-- par entreprise comme tout le reste (meme patron que le grand soir).
+-- ============================================================
+create table if not exists notes_perso (
+  id text primary key,
+  entreprise_id text not null default 'dgl',
+  courriel text not null,
+  texte text not null,
+  fait boolean not null default false,
+  cree_le timestamptz default now(),
+  fait_le timestamptz
+);
+create index if not exists idx_notes_perso_courriel on notes_perso (entreprise_id, courriel);
+alter table notes_perso enable row level security;
+drop policy if exists "iso_notes_perso" on notes_perso;
+create policy "iso_notes_perso" on notes_perso
+  for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton()
+         and courriel = lower(coalesce((select auth.jwt()) ->> 'email', '')))
+  with check (entreprise_id = public.entreprise_du_jeton()
+              and courriel = lower(coalesce((select auth.jwt()) ->> 'email', '')));
+drop trigger if exists trg_entreprise_notes_perso on notes_perso;
+create trigger trg_entreprise_notes_perso before insert on notes_perso
+  for each row execute function public.poser_entreprise_id();

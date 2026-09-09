@@ -22,6 +22,7 @@ import { SqueletteTechnicien } from "@/components/EcranSquelette";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail, bonExistePourTache, apportEquipePourBon } from "@/lib/supabase/bonsTravail";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
+import PanneauNotesPerso from "@/components/PanneauNotesPerso";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
 import { pushSupporte, activerNotificationsPush, resouscrireSiPermis } from "@/lib/notificationsPush";
@@ -1890,6 +1891,8 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
   // lui-même, aujourd'hui seulement — la planification reste au bureau.
   // Heures payées (catégorie « divers »), jamais de facturation.
   const [courseOuverte, setCourseOuverte] = useState(false);
+  // 📝 Mes notes — le bloc-notes personnel à cocher (demande №8).
+  const [notesPersoOuvert, setNotesPersoOuvert] = useState(false);
   // 🌎 Version anglaise (tranche « app technicien », 2026-09-04).
   const { t } = useLangue();
   const [courseTitre, setCourseTitre] = useState("");
@@ -2133,6 +2136,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
 
   return (
     <div className="flex min-h-full flex-col bg-slate-100">
+      <PanneauNotesPerso ouvert={notesPersoOuvert} onFermer={() => setNotesPersoOuvert(false)} />
       <div className="bg-[#131B2E] px-5 pb-6 pt-8 text-white">
         <div className="flex items-start justify-between">
           <p className="text-sm text-slate-400">
@@ -2143,6 +2147,18 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
             })}
           </p>
           <div className="flex items-center gap-2">
+            {/* 📝 MES NOTES — le bloc-notes personnel à cocher (2026-09-09,
+                demande №8 du propriétaire) : le technicien note sur le
+                terrain (« rappeler M. Côté », « acheter des vis ») et
+                coche quand c'est fait. Personnel — personne d'autre ne
+                les voit. */}
+            <button
+              onClick={() => setNotesPersoOuvert(true)}
+              title="Mes notes"
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-sm"
+            >
+              📝
+            </button>
             <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${enLigne ? "bg-emerald-500/20 text-emerald-400" : "bg-zinc-500/20 text-zinc-300"}`}>
               <span className={`h-1.5 w-1.5 rounded-full ${enLigne ? "bg-emerald-400" : "bg-zinc-400"}`} />
               {enLigne ? "En ligne" : "Hors ligne"}
@@ -4117,6 +4133,17 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const [courrielsChoisis, setCourrielsChoisis] = useState(() =>
     courrielsClient.filter((c) => c.defaut).map((c) => c.email)
   );
+  // ✍️ AUTRE ADRESSE tapée sur place (2026-09-09, demande №9b du
+  // propriétaire : « les employés ne peuvent pas envoyer à une autre
+  // adresse ») — le client dicte son courriel au technicien. Plusieurs
+  // adresses possibles, séparées par une virgule ; seules les valides
+  // partent. Elles s'AJOUTENT aux cases cochées.
+  const [courrielLibre, setCourrielLibre] = useState("");
+  const courrielsLibresValides = () =>
+    courrielLibre
+      .split(/[,;]/)
+      .map((x) => x.trim())
+      .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x));
   const basculerCourriel = (email) =>
     setCourrielsChoisis((prev) => (prev.includes(email) ? prev.filter((x) => x !== email) : [...prev, email]));
 
@@ -5503,14 +5530,36 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 </label>
               ))}
             </div>
+            {/* ✍️ AUTRE ADRESSE (2026-09-09, demande №9b) — le client la
+                dicte sur place ; elle s'ajoute aux cases cochées. */}
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">✍️ Autre adresse (dictée par le client)</label>
+              <input
+                type="email"
+                inputMode="email"
+                autoCapitalize="off"
+                value={courrielLibre}
+                onChange={(e) => setCourrielLibre(e.target.value)}
+                placeholder="courriel@exemple.com (virgule entre plusieurs)"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
+              />
+              {courrielLibre.trim() && courrielsLibresValides().length === 0 && (
+                <p className="mt-1 text-[10px] font-bold text-red-600">Adresse incomplète — vérifie le @ et le point.</p>
+              )}
+            </div>
+            {(() => {
+              const tous = [...new Set([...courrielsChoisis, ...courrielsLibresValides()])];
+              return (
             <div className="mt-4 space-y-2">
-              <Button onClick={() => envoyer(courrielsChoisis)} disabled={courrielsChoisis.length === 0} className="w-full">
-                Envoyer le bon{courrielsChoisis.length > 1 ? ` (${courrielsChoisis.length} adresses)` : ""}
+              <Button onClick={() => envoyer(tous)} disabled={tous.length === 0} className="w-full">
+                Envoyer le bon{tous.length > 1 ? ` (${tous.length} adresses)` : ""}
               </Button>
               <Button variant="outline" onClick={() => envoyer([])} className="w-full">
                 Terminer sans envoyer de courriel
               </Button>
             </div>
+              );
+            })()}
           </div>
         </div>
       )}

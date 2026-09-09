@@ -2071,6 +2071,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
       // 🛡️ Retour sous garantie — clé absente = marque inchangée.
       ...(champs.garantie !== undefined ? { garantie: champs.garantie } : {}),
+      // 📎 Pièces jointes ajoutées après coup — clé absente = inchangées.
+      ...(champs.piecesJointes !== undefined ? { piecesJointes: champs.piecesJointes } : {}),
     };
     if (champs.employeId) {
       // « conserver » : une modification/un déplacement ne repose jamais
@@ -2093,7 +2095,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2109,6 +2111,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       contactSurPlace: contactSurPlace !== undefined ? contactSurPlace : tache.contactSurPlace || null,
       // 🛡️ Retour sous garantie — clé absente = marque inchangée.
       ...(garantie !== undefined ? { garantie } : {}),
+      // 📎 Pièces jointes ajoutées après coup — clé absente = inchangées.
+      ...(piecesJointes !== undefined ? { piecesJointes } : {}),
     };
     // Assignation multiple : tous les techniciens cochés reçoivent la
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
@@ -3187,6 +3191,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       Aucun devis au dossier de ce client{nouveauType !== "entretien_contrat" ? " — entre un numéro manuellement ci-dessous, ou crée le devis dans l'onglet Devis" : " — entre le Nº de l'ancien contrat ci-dessous, ou crée le contrat dans l'onglet Devis"}.
                     </p>
                   )}
+                  {/* 📄 SANS CONTRAT, ÇA PASSE QUAND MÊME (2026-09-09,
+                      demande №2) — mais le prix devra être révisé à la
+                      main au moment de facturer. */}
+                  {nouveauType === "entretien_contrat" && !nouveauDevisId && !numeroDevisExistant.trim() && (
+                    <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800">
+                      📄 Sans contrat ni numéro : la tâche se crée quand même — à la facturation, le prix passera par la révision manuelle (comme un prix non listé).
+                    </p>
+                  )}
                   {devisListe.length === 0 && (
                     <p className="mt-1 text-[10px] text-red-500">Aucun devis disponible — crée-en un dans l'onglet Devis.</p>
                   )}
@@ -3811,7 +3823,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       // le prix de base et la règle du temps inclus.
                       if (nouveauType === "appel_service" && !zoneAppelChoix) raisons.push("la zone de tarification de l'appel");
                       if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un devis (de la liste, ou un numéro tapé à la main)");
-                      if (nouveauType === "entretien_contrat" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un contrat (de la liste, ou le Nº d'un ancien contrat tapé à la main)");
+                      // 📄 CONTRAT FACULTATIF (2026-09-09, demande №2 du
+                      // propriétaire : « je ne peux pas créer la tâche si
+                      // je n'ai pas de numéro de contrat ») — un entretien
+                      // se crée SANS contrat ; la facturation passera par
+                      // la révision manuelle, comme un prix non listé.
                       if (depotRequis && !(parseFloat(depotMontant) > 0)) raisons.push("un montant de dépôt");
                       // « Nouveau contact » choisi mais incomplet : on ne
                       // crée pas une tâche avec un contact fantôme.

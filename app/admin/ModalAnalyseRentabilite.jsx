@@ -252,7 +252,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
         const marge = facture > 0 ? ((facture - cout) / facture) * 100 : null;
         const statutTexte =
           b.statutQb === "retire"
-            ? b.retraitRaison === "client_maison" ? "🏠 Maison" : "🛡️ Garantie"
+            ? b.retraitRaison === "client_maison" ? "🏠 Maison" : b.retraitRaison === "facture_hors_fluxya" ? "🧾 Hors Fluxya" : "🛡️ Garantie"
             : b.retraitStatut === "reporte"
               ? "🔄 Reporté"
               : b.statutQb === "envoye" || b.facture > 0 ? "Facturé" : "À facturer";

@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { Check, Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { AutocompleteAdresse, Button, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
@@ -35,6 +36,28 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // 🛡️ Retour sous garantie — corrigeable après coup : le courriel de
   // fin de travaux omet alors la demande d'avis Google (2026-09-06).
   const [garantieRetour, setGarantieRetour] = useState(!!tache.garantie);
+  // 📎 PIÈCES JOINTES APRÈS COUP (2026-09-09, demande №1 du
+  // propriétaire : « on ne peut pas ajouter de photos après la
+  // création ») — plans reçus plus tard, photo du client… Téléversées
+  // dès la sélection ; l'enregistrement les transmet au technicien via
+  // la fiche (donnees), comme celles de la création.
+  const [pjTache, setPjTache] = useState(() => (Array.isArray(tache.piecesJointes) ? tache.piecesJointes : []));
+  const [pjTelevers, setPjTelevers] = useState(false);
+  const ajouterPjEdition = async (fichiers) => {
+    setPjTelevers(true);
+    for (const fichier of fichiers) {
+      try {
+        if (fichier.type === "application/pdf" || fichier.type.startsWith("image/")) {
+          if (fichier.size > 15 * 1024 * 1024) continue; // trop lourd — ignoré
+          const url = await televerserPieceJointeTache(fichier);
+          setPjTache((prev) => [...prev, { url, nom: fichier.name, type: fichier.type === "application/pdf" ? "pdf" : "image" }]);
+        }
+      } catch {
+        // téléversement échoué — la pièce n'apparaît pas, on continue
+      }
+    }
+    setPjTelevers(false);
+  };
   // 📇 Contact sur place — repris du carnet du client ; « actuel »
   // couvre un contact déjà attaché à la tâche mais absent du carnet
   // (retiré du carnet, ou client non résolu). ⚠️ On vérifie VRAIMENT
@@ -242,6 +265,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       // 🛡️ Transmis SEULEMENT s'il a changé — une clé absente laisse
       // l'existant tranquille (même règle que les rattachements).
       ...(garantieRetour !== !!tache.garantie ? { garantie: garantieRetour } : {}),
+      // 📎 Pièces jointes — transmises seulement si elles ont changé.
+      ...(JSON.stringify(pjTache) !== JSON.stringify(tache.piecesJointes || []) ? { piecesJointes: pjTache } : {}),
       // 🏗️/📄 Rattachements — transmis SEULEMENT s'ils ont changé : une
       // clé absente laisse l'existant tranquille (les heures déjà
       // pointées ne sont alors jamais réécrites pour rien).
@@ -619,6 +644,40 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
             />
           </div>
+
+          {/* 📎 PIÈCES JOINTES — s'ajoutent aussi APRÈS la création
+              (2026-09-09, demande №1). Le technicien les reçoit dès
+              l'enregistrement. */}
+          {!estConge && (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">
+                📎 Photos et plans <span className="font-normal text-orange-600">(visibles au technicien)</span>
+              </label>
+              {pjTache.length > 0 && (
+                <div className="mb-1.5 space-y-1">
+                  {pjTache.map((pj, i) => (
+                    <div key={`${pj.url}-${i}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] text-slate-600">
+                      <span className="shrink-0">{pj.type === "pdf" ? "📄" : "🖼️"}</span>
+                      <a href={pj.url} target="_blank" rel="noreferrer" className="min-w-0 truncate font-semibold underline underline-offset-2">{pj.nom || "pièce jointe"}</a>
+                      <button onClick={() => setPjTache((prev) => prev.filter((_, j) => j !== i))} className="ml-auto shrink-0 font-bold text-slate-400 hover:text-red-600" aria-label="Retirer">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 px-2 py-2 text-[11px] font-bold text-slate-500 hover:bg-slate-50">
+                {pjTelevers ? "Téléversement…" : "➕ Ajouter des images ou des PDF"}
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  disabled={pjTelevers}
+                  onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; if (fs.length) ajouterPjEdition(fs); }}
+                />
+              </label>
+              <p className="mt-0.5 text-[9px] leading-snug text-slate-400">N&apos;oublie pas « Enregistrer les modifications » en bas — c&apos;est lui qui les envoie au technicien.</p>
+            </div>
+          )}
 
           {/* 🛡️ RETOUR SOUS GARANTIE — corrigeable ici après coup : pas de
               demande d'avis Google dans le courriel de fin de travaux. */}

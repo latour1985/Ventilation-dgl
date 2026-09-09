@@ -56,7 +56,7 @@ export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
                 className="mt-0.5 h-4 w-4 accent-[#FF6A13]"
               />
               <span className="text-xs font-semibold text-slate-700">
-                {cle === "travaux_en_cours" ? "🔄 " : cle === "garantie" ? "🛡️ " : "🏠 "}{libelle}
+                {cle === "travaux_en_cours" ? "🔄 " : cle === "garantie" ? "🛡️ " : cle === "facture_hors_fluxya" ? "🧾 " : "🏠 "}{libelle}
               </span>
             </label>
           ))}
@@ -602,7 +602,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     // est ÉCRIT dans la description : un client qui voit le calcul
     // conteste moins qu'un client qui voit un montant sorti de nulle part.
     (lignesSuggerees || []).forEach((l, i) => {
-      base.push({ id: `supp-${Date.now()}-${i}`, description: l.description, prix: l.prix });
+      base.push({ id: `supp-${Date.now()}-${i}`, description: l.description, ...(l.quantite != null ? { quantite: l.quantite } : {}), ...(l.prixUnitaire != null ? { prixUnitaire: l.prixUnitaire } : {}), prix: l.prix });
     });
     if (depotPaye) {
       base.push({
@@ -669,7 +669,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     premiereCleRef.current = cleSuggestions;
     setItems((prev) => {
       const sansAuto = prev.filter((it) => !String(it.id).startsWith("supp-"));
-      const fraiches = (lignesSuggerees || []).map((l, i) => ({ id: `supp-${Date.now()}-${i}`, description: l.description, prix: l.prix }));
+      const fraiches = (lignesSuggerees || []).map((l, i) => ({ id: `supp-${Date.now()}-${i}`, description: l.description, ...(l.quantite != null ? { quantite: l.quantite } : {}), ...(l.prixUnitaire != null ? { prixUnitaire: l.prixUnitaire } : {}), prix: l.prix }));
       // Les suggestions reprennent leur place : après la 1re ligne (la
       // description de la job), avant les déductions et ajouts manuels.
       return [...sansAuto.slice(0, 1), ...fraiches, ...sansAuto.slice(1)];
@@ -785,6 +785,10 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                     propriétaire) — dans les repères, pas seulement dans
                     le petit sous-titre de la fenêtre. */}
                 {(bon.client || be.client) && <span>👤 {bon.client || be.client}</span>}
+                {/* 📅 La DATE des travaux (2026-09-09, demande №7 du
+                    propriétaire) — on révise un prix en sachant QUAND
+                    la job a été faite. */}
+                {(be.date || bon.date) && <span>📅 Travaux du {be.date || bon.date}</span>}
                 {be.devisNumero && <span>📄 Devis {be.devisNumero}</span>}
                 {/* 📍 SANS adresse de travaux distincte (2026-09-06,
                     question du propriétaire : « pourquoi l'adresse
@@ -1054,7 +1058,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
               onClick={onRetirerFacturation}
               className="w-full rounded-xl border border-slate-300 bg-white py-2 text-xs font-bold text-slate-600 active:scale-[0.99]"
             >
-              🛡️ Ne pas facturer — retirer (garantie / client maison)…
+              🛡️ Ne pas facturer — retirer (garantie / maison / hors Fluxya)…
             </button>
           )}
         </div>
@@ -1817,6 +1821,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
               `Main-d'œuvre — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ${s.site.toFixed(2)} h sur place` +
               `${s.transport > 0 ? ` + ${s.transport.toFixed(2)} h transport` : ""}` +
               `${factH > arrondiH ? ` (minimum ${minTM} h appliqué)` : ""} = ${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
+            // 🔢 Quantité = heures, prix unitaire = taux (2026-09-09,
+            // demande №11 du propriétaire : « 2 h × 130 $ → quantité 2,
+            // 130 $, total 260 $ ») — le calcul se voit dans les cases.
+            quantite: factH,
+            prixUnitaire: taux,
             prix: Math.round(factH * taux * 100) / 100,
           };
         });
@@ -1858,6 +1867,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
               `Appel de service 2 techniciens — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ` +
               `${s.site.toFixed(2)} h sur place + ${s.transport.toFixed(2)} h transport` +
               `${factH > arrondiH ? ` (minimum ${minH} h appliqué)` : ""} = ${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
+            quantite: factH,
+            prixUnitaire: taux,
             prix: Math.round(factH * taux * 100) / 100,
           };
         });
@@ -1921,6 +1932,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         description:
           `${estTempsMateriel ? "Main-d'œuvre" : "Temps supplémentaire"}${s.nom ? ` — ${s.nom}` : ""}${s.passager ? " (même camion)" : ""}${!estTempsMateriel && horsZone ? " (hors zone — transport compté)" : ""}${estTempsMateriel && s.transport > 0 ? ` (incl. ${s.transport.toFixed(2)} h transport)` : ""} : ` +
           `${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
+        quantite: factH,
+        prixUnitaire: taux,
         prix: Math.round(factH * taux * 100) / 100,
       });
     });
@@ -3009,7 +3022,27 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           prixUnitaire: l.prixUnitaire,
         }));
       }
-      return [{ description: [b.date, b.projet || "Travaux"].filter(Boolean).join(" — "), montant: reste }];
+      // 🧾 BON JAMAIS RÉVISÉ → la ligne plate s'enrichit (2026-09-09,
+      // demande №3 du propriétaire : « il manque beaucoup
+      // d'informations, donc des heures ») : la description des travaux
+      // et les heures de chaque technicien suivent — le même niveau de
+      // détail que la facture d'un bon seul.
+      const sourcesB = ((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || []).filter(
+        (s) => (Number(s.heures) || 0) > 0
+      );
+      const heuresTxt = sourcesB.map((s) => `${s.employeNom || "technicien"} : ${Number(s.heures).toFixed(2)} h`).join(" · ");
+      return [
+        {
+          description: [
+            [b.date, b.projet || "Travaux"].filter(Boolean).join(" — "),
+            (b.description || "").trim() || null,
+            heuresTxt ? `Main-d'œuvre — ${heuresTxt}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          montant: reste,
+        },
+      ];
     });
     const total = lignes.reduce((s, l) => s + l.montant, 0);
     const r = await creerFactureQbo({
@@ -3398,7 +3431,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-slate-500 tabular-nums">{retires}</p>
-          <p className="text-xs font-semibold text-slate-500">Retirés — garantie / maison</p>
+          <p className="text-xs font-semibold text-slate-500">Retirés — garantie / maison / hors Fluxya</p>
         </button>
         <button
           onClick={() => basculerFiltre("facture")}
