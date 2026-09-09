@@ -401,7 +401,10 @@ export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = 
   const garde = (texte) => !f || String(texte || "").toLowerCase().includes(f);
   // Plafond par famille : au-delà, taper une lettre de plus est plus
   // rapide que défiler — et la liste reste fluide.
-  const tachesVisibles = taches.filter((t) => garde(`${t.clientNom} ${t.titre}`)).slice(0, 25);
+  // 📍 L'adresse entre aussi dans la recherche (2026-09-09, demande du
+  // propriétaire : « mettre l'adresse à côté des tâches, plus facile à
+  // trouver ») — on peut retrouver une job par son chantier.
+  const tachesVisibles = taches.filter((t) => garde(`${t.clientNom} ${t.titre} ${t.adresse || ""}`)).slice(0, 25);
   const clientsVisibles = clients.filter((c) => garde(c.nom)).slice(0, 25);
   const projetsVisibles = projets.filter((p) => garde(p.nom)).slice(0, 25);
   const libelle = (() => {
@@ -447,9 +450,13 @@ export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = 
             key={x.id}
             type="button"
             onClick={() => { onChoisir(`${prefixe}:${x.id}`); setOuvert(false); setFiltre(""); }}
-            className="block w-full truncate px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-orange-50"
+            className="block w-full px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-orange-50"
           >
-            {rendu(x)}
+            <span className="block truncate">{rendu(x)}</span>
+            {/* 📍 L'adresse du chantier sous la tâche — repère visuel. */}
+            {prefixe === "t" && x.adresse ? (
+              <span className="block truncate text-[10px] text-slate-400">📍 {x.adresse}</span>
+            ) : null}
           </button>
         ))}
       </div>
