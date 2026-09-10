@@ -14,6 +14,7 @@ import { useEffect, useState } from "react";
 import { use } from "react";
 import { AlertTriangle, Loader2, Printer } from "lucide-react";
 import { chargerFactureMaisonPublique, noterConsultationFactureMaison } from "@/lib/supabase/facturesMaison";
+import ContactEntreprise from "@/components/ContactEntreprise";
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import { numeroPourTaxe } from "@/lib/taxesCanada";
 
@@ -155,6 +156,9 @@ export default function PageFacturePublique({ params }) {
             {e.noteFacture && <p className={`whitespace-pre-wrap ${facture.note ? "mt-2 border-t border-slate-100 pt-2" : ""}`}>{e.noteFacture}</p>}
           </div>
         )}
+
+        {/* 📞 Une question sur la facture ? (audit Copilot 2026-09-10) */}
+        <ContactEntreprise nom={e.nom} telephone={e.telephone} courriel={e.courriel} />
 
         {/* IMPRESSION / PDF — l'impression du navigateur donne la copie
             PDF ; le bouton disparaît lui-même à l'impression. */}

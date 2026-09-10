@@ -25,6 +25,7 @@ import { CheckCircle2, AlertTriangle, Loader2, FileText } from "lucide-react";
 import { chargerDevisPublic, repondreDevis, chargerOptionsDevis, chargerVersionDevis, choisirVersionDevis, JOURS_VALIDITE_PRIX_DEVIS, ligneAccreditations, noterConsultationDevis } from "@/lib/supabase/devisPublic";
 import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
 import { CONFIG_DEFAUT, calculerTaxes } from "@/lib/supabase/entreprise";
+import ContactEntreprise from "@/components/ContactEntreprise";
 
 const argent = (n) => `${(Number(n) || 0).toFixed(2)} $`;
 
@@ -571,7 +572,11 @@ export default function PageDevisPublic({ params }) {
           </div>
         )}
 
-        <p className="pb-6 text-center text-[10px] text-slate-400">
+        {/* 📞 Une question sur le devis ? Le client nous joint en un
+            geste (audit Copilot 2026-09-10, retenu par le propriétaire). */}
+        <ContactEntreprise nom={config.nomLegal} telephone={config.telephone} courriel={config.courriel} />
+
+        <p className="pb-6 pt-4 text-center text-[10px] text-slate-400">
           © {new Date().getFullYear()} {config.nomLegal}
         </p>
       </div>

@@ -2038,9 +2038,26 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           </div>
         </div>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-white">{t("Bonjour,")} {nomTechnicien || t("technicien")}</h1>
+        {/* 📶 HORS-LIGNE BIEN VISIBLE (2026-09-10, audit Copilot — retenu
+            par le propriétaire) : la petite ligne grise passait inaperçue
+            sur un chantier. La bannière rassure d'un coup d'œil : tout
+            est gardé, rien à refaire, ça partira tout seul. */}
         {!enLigne && (
-          <p className="mt-1 text-[11px] text-zinc-300">
-            {t("Tes données sont sauvegardées localement et se synchroniseront au retour de la connexion.")}
+          <div className="mt-3 rounded-xl border-2 border-amber-400/70 bg-amber-500/15 p-3">
+            <p className="flex items-center gap-1.5 text-sm font-extrabold text-amber-300">
+              📶 {t("Hors ligne — continue, rien ne se perd")}
+            </p>
+            <p className="mt-0.5 text-[11px] text-amber-100/90">
+              {t("Photos, heures et bons sont gardés sur le téléphone et partiront tout seuls au retour du réseau.")}
+              {nbEnAttente > 0 ? ` (${nbEnAttente} ${t("en attente")})` : ""}
+            </p>
+          </div>
+        )}
+        {/* 📦 Retour du réseau : la file se vide — on le MONTRE, pour que
+            le technicien sache que ses données s'en vont au bureau. */}
+        {enLigne && nbEnAttente > 0 && (
+          <p className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-emerald-300">
+            <Loader2 size={11} className="animate-spin" /> {t("Connexion retrouvée —")} {nbEnAttente} {t("élément(s) en route vers le bureau…")}
           </p>
         )}
         {erreurSync && (
@@ -4385,6 +4402,15 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           {enLigne ? t("En ligne") : t("Hors ligne")}
         </span>
       </div>
+
+      {/* 📶 Bandeau hors-ligne sur l'écran de TRAVAIL aussi (2026-09-10) :
+          c'est ici que le technicien passe sa journée — la pastille grise
+          en coin ne suffisait pas à le rassurer. */}
+      {!enLigne && (
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800">
+          📶 {t("Hors ligne — continue normalement : photos, heures et bon sont gardés et partiront tout seuls au retour du réseau.")}
+        </div>
+      )}
 
       {fermee && dansDelai && (
         <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700">

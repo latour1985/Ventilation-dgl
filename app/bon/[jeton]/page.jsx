@@ -23,6 +23,7 @@ import { AlertTriangle, Loader2, FileCheck2, MapPin, Wrench } from "lucide-react
 import { chargerBonPublic, JOURS_VALIDITE_BON, noterConsultationBon } from "@/lib/supabase/bonPublic";
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
+import ContactEntreprise from "@/components/ContactEntreprise";
 
 // @react-pdf/renderer ne tourne que dans le navigateur.
 const BoutonPDFPublic = dynamic(() => import("@/components/pdf/BoutonPDFPublic"), {
@@ -229,6 +230,13 @@ export default function PageBonPublic({ params }) {
           <div className="mt-4">
             <BoutonPDFPublic bon={bon} />
           </div>
+
+          {/* 📞 Une question sur les travaux ? (audit Copilot 2026-09-10) */}
+          <ContactEntreprise
+            nom={bon.entreprise.nomCommercial || bon.entreprise.nomLegal}
+            telephone={bon.entreprise.telephone}
+            courriel={bon.entreprise.courriel}
+          />
 
           <p className="mt-3 text-center text-[11px] text-slate-400">
             Document descriptif des travaux réalisés — ne constitue ni une soumission ni une facture.
