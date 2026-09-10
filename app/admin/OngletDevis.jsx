@@ -15,7 +15,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
 import { rejeterEstimateQbo } from "@/lib/quickbooksClient";
 import { genererJeton, lienDevisPublic, JOURS_VALIDITE_LIEN_DEVIS } from "@/lib/supabase/devisPublic";
-import { activerVersionDevis, annulerDevisAccepte, supprimerDevis, reponsesClientATraiter, classerReponseDevis, rouvrirReponseDevis } from "@/lib/supabase/devis";
+import { activerVersionDevis, basculerVersionDevis, annulerDevisAccepte, supprimerDevis, reponsesClientATraiter, classerReponseDevis, rouvrirReponseDevis } from "@/lib/supabase/devis";
 import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
@@ -1069,25 +1069,40 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       adresseTravaux: adresseTravauxDevis || null,
     };
     // 🔑 LE LIEN DU CLIENT SUIT LA VERSION ACTIVE (bogue vécu par le
-    // propriétaire, 2026-08-30 : « les ajouts et le prix n'apparaissent
-    // pas ») : le jeton public est UNIQUE dans la base (idx_devis_jeton)
-    // — copié tel quel sur la révision, l'enregistrement était REFUSÉ
-    // pendant que l'originale se faisait archiver. On retire donc le
-    // jeton de l'ancienne version AVANT de le poser sur la nouvelle,
-    // et si quoi que ce soit échoue, on REMET tout comme avant.
-    if (source.jetonPublic) {
-      const libere = await persisterDevis?.({ ...source, versionActive: false, jetonPublic: null });
-      if (libere === false) {
-        ajouterJournal(`⚠️ Nouvelle version de ${source.numero} NON enregistrée (le lien du client n'a pas pu être transféré) — rien n'a changé, réessaie.`);
-        return;
-      }
-    }
-    const enregistre = await persisterDevis?.(revision);
+    // propriétaire, 2026-08-30) — et depuis l'audit 2026-09-09 (snippet
+    // 141), le transfert est ATOMIQUE : la révision est d'abord créée
+    // INVISIBLE (inactive, sans jeton) — si ça échoue, rien n'a changé.
+    // Puis Postgres transfère le jeton et bascule la version active
+    // d'un seul coup : plus jamais de lien mort ni de dossier sans
+    // version active si ça coupe au milieu.
+    const enregistre = await persisterDevis?.({ ...revision, versionActive: false, jetonPublic: null, jetonExpireLe: null });
     if (enregistre === false) {
-      // Marche arrière : l'originale redevient exactement ce qu'elle était.
-      if (source.jetonPublic) persisterDevis?.({ ...source });
       ajouterJournal(`⚠️ Nouvelle version de ${source.numero} NON enregistrée — rien n'a changé, réessaie.`);
       return;
+    }
+    let bascule;
+    try {
+      bascule = await basculerVersionDevis(base, numero, source.id);
+    } catch {
+      ajouterJournal(`⚠️ Version ${numero} créée mais PAS encore activée (connexion ?) — l'ancien lien du client fonctionne toujours. Rouvre le dossier et choisis « rendre active » pour terminer.`);
+      return;
+    }
+    if (!bascule) {
+      // Snippet 141 pas encore passé : l'ancien chemin prudent, pas à pas.
+      if (source.jetonPublic) {
+        const libere = await persisterDevis?.({ ...source, versionActive: false, jetonPublic: null });
+        if (libere === false) {
+          ajouterJournal(`⚠️ Nouvelle version de ${source.numero} créée mais le lien du client n'a pas pu être transféré — rien d'autre n'a changé, réessaie.`);
+          return;
+        }
+      }
+      const active = await persisterDevis?.(revision);
+      if (active === false) {
+        if (source.jetonPublic) persisterDevis?.({ ...source });
+        ajouterJournal(`⚠️ Nouvelle version de ${source.numero} NON activée — rien n'a changé, réessaie.`);
+        return;
+      }
+      activerVersionDevis(base, numero).catch(() => {});
     }
     setDevisListe((prev) => [
       revision,
@@ -1097,7 +1112,6 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           : d
       ),
     ]);
-    activerVersionDevis(base, numero).catch(() => {});
     ajouterJournal(
       `📄 Version ${numero} enregistrée à partir de ${source.numero}${note ? ` — ${note}` : ""} · ${totaux.vendant.toFixed(2)} $ (les versions précédentes restent consultables)`
     );
@@ -1438,25 +1452,36 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       if (!window.confirm("Une version de ce dossier est ACCEPTÉE. La rendre inactive archive l'acceptation (la preuve est conservée) et le client devra accepter la version choisie. Continuer ?")) return;
     }
     const porteur = versions.find((v) => v.jetonPublic);
-    if (porteur && porteur.id !== cible.id) {
-      const libere = await persisterDevis?.({ ...porteur, versionActive: false, jetonPublic: null });
-      if (libere === false) {
-        ajouterJournal(`⚠️ Version ${cible.numero} NON activée (le lien du client n'a pas pu être transféré) — rien n'a changé.`);
-        return;
-      }
-    }
-    const ok = await persisterDevis?.({
-      ...cible,
-      versionActive: true,
-      jetonPublic: porteur ? porteur.jetonPublic : cible.jetonPublic || null,
-      jetonExpireLe: porteur ? porteur.jetonExpireLe : cible.jetonExpireLe || null,
-    });
-    if (ok === false) {
-      if (porteur && porteur.id !== cible.id) persisterDevis?.({ ...porteur });
-      ajouterJournal(`⚠️ Version ${cible.numero} NON activée — rien n'a changé, réessaie.`);
+    // 🛡️ ATOMIQUE d'abord (snippet 141) : jeton + version active d'un
+    // seul coup. Repli pas à pas si le snippet n'est pas encore passé.
+    let bascule;
+    try {
+      bascule = await basculerVersionDevis(base, cible.id, porteur && porteur.id !== cible.id ? porteur.id : null);
+    } catch {
+      ajouterJournal(`⚠️ Version ${cible.numero} NON activée (connexion ?) — rien n'a changé, réessaie.`);
       return;
     }
-    activerVersionDevis(base, cible.numero).catch(() => {});
+    if (!bascule) {
+      if (porteur && porteur.id !== cible.id) {
+        const libere = await persisterDevis?.({ ...porteur, versionActive: false, jetonPublic: null });
+        if (libere === false) {
+          ajouterJournal(`⚠️ Version ${cible.numero} NON activée (le lien du client n'a pas pu être transféré) — rien n'a changé.`);
+          return;
+        }
+      }
+      const ok = await persisterDevis?.({
+        ...cible,
+        versionActive: true,
+        jetonPublic: porteur ? porteur.jetonPublic : cible.jetonPublic || null,
+        jetonExpireLe: porteur ? porteur.jetonExpireLe : cible.jetonExpireLe || null,
+      });
+      if (ok === false) {
+        if (porteur && porteur.id !== cible.id) persisterDevis?.({ ...porteur });
+        ajouterJournal(`⚠️ Version ${cible.numero} NON activée — rien n'a changé, réessaie.`);
+        return;
+      }
+      activerVersionDevis(base, cible.numero).catch(() => {});
+    }
     setDevisListe((prev) =>
       prev.map((d) => {
         if ((d.numeroBase || d.numero) !== base) return d;

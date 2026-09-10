@@ -16,10 +16,10 @@ import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo } from "@/lib/quickbooksClient";
 import { creerFactureSage as creerFactureSageCopie } from "@/lib/sageClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
-import { creerFactureMaison, majFactureMaison, lienFactureMaison } from "@/lib/supabase/facturesMaison";
+import { creerFactureMaison, lienFactureMaison, finaliserFactureMaison } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
 import { SectionFacturesMaison } from "./FacturesMaison";
-import { majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
+import { majFacturesEmises, poserFacturesEmisesLot, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
 import { AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
@@ -2680,7 +2680,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       }).catch(() => ({}));
       if (r?.envoye || r?.simule) {
         envoye = true;
-        majFactureMaison(creee.id, { statut: "envoyee", envoyeeLe: new Date().toISOString(), courriels: destinataires }).catch(() => {});
+        // Le marquage « envoyée » part dans la FINALISATION ATOMIQUE
+        // ci-dessous — d'un seul coup avec la sortie du bon de la pile.
       }
     }
     // 🧾 COPIE COMPTABLE DANS SAGE (chantier Sage phase 3, 2026-09-07) :
@@ -2723,6 +2724,38 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       envoiQb: envoye ? { statut: "envoyee", date: new Date().toISOString() } : null,
     };
     const nouvelles = [...(b.facturesEmises || []), entree];
+    // 🛡️ FINALISATION ATOMIQUE (audit 2026-09-09, snippet 141) : la
+    // facture passe « envoyée » ET le bon sort de la pile dans UNE
+    // transaction. Avant, deux écritures lâchées sans attendre : une
+    // coupure laissait le bon « à facturer » — deuxième clic = deux
+    // numéros de facture pour le même travail.
+    const finalisation = {
+      factureId: creee.id,
+      ...(envoye ? { statut: "envoyee", envoyeeLe: new Date().toISOString(), courriels: destinataires } : {}),
+      ...(String(b.id).startsWith("sbb-") ? { bonRowId: String(b.id).slice(4), factures: nouvelles, statutBon: "envoye" } : {}),
+    };
+    if (finalisation.statut || finalisation.bonRowId) {
+      let finalisee = true;
+      try {
+        await finaliserFactureMaison(finalisation);
+      } catch {
+        try {
+          await finaliserFactureMaison(finalisation);
+        } catch {
+          finalisee = false;
+        }
+      }
+      if (!finalisee) {
+        ajouterJournal(
+          `🚨 Facture ${creee.numero} CRÉÉE${envoye ? " et envoyée au client" : ""}, mais le bon n'a PAS pu être marqué « facturé » — NE REFACTURE PAS ce bon : recharge la page et vérifie avant tout autre geste.`
+        );
+        if (typeof window !== "undefined") {
+          window.alert(
+            `⚠️ IMPORTANT — La facture ${creee.numero} est créée${envoye ? " (le client l'a reçue)" : ""}, mais le marquage du bon a échoué (connexion ?).\n\nNE PAS refacturer ce bon. Recharge la page : s'il apparaît encore « à facturer », ne le refacture pas — la facture existe déjà.`
+          );
+        }
+      }
+    }
     setBons((prev) =>
       prev.map((x) =>
         x.id === id
@@ -2730,11 +2763,6 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           : x
       )
     );
-    if (String(b.id).startsWith("sbb-")) {
-      majFacturesEmises(String(b.id).slice(4), nouvelles, "envoye").catch(() =>
-        ajouterJournal("⚠️ Facture maison affichée mais NON enregistrée en base — vérifie la connexion.")
-      );
-    }
     ajouterJournal(
       `🧾 Facture MAISON ${creee.numero} — « ${b.projet} » (${b.client}) · ${sousTotal.toFixed(2)} $ HT` +
         (envoye
@@ -3083,12 +3111,16 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // restent justes bon par bon, et le numéro les relie entre eux.
     const idsDuGroupe = new Set(bonsDuGroupe.map((b) => b.id));
     const partDe = new Map(bonsDuGroupe.map((b) => [b.id, resteAFacturerDe(b)]));
-    setBons((prev) =>
-      prev.map((x) => {
-        if (!idsDuGroupe.has(x.id)) return x;
+    // 🛡️ TOUT OU RIEN (audit 2026-09-09, snippet 141) : les N marquages
+    // partent en UN appel atomique — plus jamais « 3 bons marqués, 3
+    // oubliés » avec double facturation au prochain passage. Et les
+    // écritures SORTENT du setBons : un updater React peut être
+    // ré-exécuté (StrictMode), ce qui aurait redoublé les écritures.
+    const majParBon = new Map(
+      bonsDuGroupe.map((b) => {
         const entree = {
-          id: `fact-${Date.now()}-${x.id}`,
-          montant: partDe.get(x.id) || 0,
+          id: `fact-${Date.now()}-${b.id}`,
+          montant: partDe.get(b.id) || 0,
           type: "complete",
           detail: `facture groupée ${numero}`,
           date: dateISO(new Date()),
@@ -3098,17 +3130,40 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           courrielsEnvoi: destinataires.map((c) => c.email),
           envoiQb: envoiSimple,
         };
-        const nouvelles = [...(x.facturesEmises || []), entree];
-        // Persistance — sinon les factures émises meurent au rechargement.
-        if (String(x.id).startsWith("sbb-")) {
-          majFacturesEmises(String(x.id).slice(4), nouvelles, "envoye").catch(() =>
-            ajouterJournal(`⚠️ Facture ${numero} affichée sur « ${x.projet} » mais NON enregistrée — vérifie la connexion.`)
-          );
-        }
+        return [b.id, [...(b.facturesEmises || []), entree]];
+      })
+    );
+    const lots = bonsDuGroupe
+      .filter((b) => String(b.id).startsWith("sbb-"))
+      .map((b) => ({ rowId: String(b.id).slice(4), factures: majParBon.get(b.id), statut: "envoye" }));
+    let persiste = true;
+    try {
+      await poserFacturesEmisesLot(lots);
+    } catch {
+      // Une seconde chance immédiate (micro-coupure), puis l'alarme.
+      try {
+        await poserFacturesEmisesLot(lots);
+      } catch {
+        persiste = false;
+      }
+    }
+    if (!persiste) {
+      ajouterJournal(
+        `🚨 Facture ${numero} CRÉÉE dans QuickBooks, mais les ${lots.length} bons n'ont PAS pu être marqués « facturés » — NE REFACTURE PAS ce groupe : recharge la page et vérifie avant tout autre geste.`
+      );
+      if (typeof window !== "undefined") {
+        window.alert(
+          `⚠️ IMPORTANT — La facture ${numero} est créée dans QuickBooks, mais le marquage des bons a échoué (connexion ?).\n\nNE PAS refacturer ce groupe. Recharge la page : si les bons apparaissent encore « à facturer », ne les refacture pas — la facture existe déjà.`
+        );
+      }
+    }
+    setBons((prev) =>
+      prev.map((x) => {
+        if (!idsDuGroupe.has(x.id)) return x;
         return {
           ...x,
           statutQb: "envoye",
-          facturesEmises: nouvelles,
+          facturesEmises: majParBon.get(x.id) || x.facturesEmises,
           courrielFacturation: destinataires[0]?.email || null,
           courrielsFacturation: destinataires.map((c) => c.email),
         };
@@ -3193,11 +3248,25 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           : x
       )
     );
-    // PERSISTANCE — les factures émises survivent enfin au rechargement.
+    // PERSISTANCE — attendue et RÉESSAYÉE (audit 2026-09-09) : la
+    // facture existe dans QuickBooks, le marquage ne doit pas se perdre.
     if (String(b.id).startsWith("sbb-")) {
-      majFacturesEmises(String(b.id).slice(4), nouvelles, "envoye").catch(() =>
-        ajouterJournal("⚠️ Facture émise affichée mais NON enregistrée en base — vérifie la connexion.")
-      );
+      try {
+        await majFacturesEmises(String(b.id).slice(4), nouvelles, "envoye");
+      } catch {
+        try {
+          await majFacturesEmises(String(b.id).slice(4), nouvelles, "envoye");
+        } catch {
+          ajouterJournal(
+            `🚨 Facture ${numeroReel} CRÉÉE dans QuickBooks mais le bon « ${b.projet} » n'a PAS pu être marqué — NE le refacture PAS : recharge la page et vérifie.`
+          );
+          if (typeof window !== "undefined") {
+            window.alert(
+              `⚠️ IMPORTANT — La facture ${numeroReel} est créée dans QuickBooks, mais le marquage du bon a échoué (connexion ?).\n\nNE PAS refacturer ce bon. Recharge la page : s'il apparaît encore « à facturer », ne le refacture pas — la facture existe déjà.`
+            );
+          }
+        }
+      }
     }
     if (r?.creee) {
       envoyerCopieInterne({ numero: numeroReel, clientNom: b.client || "", totalHT: entree.montant, destinataires, lignes, adresse: b.adresseTravaux || null });
@@ -3282,24 +3351,24 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         ? { statut: "envoyee", date: rQbo.envoiQb.envoyeeLe || new Date().toISOString() }
         : { statut: "non_confirme", date: null }
       : null;
+    // UNE seule entrée, partagée par l'écran ET la base (avant : deux
+    // `Date.now()` séparés → l'entrée changeait d'identité au rechargement).
+    const entree = {
+      id: `fact-${Date.now()}`,
+      montant,
+      type,
+      detail,
+      date: dateISO(new Date()),
+      numeroFactureQb,
+      qboInvoiceId: rQbo?.factureId || null,
+      courrielEnvoi: destinataires[0]?.email || null,
+      courrielsEnvoi: destinataires.map((c) => c.email),
+      envoiQb,
+    };
     setBons((prev) =>
       prev.map((b) => {
         if (b.id !== bonId) return b;
-        const nouvelles = [
-          ...(b.facturesEmises || []),
-          {
-            id: `fact-${Date.now()}`,
-            montant,
-            type,
-            detail,
-            date: dateISO(new Date()),
-            numeroFactureQb,
-            qboInvoiceId: rQbo?.factureId || null,
-            courrielEnvoi: destinataires[0]?.email || null,
-            courrielsEnvoi: destinataires.map((c) => c.email),
-            envoiQb,
-          },
-        ];
+        const nouvelles = [...(b.facturesEmises || []), entree];
         const cumul = nouvelles.filter((f) => !f.annuleeQb).reduce((s, f) => s + f.montant, 0);
         const total = devisCourant ? devisCourant.totalVendant : b.montant;
         const complet = cumul >= total - 0.01;
@@ -3307,18 +3376,30 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       })
     );
     const b = bons.find((x) => x.id === bonId);
-    // PERSISTANCE — reconstruit la même liste que le setBons ci-dessus
-    // (b est l'état AVANT ajout) et l'écrit en base avec le statut.
+    // PERSISTANCE — attendue et RÉESSAYÉE (audit 2026-09-09) : si cette
+    // écriture se perdait, la modale recalculait le solde restant sur la
+    // base incomplète → SUR-facturation du prochain versement.
     if (b && String(b.id).startsWith("sbb-")) {
-      const listePersistee = [
-        ...(b.facturesEmises || []),
-        { id: `fact-${Date.now()}`, montant, type, detail, date: dateISO(new Date()), numeroFactureQb, qboInvoiceId: rQbo?.factureId || null, courrielEnvoi: destinataires[0]?.email || null, courrielsEnvoi: destinataires.map((c) => c.email), envoiQb },
-      ];
+      const listePersistee = [...(b.facturesEmises || []), entree];
       const totalAttendu = devisCourant ? devisCourant.totalVendant : b.montant;
       const cumulPersiste = listePersistee.filter((f) => !f.annuleeQb).reduce((x, f) => x + f.montant, 0);
-      majFacturesEmises(String(b.id).slice(4), listePersistee, cumulPersiste >= totalAttendu - 0.01 ? "envoye" : "a_facturer").catch(() =>
-        ajouterJournal("⚠️ Facture émise affichée mais NON enregistrée en base — vérifie la connexion.")
-      );
+      const statutPersiste = cumulPersiste >= totalAttendu - 0.01 ? "envoye" : "a_facturer";
+      try {
+        await majFacturesEmises(String(b.id).slice(4), listePersistee, statutPersiste);
+      } catch {
+        try {
+          await majFacturesEmises(String(b.id).slice(4), listePersistee, statutPersiste);
+        } catch {
+          ajouterJournal(
+            `🚨 Facture ${numeroFactureQb} CRÉÉE dans QuickBooks mais NON enregistrée au registre du bon — le solde restant du devis ${b.devisNumero || ""} est FAUX tant que ce n'est pas réglé : recharge la page avant toute autre facture sur ce devis.`
+          );
+          if (typeof window !== "undefined") {
+            window.alert(
+              `⚠️ IMPORTANT — La facture ${numeroFactureQb} est créée dans QuickBooks, mais son inscription au dossier a échoué (connexion ?).\n\nAvant de faire une AUTRE facture sur ce devis, recharge la page et vérifie le solde restant — sinon le prochain versement serait calculé sur un mauvais montant.`
+            );
+          }
+        }
+      }
     }
     ajouterJournal(
       `🧾 Facture${rQbo?.creee ? " QuickBooks" : " (locale)"} Nº ${numeroFactureQb} de ${montant.toFixed(2)} $ (${libelle}) créée pour "${b?.projet}" — ${b?.type === "entretien_contrat" ? "contrat" : "devis"} #${b?.devisNumero}` +

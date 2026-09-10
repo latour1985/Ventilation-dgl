@@ -19,6 +19,7 @@ import { coffrerPhoto, lireBlobPhoto, listerPhotosCoffre, decoffrerPhoto } from 
 import { SqueletteTechnicien } from "@/components/EcranSquelette";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail, bonExistePourTache, apportEquipePourBon } from "@/lib/supabase/bonsTravail";
+import { fermerTravauxTechnicien } from "@/lib/supabase/fermetureTechnicien";
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import PanneauNotesPerso from "@/components/PanneauNotesPerso";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
@@ -3614,7 +3615,7 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
 // ============================================================
 // FORMULAIRE BON DE TRAVAIL
 // ============================================================
-function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile }) {
+function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile, onChargeHeures }) {
   // 🌎 Version anglaise (tranche « bon de travail », 2026-09-04) —
   // interface seulement : le bon envoyé au client et les données
   // enregistrées restent en français.
@@ -4252,7 +4253,17 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           .join("\n");
       }
     }
-    enregistrerBonTravail(chargeBon, session).then(async (bonRowId) => {
+    // 🛡️ BON + HEURES D'UN SEUL COUP (audit 2026-09-09, snippet 141) :
+    // avant, le bon partait tout de suite et les heures ~600 ms plus
+    // tard — une coupure entre les deux laissait un bon facturable SANS
+    // paie pour le technicien. La fermeture atomique écrit les deux
+    // dans une transaction ; terminerTache() repasse ensuite (upsert
+    // identique, sans danger) et garde son filet hors-ligne.
+    const chargeHeures = onChargeHeures?.(tache.id) || null;
+    (chargeHeures
+      ? fermerTravauxTechnicien(chargeBon, chargeHeures, session).then((r) => r.bonRowId)
+      : enregistrerBonTravail(chargeBon, session)
+    ).then(async (bonRowId) => {
       // 🤝 FERMETURE D'ÉQUIPE : le bon est créé — on avertit maintenant
       // les coéquipiers qui n'avaient pas fermé. Leur téléphone leur
       // demandera de confirmer (ou d'ajuster) leurs heures. Si l'appel
@@ -6161,42 +6172,49 @@ function AppTechnicien() {
     );
   };
 
+  // La CHARGE D'HEURES d'une tâche — extraite de terminerTache pour que
+  // la fermeture atomique bon+heures (snippet 141) construise EXACTEMENT
+  // la même ligne que le chemin normal.
+  const chargeHeuresDepuisTache = (t) => {
+    const ecoule = t.tempsDebutSegment ? (Date.now() - t.tempsDebutSegment) / 1000 : 0;
+    const heures = (t.tempsAccumuleSec + ecoule) / 3600;
+    const clientDemo = CLIENTS.find((c) => c.id === t.clientId);
+    return {
+      // Pour les tâches assignées par l'admin : l'identifiant D'ORIGINE
+      // (côté agenda), pour que le bloc passe au vert dans l'agenda.
+      tacheId: t.cleHeures || t.tacheOrigineId || t.id,
+      secteur: t.secteur || "commercial",
+      titre: t.titre || (t.type === "transport" ? "Transport" : undefined),
+      clientNom: t.clientNom || clientDemo?.nom || null,
+      date: t.date || isoLocal(new Date()),
+      heures,
+      estTransport: t.type === "transport",
+      // Où ces heures atterrissent dans les coûts : projet,
+      // administratif, ou divers (payées mais rattachées à rien).
+      categorieHeures: t.categorieHeures || "projet",
+      kilometres: t.type === "transport" ? t.kilometres || 0 : null,
+      projetId: t.projetId || null,
+      noteTerrain: t.notesTerrain || "",
+      noteInterne: t.notesInternes || "",
+      // Heures RÉELLES de début et de fin — pour l'affichage
+      // « 7 h 42 → 11 h 15 » et les ajustements côté bureau.
+      debutReel: t.debutReel || null,
+      finReelle: Date.now(),
+      // Liens des photos téléversées (avant/après) — affichées au
+      // bureau, sur le bon de travail client et dans le PDF.
+      photosAvant: (t.photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
+      photosApres: (t.photosApres || []).map((p) => p.urlDistante).filter(Boolean),
+      videos: (t.videos || []).map((v) => v.urlDistante).filter(Boolean),
+    };
+  };
+
   const terminerTache = (id) => {
     // Capture AVANT la mise à jour d'état : la ligne « travail effectué »
     // (heures réelles + taux coûtant FIGÉ à la saisie) part vers le
     // bureau via Supabase — alimente les coûts réels des projets.
     const t = taches.find((x) => x.id === id);
     if (t) {
-      const ecoule = t.tempsDebutSegment ? (Date.now() - t.tempsDebutSegment) / 1000 : 0;
-      const heures = (t.tempsAccumuleSec + ecoule) / 3600;
-      const clientDemo = CLIENTS.find((c) => c.id === t.clientId);
-      const chargeTravail = {
-          // Pour les tâches assignées par l'admin : l'identifiant D'ORIGINE
-          // (côté agenda), pour que le bloc passe au vert dans l'agenda.
-          tacheId: t.cleHeures || t.tacheOrigineId || t.id,
-        secteur: t.secteur || "commercial",
-          titre: t.titre || (t.type === "transport" ? "Transport" : undefined),
-          clientNom: t.clientNom || clientDemo?.nom || null,
-          date: t.date || isoLocal(new Date()),
-          heures,
-          estTransport: t.type === "transport",
-          // Où ces heures atterrissent dans les coûts : projet,
-          // administratif, ou divers (payées mais rattachées à rien).
-          categorieHeures: t.categorieHeures || "projet",
-          kilometres: t.type === "transport" ? t.kilometres || 0 : null,
-          projetId: t.projetId || null,
-          noteTerrain: t.notesTerrain || "",
-          noteInterne: t.notesInternes || "",
-          // Heures RÉELLES de début et de fin — pour l'affichage
-          // « 7 h 42 → 11 h 15 » et les ajustements côté bureau.
-          debutReel: t.debutReel || null,
-          finReelle: Date.now(),
-          // Liens des photos téléversées (avant/après) — affichées au
-          // bureau, sur le bon de travail client et dans le PDF.
-          photosAvant: (t.photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
-          photosApres: (t.photosApres || []).map((p) => p.urlDistante).filter(Boolean),
-          videos: (t.videos || []).map((v) => v.urlDistante).filter(Boolean),
-      };
+      const chargeTravail = chargeHeuresDepuisTache(t);
       enregistrerTravailEffectue(chargeTravail, session)
         .then(() => setErreurSync(""))
         .catch(() => {
@@ -6854,6 +6872,10 @@ function AppTechnicien() {
             onMettreEnFile={(action, message) => {
               setFileAttente((prev) => [...prev, action]);
               if (message) setErreurSync(message);
+            }}
+            onChargeHeures={(id) => {
+              const t = taches.find((x) => x.id === id);
+              return t ? chargeHeuresDepuisTache(t) : null;
             }}
           />
         )}

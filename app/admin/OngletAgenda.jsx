@@ -22,7 +22,7 @@ import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
 import { pieceBloqueLaTache } from "@/lib/supabase/piecesCommandees";
 import { enregistrerBonTravailBureau, rattacherAuBon } from "@/lib/supabase/bonsTravail";
-import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxHeures } from "@/lib/supabase/travauxEffectues";
+import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxHeures, rattacherTacheLot } from "@/lib/supabase/travauxEffectues";
 import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
@@ -1952,9 +1952,19 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ? (projets || []).find((p) => p.id === champs.projetId)?.nom || "projet"
       : null;
     try {
+      // 🛡️ TOUT OU RIEN (audit 2026-09-09, snippet 141) : les heures ET
+      // le bon suivent le projet/devis dans UNE transaction — avant, la
+      // boucle pouvait s'arrêter à 3 lignes sur 8 et la rentabilité du
+      // chantier mentait en silence. Repli : l'ancien chemin pas à pas.
+      const lot = await rattacherTacheLot(tache.id, {
+        majProjet: champs.projetId !== undefined,
+        projetId: champs.projetId !== undefined ? champs.projetId : null,
+        majDevis: champs.devisNumero !== undefined,
+        devisNumero: champs.devisNumero !== undefined ? champs.devisNumero : null,
+      });
       if (champs.projetId !== undefined) {
         const apercu = await heuresRattachablesA(tache.id);
-        const n = await rattacherProjetAuxHeures(tache.id, champs.projetId);
+        const n = lot !== null ? lot : await rattacherProjetAuxHeures(tache.id, champs.projetId);
         if (n > 0) {
           ajouterJournal(
             champs.projetId
@@ -1976,11 +1986,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
             : `📄 Devis retiré de « ${tache.titre || tache.clientNom} ».`
         );
       }
-      // Le bon de travail déjà créé (s'il existe) suit les deux.
-      await rattacherAuBon(tache.id, {
-        ...(champs.projetId !== undefined ? { projetId: champs.projetId } : {}),
-        ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
-      });
+      // Le bon de travail déjà créé (s'il existe) suit les deux — déjà
+      // fait par la transaction ; seulement en repli si snippet absent.
+      if (lot === null) {
+        await rattacherAuBon(tache.id, {
+          ...(champs.projetId !== undefined ? { projetId: champs.projetId } : {}),
+          ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
+        });
+      }
       // Pas de rechargement à la main : `travaux_effectues` et
       // `bons_travail` sont écoutés en Realtime — les coûts du projet et
       // la facturation se rafraîchissent d'eux-mêmes, ici comme sur les
@@ -5183,7 +5196,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   try {
                     await traiterPropositionProjetShop(t.id, accepter ? projetId : null);
                     if (accepter) {
-                      const n = await rattacherProjetAuxHeures(t.id, projetId, { toutesCategories: true });
+                      // 🛡️ Transaction du snippet 141 d'abord ; repli boucle.
+                      const lot = await rattacherTacheLot(t.id, { majProjet: true, projetId, toutesCategories: true });
+                      const n = lot !== null ? lot : await rattacherProjetAuxHeures(t.id, projetId, { toutesCategories: true });
                       ajouterJournal(
                         `🏗️ Projet « ${nomProjet} » CONFIRMÉ sur « ${t.titre} » (proposé par ${t.projetProposePar || "le technicien"})${n > 0 ? ` — ${n} entrée${n > 1 ? "s" : ""} d'heures rejoint${n > 1 ? "" : ""} ses coûts réels` : ""}.`
                       );
