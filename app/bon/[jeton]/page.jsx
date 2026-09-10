@@ -236,6 +236,8 @@ export default function PageBonPublic({ params }) {
             nom={bon.entreprise.nomCommercial || bon.entreprise.nomLegal}
             telephone={bon.entreprise.telephone}
             courriel={bon.entreprise.courriel}
+            jeton={jeton}
+            type="bon"
           />
 
           <p className="mt-3 text-center text-[11px] text-slate-400">
