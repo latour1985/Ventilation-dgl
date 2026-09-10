@@ -569,6 +569,52 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       },
     ]);
   };
+  // 🔑 LE LIEN DU CLIENT NE BOUGE QU'À L'ENVOI (2026-09-09, demande du
+  // propriétaire : « Enregistrer sans envoyer » montrait déjà la
+  // modification au client). Une révision enregistrée reste INVISIBLE
+  // pour le client : l'ancienne version garde le lien ET le statut de
+  // version active (la page publique exige les deux ensemble). Au
+  // moment d'ENVOYER — courriel ou copie du lien — cette fonction
+  // rapatrie le jeton du dossier sur la version envoyée et la rend
+  // active, d'un seul coup (transaction du snippet 141).
+  const reprendreJetonEtActiver = async (devis) => {
+    const base = devis.numeroBase || devis.numero;
+    const porteur = devisListe.find((d) => (d.numeroBase || d.numero) === base && d.jetonPublic && d.id !== devis.id) || null;
+    if (devis.versionActive !== false && !porteur) return devis; // déjà en règle
+    const bascule = await basculerVersionDevis(base, devis.id, porteur?.id || null);
+    if (!bascule) {
+      // Snippet 141 pas encore passé : chemin prudent pas à pas.
+      if (porteur) {
+        const libere = await persisterDevis?.({ ...porteur, versionActive: false, jetonPublic: null });
+        if (libere === false) throw new Error("le lien du client n'a pas pu être transféré");
+      }
+      const ok = await persisterDevis?.({
+        ...devis,
+        versionActive: true,
+        jetonPublic: porteur ? porteur.jetonPublic : devis.jetonPublic || null,
+        jetonExpireLe: porteur ? porteur.jetonExpireLe : devis.jetonExpireLe || null,
+      });
+      if (ok === false) {
+        if (porteur) persisterDevis?.({ ...porteur });
+        throw new Error("la version n'a pas pu être activée");
+      }
+      activerVersionDevis(base, devis.id).catch(() => {});
+    }
+    const maj = {
+      ...devis,
+      versionActive: true,
+      ...(porteur ? { jetonPublic: porteur.jetonPublic, jetonExpireLe: porteur.jetonExpireLe } : {}),
+    };
+    setDevisListe((prev) =>
+      prev.map((d) => {
+        if (d.id === maj.id) return maj;
+        if ((d.numeroBase || d.numero) !== base) return d;
+        return { ...d, versionActive: false, ...(porteur && d.id === porteur.id ? { jetonPublic: null } : {}) };
+      })
+    );
+    return maj;
+  };
+
   // LIEN D'ACCEPTATION — crée le jeton au premier clic (pas à la
   // création du devis : inutile d'exposer un lien qu'on n'enverra
   // peut-être jamais), puis le copie dans le presse-papier.
@@ -577,6 +623,14 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // ferme le bouton « Accepter » passé 30 jours.
   const [lienCopie, setLienCopie] = useState(null);
   const creerLienAcceptation = async (devis) => {
+    // Copier le lien = un ENVOI (le bureau va le coller dans son propre
+    // courriel) : la version copiée devient celle que le client voit.
+    try {
+      devis = await reprendreJetonEtActiver(devis);
+    } catch (e) {
+      ajouterJournal(`⚠️ Lien de ${devis.numero} NON copié — ${e?.message || "connexion impossible"}. Le client voit toujours l'ancienne version, réessaie.`);
+      return;
+    }
     let jeton = devis.jetonPublic;
     // ⏳ JETON EXPIRÉ : on le PROLONGE au lieu de le remplacer (2026-08-31,
     // « il devrait garder tous les liens ouverts ») — un nouveau jeton
@@ -676,17 +730,27 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     }
     if (adresses.length === 0) return;
     setEnvoiDevisEnCours(true);
+    // 🔑 C'EST ICI que le client change de version : la version envoyée
+    // récupère le lien du dossier et devient active — d'un seul coup
+    // (snippet 141). Tant qu'on n'envoie pas, il voit l'ancienne.
+    let devisCourant = devis;
+    try {
+      devisCourant = await reprendreJetonEtActiver(devis);
+    } catch (e) {
+      ajouterJournal(`⚠️ Devis ${devis.numero} NON envoyé — ${e?.message || "connexion impossible"}. Rien n'est parti et le client voit toujours l'ancienne version, réessaie.`);
+      setEnvoiDevisEnCours(false);
+      return;
+    }
     // Jeton valide — PROLONGÉ s'il est expiré (jamais remplacé : les
     // courriels déjà envoyés portent cette adresse-là).
     // `devisCourant` suit les mises à jour (jeton, relances) pour ne
     // jamais réécrire une version périmée du devis.
-    let devisCourant = devis;
-    let jeton = devis.jetonPublic;
-    const perime = !!devis.jetonExpireLe && new Date(devis.jetonExpireLe).getTime() < Date.now();
+    let jeton = devisCourant.jetonPublic;
+    const perime = !!devisCourant.jetonExpireLe && new Date(devisCourant.jetonExpireLe).getTime() < Date.now();
     if (!jeton || perime) {
       if (!jeton) jeton = genererJeton();
       const expire = new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString();
-      const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
+      const maj = { ...devisCourant, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
       devisCourant = maj;
       try {
@@ -1068,52 +1132,23 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       offerteComparaison: false,
       adresseTravaux: adresseTravauxDevis || null,
     };
-    // 🔑 LE LIEN DU CLIENT SUIT LA VERSION ACTIVE (bogue vécu par le
-    // propriétaire, 2026-08-30) — et depuis l'audit 2026-09-09 (snippet
-    // 141), le transfert est ATOMIQUE : la révision est d'abord créée
-    // INVISIBLE (inactive, sans jeton) — si ça échoue, rien n'a changé.
-    // Puis Postgres transfère le jeton et bascule la version active
-    // d'un seul coup : plus jamais de lien mort ni de dossier sans
-    // version active si ça coupe au milieu.
-    const enregistre = await persisterDevis?.({ ...revision, versionActive: false, jetonPublic: null, jetonExpireLe: null });
+    // 🔒 LE CLIENT NE VOIT RIEN TANT QU'ON N'ENVOIE PAS (2026-09-09,
+    // demande du propriétaire : « Enregistrer sans envoyer » montrait
+    // déjà la modification au client). La révision est enregistrée
+    // INACTIVE et sans jeton : l'ancienne version garde le lien ET le
+    // statut de version active — la page du client montre EXACTEMENT
+    // ce qu'il a reçu. La bascule (lien + version active, d'un seul
+    // coup — snippet 141) se fait à l'ENVOI : courriel, copie du lien,
+    // ou le geste explicite « rendre active ».
+    const revisionLocale = { ...revision, versionActive: false, jetonPublic: null, jetonExpireLe: null };
+    const enregistre = await persisterDevis?.(revisionLocale);
     if (enregistre === false) {
       ajouterJournal(`⚠️ Nouvelle version de ${source.numero} NON enregistrée — rien n'a changé, réessaie.`);
       return;
     }
-    let bascule;
-    try {
-      bascule = await basculerVersionDevis(base, numero, source.id);
-    } catch {
-      ajouterJournal(`⚠️ Version ${numero} créée mais PAS encore activée (connexion ?) — l'ancien lien du client fonctionne toujours. Rouvre le dossier et choisis « rendre active » pour terminer.`);
-      return;
-    }
-    if (!bascule) {
-      // Snippet 141 pas encore passé : l'ancien chemin prudent, pas à pas.
-      if (source.jetonPublic) {
-        const libere = await persisterDevis?.({ ...source, versionActive: false, jetonPublic: null });
-        if (libere === false) {
-          ajouterJournal(`⚠️ Nouvelle version de ${source.numero} créée mais le lien du client n'a pas pu être transféré — rien d'autre n'a changé, réessaie.`);
-          return;
-        }
-      }
-      const active = await persisterDevis?.(revision);
-      if (active === false) {
-        if (source.jetonPublic) persisterDevis?.({ ...source });
-        ajouterJournal(`⚠️ Nouvelle version de ${source.numero} NON activée — rien n'a changé, réessaie.`);
-        return;
-      }
-      activerVersionDevis(base, numero).catch(() => {});
-    }
-    setDevisListe((prev) => [
-      revision,
-      ...prev.map((d) =>
-        (d.numeroBase || d.numero) === base
-          ? { ...d, versionActive: false, ...(d.id === source.id ? { jetonPublic: null } : {}) }
-          : d
-      ),
-    ]);
+    setDevisListe((prev) => [revisionLocale, ...prev]);
     ajouterJournal(
-      `📄 Version ${numero} enregistrée à partir de ${source.numero}${note ? ` — ${note}` : ""} · ${totaux.vendant.toFixed(2)} $ (les versions précédentes restent consultables)`
+      `📄 Version ${numero} enregistrée à partir de ${source.numero}${note ? ` — ${note}` : ""} · ${totaux.vendant.toFixed(2)} $ — le client voit ENCORE ${source.numero} tant que tu n'envoies pas la nouvelle (Envoyer au client ou Copier le lien).`
     );
     setEditionVersion(null);
     setEditionEnFenetre(false);
@@ -1133,7 +1168,8 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // dossier — on ouvre donc la fenêtre du dossier AVEC le panneau
       // déplié (vécu : « ça n'envoie pas, je dois retourner là » — le
       // panneau s'ouvrait sur la carte de la liste, hors du regard).
-      ouvrirEnvoiDevis(revision);
+      // C'est l'ENVOI qui fera basculer le lien du client (règle 2026-09-09).
+      ouvrirEnvoiDevis(revisionLocale);
       setDossierEnModale(base);
     } else {
       setDossierEnModale(base);
