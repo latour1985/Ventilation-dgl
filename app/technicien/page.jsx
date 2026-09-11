@@ -5845,9 +5845,14 @@ function AppTechnicien() {
   const [inspectionsParDate, setInspectionsParDate] = useState({});
   const inspectionFaitePour = (date) => !!inspectionsParDate[date];
   // Recalcule le ref des journées sans véhicule à chaque changement.
+  // ⚠️ UN PASSAGER GARDE SON TRANSPORT (2026-09-11, vécu Raphaël : ses
+  // heures de transport disparaissaient) — « passager » et « pas de
+  // véhicule » cochent tous deux sansVehicule, MAIS le passager voyage
+  // (payé pendant le trajet). Seul le vrai « à pied, aucun véhicule »
+  // (sansVehicule ET aucun conducteur) retire les blocs de transport.
   datesSansVehiculeRef.current = new Set(
     Object.entries(inspectionsParDate)
-      .filter(([, rec]) => rec?.sansVehicule)
+      .filter(([, rec]) => rec?.sansVehicule && !rec?.passagerDeNom)
       .map(([date]) => date)
   );
   const [vue, setVue] = useState("accueil");
@@ -6704,11 +6709,10 @@ function AppTechnicien() {
       }
       return maj;
     });
-    // 🚶 PAS DE VÉHICULE : les blocs Transport Début/Fin de la journée
-    // disparaissent TOUT DE SUITE (2026-09-08) — sinon ils restaient
-    // « à faire » jusqu'au prochain rechargement. Le ref est mis à jour
-    // ici même pour que le recalcul en tienne compte immédiatement.
-    if (donnees.sansVehicule) {
+    // 🚶 VRAI « PAS DE VÉHICULE » (à pied, PAS passager) : les blocs
+    // Transport Début/Fin disparaissent tout de suite. Un PASSAGER, lui,
+    // voyage — il garde son transport (2026-09-11, vécu Raphaël).
+    if (donnees.sansVehicule && !donnees.passagerDeNom) {
       datesSansVehiculeRef.current = new Set([...datesSansVehiculeRef.current, dateCible]);
       setTaches((prev) => completerTransportsJournee(prev, transportDebutFinRef.current, datesSansVehiculeRef.current));
     }
