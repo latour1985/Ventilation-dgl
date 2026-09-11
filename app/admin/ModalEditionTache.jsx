@@ -20,6 +20,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
   // seulement sans dépôt ni pièce (règle du propriétaire) ; app
   // technicien : jamais — ces props n'y existent pas.
+  // 🧾 Détail d'un bon de commande ouvert au clic (2026-09-11, demande
+  // du propriétaire : « pouvoir ouvrir les BC pour savoir ce qui a été
+  // commandé »).
+  const [commandeOuverte, setCommandeOuverte] = useState(null);
   const [etapeAnnulation, setEtapeAnnulation] = useState(null); // null | "raison" | "confirmation"
   const [raisonAnnulation, setRaisonAnnulation] = useState("");
   const [date, setDate] = useState(dateInitiale || todayISO());
@@ -448,11 +452,38 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
             {/* 🧾 Commandes rattachées (2026-09-04) : le répartiteur voit
                 d'un œil que la job attend sa pièce — et le numéro à
                 chercher quand la boîte arrive. */}
+            {/* 🖱️ Cliquable : ouvre le détail de ce qui a été commandé. */}
             {(commandes || []).map((cm) => (
-              <span key={cm.cle} title={cm.texte || ""}>
+              <button
+                key={cm.cle}
+                type="button"
+                onClick={() => setCommandeOuverte(cm)}
+                title="Voir ce qui a été commandé"
+                className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700 active:scale-95"
+              >
                 🧾 {cm.numero}{cm.fournisseur ? ` — ${cm.fournisseur}` : ""} · {cm.statut}
-              </span>
+              </button>
             ))}
+          </div>
+        )}
+        {/* 🧾 DÉTAIL D'UN BON DE COMMANDE (2026-09-11) — ce qui a été
+            commandé, en toutes lettres. */}
+        {commandeOuverte && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setCommandeOuverte(null); }}>
+            <div className="w-full max-w-md rounded-2xl bg-white p-5">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">🧾 {commandeOuverte.numero}{commandeOuverte.fournisseur ? ` — ${commandeOuverte.fournisseur}` : ""}</h3>
+                  <p className="text-[11px] font-semibold text-slate-500">{commandeOuverte.statut}</p>
+                </div>
+                <button onClick={() => setCommandeOuverte(null)} aria-label="Fermer" className="text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+              {commandeOuverte.texte ? (
+                <p className="whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">{commandeOuverte.texte}</p>
+              ) : (
+                <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-400">Aucun détail enregistré sur ce bon.</p>
+              )}
+            </div>
           </div>
         )}
 
