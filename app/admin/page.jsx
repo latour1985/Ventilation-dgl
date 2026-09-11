@@ -50,7 +50,7 @@ import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaieme
 import { termesHtmlCourriel } from "@/lib/termes";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
-import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo, refleterReponsesDevisQbo } from "@/lib/quickbooksClient";
+import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo, refleterReponsesDevisQbo, lireCreditsQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
@@ -2472,6 +2472,10 @@ function AppAdmin() {
   // Clients ET le Hub Projets partagent la même source de vérité.
   // ------------------------------------------------------------
   const [transactionsQb, setTransactionsQb] = useState([]);
+  // 💳 Notes de crédit QuickBooks (2026-09-11) — lues avec les
+  // transactions (même cadence) pour que l'analyse de rentabilité
+  // soustraie les remboursements du facturé.
+  const [creditsQb, setCreditsQb] = useState([]);
   // 🧭 UN SEUL CHEMIN DE FACTURATION (2026-09-03, demande du
   // propriétaire : « ne pas mettre l'option QuickBooks si le client n'en
   // a pas besoin — il pourrait créer la mauvaise facture »). L'onglet
@@ -2804,6 +2808,14 @@ function AppAdmin() {
           );
         } catch {
           // silencieux — le bouton « Synchroniser » reste là
+        }
+        // 💳 Notes de crédit (2026-09-11) — même cadence que les
+        // transactions : elles baissent le facturé dans l'analyse.
+        try {
+          const rc = await lireCreditsQbo();
+          if (!annule && Array.isArray(rc?.credits)) setCreditsQb(rc.credits);
+        } catch {
+          // silencieux — l'analyse fonctionne sans (crédits à 0)
         }
         // ⬇️ DESCENTE SILENCIEUSE DES CLIENTS (2026-08-29, même cadence) :
         // un client créé directement dans QuickBooks (par la comptable)
@@ -3170,6 +3182,8 @@ function AppAdmin() {
           transactionsQb={transactionsQb}
           utilisateurs={utilisateursActifs}
           tauxMetiers={tauxMetiers}
+          tauxMetiersRes={tauxMetiersRes}
+          creditsQb={creditsQb}
           parcCamions={parcCamions}
           clients={clients}
           compteAlertes={compteAlertes}

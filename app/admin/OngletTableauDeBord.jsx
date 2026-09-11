@@ -15,7 +15,7 @@ import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { BlocReponsesClients } from "./BlocReponsesClients";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [] }) {
   const configTdb = useEntreprise();
   // 🌎 Tranche 2 de la version anglaise : cet écran est traduit AU
   // COMPLET (repli français sur tout le reste de l'application).
@@ -298,6 +298,10 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
           transactionsQb={transactionsQb}
           clients={clients}
           depots={depots}
+          utilisateurs={utilisateurs}
+          tauxMetiers={tauxMetiers}
+          tauxMetiersRes={tauxMetiersRes}
+          creditsQb={creditsQb}
           onFermer={() => setAnalyseOuverte(false)}
         />
       )}

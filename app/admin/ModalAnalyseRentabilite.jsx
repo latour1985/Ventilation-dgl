@@ -10,7 +10,7 @@ import { X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { bornesPeriodeAnalyse, dateISO } from "./partage";
 
-export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], depots = {}, onFermer }) {
+export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], depots = {}, utilisateurs = [], tauxMetiers = {}, tauxMetiersRes = {}, creditsQb = [], onFermer }) {
   // 🧾 DÉPENSES QUICKBOOKS RATTACHÉES (2026-08-26) — l'écran ne les
   // recevait même pas : un achat fait dans QuickBooks pour une job
   // n'apparaissait donc dans AUCUN coût ici, quoi qu'on fasse.
@@ -84,7 +84,28 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
     if (!insp) return 0;
     return (Number(t.heures) || 0) * (insp.coutCamionHoraire != null ? insp.coutCamionHoraire : camionDefaut);
   };
-  const coutMoDe = (t) => (Number(t.heures) || 0) * (Number(t.tauxCoutantFige) || 0);
+  // 💵 TAUX COÛTANT D'UNE LIGNE D'HEURES — le taux FIGÉ à la saisie fait
+  // foi ; mais depuis le durcissement RLS du 2026-09-04, le technicien
+  // ne peut plus lire la grille des salaires, si bien que 38 % des
+  // heures se figeaient à 0 $ (vécu : 25 h qui coûtaient 190 $). REPLI
+  // (2026-09-11) : quand le taux figé manque, on le reconstitue depuis
+  // la fiche + la grille actuelle (le bureau, lui, les lit) — taux
+  // individuel d'abord, sinon grille CCQ du secteur + prime. Ainsi
+  // aucune heure ne coûte jamais 0 $ par erreur.
+  const tauxDeLigne = (t) => {
+    if (Number(t.tauxCoutantFige) > 0) return Number(t.tauxCoutantFige);
+    const email = (t.employeEmail || "").toLowerCase();
+    const emp = (utilisateurs || []).find((u) => (u.courriel || "").toLowerCase() === email);
+    if (!emp) return 0;
+    if (Number(emp.tauxHoraire) > 0) return Number(emp.tauxHoraire);
+    const secteur = emp.toujoursCommercial ? "commercial" : (t.secteur === "residentiel" ? "residentiel" : "commercial");
+    const grille = secteur === "residentiel" ? tauxMetiersRes : tauxMetiers;
+    const base = Number(grille?.[emp.metier]?.[emp.niveau]) || 0;
+    // Repli sur la grille commerciale si la case résidentielle est vide.
+    const baseFinale = base > 0 ? base : Number(tauxMetiers?.[emp.metier]?.[emp.niveau]) || 0;
+    return baseFinale > 0 ? baseFinale + (Number(emp.primeHoraire) || 0) : 0;
+  };
+  const coutMoDe = (t) => (Number(t.heures) || 0) * tauxDeLigne(t);
 
   // ---- CALCULS D'UNE PÉRIODE (réutilisés pour la tendance) ----
   const calculerPeriode = (bornes) => {
@@ -144,6 +165,19 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
       ? { debut: persoDu || "0000-01-01", fin: persoAu || "9999-12-31" }
       : bornesPeriodeAnalyse(periode, debutFiscal);
   const stats = calculerPeriode(bornes);
+  // 💳 NOTES DE CRÉDIT de la période (2026-09-11) — regroupées par
+  // client, HT, dans les bornes courantes. Elles BAISSENT le facturé
+  // (remboursement au client) : sans elles les marges mentaient.
+  const creditsDansBornes = (creditsQb || []).filter((c) => c.date && c.date >= bornes.debut && c.date <= bornes.fin);
+  const creditsParClient = (() => {
+    const m = new Map();
+    creditsDansBornes.forEach((c) => {
+      const nom = c.client || "Sans client";
+      m.set(nom, (m.get(nom) || 0) + (Number(c.montantHT) || 0));
+    });
+    return m;
+  })();
+  const creditsTotal = creditsDansBornes.reduce((s, c) => s + (Number(c.montantHT) || 0), 0);
   // 🔁 COMPARATIF « à pareille date l'an passé » : les MÊMES bornes,
   // reculées d'un an. Jamais 9 mois contre 12 — ça mentirait.
   const reculerUnAn = (d) => {
@@ -277,6 +311,12 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
       e.cout += montant;
       m.set(nom, e);
     });
+    // 💳 Crédits (remboursements) → baissent le facturé du client.
+    creditsParClient.forEach((montant, nom) => {
+      const e = m.get(nom) || { clientNom: nom, jobs: 0, facture: 0, cout: 0 };
+      e.facture -= montant;
+      m.set(nom, e);
+    });
     return [...m.values()]
       .map((e) => ({ ...e, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : null }))
       .sort((a, b2) => b2.facture - a.facture);
@@ -315,6 +355,12 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
     depensesQbParClient.forEach((montant, nom) => {
       const e = m.get(nom) || { clientNom: nom, facture: 0, cout: 0, jobs: 0 };
       e.cout += montant;
+      m.set(nom, e);
+    });
+    // 💳 Les crédits baissent le facturé du client (remboursement).
+    creditsParClient.forEach((montant, nom) => {
+      const e = m.get(nom) || { clientNom: nom, facture: 0, cout: 0, jobs: 0 };
+      e.facture -= montant;
       m.set(nom, e);
     });
     return [...m.values()]
@@ -385,10 +431,13 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
         {/* TUILES GLOBALES */}
         <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-            <p className="text-[9px] font-extrabold uppercase text-slate-400">Revenus facturés</p>
-            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-900">{fmt$(stats.revenus)}</p>
+            <p className="text-[9px] font-extrabold uppercase text-slate-400">Revenus facturés{creditsTotal > 0 ? " (net des crédits)" : ""}</p>
+            <p className="mt-0.5 text-xl font-extrabold tabular-nums text-slate-900">{fmt$(stats.revenus - creditsTotal)}</p>
             {stats.revenusDepots > 0 && (
               <p className="text-[10px] text-slate-500">dont {fmt$(stats.revenusDepots)} de dépôts payés</p>
+            )}
+            {creditsTotal > 0 && (
+              <p className="text-[10px] text-red-500">− {fmt$(creditsTotal)} de notes de crédit</p>
             )}
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">

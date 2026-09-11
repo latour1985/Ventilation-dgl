@@ -111,6 +111,43 @@ export async function POST(request) {
       return Response.json({ ouvertes, tronque: ouvertes.length >= 500 });
     }
 
+    // 💳 { action: "credits" } — NOTES DE CRÉDIT (CreditMemo) 2026-09-11.
+    // Demande du propriétaire : les crédits/remboursements faits dans
+    // QuickBooks doivent baisser le facturé dans l'analyse de
+    // rentabilité (sinon les marges mentent). Lecture seule : nom du
+    // client, montant HT (le sous-total avant taxes, pour rester
+    // cohérent avec nos montants HT), date, et le lien éventuel vers une
+    // facture (LinkedTxn) pour rattacher à la bonne job.
+    if (corps?.action === "credits") {
+      const credits = [];
+      for (let position = 1; position <= 401; position += 100) {
+        const reponse = await requeteQbo(
+          acces,
+          `select * from CreditMemo startposition ${position} maxresults 100`
+        );
+        const page = reponse?.CreditMemo || [];
+        for (const c of page) {
+          // Montant HT = TotalAmt − taxe (TxnTaxDetail) quand présent.
+          const total = Number(c?.TotalAmt) || 0;
+          const taxe = Number(c?.TxnTaxDetail?.TotalTax) || 0;
+          const factureLiee = (c?.Line || [])
+            .flatMap((l) => l?.LinkedTxn || [])
+            .find((lt) => lt?.TxnType === "Invoice");
+          credits.push({
+            id: c?.Id,
+            numero: c?.DocNumber || "",
+            client: c?.CustomerRef?.name || "",
+            date: c?.TxnDate || null,
+            montantHT: Math.round((total - taxe) * 100) / 100,
+            total,
+            factureLieeId: factureLiee?.TxnId || null,
+          });
+        }
+        if (page.length < 100) break;
+      }
+      return Response.json({ credits, tronque: credits.length >= 500 });
+    }
+
     // ⏱️ { action: "delais" } — TEMPS DE PAIEMENT MOYEN PAR CLIENT
     // (2026-09-06, demande du propriétaire). Les PAIEMENTS des 12
     // derniers mois sont lus du registre, rattachés à leurs factures
