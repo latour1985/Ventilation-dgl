@@ -5915,11 +5915,13 @@ begin
   if emp.metier is null or emp.niveau is null then
     return query select null::numeric, sect; return;
   end if;
-  select case when sect = 'residentiel' and coalesce(taux_residentiel, 0) > 0
-              then taux_residentiel else taux end
+  -- Colonnes QUALIFIÉES (tm.) : « taux » est aussi la colonne de sortie
+  -- de la fonction → ambiguïté 42702 sans le préfixe (vécu à la sonde).
+  select case when sect = 'residentiel' and coalesce(tm.taux_residentiel, 0) > 0
+              then tm.taux_residentiel else tm.taux end
     into base
-    from taux_metiers
-   where metier = emp.metier and niveau = emp.niveau and entreprise_id = ent
+    from taux_metiers tm
+   where tm.metier = emp.metier and tm.niveau = emp.niveau and tm.entreprise_id = ent
    limit 1;
   if coalesce(base, 0) <= 0 then
     return query select null::numeric, sect; return;
