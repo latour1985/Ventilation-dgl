@@ -488,8 +488,17 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
       </aside>
       {/* Mobile : tiroir par-dessus (toujours complet) */}
       {ouvert && (
-        <div className="fixed inset-0 z-40 md:hidden" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
-          <div className="absolute inset-0 bg-black/50" />
+        <div className="fixed inset-0 z-40 md:hidden">
+          {/* 👆 Le FOND NOIR lui-même ferme le tiroir (correctif 2026-09-14,
+              vécu au téléphone : le doigt tombait sur ce fond — un enfant —
+              et l'ancien test « cible = conteneur » ne se déclenchait
+              jamais). Bouton pour que le clavier/lecteur d'écran le trouve. */}
+          <button
+            type="button"
+            aria-label="Fermer"
+            onClick={onFermer}
+            className="absolute inset-0 h-full w-full cursor-default bg-black/50"
+          />
           <aside className="absolute left-0 top-0 flex h-full w-64 flex-col bg-[#131B2E]" onClick={(e) => e.stopPropagation()}>
             {contenu(false, false)}
           </aside>
