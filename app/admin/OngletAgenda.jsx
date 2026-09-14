@@ -2494,6 +2494,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 </div>
                 <div className="flex-1 space-y-2 overflow-y-auto p-4 md:columns-2 md:gap-x-6 md:space-y-0 md:[&>*]:mb-3 md:[&>*]:break-inside-avoid">
               <>
+              {/* 🧭 FORMULAIRE EN 4 SECTIONS (2026-09-14, demande du propriétaire :
+                  « plus fluide ») — l'ordre suit la tête de celui qui planifie :
+                  1. QUI ET OÙ · 2. QUOI · 3. QUAND ET PAR QUI · 4. OPTIONS. Les
+                  blocs coulent en deux colonnes par hauteur (md:columns-2). */}
+              <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500 md:break-after-avoid">1 · Qui et où</p>
+
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Type de tâche</label>
                 <select
@@ -2538,6 +2544,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </p>
                 )}
               </div>
+
               {/* CLIENT EN DEUXIÈME (demande du propriétaire, 2026-08-17) :
                   c'est lui qui décide de tout le reste — devis offerts,
                   contact sur place, adresses enregistrées, courriels du
@@ -2615,17 +2622,124 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 })()}
               </div>
               )}
+
+              {/* 📌 NOTE GÉNÉRALE DU CLIENT (2026-08-30) — l'aide-mémoire
+                  de la fiche ressurgit AU MOMENT DE DÉCIDER : c'est ici
+                  qu'un « mauvais payeur — exiger un dépôt » doit se lire,
+                  pas enfoui dans le dossier. */}
+              {!estTypeSansClient(nouveauType) && nouveauClientId && (() => {
+                const noteClient = clients.find((c) => c.id === nouveauClientId)?.note;
+                if (!noteClient) return null;
+                return (
+                  <p className="whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">
+                    📌 Note du dossier : {noteClient}
+                  </p>
+                );
+              })()}
+
+              {!estTypeSansClient(nouveauType) && (
               <div>
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                  {nouveauType === "divers" || nouveauType === "course" ? "Quoi faire" : "Titre / description courte"}
+                <label className="mb-1 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={adresseTravauxDifferente}
+                    onChange={(e) => {
+                      setAdresseTravauxDifferente(e.target.checked);
+                      setAdresseTravauxId("");
+                      setNouvelleAdresseTravaux(null);
+                    }}
+                    className="h-3.5 w-3.5 accent-[#FF6A13]"
+                  />
+                  Adresse des travaux différente de l'adresse de facturation
                 </label>
-                <input
-                  value={nouveauTitre}
-                  onChange={(e) => setNouveauTitre(e.target.value)}
-                  placeholder="Ex: Appel de service — bruit anormal"
-                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                />
+                {adresseTravauxDifferente && (
+                  <div className="space-y-2 rounded-lg bg-slate-50 p-2">
+                    {(() => {
+                      const client = clients.find((c) => c.id === nouveauClientId);
+                      if ((client?.adresses || []).length === 0) return null;
+                      // La liste montre UNIQUEMENT les adresses de CE
+                      // client — son nom est affiché pour qu'aucun doute
+                      // ne subsiste (retour de tests : « adresses
+                      // mélangées »). Filtre au-dessus, liste conservée.
+                      const f = filtreAdresseTache.trim().toLowerCase();
+                      const adressesFiltrees = client.adresses.filter(
+                        (a) => !f || a.id === adresseTravauxId || `${a.nom} ${a.ligne1} ${a.appartement || ""}`.toLowerCase().includes(f)
+                      );
+                      return (
+                        <div>
+                          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                            Adresses enregistrées de {nomAffichageClient(client)}
+                          </p>
+                          {/* 🔍 Le filtre n'apparaît qu'à partir de 5
+                              adresses (2026-09-14, vécu : une NOUVELLE
+                              adresse tapée dans le filtre → « le chemin
+                              que je mets pour Google n'apparaît pas » —
+                              c'était le mauvais champ). Peu d'adresses =
+                              la liste suffit, aucun champ piège. */}
+                          {client.adresses.length > 4 && (
+                            <input
+                              value={filtreAdresseTache}
+                              onChange={(e) => setFiltreAdresseTache(e.target.value)}
+                              placeholder="🔍 Filtrer les adresses DÉJÀ enregistrées (pas pour une nouvelle)"
+                              className="mb-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                            />
+                          )}
+                          {adressesFiltrees.length === 0 ? (
+                            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-700">
+                              Aucune adresse enregistrée ne correspond à « {filtreAdresseTache.trim()} ». Pour une NOUVELLE adresse, utilise le champ ⤵ « Nouvelle adresse » juste en dessous.
+                            </p>
+                          ) : (
+                            <select
+                              value={adresseTravauxId}
+                              onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                            >
+                              <option value="">— Choisir une adresse enregistrée —</option>
+                              {adressesFiltrees.map((a) => (
+                                <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">➕ Nouvelle adresse — tape-la ICI (suggestions Google) :</p>
+                    <AutocompleteAdresse
+                      onSelection={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
+                    />
+                    <input
+                      value={nouvelleAdresseApp}
+                      onChange={(e) => setNouvelleAdresseApp(e.target.value)}
+                      placeholder="App. / unité (optionnel) — ex. : 4B"
+                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
+                    />
+                    {nouvelleAdresseTravaux && (
+                      <>
+                        <p className="flex items-center gap-1 text-[11px] text-emerald-600">
+                          <Check size={12} /> {nouvelleAdresseTravaux.label}
+                          {nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}
+                        </p>
+                        {/* 📌 Cochée d'avance : l'adresse rejoint le dossier
+                            du client et sera offerte dans la liste à la
+                            prochaine tâche (anti-doublon à la création). */}
+                        {nouveauClientId && (
+                          <label className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={enregistrerAdresseFiche}
+                              onChange={(e) => setEnregistrerAdresseFiche(e.target.checked)}
+                              className="h-3.5 w-3.5 accent-[#FF6A13]"
+                            />
+                            📌 Enregistrer cette adresse au dossier de {nomAffichageClient(clients.find((c) => c.id === nouveauClientId)) || "ce client"}
+                          </label>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
+              )}
+
               {nouveauType === "course" && (
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse de la course (facultatif)</label>
@@ -2681,95 +2795,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   )}
                 </div>
               )}
-              <div>
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                  {/* 🏖️ Un congé n'a pas de « travaux » : on demande la
-                      RAISON, qui reste notée au dossier (2026-09-02). */}
-                  {nouveauType === "conge"
-                    ? <>Raison du congé <span className="font-normal text-slate-400">(reste notée au dossier)</span></>
-                    : <>Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span></>}
-                </label>
-                <textarea
-                  value={nouvelleDescription}
-                  onChange={(e) => setNouvelleDescription(e.target.value)}
-                  rows={2}
-                  placeholder={nouveauType === "conge" ? "Pourquoi cette journée est bloquée — vacances, rendez-vous, finir tôt…" : "Ce qu'il y a à faire sur cette tâche, instructions particulières..."}
-                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                />
-                {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
-                  <p className="mt-0.5 text-[9px] text-slate-400">
-                    Les items du devis (quantités × items, sans les prix) apparaissent ici dès que tu choisis le devis — modifiables avant de créer la tâche.
-                  </p>
-                )}
-              </div>
 
-              {/* 📎 PHOTOS ET PLANS — le technicien les aura dans sa poche. */}
-              <div>
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
-                  📎 Photos et plans <span className="font-normal text-orange-600">(visibles au technicien)</span>
-                </label>
-                <label className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed px-2 py-2 text-[11px] font-semibold ${televersementJointe ? "border-slate-200 text-slate-300" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
-                  {televersementJointe ? "Téléversement…" : "➕ Ajouter des images ou des PDF"}
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*,application/pdf"
-                    disabled={televersementJointe}
-                    className="hidden"
-                    onChange={(e) => {
-                      const fichiers = Array.from(e.target.files || []);
-                      e.target.value = "";
-                      if (fichiers.length > 0) ajouterPiecesJointes(fichiers);
-                    }}
-                  />
-                </label>
-                {nouvellesPiecesJointes.length > 0 && (
-                  <div className="mt-1.5 space-y-1">
-                    {nouvellesPiecesJointes.map((pj, idx) => (
-                      <div key={pj.url} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1 text-[11px]">
-                        {pj.type === "image" ? (
-                          // Vignette cliquable — on vérifie ce qu'on envoie.
-                          <a href={pj.url} target="_blank" rel="noreferrer" className="shrink-0">
-                            <img src={pj.url} alt={pj.nom} loading="lazy" decoding="async" className="h-8 w-8 rounded object-cover" />
-                          </a>
-                        ) : (
-                          <span className="shrink-0 text-base">📄</span>
-                        )}
-                        <a href={pj.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-semibold text-slate-600 hover:underline">
-                          {pj.nom}
-                        </a>
-                        <button
-                          onClick={() => setNouvellesPiecesJointes((prev) => prev.filter((_, i) => i !== idx))}
-                          className="shrink-0 text-slate-400 hover:text-red-600"
-                          aria-label="Retirer"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* ✅ ÉTAPES DE LA JOB — facultatives ici : elles s'ajoutent
-                  aussi APRÈS coup dans la fiche ✏️ (celui qui les attribue
-                  n'est souvent pas celui qui met à l'horaire). */}
-              {!estTypeSansClient(nouveauType) && (
-                <EditeurEtapesJob etapes={etapesNouvelle} onChange={setEtapesNouvelle} compact />
-              )}
-              {/* 📌 NOTE GÉNÉRALE DU CLIENT (2026-08-30) — l'aide-mémoire
-                  de la fiche ressurgit AU MOMENT DE DÉCIDER : c'est ici
-                  qu'un « mauvais payeur — exiger un dépôt » doit se lire,
-                  pas enfoui dans le dossier. */}
-              {!estTypeSansClient(nouveauType) && nouveauClientId && (() => {
-                const noteClient = clients.find((c) => c.id === nouveauClientId)?.note;
-                if (!noteClient) return null;
-                return (
-                  <p className="whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-800">
-                    📌 Note du dossier : {noteClient}
-                  </p>
-                );
-              })()}
               {/* 📇 CONTACT SUR PLACE — la personne à voir sur le
                   chantier, choisie dans le carnet du client ou créée ici
                   (et mémorisée au carnet). Le technicien la verra avec
@@ -2920,28 +2946,6 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 );
               })()}
 
-              {/* SECTEUR CCQ — commercial/résidentiel : décide du taux
-                  coûtant. Hérité du projet choisi, changeable ici.
-                  Course et congé : sans objet, masqué. */}
-              {!estTypeSansClient(nouveauType) && (
-              <div>
-                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Secteur (taux CCQ)</label>
-                <div className="flex gap-1.5">
-                  {[["commercial", "🏢 Commercial"], ["residentiel", "🏠 Résidentiel"]].map(([val, lib]) => (
-                    <button
-                      key={val}
-                      type="button"
-                      onClick={() => setNouveauSecteur(val)}
-                      className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-bold ${
-                        nouveauSecteur === val ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-600"
-                      }`}
-                    >
-                      {lib}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              )}
               {/* Projet lié : caché pour les types SANS CLIENT (divers,
                   course, congé) — SAUF le shop, dont les heures peuvent
                   compter au projet (2026-09-04, formulaire allégé). */}
@@ -3050,108 +3054,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               </div>
               )}
 
-              {!estTypeSansClient(nouveauType) && (
-              <div>
-                <label className="mb-1 flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
-                  <input
-                    type="checkbox"
-                    checked={adresseTravauxDifferente}
-                    onChange={(e) => {
-                      setAdresseTravauxDifferente(e.target.checked);
-                      setAdresseTravauxId("");
-                      setNouvelleAdresseTravaux(null);
-                    }}
-                    className="h-3.5 w-3.5 accent-[#FF6A13]"
-                  />
-                  Adresse des travaux différente de l'adresse de facturation
-                </label>
-                {adresseTravauxDifferente && (
-                  <div className="space-y-2 rounded-lg bg-slate-50 p-2">
-                    {(() => {
-                      const client = clients.find((c) => c.id === nouveauClientId);
-                      if ((client?.adresses || []).length === 0) return null;
-                      // La liste montre UNIQUEMENT les adresses de CE
-                      // client — son nom est affiché pour qu'aucun doute
-                      // ne subsiste (retour de tests : « adresses
-                      // mélangées »). Filtre au-dessus, liste conservée.
-                      const f = filtreAdresseTache.trim().toLowerCase();
-                      const adressesFiltrees = client.adresses.filter(
-                        (a) => !f || a.id === adresseTravauxId || `${a.nom} ${a.ligne1} ${a.appartement || ""}`.toLowerCase().includes(f)
-                      );
-                      return (
-                        <div>
-                          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                            Adresses enregistrées de {nomAffichageClient(client)}
-                          </p>
-                          {/* 🔍 Le filtre n'apparaît qu'à partir de 5
-                              adresses (2026-09-14, vécu : une NOUVELLE
-                              adresse tapée dans le filtre → « le chemin
-                              que je mets pour Google n'apparaît pas » —
-                              c'était le mauvais champ). Peu d'adresses =
-                              la liste suffit, aucun champ piège. */}
-                          {client.adresses.length > 4 && (
-                            <input
-                              value={filtreAdresseTache}
-                              onChange={(e) => setFiltreAdresseTache(e.target.value)}
-                              placeholder="🔍 Filtrer les adresses DÉJÀ enregistrées (pas pour une nouvelle)"
-                              className="mb-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
-                            />
-                          )}
-                          {adressesFiltrees.length === 0 ? (
-                            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-700">
-                              Aucune adresse enregistrée ne correspond à « {filtreAdresseTache.trim()} ». Pour une NOUVELLE adresse, utilise le champ ⤵ « Nouvelle adresse » juste en dessous.
-                            </p>
-                          ) : (
-                            <select
-                              value={adresseTravauxId}
-                              onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                            >
-                              <option value="">— Choisir une adresse enregistrée —</option>
-                              {adressesFiltrees.map((a) => (
-                                <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">➕ Nouvelle adresse — tape-la ICI (suggestions Google) :</p>
-                    <AutocompleteAdresse
-                      onSelection={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
-                    />
-                    <input
-                      value={nouvelleAdresseApp}
-                      onChange={(e) => setNouvelleAdresseApp(e.target.value)}
-                      placeholder="App. / unité (optionnel) — ex. : 4B"
-                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
-                    />
-                    {nouvelleAdresseTravaux && (
-                      <>
-                        <p className="flex items-center gap-1 text-[11px] text-emerald-600">
-                          <Check size={12} /> {nouvelleAdresseTravaux.label}
-                          {nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}
-                        </p>
-                        {/* 📌 Cochée d'avance : l'adresse rejoint le dossier
-                            du client et sera offerte dans la liste à la
-                            prochaine tâche (anti-doublon à la création). */}
-                        {nouveauClientId && (
-                          <label className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
-                            <input
-                              type="checkbox"
-                              checked={enregistrerAdresseFiche}
-                              onChange={(e) => setEnregistrerAdresseFiche(e.target.checked)}
-                              className="h-3.5 w-3.5 accent-[#FF6A13]"
-                            />
-                            📌 Enregistrer cette adresse au dossier de {nomAffichageClient(clients.find((c) => c.id === nouveauClientId)) || "ce client"}
-                          </label>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-              )}
+              <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500 md:break-after-avoid">2 · Quoi</p>
 
               {(nouveauType === "devis" || nouveauType === "entretien_contrat" || nouveauType === "appel_service") && (
                 <div>
@@ -3309,6 +3212,120 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       : "Pour la transition : le numéro suivra la tâche jusqu'au bon de travail et à la facturation, et son contenu sera relu depuis QuickBooks au moment de facturer."}
                   </p>
                 </div>
+              )}
+
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                  {nouveauType === "divers" || nouveauType === "course" ? "Quoi faire" : "Titre / description courte"}
+                </label>
+                <input
+                  value={nouveauTitre}
+                  onChange={(e) => setNouveauTitre(e.target.value)}
+                  placeholder="Ex: Appel de service — bruit anormal"
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                  {/* 🏖️ Un congé n'a pas de « travaux » : on demande la
+                      RAISON, qui reste notée au dossier (2026-09-02). */}
+                  {nouveauType === "conge"
+                    ? <>Raison du congé <span className="font-normal text-slate-400">(reste notée au dossier)</span></>
+                    : <>Description des travaux <span className="font-normal text-orange-600">(visible au technicien)</span></>}
+                </label>
+                <textarea
+                  value={nouvelleDescription}
+                  onChange={(e) => setNouvelleDescription(e.target.value)}
+                  rows={2}
+                  placeholder={nouveauType === "conge" ? "Pourquoi cette journée est bloquée — vacances, rendez-vous, finir tôt…" : "Ce qu'il y a à faire sur cette tâche, instructions particulières..."}
+                  className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                />
+                {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
+                  <p className="mt-0.5 text-[9px] text-slate-400">
+                    Les items du devis (quantités × items, sans les prix) apparaissent ici dès que tu choisis le devis — modifiables avant de créer la tâche.
+                  </p>
+                )}
+              </div>
+
+              {/* ✅ ÉTAPES DE LA JOB — facultatives ici : elles s'ajoutent
+                  aussi APRÈS coup dans la fiche ✏️ (celui qui les attribue
+                  n'est souvent pas celui qui met à l'horaire). */}
+              {!estTypeSansClient(nouveauType) && (
+                <EditeurEtapesJob etapes={etapesNouvelle} onChange={setEtapesNouvelle} compact />
+              )}
+
+              {/* 📎 PHOTOS ET PLANS — le technicien les aura dans sa poche. */}
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                  📎 Photos et plans <span className="font-normal text-orange-600">(visibles au technicien)</span>
+                </label>
+                <label className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed px-2 py-2 text-[11px] font-semibold ${televersementJointe ? "border-slate-200 text-slate-300" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+                  {televersementJointe ? "Téléversement…" : "➕ Ajouter des images ou des PDF"}
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*,application/pdf"
+                    disabled={televersementJointe}
+                    className="hidden"
+                    onChange={(e) => {
+                      const fichiers = Array.from(e.target.files || []);
+                      e.target.value = "";
+                      if (fichiers.length > 0) ajouterPiecesJointes(fichiers);
+                    }}
+                  />
+                </label>
+                {nouvellesPiecesJointes.length > 0 && (
+                  <div className="mt-1.5 space-y-1">
+                    {nouvellesPiecesJointes.map((pj, idx) => (
+                      <div key={pj.url} className="flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1 text-[11px]">
+                        {pj.type === "image" ? (
+                          // Vignette cliquable — on vérifie ce qu'on envoie.
+                          <a href={pj.url} target="_blank" rel="noreferrer" className="shrink-0">
+                            <img src={pj.url} alt={pj.nom} loading="lazy" decoding="async" className="h-8 w-8 rounded object-cover" />
+                          </a>
+                        ) : (
+                          <span className="shrink-0 text-base">📄</span>
+                        )}
+                        <a href={pj.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate font-semibold text-slate-600 hover:underline">
+                          {pj.nom}
+                        </a>
+                        <button
+                          onClick={() => setNouvellesPiecesJointes((prev) => prev.filter((_, i) => i !== idx))}
+                          className="shrink-0 text-slate-400 hover:text-red-600"
+                          aria-label="Retirer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500 md:break-after-avoid">3 · Quand et par qui</p>
+
+              {/* SECTEUR CCQ — commercial/résidentiel : décide du taux
+                  coûtant. Hérité du projet choisi, changeable ici.
+                  Course et congé : sans objet, masqué. */}
+              {!estTypeSansClient(nouveauType) && (
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Secteur (taux CCQ)</label>
+                <div className="flex gap-1.5">
+                  {[["commercial", "🏢 Commercial"], ["residentiel", "🏠 Résidentiel"]].map(([val, lib]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setNouveauSecteur(val)}
+                      className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-bold ${
+                        nouveauSecteur === val ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-600"
+                      }`}
+                    >
+                      {lib}
+                    </button>
+                  ))}
+                </div>
+              </div>
               )}
 
               <div className="border-t border-slate-100 pt-2">
@@ -3531,6 +3548,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     supplémentaire (temps réel sur place seulement — jamais le bloc d&apos;agenda).
                   </p>
                 </div>
+              )}
+
+              {!estTypeSansClient(nouveauType) && (
+                <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500 md:break-after-avoid">4 · Options</p>
               )}
 
               {/* 🛡️ RETOUR SOUS GARANTIE — la marque suit la tâche jusqu'au

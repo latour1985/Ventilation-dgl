@@ -1125,6 +1125,29 @@ export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
     onChange([...(etapes || []), { id: `et-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, texte: propre, fait: false }]);
     setTexte("");
   };
+  // ✏️ MODIFIER UNE ÉTAPE (2026-09-14, vécu : « je ne peux pas modifier
+  // les étapes après leur création » — on ne pouvait que ✕ et retaper).
+  // Clic sur le texte = champ ; Entrée ou clic ailleurs enregistre ;
+  // Échap annule. Une étape déjà cochée garde son ✅ et son auteur.
+  const [enEdition, setEnEdition] = useState(null); // index de l'étape ouverte
+  const [texteEdition, setTexteEdition] = useState("");
+  const ouvrirEdition = (i) => { setEnEdition(i); setTexteEdition(String((etapes || [])[i]?.texte || "")); };
+  const validerEdition = () => {
+    if (enEdition === null) return;
+    const propre = texteEdition.trim();
+    if (propre && propre !== (etapes || [])[enEdition]?.texte) {
+      onChange((etapes || []).map((e, j) => (j === enEdition ? { ...e, texte: propre } : e)));
+    }
+    setEnEdition(null);
+  };
+  // ↑↓ RÉORDONNER — un rough avant les conduits, sans tout effacer.
+  const deplacer = (i, delta) => {
+    const liste = [...(etapes || [])];
+    const j = i + delta;
+    if (j < 0 || j >= liste.length) return;
+    [liste[i], liste[j]] = [liste[j], liste[i]];
+    onChange(liste);
+  };
   return (
     <div>
       <label className={`mb-1 block font-bold text-slate-500 ${compact ? "text-[10px]" : "text-xs"}`}>
@@ -1135,8 +1158,47 @@ export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
           {(etapes || []).map((e, i) => (
             <div key={e.id || i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] ${e.fait ? "bg-emerald-50 text-slate-400" : "bg-slate-50 text-slate-700"}`}>
               <span className="shrink-0">{e.fait ? "✅" : "⬜"}</span>
-              <span className={`min-w-0 flex-1 font-semibold ${e.fait ? "line-through" : ""}`}>{e.texte}</span>
+              {enEdition === i ? (
+                <input
+                  autoFocus
+                  value={texteEdition}
+                  onChange={(ev) => setTexteEdition(ev.target.value)}
+                  onBlur={validerEdition}
+                  onKeyDown={(ev) => {
+                    if (ev.key === "Enter") { ev.preventDefault(); validerEdition(); }
+                    if (ev.key === "Escape") { ev.preventDefault(); setEnEdition(null); }
+                  }}
+                  className="min-w-0 flex-1 rounded border border-[#FF6A13] bg-white px-1.5 py-0.5 text-[11px] font-semibold text-slate-800 outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => ouvrirEdition(i)}
+                  title="Cliquer pour modifier le texte"
+                  className={`min-w-0 flex-1 truncate text-left font-semibold hover:underline ${e.fait ? "line-through" : ""}`}
+                >
+                  {e.texte}
+                </button>
+              )}
               {e.fait && e.faitPar && <span className="shrink-0 text-[9px] font-bold text-emerald-600">{String(e.faitPar).split("@")[0]}</span>}
+              <button
+                type="button"
+                onClick={() => deplacer(i, -1)}
+                disabled={i === 0}
+                className="shrink-0 text-slate-400 hover:text-slate-700 disabled:opacity-25"
+                aria-label="Monter l'étape"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => deplacer(i, 1)}
+                disabled={i === (etapes || []).length - 1}
+                className="shrink-0 text-slate-400 hover:text-slate-700 disabled:opacity-25"
+                aria-label="Descendre l'étape"
+              >
+                ↓
+              </button>
               <button
                 onClick={() => onChange((etapes || []).filter((_, j) => j !== i))}
                 className="shrink-0 font-bold text-slate-400 hover:text-red-600"
