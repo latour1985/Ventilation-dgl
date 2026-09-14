@@ -2188,17 +2188,17 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 return (
                   <div key={l.uid} className="rounded-xl border border-slate-200 bg-white p-2.5">
                     <div className="flex items-start justify-between gap-2">
-                      {l.surMesure ? (
-                        <input
-                          type="text"
-                          value={l.nom}
-                          onChange={(e) => majLigne(l.uid, { ...l, nom: e.target.value })}
-                          placeholder="Détail de l'item…"
-                          className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-2 text-sm font-semibold"
-                        />
-                      ) : (
-                        <p className="min-w-0 flex-1 text-sm font-bold leading-snug text-slate-900">{l.nom}</p>
-                      )}
+                      {/* ✏️ TITRE MODIFIABLE, item du catalogue compris
+                          (2026-09-14, demande du propriétaire) — n'affecte
+                          que CE devis, jamais la liste de prix. */}
+                      <input
+                        type="text"
+                        value={l.nom}
+                        onChange={(e) => majLigne(l.uid, { ...l, nom: e.target.value })}
+                        placeholder={l.surMesure ? "Détail de l'item…" : "Titre du produit"}
+                        title="Modifiable — n'affecte que ce devis, pas le catalogue"
+                        className={`min-w-0 flex-1 rounded-lg border px-2 py-2 text-sm font-semibold ${l.surMesure ? "border-slate-300" : "border-transparent bg-transparent font-bold text-slate-900 hover:border-slate-300 focus:border-slate-300 focus:bg-white"}`}
+                      />
                       <button
                         onClick={() => supprimerLigne(l.uid)}
                         aria-label="Retirer la ligne"
@@ -2295,17 +2295,16 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                   {lignes.map((l) => (
                     <tr key={l.uid} className="border-t border-slate-100">
                       <td className="py-1.5 pr-2 font-semibold text-slate-800">
-                        {l.surMesure ? (
-                          <input
-                            type="text"
-                            value={l.nom}
-                            onChange={(e) => majLigne(l.uid, { ...l, nom: e.target.value })}
-                            placeholder="Détail de l'item..."
-                            className="w-full rounded border border-slate-300 px-1.5 py-1 text-xs"
-                          />
-                        ) : (
-                          l.nom
-                        )}
+                        {/* ✏️ Titre modifiable même pour un item du
+                            catalogue (2026-09-14) — ce devis seulement. */}
+                        <input
+                          type="text"
+                          value={l.nom}
+                          onChange={(e) => majLigne(l.uid, { ...l, nom: e.target.value })}
+                          placeholder={l.surMesure ? "Détail de l'item..." : "Titre du produit"}
+                          title="Modifiable — n'affecte que ce devis, pas le catalogue"
+                          className={`w-full rounded border px-1.5 py-1 text-xs ${l.surMesure ? "border-slate-300" : "border-transparent bg-transparent font-semibold text-slate-800 hover:border-slate-300 focus:border-slate-300 focus:bg-white"}`}
+                        />
                         {/* DESCRIPTION DE L'ITEM — modèles, garantie,
                             numéros AHRI, subventions… Elle vient du
                             catalogue (importée de QuickBooks) et part
