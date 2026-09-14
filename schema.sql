@@ -5935,3 +5935,184 @@ grant execute on function fn_mon_taux_coutant(text) to authenticated;
 
 -- Vérification : la fonction existe et est appelable.
 select proname from pg_proc where proname = 'fn_mon_taux_coutant';
+
+-- ============================================================
+-- 142 - RLS PHASE 4 : L'ECRITURE DES TABLES « BUREAU » RESERVEE AU BUREAU (2026-09-14)
+-- ------------------------------------------------------------
+-- Sonde du 2026-09-14 : un compte TECHNICIEN pouvait encore INSERER dans
+-- taches_attente, devis_app, clients_app, fournisseurs (et toutes les
+-- tables ci-dessous) — la cloison multi-entreprises (iso_<table>) dit
+-- « chacun chez soi », pas « chacun son metier ». Son app n'ecrit que
+-- dans : taches_assignees / travaux_effectues (SA ligne), bons_travail,
+-- inspections_vehicules, entretiens_vehicules, commandes_camion,
+-- photos_legendes, retours_logiciel, push_abonnements — verifie par
+-- lecture de app/technicien/page.jsx et des libs qu'il importe.
+--
+-- Regle : LECTURE inchangee (entreprise) ; ECRITURE = entreprise ET
+-- fn_est_bureau() (Admin principal/regulier, Administration bureau,
+-- Charge de projet, Repartiteur — jamais Technicien). Les fonctions RPC
+-- « invoker » (basculer_version_devis, rattacher_tache_lot…) obeissent
+-- d'elles-memes ; les deux « definer » (prochain_numero,
+-- creer_facture_maison) recoivent la meme garde en dur.
+-- ============================================================
+
+-- ---- 1. Tables bureau : ecriture reservee ----
+do $$
+declare t text; p record;
+begin
+  foreach t in array array[
+    'clients_app','projets_app','devis_app','taches_attente','depots',
+    'pieces_commandees','achats_libres','articles_fournisseurs','qb_attributions_manuelles',
+    'fournisseurs','sous_traitants_app','catalogue_items','compteurs',
+    'camions','carnet_vehicules','factures_libres','factures_maison',
+    'inventaire_articles','modeles_etapes'
+  ]
+  loop
+    if not exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then
+      continue;
+    end if;
+    -- on retire les policies « pour tous » existantes (iso_<t>, iso_inventaire…)
+    for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
+    loop
+      execute format('drop policy %I on public.%I', p.policyname, t);
+    end loop;
+    execute format(
+      'create policy %I on public.%I for select to authenticated
+         using (entreprise_id = public.entreprise_du_jeton())',
+      'iso_' || t || '_lecture', t);
+    execute format(
+      'create policy %I on public.%I for insert to authenticated
+         with check (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()))',
+      'iso_' || t || '_ins', t);
+    execute format(
+      'create policy %I on public.%I for update to authenticated
+         using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()))
+         with check (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()))',
+      'iso_' || t || '_upd', t);
+    execute format(
+      'create policy %I on public.%I for delete to authenticated
+         using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()))',
+      'iso_' || t || '_del', t);
+  end loop;
+end $$;
+
+-- ---- 2. Assignations et heures : le bureau, ou SA PROPRE ligne ----
+-- Un technicien cree ses courses/shop, met a jour son statut et pointe
+-- ses heures — jamais celles d'un collegue (la fermeture d'equipe passe
+-- par la route serveur /api/equipe/fermeture, cle service).
+do $$
+declare
+  t text; p record;
+  moi text := $c$ ((select public.fn_est_bureau()) or lower(coalesce(employe_email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))) $c$;
+begin
+  foreach t in array array['taches_assignees','travaux_effectues']
+  loop
+    for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
+    loop
+      execute format('drop policy %I on public.%I', p.policyname, t);
+    end loop;
+    execute format(
+      'create policy %I on public.%I for select to authenticated
+         using (entreprise_id = public.entreprise_du_jeton())',
+      'iso_' || t || '_lecture', t);
+    execute format(
+      'create policy %I on public.%I for insert to authenticated
+         with check (entreprise_id = public.entreprise_du_jeton() and %s)',
+      'iso_' || t || '_ins', t, moi);
+    execute format(
+      'create policy %I on public.%I for update to authenticated
+         using (entreprise_id = public.entreprise_du_jeton() and %s)
+         with check (entreprise_id = public.entreprise_du_jeton() and %s)',
+      'iso_' || t || '_upd', t, moi, moi);
+    execute format(
+      'create policy %I on public.%I for delete to authenticated
+         using (entreprise_id = public.entreprise_du_jeton() and %s)',
+      'iso_' || t || '_del', t, moi);
+  end loop;
+end $$;
+
+-- ---- 3. Les deux fonctions SECURITY DEFINER recoivent la garde ----
+create or replace function prochain_numero(cle_compteur text)
+returns bigint
+language plpgsql
+security definer
+as $$
+declare
+  nouveau bigint;
+  ent text := coalesce(public.entreprise_du_jeton(), 'dgl');
+begin
+  if not public.fn_est_bureau() then
+    raise exception 'Numerotation reservee au bureau';
+  end if;
+  insert into compteurs (entreprise_id, cle, valeur) values (ent, cle_compteur, 1)
+  on conflict (entreprise_id, cle) do update set valeur = compteurs.valeur + 1
+  returning valeur into nouveau;
+  return nouveau;
+end;
+$$;
+
+create or replace function creer_facture_maison(p jsonb)
+returns factures_maison
+language plpgsql
+security definer
+as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  le_type text := coalesce(p->>'type', 'facture');
+  v_cle text;
+  v_prefixe text;
+  n bigint;
+  ligne factures_maison;
+begin
+  if ent is null then
+    raise exception 'Connexion requise';
+  end if;
+  if not public.fn_est_bureau() then
+    raise exception 'Facturation reservee au bureau';
+  end if;
+  if le_type not in ('facture', 'credit') then
+    raise exception 'Type invalide';
+  end if;
+  v_cle := case when le_type = 'credit' then 'credit_maison' else 'facture_maison' end;
+  v_prefixe := case when le_type = 'credit' then 'CR' else 'FAC' end;
+  insert into compteurs (entreprise_id, cle, valeur) values (ent, v_cle, 1)
+  on conflict (entreprise_id, cle) do update set valeur = compteurs.valeur + 1
+  returning valeur into n;
+  insert into factures_maison (
+    entreprise_id, numero, type, facture_origine_id,
+    client_id, client_nom, client_adresse, courriels, lignes,
+    sous_total, taxes, regime_taxes, total, terme,
+    date_emission, date_echeance, note, jeton_public, jeton_expire_le
+  ) values (
+    ent,
+    v_prefixe || '-' || to_char(coalesce((p->>'date_emission')::date, current_date), 'YYYY') || '-' || lpad(n::text, 4, '0'),
+    le_type,
+    nullif(p->>'facture_origine_id', '')::uuid,
+    nullif(p->>'client_id', ''),
+    coalesce(p->>'client_nom', ''),
+    nullif(p->>'client_adresse', ''),
+    coalesce(p->'courriels', '[]'::jsonb),
+    coalesce(p->'lignes', '[]'::jsonb),
+    coalesce((p->>'sous_total')::numeric, 0),
+    coalesce(p->'taxes', '[]'::jsonb),
+    coalesce(p->>'regime_taxes', 'qc'),
+    coalesce((p->>'total')::numeric, 0),
+    nullif(p->>'terme', ''),
+    coalesce((p->>'date_emission')::date, current_date),
+    nullif(p->>'date_echeance', '')::date,
+    nullif(p->>'note', ''),
+    coalesce(nullif(p->>'jeton_public', ''), encode(gen_random_bytes(24), 'hex')),
+    now() + interval '1 year'
+  ) returning * into ligne;
+  return ligne;
+end;
+$$;
+
+-- Verification : 4 policies par table, plus rien « pour tous » (ALL).
+select tablename, count(*) as nb_policies,
+       bool_or(cmd = 'ALL') as encore_pour_tous
+  from pg_policies
+ where schemaname = 'public'
+   and tablename in ('clients_app','projets_app','devis_app','taches_attente','depots',
+                     'fournisseurs','factures_maison','taches_assignees','travaux_effectues')
+ group by tablename order by tablename;
