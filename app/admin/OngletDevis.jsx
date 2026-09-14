@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { Briefcase, Check, CheckCircle2, ClipboardList, Copy, FileCheck2, FileText, Mail, Plus, Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { useLangue } from "@/lib/i18n";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
 import { rejeterEstimateQbo } from "@/lib/quickbooksClient";
@@ -401,6 +402,8 @@ export function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, on
 
 
 export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris }) {
+  // 🌎 Traduction (tranche devis admin, 2026-09-14) — nommée `tr`.
+  const { t: tr } = useLangue();
   // Liste de prix (289 items) — sert au sélecteur de lignes de devis.
   const catalogue = useCatalogue();
   // Taux de taxes des Paramètres — pour afficher le total client.
@@ -1821,7 +1824,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId !== affichee.id && (
                   <div className="mt-2 flex gap-1.5">
                     <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="min-h-0 flex-1 gap-1.5 py-2 text-xs">
-                      {affichee.reponseClient === "accepte" ? "✉️ Renvoyer la copie au client" : "✉️ Envoyer au client"}
+                      {affichee.reponseClient === "accepte" ? tr("✉️ Renvoyer la copie au client") : tr("✉️ Envoyer au client")}
                     </Button>
                     {/* 🔔 RELANCE EN UN CLIC — devis parti mais sans
                         réponse : courriel de rappel prérédigé, trace sur
@@ -1992,7 +1995,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const rendreConstructeur = () => (
         <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-4 md:col-span-3 md:p-5">
           <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">
-            {editionVersion ? "Modification en cours" : "Nouveau devis"}
+            {editionVersion ? tr("Modification en cours") : tr("Nouveau devis")}
           </h2>
           {/* MODE ÉDITION — les lignes de la version source sont chargées
               ici. Le devis d'origine reste INTACT : l'enregistrement crée
@@ -2578,7 +2581,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
             </div>
           ) : (
             <Button onClick={demarrerCreationDevis} disabled={lignes.length === 0} className="w-full">
-              {estContrat ? "Créer le contrat d'entretien périodique" : "Créer le devis"}
+              {estContrat ? tr("Créer le contrat d'entretien périodique") : tr("Créer le devis")}
             </Button>
           )}
         </div>

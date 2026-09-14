@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, Check, CheckCircle2, Cloud, FileText, MapPin, Plus, Send, Trash2, User, X } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { useLangue } from "@/lib/i18n";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo } from "@/lib/quickbooksClient";
@@ -1574,6 +1575,9 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 
 
 export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null }) {
+  // 🌎 Traduction (tranche facturation, 2026-09-14) — nommée `tr` car le
+  // fichier utilise `t` comme variable de boucle (bons/travaux).
+  const { t: tr } = useLangue();
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
@@ -3467,7 +3471,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-red-600 tabular-nums">{rouges}</p>
-          <p className="text-xs font-semibold text-red-600">À réviser — prix non listé</p>
+          <p className="text-xs font-semibold text-red-600">{tr("À réviser — prix non listé")}</p>
         </button>
         <button
           onClick={() => basculerFiltre("bleu")}
@@ -3476,7 +3480,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-blue-600 tabular-nums">{bleus}</p>
-          <p className="text-xs font-semibold text-blue-600">À valider — selon devis</p>
+          <p className="text-xs font-semibold text-blue-600">{tr("À valider — selon devis")}</p>
         </button>
         <button
           onClick={() => basculerFiltre("violet")}
@@ -3485,7 +3489,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-purple-600 tabular-nums">{violets}</p>
-          <p className="text-xs font-semibold text-purple-600">À valider — contrat</p>
+          <p className="text-xs font-semibold text-purple-600">{tr("À valider — contrat")}</p>
         </button>
         <button
           onClick={() => basculerFiltre("jaune")}
@@ -3494,7 +3498,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-amber-600 tabular-nums">{jaunes}</p>
-          <p className="text-xs font-semibold text-amber-600">Prêts — bon de commande</p>
+          <p className="text-xs font-semibold text-amber-600">{tr("Prêts — bon de commande")}</p>
         </button>
         <button
           onClick={() => basculerFiltre("gris")}
@@ -3503,7 +3507,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-teal-600 tabular-nums">{gris}</p>
-          <p className="text-xs font-semibold text-teal-700">Appels de service</p>
+          <p className="text-xs font-semibold text-teal-700">{tr("Appels de service")}</p>
         </button>
         <button
           onClick={() => basculerFiltre("retire")}
@@ -3512,7 +3516,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-slate-500 tabular-nums">{retires}</p>
-          <p className="text-xs font-semibold text-slate-500">Retirés — garantie / maison / hors Fluxya</p>
+          <p className="text-xs font-semibold text-slate-500">{tr("Retirés — garantie / maison / hors Fluxya")}</p>
         </button>
         <button
           onClick={() => basculerFiltre("facture")}
@@ -3522,7 +3526,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           }`}
         >
           <p className="text-2xl font-extrabold text-emerald-600 tabular-nums">{dejaFactures}</p>
-          <p className="text-xs font-semibold text-emerald-700">✅ Déjà facturés</p>
+          <p className="text-xs font-semibold text-emerald-700">{tr("✅ Déjà facturés")}</p>
         </button>
       </div>
 
@@ -3532,7 +3536,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {groupesAFacturer.length === 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-3">
           <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
-            📋 À facturer — par client et par projet
+            {tr("📋 À facturer — par client et par projet")}
           </p>
           {/* 📭 ÉCRAN VIDE QUI EXPLIQUE (2026-09-07, vécu par le
               propriétaire : tout à 0, il a cru à un bogue) — dire
@@ -3704,10 +3708,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {estAdminPrincipal && qbConnecte !== false && (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
           <p className="min-w-0 text-[11px] text-slate-500">
-            Une vente au comptoir, un contrat, des frais ? Une facture peut partir sans chantier.
+            {tr("Une vente au comptoir, un contrat, des frais ? Une facture peut partir sans chantier.")}
           </p>
           <Button onClick={() => setFactureLibreOuverte(true)} className="min-h-0 shrink-0 gap-1 px-2.5 py-1.5 text-[11px]">
-            <Plus size={13} /> Nouvelle facture
+            <Plus size={13} /> {tr("Nouvelle facture")}
           </Button>
         </div>
       )}
@@ -3823,7 +3827,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           {envoisAConfirmer > 0 ? (
             <span className="font-bold text-red-600">⚠️ {envoisAConfirmer} facture{envoisAConfirmer > 1 ? "s" : ""} dont l'envoi par QuickBooks n'est pas confirmé</span>
           ) : (
-            <span>✉️ Envois par QuickBooks : aucun problème connu</span>
+            <span>{tr("✉️ Envois par QuickBooks : aucun problème connu")}</span>
           )}
         </p>
         <button
@@ -3831,7 +3835,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           disabled={verifEnvoisEnCours}
           className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 active:scale-95 disabled:opacity-50"
         >
-          {verifEnvoisEnCours ? "Vérification…" : "🔎 Vérifier les envois"}
+          {verifEnvoisEnCours ? tr("Vérification…") : tr("🔎 Vérifier les envois")}
         </button>
       </div>
       )}
@@ -3851,7 +3855,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
         >
           <p className="min-w-0 text-[11px] font-bold text-slate-700">
-            💵 Comptes à recevoir
+            {tr("💵 Comptes à recevoir")}
             {Array.isArray(comptesAR) && (
               <>
                 {" "}
@@ -3942,7 +3946,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
         >
           <p className="min-w-0 text-[11px] font-bold text-slate-700">
-            ⏱️ Temps de paiement par client
+            {tr("⏱️ Temps de paiement par client")}
             {delaisPaiement?.global && (
               <span className="ml-1 font-semibold text-slate-500">
                 — moyenne {delaisPaiement.global.moyenneJours} jour{delaisPaiement.global.moyenneJours > 1 ? "s" : ""} ({delaisPaiement.global.nb} facture{delaisPaiement.global.nb > 1 ? "s" : ""} payée{delaisPaiement.global.nb > 1 ? "s" : ""} sur 12 mois)

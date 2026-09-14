@@ -5868,3 +5868,66 @@ end;
 $$;
 revoke all on function fermer_travaux_technicien(jsonb, jsonb) from public, anon;
 grant execute on function fermer_travaux_technicien(jsonb, jsonb) to authenticated;
+-- ============================================================
+-- 133 - TAUX COÛTANT FIGÉ À LA SAISIE, MÊME POUR LE TECHNICIEN (2026-09-14)
+-- ============================================================
+-- Depuis la RLS phase 2 (snippet 128), le technicien ne peut plus lire
+-- repertoire_employes ni taux_metiers (salaires = bureau seulement).
+-- Conséquence : quand il termine une tâche, son app n'arrive plus à
+-- FIGER son taux coûtant → il se sauve à NULL, et les heures coûtent
+-- 0 $ dans l'analyse de rentabilité (38 % des heures touchées).
+--
+-- Cette fonction SECURITY DEFINER rend au technicien UNIQUEMENT SON
+-- PROPRE taux coûtant (juste un chiffre, jamais la grille complète ni le
+-- salaire d'un collègue) : elle lit la fiche du courriel du JETON, pas
+-- d'un courriel fourni. Le secteur de paie tient compte du droit acquis
+-- « toujours commercial ». L'app s'en sert pour figer le bon taux dès la
+-- saisie ; l'analyse garde son repli d'affichage comme filet.
+create or replace function public.fn_mon_taux_coutant(secteur_tache text default 'commercial')
+returns table(taux numeric, secteur_paie text)
+language plpgsql stable security definer
+set search_path = public, extensions
+as $fn$
+declare
+  courriel text := lower(coalesce((select auth.jwt()) ->> 'email', ''));
+  ent text := coalesce(public.entreprise_du_jeton(), 'dgl');
+  emp record;
+  sect text;
+  base numeric;
+begin
+  select metier, niveau, taux_horaire, prime_horaire, toujours_commercial
+    into emp
+    from repertoire_employes
+   where lower(courriel) = courriel and entreprise_id = ent
+   limit 1;
+  if not found then
+    return query select null::numeric, secteur_tache; return;
+  end if;
+  sect := case when emp.toujours_commercial then 'commercial'
+               when secteur_tache = 'residentiel' then 'residentiel'
+               else 'commercial' end;
+  -- Taux individuel (métiers de bureau) prioritaire.
+  if coalesce(emp.taux_horaire, 0) > 0 then
+    return query select emp.taux_horaire::numeric, sect; return;
+  end if;
+  if emp.metier is null or emp.niveau is null then
+    return query select null::numeric, sect; return;
+  end if;
+  select case when sect = 'residentiel' and coalesce(taux_residentiel, 0) > 0
+              then taux_residentiel else taux end
+    into base
+    from taux_metiers
+   where metier = emp.metier and niveau = emp.niveau and entreprise_id = ent
+   limit 1;
+  if coalesce(base, 0) <= 0 then
+    return query select null::numeric, sect; return;
+  end if;
+  return query select (base + coalesce(emp.prime_horaire, 0))::numeric, sect;
+end
+$fn$;
+
+revoke execute on function fn_mon_taux_coutant(text) from public, anon;
+grant execute on function fn_mon_taux_coutant(text) to authenticated;
+
+-- Vérification : la fonction existe et est appelable.
+select proname from pg_proc where proname = 'fn_mon_taux_coutant';
