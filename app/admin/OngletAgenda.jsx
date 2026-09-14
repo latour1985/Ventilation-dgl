@@ -26,7 +26,7 @@ import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxH
 import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { AutocompleteAdresse, Button, EditeurEtapesJob, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
+import { AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -2653,91 +2653,52 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   />
                   Adresse des travaux différente de l'adresse de facturation
                 </label>
-                {adresseTravauxDifferente && (
-                  <div className="space-y-2 rounded-lg bg-slate-50 p-2">
-                    {(() => {
-                      const client = clients.find((c) => c.id === nouveauClientId);
-                      if ((client?.adresses || []).length === 0) return null;
-                      // La liste montre UNIQUEMENT les adresses de CE
-                      // client — son nom est affiché pour qu'aucun doute
-                      // ne subsiste (retour de tests : « adresses
-                      // mélangées »). Filtre au-dessus, liste conservée.
-                      const f = filtreAdresseTache.trim().toLowerCase();
-                      const adressesFiltrees = client.adresses.filter(
-                        (a) => !f || a.id === adresseTravauxId || `${a.nom} ${a.ligne1} ${a.appartement || ""}`.toLowerCase().includes(f)
-                      );
-                      return (
-                        <div>
-                          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                            Adresses enregistrées de {nomAffichageClient(client)}
-                          </p>
-                          {/* 🔍 Le filtre n'apparaît qu'à partir de 5
-                              adresses (2026-09-14, vécu : une NOUVELLE
-                              adresse tapée dans le filtre → « le chemin
-                              que je mets pour Google n'apparaît pas » —
-                              c'était le mauvais champ). Peu d'adresses =
-                              la liste suffit, aucun champ piège. */}
-                          {client.adresses.length > 4 && (
+                {adresseTravauxDifferente && (() => {
+                  // 🏠 UN SEUL CHAMP (2026-09-14, même patron que le devis) :
+                  // dossier au clic, Google en tapant. Une nouvelle adresse
+                  // est enregistrée au dossier à la création de la tâche
+                  // (case 📌 cochée d'avance, anti-doublon conservé).
+                  const client = clients.find((c) => c.id === nouveauClientId);
+                  const duDossier = adresseTravauxId ? (client?.adresses || []).find((a) => a.id === adresseTravauxId) : null;
+                  const choisie = duDossier
+                    ? { type: "dossier", adresse: duDossier }
+                    : nouvelleAdresseTravaux
+                      ? { type: "nouvelle", label: `${nouvelleAdresseTravaux.label}${nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}` }
+                      : null;
+                  return (
+                    <div className="rounded-lg bg-slate-50 p-2">
+                      <SelecteurAdresseTravaux
+                        compact
+                        client={client}
+                        choisie={choisie}
+                        onChoisirDossier={(a) => { setAdresseTravauxId(a.id); setNouvelleAdresseTravaux(null); }}
+                        onNouvelle={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
+                        onAucune={() => { setAdresseTravauxId(""); setNouvelleAdresseTravaux(null); setNouvelleAdresseApp(""); }}
+                        enfants={nouvelleAdresseTravaux ? (
+                          <div className="mt-1.5 space-y-1.5">
                             <input
-                              value={filtreAdresseTache}
-                              onChange={(e) => setFiltreAdresseTache(e.target.value)}
-                              placeholder="🔍 Filtrer les adresses DÉJÀ enregistrées (pas pour une nouvelle)"
-                              className="mb-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs"
+                              value={nouvelleAdresseApp}
+                              onChange={(e) => setNouvelleAdresseApp(e.target.value)}
+                              placeholder="App. / unité (optionnel) — ex. : 4B"
+                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
                             />
-                          )}
-                          {adressesFiltrees.length === 0 ? (
-                            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-700">
-                              Aucune adresse enregistrée ne correspond à « {filtreAdresseTache.trim()} ». Pour une NOUVELLE adresse, utilise le champ ⤵ « Nouvelle adresse » juste en dessous.
-                            </p>
-                          ) : (
-                            <select
-                              value={adresseTravauxId}
-                              onChange={(e) => { setAdresseTravauxId(e.target.value); setNouvelleAdresseTravaux(null); }}
-                              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
-                            >
-                              <option value="">— Choisir une adresse enregistrée —</option>
-                              {adressesFiltrees.map((a) => (
-                                <option key={a.id} value={a.id}>{a.nom} — {libelleAdresse(a)}</option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">➕ Nouvelle adresse — tape-la ICI (suggestions Google) :</p>
-                    <AutocompleteAdresse
-                      onSelection={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
-                    />
-                    <input
-                      value={nouvelleAdresseApp}
-                      onChange={(e) => setNouvelleAdresseApp(e.target.value)}
-                      placeholder="App. / unité (optionnel) — ex. : 4B"
-                      className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs sm:w-52"
-                    />
-                    {nouvelleAdresseTravaux && (
-                      <>
-                        <p className="flex items-center gap-1 text-[11px] text-emerald-600">
-                          <Check size={12} /> {nouvelleAdresseTravaux.label}
-                          {nouvelleAdresseApp.trim() ? `, app. ${nouvelleAdresseApp.trim()}` : ""}
-                        </p>
-                        {/* 📌 Cochée d'avance : l'adresse rejoint le dossier
-                            du client et sera offerte dans la liste à la
-                            prochaine tâche (anti-doublon à la création). */}
-                        {nouveauClientId && (
-                          <label className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
-                            <input
-                              type="checkbox"
-                              checked={enregistrerAdresseFiche}
-                              onChange={(e) => setEnregistrerAdresseFiche(e.target.checked)}
-                              className="h-3.5 w-3.5 accent-[#FF6A13]"
-                            />
-                            📌 Enregistrer cette adresse au dossier de {nomAffichageClient(clients.find((c) => c.id === nouveauClientId)) || "ce client"}
-                          </label>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
+                            {nouveauClientId && (
+                              <label className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-600">
+                                <input
+                                  type="checkbox"
+                                  checked={enregistrerAdresseFiche}
+                                  onChange={(e) => setEnregistrerAdresseFiche(e.target.checked)}
+                                  className="h-3.5 w-3.5 accent-[#FF6A13]"
+                                />
+                                📌 Enregistrer cette adresse au dossier de {nomAffichageClient(client) || "ce client"}
+                              </label>
+                            )}
+                          </div>
+                        ) : null}
+                      />
+                    </div>
+                  );
+                })()}
               </div>
               )}
 

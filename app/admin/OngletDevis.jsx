@@ -21,7 +21,7 @@ import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
 import { ModalNouveauClient } from "./OngletClients";
-import { ApercuDevisClient, AutocompleteAdresse, BarrePagination, Button, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurItem, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
+import { ApercuDevisClient, BarrePagination, Button, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurAdresseTravaux, SelecteurItem, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
 
 // Taux coûtant moyen de l'équipe, lu dans la GRILLE CCQ de l'entreprise
 // (2026-08-28) : le champ « taux prévu » se pré-remplit avec un chiffre
@@ -436,8 +436,6 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   useEffect(() => {
     if (clientCible && clients.some((c) => c.id === clientCible)) setClientId(clientCible);
   }, [clientCible, clients]);
-  const [nouvelleAdresseNom, setNouvelleAdresseNom] = useState("");
-  const [nouvelleAdresseNomUnite, setNouvelleAdresseNomUnite] = useState("");
   const [lignes, setLignes] = useState([]);
   // 🙈 COÛTS MASQUÉS (demande du propriétaire, 2026-08-22) : chez le
   // client, l'écran du téléphone est visible par-dessus l'épaule — le
@@ -836,33 +834,44 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const majLigne = (uid, n) => setLignes((prev) => prev.map((l) => (l.uid === uid ? n : l)));
   const supprimerLigne = (uid) => setLignes((prev) => prev.filter((l) => l.uid !== uid));
 
+  // Libellé figé sur le devis pour une adresse du dossier.
+  const libelleDevis = (a) => `${a.nom} — ${libelleAdresse(a)}`;
+  // 🏠 UN SEUL CHAMP (2026-09-14) : choisir une nouvelle adresse Google
+  // l'enregistre au dossier ET la met sur le devis d'un coup. Anti-
+  // doublon (2026-09-03) conservé : la ligne1 normalisée décide — déjà
+  // là = on choisit celle du dossier au lieu d'en créer une copie.
   const enregistrerAdresse = (place) => {
-    // 🚫 ANTI-DOUBLON (2026-09-03, vécu : la même adresse choisie deux
-    // fois apparaissait deux fois dans le dossier ET dans le sélecteur).
-    // Même règle que partout ailleurs : la ligne1 normalisée décide.
-    const dejaLa = (client?.adresses || []).some(
+    const dejaLa = (client?.adresses || []).find(
       (a) => (a.ligne1 || "").trim().toLowerCase() === String(place.label || "").trim().toLowerCase()
     );
     if (dejaLa) {
-      ajouterJournal(`📍 Adresse déjà au dossier de ${client.nom} — rien à ajouter, choisis-la dans « Adresse des travaux ».`);
-      setNouvelleAdresseNom("");
+      setAdresseTravauxDevis(libelleDevis(dejaLa));
       return;
     }
-    // Le petit nom est FACULTATIF (correctif 2026-09-06 : quand il était
-    // vide, choisir une suggestion Google ne faisait RIEN, en silence —
-    // « l'adresse n'apparaît pas »). Sans petit nom : l'adresse elle-même.
-    const nouvelle = {
-      id: `a-${Date.now()}`,
-      nom: nouvelleAdresseNom.trim() || place.label,
-      ligne1: place.label,
-      ...(nouvelleAdresseNomUnite.trim() ? { appartement: nouvelleAdresseNomUnite.trim() } : {}),
-      codePostal: place.codePostal,
-    };
+    // Sans petit nom : l'adresse elle-même sert de nom (modifiable
+    // après coup dans les petits champs sous la ligne orange).
+    const nouvelle = { id: `a-${Date.now()}`, nom: place.label, ligne1: place.label, codePostal: place.codePostal };
     setClients((prev) =>
       prev.map((c) => (c.id === clientId ? { ...c, adresses: [...(c.adresses || []), nouvelle] } : c))
     );
-    setNouvelleAdresseNom("");
+    setAdresseTravauxDevis(libelleDevis(nouvelle));
     ajouterJournal(`Nouvelle adresse enregistrée au dossier de ${client.nom} : ${nouvelle.ligne1}`);
+  };
+  // ✏️ Petit nom / app. de l'adresse choisie — modifiés au dossier ET le
+  // libellé du devis suit (sinon l'effet « adresse invalide » le viderait).
+  const modifierAdresseChoisie = (champs) => {
+    const actuelle = (client?.adresses || []).find((a) => libelleDevis(a) === adresseTravauxDevis);
+    if (!actuelle) return;
+    const maj = { ...actuelle };
+    if (champs.nom !== undefined) maj.nom = champs.nom.trim() ? champs.nom : actuelle.ligne1;
+    if (champs.appartement !== undefined) {
+      if (champs.appartement.trim()) maj.appartement = champs.appartement;
+      else delete maj.appartement;
+    }
+    setClients((prev) =>
+      prev.map((c) => (c.id === clientId ? { ...c, adresses: (c.adresses || []).map((a) => (a.id === actuelle.id ? maj : a)) } : c))
+    );
+    setAdresseTravauxDevis(libelleDevis(maj));
   };
 
   const [courrielModalOuvert, setCourrielModalOuvert] = useState(false);
@@ -2109,48 +2118,25 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
               sans client sélectionné, `client` est undefined et lire
               `client.nom` faisait planter tout l'onglet Devis (depuis le
               retrait de la présélection, 2026-08-17). */}
-          {client && (
-            <div className="rounded-xl bg-slate-50 p-3">
-              {/* 📍 L'ADRESSE D'ABORD (correctif 2026-09-06 : le champ
-                  Google était le 3e — les gens tapaient l'adresse dans
-                  « Nom de l'adresse » et rien n'apparaissait). */}
-              <label className="mb-1 block text-xs font-bold text-slate-500">📍 Ajouter une adresse au dossier client — tape-la ici et CHOISIS dans la liste</label>
-              <AutocompleteAdresse onSelection={enregistrerAdresse} />
-              <input
-                value={nouvelleAdresseNom}
-                onChange={(e) => setNouvelleAdresseNom(e.target.value)}
-                placeholder="Petit nom de l'adresse (facultatif — ex: Chantier Sud)"
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <input
-                value={nouvelleAdresseNomUnite}
-                onChange={(e) => setNouvelleAdresseNomUnite(e.target.value)}
-                placeholder="App. / bureau / casier postal (facultatif)"
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <p className="mt-1 text-[11px] text-slate-400">Choisir un résultat enregistre l&apos;adresse au dossier de {client.nom} (avec le petit nom s&apos;il est rempli).</p>
-            </div>
-          )}
-
           {/* 🏠 ADRESSE DES TRAVAUX DU DEVIS (2026-08-31) — pour le
-              reconnaître d'un coup d'œil, et elle suit partout. */}
-          {client && (client.adresses || []).length > 0 && (
+              reconnaître d'un coup d'œil, et elle suit partout. UN SEUL
+              CHAMP depuis le 2026-09-14 : dossier au clic, Google en
+              tapant, nouvelle = enregistrée ET choisie d'un coup. */}
+          {client && (
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">🏠 Adresse des travaux (sur ce devis)</label>
-              <select
-                value={adresseTravauxDevis}
-                onChange={(e) => setAdresseTravauxDevis(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="">— Aucune (adresse de facturation par défaut) —</option>
-                {client.adresses.map((a) => {
-                  const t = `${a.nom} — ${libelleAdresse(a)}`;
-                  return <option key={a.id} value={t}>{t}</option>;
-                })}
-              </select>
-              <p className="mt-1 text-[10px] text-slate-400">
-                Elle identifie le devis dans les listes, part dans l&apos;objet du courriel et suit jusqu&apos;à la tâche ou au projet.
-              </p>
+              <SelecteurAdresseTravaux
+                client={client}
+                choisie={(() => {
+                  const a = (client.adresses || []).find((x) => libelleDevis(x) === adresseTravauxDevis);
+                  return a ? { type: "dossier", adresse: a } : null;
+                })()}
+                onChoisirDossier={(a) => setAdresseTravauxDevis(libelleDevis(a))}
+                onNouvelle={enregistrerAdresse}
+                onAucune={() => setAdresseTravauxDevis("")}
+                onModifierChoisie={modifierAdresseChoisie}
+                indice="Vide = adresse de facturation. Elle identifie le devis dans les listes, part dans l'objet du courriel et suit jusqu'à la tâche ou au projet."
+              />
             </div>
           )}
 

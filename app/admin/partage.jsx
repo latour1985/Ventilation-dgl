@@ -1265,8 +1265,84 @@ export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
   );
 }
 
-export function AutocompleteAdresse({ onSelection }) {
+// 🏠 SÉLECTEUR D'ADRESSE DES TRAVAUX — UN SEUL CHAMP (2026-09-14, demande
+// du propriétaire : « pourquoi il faut la resélectionner plus bas ? »).
+// Clic = les adresses DU DOSSIER du client ; taper = dossier filtré en
+// haut + suggestions Google en bas pour une NOUVELLE ; une nouvelle est
+// enregistrée ET choisie d'un coup (c'est l'appelant qui l'enregistre
+// via onNouvelle). Une fois choisie : ligne orange + « changer », et les
+// petits champs facultatifs (petit nom, app.) se modifient APRÈS coup.
+//   choisie : { type: "dossier", adresse } | { type: "nouvelle", label } | null
+export function SelecteurAdresseTravaux({ client, choisie, onChoisirDossier, onNouvelle, onAucune, onModifierChoisie = null, enfants = null, indice = null, compact = false }) {
+  if (choisie) {
+    const libelle =
+      choisie.type === "dossier"
+        ? `${choisie.adresse.nom && choisie.adresse.nom !== choisie.adresse.ligne1 ? `${choisie.adresse.nom} — ` : ""}${libelleAdresse(choisie.adresse)}`
+        : choisie.label;
+    return (
+      <div>
+        <div className={`flex items-center justify-between gap-2 rounded-xl border border-[#FF6A13] bg-orange-50 ${compact ? "px-2 py-1.5" : "px-3 py-2"}`}>
+          <span className={`min-w-0 truncate font-bold text-slate-800 ${compact ? "text-xs" : "text-sm"}`}>🏠 {libelle}</span>
+          <button type="button" onClick={onAucune} className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2">
+            changer
+          </button>
+        </div>
+        {choisie.type === "dossier" && onModifierChoisie && (
+          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+            <input
+              value={choisie.adresse.nom && choisie.adresse.nom !== choisie.adresse.ligne1 ? choisie.adresse.nom : ""}
+              onChange={(e) => onModifierChoisie({ nom: e.target.value })}
+              placeholder="Petit nom (facultatif — ex. Chantier Sud)"
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+            <input
+              value={choisie.adresse.appartement || ""}
+              onChange={(e) => onModifierChoisie({ appartement: e.target.value })}
+              placeholder="App. / bureau (facultatif)"
+              className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+            />
+          </div>
+        )}
+        {enfants}
+      </div>
+    );
+  }
+  const adresses = client?.adresses || [];
+  return (
+    <div>
+      <AutocompleteAdresse
+        onSelection={onNouvelle}
+        adressesLocales={adresses}
+        onChoixLocal={onChoisirDossier}
+        titreLocaux={`Au dossier de ${nomAffichageClient(client) || "ce client"}`}
+        placeholder={adresses.length > 0 ? "Clique pour les adresses du dossier, ou tape une nouvelle adresse…" : "Tape l'adresse des travaux (suggestions Google)…"}
+        compact={compact}
+      />
+      {indice && <p className="mt-1 text-[10px] text-slate-400">{indice}</p>}
+    </div>
+  );
+}
+
+export function AutocompleteAdresse({ onSelection, adressesLocales = null, onChoixLocal = null, titreLocaux = "Au dossier", placeholder = "Commence à taper l'adresse…", compact = false }) {
   const [texte, setTexte] = useState("");
+  // 🏠 Adresses locales (du dossier client) : toutes au clic, filtrées
+  // en tapant — au-dessus des suggestions Google.
+  const f = texte.trim().toLowerCase();
+  const locauxFiltres = (adressesLocales || []).filter(
+    (a) => !f || `${a.nom || ""} ${a.ligne1 || ""} ${a.appartement || ""}`.toLowerCase().includes(f)
+  );
+  const choisirLocal = (a) => {
+    onChoixLocal?.(a);
+    setTexte("");
+    setSuggestions([]);
+    setOuvert(false);
+    setSelectionFaite(true);
+    jetonRef.current = null;
+  };
+  // 🚫 Anti-doublon centralisé : une suggestion Google qui est DÉJÀ au
+  // dossier (même ligne1) choisit l'adresse du dossier, pas une copie.
+  const localeIdentique = (label) =>
+    (adressesLocales || []).find((a) => (a.ligne1 || "").trim().toLowerCase() === String(label || "").trim().toLowerCase());
   const [ouvert, setOuvert] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [chargement, setChargement] = useState(false);
@@ -1317,11 +1393,15 @@ export function AutocompleteAdresse({ onSelection }) {
   const choisir = async (s) => {
     try {
       const details = await detailsAdresse(s, jetonRef.current);
+      const deja = onChoixLocal && localeIdentique(details.label);
+      if (deja) { choisirLocal(deja); return; }
       onSelection(details);
       setTexte(details.label);
     } catch {
       // Détails indisponibles : on garde au moins le texte de la
       // suggestion plutôt que de perdre le choix du client.
+      const deja = onChoixLocal && localeIdentique(s.texte);
+      if (deja) { choisirLocal(deja); return; }
       onSelection({ label: s.texte, ligne1: s.texte, ville: "", codePostal: "" });
       setTexte(s.texte);
     }
@@ -1359,16 +1439,38 @@ export function AutocompleteAdresse({ onSelection }) {
             setOuvert(true);
             setSelectionFaite(false);
           }}
-          placeholder="Commence à taper l'adresse…"
-          className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-9 text-sm"
+          onFocus={() => { if (adressesLocales) setOuvert(true); }}
+          onBlur={() => { if (adressesLocales) setTimeout(() => setOuvert(false), 200); }}
+          placeholder={placeholder}
+          className={`w-full rounded-xl border border-slate-300 pl-9 pr-9 ${compact ? "py-1.5 text-xs" : "py-2.5 text-sm"}`}
         />
         {chargement && (
           <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />
         )}
       </div>
 
-      {ouvert && suggestions.length > 0 && (
-        <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+      {ouvert && (suggestions.length > 0 || locauxFiltres.length > 0) && (
+        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+          {locauxFiltres.length > 0 && (
+            <p className="border-b border-slate-100 bg-slate-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">🏠 {titreLocaux}</p>
+          )}
+          {locauxFiltres.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => choisirLocal(a)}
+              className="flex w-full items-start gap-2 border-b border-slate-100 px-3 py-2 text-left text-sm last:border-0 hover:bg-orange-50"
+            >
+              <span className="mt-0.5 shrink-0 text-xs">🏠</span>
+              <span className="min-w-0">
+                {a.nom && a.nom !== a.ligne1 && <span className="font-bold">{a.nom} — </span>}
+                {libelleAdresse(a)}
+              </span>
+            </button>
+          ))}
+          {suggestions.length > 0 && locauxFiltres.length > 0 && (
+            <p className="border-b border-slate-100 bg-slate-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">➕ Nouvelle adresse (Google)</p>
+          )}
           {suggestions.map((s) => (
             <button
               key={s.id}
