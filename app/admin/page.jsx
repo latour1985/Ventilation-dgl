@@ -594,9 +594,11 @@ function EcranEntente({ config, session, onAcceptee }) {
   );
 }
 
-function OngletRecherche({ clients, devisListe, onOuvrirDevis, onOuvrirClient = null, terme, setTerme, achatsLibres = [], pieces = [], projets = [], devisPourTache = null, onOuvrirCommandes = null, onOuvrirProjet = null }) {
+function OngletRecherche({ clients, devisListe, onOuvrirDevis, onOuvrirClient = null, terme, setTerme, achatsLibres = [], pieces = [], projets = [], devisPourTache = null, onOuvrirCommandes = null, onOuvrirProjet = null, chercherTaches = null, onOuvrirTache = null, dateCourteTache = null }) {
   const q = terme.trim().toLowerCase();
   const resultats = terme.trim() ? clients.filter((c) => correspond(c, terme)) : [];
+  // 🔧 TÂCHES (2026-09-14) — même moteur que le menu déroulant.
+  const tachesTrouvees = chercherTaches ? chercherTaches(terme).slice(0, 20) : [];
 
   // 🧾 COMMANDES trouvées (2026-09-04, demande du propriétaire : « la
   // personne qui trouve la boîte sait c'est où l'attitrer ») : taper le
@@ -681,7 +683,7 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, onOuvrirClient = 
       .sort((a, b) => (b.active.date || "").localeCompare(a.active.date || ""));
   })();
 
-  const total = resultats.length + devisTrouves.length + commandesTrouvees.length;
+  const total = resultats.length + devisTrouves.length + commandesTrouvees.length + tachesTrouvees.length;
 
   return (
     <div className="mx-auto max-w-2xl space-y-4 p-4 md:p-6">
@@ -699,9 +701,37 @@ function OngletRecherche({ clients, devisListe, onOuvrirDevis, onOuvrirClient = 
       {!terme.trim() && (
         <p className="text-center text-xs text-slate-400">
           Cherche un <span className="font-bold">client</span> (nom, entreprise, adresse, téléphone, courriel), un{" "}
-          <span className="font-bold">devis</span> (numéro, client, produit inscrit dedans) ou une{" "}
+          <span className="font-bold">devis</span> (numéro, client, produit inscrit dedans), une{" "}
+          <span className="font-bold">tâche</span> (titre, client, adresse des travaux, description) ou une{" "}
           <span className="font-bold">commande</span> (nº de bon de commande écrit sur la boîte, fournisseur, pièce).
         </p>
+      )}
+
+      {/* 🔧 TÂCHES — un clic amène à la journée dans l'agenda, fiche ouverte. */}
+      {tachesTrouvees.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">Tâches ({tachesTrouvees.length})</p>
+          {tachesTrouvees.map((r) => (
+            <button
+              key={`t-${r.tache.id}`}
+              onClick={() => onOuvrirTache?.(r)}
+              className="flex w-full items-start justify-between gap-2 rounded-xl border border-slate-200 bg-white p-3 text-left hover:border-[#FF6A13] hover:bg-orange-50"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-slate-900">🔧 {r.tache.titre || r.tache.clientNom || "Tâche"}</p>
+                <p className="truncate text-xs text-slate-500">
+                  {[r.tache.clientNom, r.tache.adresseIntervention || r.tache.adresseTravaux].filter(Boolean).join(" · ") || "—"}
+                </p>
+                {r.tache.description && <p className="mt-0.5 truncate text-[10px] text-slate-400">{String(r.tache.description).split("\n")[0]}</p>}
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[10px] font-bold text-slate-600">{dateCourteTache ? dateCourteTache(r) : r.date || "en attente"}</p>
+                {r.employeNom && <p className="text-[10px] text-slate-400">{r.employeNom}</p>}
+                <span className="mt-0.5 inline-block text-[10px] font-bold text-[#FF6A13]">Ouvrir ›</span>
+              </div>
+            </button>
+          ))}
+        </div>
       )}
 
       {terme.trim() && total === 0 && (
@@ -1232,6 +1262,9 @@ function AppAdmin() {
   // Cible d'une navigation venant de la RECHERCHE RAPIDE :
   // { clientId, numeroDevis } — ouvre le bon dossier et surligne le devis.
   const [cibleRecherche, setCibleRecherche] = useState(null);
+  // 🔎 Cible AGENDA venue de la recherche : { tacheId, date, employeId,
+  // heure, coup } — l'agenda saute à la journée et ouvre la fiche.
+  const [cibleAgenda, setCibleAgenda] = useState(null);
   // ✏️ Devis à réviser demandé depuis le dossier client (onglet Clients) —
   // l'onglet Devis le prend et ouvre sa fenêtre d'édition.
   const [devisAReviser, setDevisAReviser] = useState(null);
@@ -1647,6 +1680,43 @@ function AppAdmin() {
     }
     return (tachesAttente || []).find((t) => t.id === id) || null;
   };
+  // 🔎 TÂCHES DANS LA RECHERCHE (2026-09-14, vécu : « 395 » ne trouvait
+  // pas la job de C.R.S.D — l'adresse était SUR LA TÂCHE, pas au
+  // dossier du client). Grille + file d'attente ; titre, client,
+  // adresse, description, nº de devis. Une tâche sur plusieurs jours ou
+  // techniciens = UNE ligne (sa première case). En attente d'abord,
+  // puis les plus récentes.
+  const chercherTaches = (terme) => {
+    const q = (terme || "").trim().toLowerCase();
+    if (!q) return [];
+    const texteDe = (t) =>
+      `${t.titre || ""} ${t.clientNom || ""} ${t.adresseTravaux || ""} ${t.adresseIntervention || ""} ${t.description || ""} ${t.devisNumero || ""}`.toLowerCase();
+    const nomEmploye = (id) =>
+      utilisateursActifs.find((u) => u.id === id)?.nom ||
+      sousTraitants.find((s) => `st-${s.id}` === id)?.nom ||
+      (id === "compte-connecte" ? "moi" : "");
+    const vues = new Map();
+    for (const [cle, valeur] of Object.entries(planning)) {
+      const [date, employeId, heure] = cle.split("|");
+      for (const t of listeCellule(valeur)) {
+        if (!t || t.est_tache_systeme || !texteDe(t).includes(q)) continue;
+        const deja = vues.get(t.id);
+        if (!deja || date < deja.date) vues.set(t.id, { tache: t, date, employeId, heure, employeNom: nomEmploye(employeId) });
+      }
+    }
+    const planifiees = [...vues.values()].sort((a, b) => b.date.localeCompare(a.date));
+    const attente = (tachesAttente || [])
+      .filter((t) => !vues.has(t.id) && texteDe(t).includes(q))
+      .map((t) => ({ tache: t, date: null, employeId: null, heure: null, employeNom: "" }));
+    return [...attente, ...planifiees];
+  };
+  const ouvrirTacheTrouvee = (r) => {
+    setCibleAgenda({ tacheId: r.tache.id, date: r.date, employeId: r.employeId, heure: r.heure, coup: Date.now() });
+    setOnglet("agenda");
+    setListeRechercheOuverte(false);
+  };
+  const dateCourteTache = (r) =>
+    r.date ? new Date(`${r.date}T12:00:00`).toLocaleDateString("fr-CA", { day: "numeric", month: "short" }) : "en attente";
 
   // CRÉATION AUTOMATIQUE depuis les bons de travail : quand un
   // technicien coche « pièce à commander », la demande apparaît au
@@ -3086,6 +3156,8 @@ function AppAdmin() {
                       }))
                   ),
                 ].slice(0, 4);
+                // 🔧 TÂCHES (grille + attente) — voir chercherTaches.
+                const tachesTrouvees = chercherTaches(rechercheGlobale).slice(0, 4);
                 const ouvrirClient = (c) => {
                   // `coup` change à chaque clic : recliquer le même
                   // résultat rouvre le dossier même refermé entre-temps.
@@ -3103,7 +3175,7 @@ function AppAdmin() {
                 };
                 return (
                   <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                    {clientsTrouves.length === 0 && devisTrouves.length === 0 && commandesTrouvees.length === 0 ? (
+                    {clientsTrouves.length === 0 && devisTrouves.length === 0 && commandesTrouvees.length === 0 && tachesTrouvees.length === 0 ? (
                       <p className="px-3 py-3 text-xs text-slate-400">Aucun résultat pour « {rechercheGlobale.trim()} »</p>
                     ) : (
                       <>
@@ -3132,6 +3204,23 @@ function AppAdmin() {
                             <span className="min-w-0">
                               <span className="block truncate text-xs font-bold text-slate-800">Devis {d.numero}</span>
                               <span className="block truncate text-[10px] text-slate-400">{d.clientNom || "—"}</span>
+                            </span>
+                          </button>
+                        ))}
+                        {tachesTrouvees.map((r) => (
+                          <button
+                            key={`t-${r.tache.id}`}
+                            onMouseDown={() => ouvrirTacheTrouvee(r)}
+                            className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                          >
+                            <span className="shrink-0">🔧</span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-xs font-bold text-slate-800">{r.tache.titre || r.tache.clientNom || "Tâche"}</span>
+                              <span className="block truncate text-[10px] text-slate-400">
+                                {[r.tache.clientNom, r.tache.adresseIntervention || r.tache.adresseTravaux].filter(Boolean).join(" · ") || "—"}
+                                {" — "}
+                                <span className="font-semibold text-slate-500">{dateCourteTache(r)}{r.employeNom ? ` · ${r.employeNom}` : ""}</span>
+                              </span>
                             </span>
                           </button>
                         ))}
@@ -3244,6 +3333,9 @@ function AppAdmin() {
           devisPourTache={(tacheId) => tacheParId(tacheId)?.devisNumero || null}
           onOuvrirCommandes={() => setOnglet("pieces")}
           onOuvrirProjet={() => setOnglet("projets")}
+          chercherTaches={chercherTaches}
+          onOuvrirTache={ouvrirTacheTrouvee}
+          dateCourteTache={dateCourteTache}
         />
       )}
 
@@ -3378,6 +3470,8 @@ function AppAdmin() {
         <OngletAgenda
           achatsLibres={achatsLibres}
           fournisseurs={fournisseurs}
+          cible={cibleAgenda}
+          onCibleTraitee={() => setCibleAgenda(null)}
           onMajFacturable={(tacheId, courriel, val) =>
             setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }))
           }

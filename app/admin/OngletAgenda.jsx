@@ -395,7 +395,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [] }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -679,6 +679,24 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // restent sur UNE ligne : pastille, titre, chips d'état.
   const [tacheDepliee, setTacheDepliee] = useState(null);
   const [assignationMobile, setAssignationMobile] = useState(null); // {tacheId, employeId, heure, date}
+  // 🔎 CIBLE VENUE DE LA RECHERCHE (2026-09-14) : sauter à la journée de
+  // la tâche (vue Jour) et ouvrir sa fiche ; une tâche en attente ouvre
+  // ✏️. `onCibleTraitee` vide la cible pour ne pas rejouer au retour.
+  useEffect(() => {
+    if (!cible?.coup) return;
+    if (!cible.date) {
+      setTacheDepliee(cible.tacheId);
+      setTacheEnEditionId(cible.tacheId);
+    } else {
+      setJourAffiche(new Date(`${cible.date}T12:00:00`));
+      setVue("jour");
+      const tache = listeCellule(planning[`${cible.date}|${cible.employeId}|${cible.heure}`]).find((t) => t?.id === cible.tacheId);
+      const emp = (employes || []).find((e) => e.id === cible.employeId);
+      if (tache && emp && !emp.estSousTraitant) setTacheDetailOuverte({ tache, employe: emp, date: cible.date, heure: cible.heure });
+    }
+    onCibleTraitee?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cible?.coup]);
   // 📱 AGENDA TÉLÉPHONE — LISTE DÉPLIÉE (essai des cartes repliées
   // abandonné le 2026-08-22 après usage réel : ça tenait dans un écran,
   // mais ça se lisait moins bien qu'un simple défilement où tout est
