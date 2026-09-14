@@ -75,6 +75,9 @@ import { FREQUENCES_CONTRAT, LARGEUR_LIGNE_DESCRIPTION, hauteurDescription, list
 import { OngletDevis, ApercuBonCommande, ModalReportCatalogue, ModalTraiterDevis } from "./OngletDevis";
 import { OngletFacturation, ModalFacturationDevis, ModalReviserPrixNonListe, ApercuFactureClient, FacturesEmisesListe, ModalChoixPaiementFacture, ModalRetraitFacturation } from "./OngletFacturation";
 import TourGuide, { tourDejaFait } from "./TourGuide";
+import Toasts from "@/components/Toasts";
+import RaccourcisClavier from "@/components/RaccourcisClavier";
+import { notifier } from "@/lib/toasts";
 import { TYPES_TACHE, TYPE_INFO, estTypeSansClient, HEURES_QUART, HEURE_PAR_DEFAUT, listeCellule, cleTacheDesHeures, camionsEntretienDu, tachesDuJourPourEmploye } from "./partage";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { OngletTableauDeBord } from "./OngletTableauDeBord";
@@ -2510,6 +2513,9 @@ function AppAdmin() {
     // l'action — le nom (métadonnées) ou le courriel du compte connecté.
     const par = session?.user?.user_metadata?.nom || session?.user?.email || "système";
     setJournal((prev) => [{ id, texte, heure, date, par }, ...prev].slice(0, PLAFOND_JOURNAL));
+    // 🔔 La même ligne devient une BULLE en haut à droite (2026-09-14) :
+    // le journal reste la trace, la bulle est la confirmation sous les yeux.
+    notifier(texte);
     // Piste d'audit PARTAGÉE : l'entrée part aussi en base (append-only),
     // pour survivre au changement de poste et être visible par tous.
     if (session) ajouterEntreeJournal({ texte, par, date, heure }, session).catch(() => {});
@@ -3069,6 +3075,9 @@ function AppAdmin() {
         {tourOuvert && (
           <TourGuide permissions={permissions} onAllerOnglet={setOnglet} onFermer={() => setTourOuvert(false)} />
         )}
+        {/* 🔔 Bulles de confirmation + ⌨️ Échap / Ctrl+Entrée (2026-09-14). */}
+        <Toasts />
+        <RaccourcisClavier />
         {/* 🔍 RECHERCHE GLOBALE — accessible de partout, comme demandé
             par le propriétaire : la recherche est une PORTE D'ENTRÉE,
             pas une destination. Première frappe = la page Recherche

@@ -656,6 +656,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // clause « prix valides 30 jours » se joue sur la page publique, qui
   // ferme le bouton « Accepter » passé 30 jours.
   const [lienCopie, setLienCopie] = useState(null);
+  // ⋯ MENU DES ACTIONS SECONDAIRES d'une carte de devis (2026-09-14) —
+  // un seul bouton principal selon l'état, le reste derrière « ⋯ ».
+  const [menuCartePour, setMenuCartePour] = useState(null); // numero du devis
   const creerLienAcceptation = async (devis) => {
     // Copier le lien = un ENVOI (le bureau va le coller dans son propre
     // courriel) : la version copiée devient celle que le client voit.
@@ -1833,10 +1836,6 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                   </span>
                 )}
 
-                <Button variant="outline" onClick={() => setDevisAperçu(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                  <FileText size={13} /> Voir version client
-                </Button>
-
                 {/* RÉPONSE DU CLIENT — la preuve. Nom saisi, date, heure,
                     et la version des conditions qu'il a lues ce jour-là.
                     C'est ce qui répond à « je n'ai jamais été avisé ». */}
@@ -1874,22 +1873,81 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 {/* ENVOI / RENVOI — disponible tant que le client n'a pas
                     répondu, ET aussi pour un devis DÉJÀ ACCEPTÉ (le client
                     a perdu sa copie et la redemande). */}
-                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && envoiDevis?.devisId !== affichee.id && (
-                  <div className="mt-2 flex gap-1.5">
-                    <Button onClick={() => ouvrirEnvoiDevis(affichee)} className="min-h-0 flex-1 gap-1.5 py-2 text-xs">
-                      {affichee.reponseClient === "accepte" ? tr("✉️ Renvoyer la copie au client") : tr("✉️ Envoyer au client")}
-                    </Button>
-                    {/* 🔔 RELANCE EN UN CLIC — devis parti mais sans
-                        réponse : courriel de rappel prérédigé, trace sur
-                        la carte. JAMAIS automatique (règle du
-                        propriétaire). */}
-                    {!affichee.reponseClient && affichee.statut !== "brouillon" && (
-                      <Button variant="outline" onClick={() => ouvrirRelanceDevis(affichee)} className="min-h-0 shrink-0 gap-1 py-2 text-xs">
-                        🔔 Relancer
+                {/* 🎯 UN SEUL BOUTON PRINCIPAL SELON L'ÉTAT + menu « ⋯ »
+                    (2026-09-14, demande du propriétaire : six boutons de
+                    même poids, le prochain geste ne ressortait pas).
+                    Accepté → Traiter · Consulté → Marquer accepté ·
+                    Envoyé (pas vu) → Relancer · Jamais envoyé → Envoyer.
+                    Le reste (voir, copier le lien, nouvelle version,
+                    annuler) attend derrière « ⋯ ». Relance JAMAIS
+                    automatique (règle du propriétaire). */}
+                {(() => {
+                  const accepte = affichee.statut === "accepte";
+                  const annule = affichee.statut === "annule";
+                  const enEnvoi = envoiDevis?.devisId === affichee.id;
+                  const peutEnvoyer = estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && !enEnvoi;
+                  const jamaisEnvoye = !(affichee.courrielsEnvoi || []).length && !affichee.courrielEnvoi;
+                  const actions = [];
+                  const ajouter = (a) => { if (!actions.some((x) => x.cle === a.cle)) actions.push(a); };
+                  if (estActive && accepte && !affichee.traite) ajouter({ cle: "traiter", libelle: "Traiter le devis", icone: <ClipboardList size={13} />, action: () => setDevisATraiterId(affichee.id) });
+                  if (estActive && !accepte && !annule && !affichee.reponseClient) {
+                    if (jamaisEnvoye || affichee.statut === "brouillon") ajouter({ cle: "envoyer", libelle: tr("✉️ Envoyer au client"), action: () => ouvrirEnvoiDevis(affichee), cache: enEnvoi });
+                    else if (affichee.consulteLe) ajouter({ cle: "accepter", libelle: "Marquer accepté", icone: <Check size={13} />, action: () => accepterDevis(affichee) });
+                    else ajouter({ cle: "relancer", libelle: "🔔 Relancer", action: () => ouvrirRelanceDevis(affichee), cache: enEnvoi });
+                  }
+                  if (estActive && !accepte && !annule) ajouter({ cle: "accepter", libelle: "Marquer accepté", icone: <Check size={13} />, action: () => accepterDevis(affichee) });
+                  if (peutEnvoyer && !affichee.reponseClient && affichee.statut !== "brouillon") ajouter({ cle: "relancer", libelle: "🔔 Relancer", action: () => ouvrirRelanceDevis(affichee) });
+                  if (peutEnvoyer) ajouter({ cle: "envoyer", libelle: accepte ? tr("✉️ Renvoyer la copie au client") : tr("✉️ Envoyer au client"), action: () => ouvrirEnvoiDevis(affichee) });
+                  ajouter({ cle: "voir", libelle: "Voir version client", icone: <FileText size={13} />, action: () => setDevisAperçu(affichee) });
+                  if (estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte")) ajouter({ cle: "lien", libelle: lienCopie === affichee.id ? "Lien copié ✓" : accepte ? "Copier le lien du devis" : "Copier le lien d'acceptation", icone: <Copy size={13} />, action: () => creerLienAcceptation(affichee) });
+                  if (!affichee.traite && creationVersionPour !== affichee.numero) ajouter({ cle: "version", libelle: estActive ? "Nouvelle version" : "Copier vers une nouvelle version", icone: <Plus size={13} />, action: () => { setCreationVersionPour(affichee.numero); setNoteNouvelleVersion(""); } });
+                  if (estActive && accepte) ajouter({ cle: "annuler", libelle: "❌ Le client annule — annuler ce devis accepté…", danger: true, action: () => { setAnnulationDevis(affichee); setRaisonAnnulationDevis(""); } });
+                  const visibles = actions.filter((a) => !a.cache);
+                  if (visibles.length === 0) return null;
+                  const [principale, ...autres] = visibles;
+                  const menuOuvert = menuCartePour === affichee.numero;
+                  return (
+                    <div className="relative mt-2 flex gap-1.5">
+                      <Button
+                        variant={principale.cle === "voir" || principale.cle === "version" ? "outline" : "primary"}
+                        onClick={() => { setMenuCartePour(null); principale.action(); }}
+                        className="min-h-0 flex-1 gap-1.5 py-2 text-xs"
+                      >
+                        {principale.icone}{principale.libelle}
                       </Button>
-                    )}
-                  </div>
-                )}
+                      {autres.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setMenuCartePour(menuOuvert ? null : affichee.numero)}
+                            aria-label="Autres actions"
+                            title="Autres actions"
+                            className={`shrink-0 rounded-xl border px-3 text-sm font-extrabold ${menuOuvert ? "border-slate-400 bg-slate-100" : "border-slate-300 bg-white hover:bg-slate-50"}`}
+                          >
+                            ⋯
+                          </button>
+                          {menuOuvert && (
+                            <>
+                              <div className="fixed inset-0 z-20" onClick={() => setMenuCartePour(null)} aria-hidden="true" />
+                              <div className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                                {autres.map((a) => (
+                                  <button
+                                    key={a.cle}
+                                    type="button"
+                                    onClick={() => { setMenuCartePour(null); a.action(); }}
+                                    className={`flex w-full items-center gap-2 border-b border-slate-100 px-3 py-2 text-left text-xs font-semibold last:border-0 hover:bg-slate-50 ${a.danger ? "text-red-600" : "text-slate-700"}`}
+                                  >
+                                    {a.icone}{a.libelle}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
                 {estActive && !affichee.reponseClient && (affichee.relances || []).length > 0 && (
                   <p className="mt-1 text-[10px] text-slate-400">
                     🔔 Relancé {affichee.relances.length} fois — dernière le {new Date(affichee.relances[affichee.relances.length - 1].date).toLocaleDateString("fr-CA")}
@@ -1959,40 +2017,8 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     </div>
                   </div>
                 )}
-                {estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte") && (
-                  <Button
-                    variant="outline"
-                    onClick={() => creerLienAcceptation(affichee)}
-                    className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
-                  >
-                    <Copy size={13} /> {lienCopie === affichee.id ? "Lien copié ✓" : affichee.reponseClient === "accepte" ? "Copier le lien du devis" : "Copier le lien d'acceptation"}
-                  </Button>
-                )}
-
-                {/* Actions réservées à la version ACTIVE — on ne traite
-                    jamais une révision archivée par erreur. */}
-                {estActive && affichee.statut !== "accepte" && (
-                  <Button onClick={() => accepterDevis(affichee)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                    <Check size={13} /> Marquer accepté
-                  </Button>
-                )}
-                {estActive && affichee.statut === "accepte" && !affichee.traite && (
-                  <Button onClick={() => setDevisATraiterId(affichee.id)} className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs">
-                    <ClipboardList size={13} /> Traiter le devis
-                  </Button>
-                )}
-                {/* ❌ ANNULER UN DEVIS ACCEPTÉ (2026-08-29) — le client
-                    s'est désisté après coup. Raison obligatoire, preuve
-                    d'acceptation conservée, et l'estimate QuickBooks
-                    passe à « Rejeté » automatiquement. */}
-                {estActive && affichee.statut === "accepte" && (
-                  <button
-                    onClick={() => { setAnnulationDevis(affichee); setRaisonAnnulationDevis(""); }}
-                    className="mt-1.5 w-full text-center text-[10px] font-semibold text-red-400 underline underline-offset-2 hover:text-red-600"
-                  >
-                    ❌ Le client annule — annuler ce devis accepté…
-                  </button>
-                )}
+                {/* (Copier le lien, Marquer accepté, Traiter, Annuler : dans
+                    le bouton principal ou le menu « ⋯ » ci-dessus.) */}
                 {affichee.statut === "annule" && (
                   <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">
                     ❌ ANNULÉ{affichee.annuleLe ? ` le ${String(affichee.annuleLe).slice(0, 10)}` : ""}
@@ -2023,20 +2049,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                       </Button>
                     </div>
                   </div>
-                ) : (
-                  !affichee.traite && (
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setCreationVersionPour(affichee.numero);
-                        setNoteNouvelleVersion("");
-                      }}
-                      className="mt-2 w-full min-h-0 gap-1.5 py-2 text-xs"
-                    >
-                      <Plus size={13} /> {estActive ? "Nouvelle version" : "Copier vers une nouvelle version"}
-                    </Button>
-                  )
-                )}
+                ) : null}
               </div>
             );
   };

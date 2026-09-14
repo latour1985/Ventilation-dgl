@@ -59,17 +59,10 @@ function depuisQuand(iso, t) {
 export function BlocReponsesClients({ reponses, compact = false, onOuvrirDevis, onNouvelleVersion, onTraiterDevis, onRenvoyer, onClasser, onEffacerErreur }) {
   const [replie, setReplie] = useState(false);
   const { t } = useLangue();
-  if (!reponses || reponses.length === 0) {
-    if (compact) return null; // tableau de bord : rien à dire, rien à montrer
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-3">
-        <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">💬 {t("Réponses de tes clients")}</p>
-        <p className="mt-1 text-[11px] text-slate-400">
-          {t("Aucune réponse en attente. Dès qu'un client accepte, refuse ou demande une modification, ça apparaît ici.")}
-        </p>
-      </div>
-    );
-  }
+  // Rien à traiter = rien à montrer (2026-09-14, demande du propriétaire :
+  // le bloc vide prenait la première place de l'onglet Devis). Dès qu'une
+  // réponse arrive, il revient en tête — en ambre s'il faut répondre.
+  if (!reponses || reponses.length === 0) return null;
   const aRepondre = reponses.filter((r) => r.genre === "modification").length;
   return (
     <div className={`rounded-2xl border bg-white p-3 ${aRepondre > 0 ? "border-amber-300" : "border-slate-200"}`}>
