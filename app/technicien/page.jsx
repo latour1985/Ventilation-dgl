@@ -20,7 +20,7 @@ import { SqueletteTechnicien } from "@/components/EcranSquelette";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail, bonExistePourTache, apportEquipePourBon } from "@/lib/supabase/bonsTravail";
 import { fermerTravauxTechnicien } from "@/lib/supabase/fermetureTechnicien";
-import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
+import { envoyerCourriel, gabaritBonTravail, gabaritEnRoute } from "@/lib/courriels";
 import PanneauNotesPerso from "@/components/PanneauNotesPerso";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
@@ -3637,6 +3637,57 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // interface seulement : le bon envoyé au client et les données
   // enregistrées restent en français.
   const { t } = useLangue();
+  // 🚗 « EN ROUTE » — envoi du courriel au client (voir le bloc dans le
+  // rendu). L'horodatage est gardé SUR la tâche (onMajTache) : la carte
+  // ne le propose plus, et le bureau lit la trace au journal.
+  const configEntRoute = useEntreprise();
+  const [enRouteEnvoi, setEnRouteEnvoi] = useState(false);
+  const [enRouteErreur, setEnRouteErreur] = useState("");
+  const envoyerEnRoute = async (delaiMinutes, cibles) => {
+    if (enRouteEnvoi || !cibles?.length) return;
+    setEnRouteEnvoi(true);
+    setEnRouteErreur("");
+    const nomComplet = session?.user?.user_metadata?.nom || (session?.user?.email || "").split("@")[0];
+    const prenom = String(nomComplet).trim().split(/\s+/)[0] || nomComplet;
+    const nomEnt = configEntRoute?.nomCommercial || configEntRoute?.nomLegal || "";
+    try {
+      const r = await envoyerCourriel({
+        a: cibles,
+        sujet: `${prenom} est en route — arrivée dans ~${delaiMinutes} min (${nomEnt})`,
+        html: gabaritEnRoute({
+          config: configEntRoute,
+          clientNom: tache.clientNom || "",
+          technicien: prenom,
+          delaiMinutes,
+          adresse: tache.adresseTravaux || tache.adresseIntervention || "",
+        }),
+      });
+      if (r?.erreur) {
+        setEnRouteErreur(`⚠️ ${r.erreur}`);
+        return;
+      }
+      onMajTache(tache.id, { enRouteEnvoyeLe: Date.now(), enRouteDelai: delaiMinutes });
+      // 🕘 Trace au journal du bureau — jamais bloquant.
+      try {
+        const { data } = await supabase.auth.getSession();
+        const jeton = data?.session?.access_token;
+        if (jeton) {
+          fetch("/api/journal", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${jeton}` },
+            body: JSON.stringify({
+              action: "ajouter",
+              texte: `🚗 « En route » envoyé à ${cibles.join(", ")} pour « ${tache.titre || tache.clientNom || "tâche"} » — arrivée annoncée dans ~${delaiMinutes} min${r?.simule ? " (mode simulé : aucun courriel réel)" : ""}`,
+            }),
+          }).catch(() => {});
+        }
+      } catch {}
+    } catch {
+      setEnRouteErreur(`⚠️ ${t("Envoi impossible — réessaie.")}`);
+    } finally {
+      setEnRouteEnvoi(false);
+    }
+  };
   // ============================================================
   // TRAVAIL PARTAGÉ À PLUSIEURS TECHNICIENS
   // ------------------------------------------------------------
@@ -4432,6 +4483,54 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       )}
 
       <div className="flex-1 space-y-5 px-4 py-4">
+        {/* 🚗 « EN ROUTE » (2026-09-14, demande du propriétaire) — avant
+            de démarrer la tâche : un tap, le client reçoit « Charles est
+            en route, arrivée dans ~30 min ». Courriel aux adresses par
+            défaut du dossier (sinon toutes). Jamais deux fois : une fois
+            envoyé, la carte le dit. En ligne seulement (rien en file :
+            un « en route » rejoué une heure plus tard mentirait). */}
+        {!fermee && tache.etat === "a_faire" && (tache.clientNom || tache.clientId) && (() => {
+          const courriels = (tache.clientCourriels || []);
+          const defauts = courriels.filter((c) => c.defaut).map((c) => c.email);
+          const cibles = (defauts.length > 0 ? defauts : courriels.map((c) => c.email)).filter(Boolean);
+          if (tache.enRouteEnvoyeLe) {
+            return (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
+                🚗 {t("Client averti à")} {new Date(tache.enRouteEnvoyeLe).toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" })}
+                {tache.enRouteDelai ? ` — ${t("arrivée prévue dans")} ~${tache.enRouteDelai} min` : ""}
+              </div>
+            );
+          }
+          if (cibles.length === 0) {
+            return (
+              <p className="rounded-xl border border-dashed border-slate-300 px-3 py-2 text-[11px] text-slate-400">
+                🚗 {t("« En route » indisponible : aucun courriel au dossier de ce client.")}
+              </p>
+            );
+          }
+          return (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
+              <p className="text-xs font-extrabold text-sky-900">🚗 {t("Avertir le client que tu es en route")}</p>
+              <p className="mt-0.5 text-[11px] text-sky-800">{t("Un courriel part à")} {cibles.join(", ")} — {t("choisis ton délai :")}</p>
+              <div className="mt-2 grid grid-cols-4 gap-1.5">
+                {[15, 30, 45, 60].map((min) => (
+                  <button
+                    key={min}
+                    type="button"
+                    disabled={!enLigne || enRouteEnvoi}
+                    onClick={() => envoyerEnRoute(min, cibles)}
+                    className="rounded-lg border border-sky-300 bg-white py-2 text-sm font-extrabold text-sky-900 active:scale-95 disabled:opacity-40"
+                  >
+                    {min} min
+                  </button>
+                ))}
+              </div>
+              {!enLigne && <p className="mt-1.5 text-[10px] font-bold text-amber-700">📶 {t("Hors ligne — réessaie dès que le réseau revient.")}</p>}
+              {enRouteEnvoi && <p className="mt-1.5 text-[10px] font-bold text-sky-700">{t("Envoi…")}</p>}
+              {enRouteErreur && <p className="mt-1.5 text-[10px] font-bold text-red-600">{enRouteErreur}</p>}
+            </div>
+          );
+        })()}
         <PanneauMinutage
           tache={tache}
           onDemarrer={onDemarrer}
