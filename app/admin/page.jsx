@@ -1265,6 +1265,9 @@ function AppAdmin() {
   // 🔎 Cible AGENDA venue de la recherche : { tacheId, date, employeId,
   // heure, coup } — l'agenda saute à la journée et ouvre la fiche.
   const [cibleAgenda, setCibleAgenda] = useState(null);
+  // 🛒 Vente directe : devis accepté passé de l'onglet Devis à la
+  // Facturation (fenêtre « Nouvelle facture » pré-remplie).
+  const [venteDirecte, setVenteDirecte] = useState(null);
   // ✏️ Devis à réviser demandé depuis le dossier client (onglet Clients) —
   // l'onglet Devis le prend et ouvre sa fenêtre d'édition.
   const [devisAReviser, setDevisAReviser] = useState(null);
@@ -3403,6 +3406,10 @@ function AppAdmin() {
         <OngletDevis
           devisAReviser={devisAReviser}
           onDevisReviserPris={() => setDevisAReviser(null)}
+          onVenteDirecte={(devis) => {
+            setVenteDirecte({ devis, coup: Date.now() });
+            setOnglet("facturation");
+          }}
           projets={projets}
           clients={clients}
           setClients={setClients}
@@ -3601,6 +3608,19 @@ function AppAdmin() {
           qbConnecte={qbConnecte}
           bons={bons}
           setBons={setBons}
+          // 🛒 Vente directe (2026-09-14) : devis → facture sans tâche.
+          venteDirecte={venteDirecte}
+          onVenteDirecteConsommee={() => setVenteDirecte(null)}
+          onDevisFacture={(numeroDevis, infos) => {
+            const d = devisListe.find((x) => x.numero === numeroDevis);
+            if (!d) return;
+            const maj = { ...d, traite: true, modeTraitement: "vente_directe", factureVenteDirecte: infos };
+            setDevisListe((prev) => prev.map((x) => (x.id === d.id ? maj : x)));
+            sauvegarderDevis(maj).catch((e) =>
+              ajouterJournal(`⚠️ Devis ${numeroDevis} facturé (vente directe) mais sa marque « traité » n'a PAS été enregistrée : ${e?.message || "connexion impossible"}.`)
+            );
+            ajouterJournal(`✅ Devis ${numeroDevis} marqué « traité — vente directe » (facture nº ${infos?.docNumber || "?"}).`);
+          }}
           // 💰/🤝 basculable depuis la fenêtre de révision (2026-09-04) —
           // même écriture que l'agenda : base + état local.
           onBasculerFacturable={(tacheId, courriel, val) => {

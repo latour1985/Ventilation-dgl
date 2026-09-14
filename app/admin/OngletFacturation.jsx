@@ -1326,12 +1326,14 @@ export function ModalChoixPaiementFacture({ montant, clientNom, onFermer, onEmet
 // elle est attribuée au CLIENT : elle ne tombe donc jamais dans la pile
 // « factures QuickBooks à rattacher ».
 // ============================================================
-export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFermer, onContinuer }) {
-  const [clientId, setClientId] = useState("");
+export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFermer, onContinuer, prefill = null }) {
+  // 🛒 PRÉ-REMPLISSAGE « vente directe » (2026-09-14) : client, lignes
+  // et référence viennent du devis accepté — tout reste modifiable.
+  const [clientId, setClientId] = useState(prefill?.clientId || "");
   const [recherche, setRecherche] = useState("");
   const [projetId, setProjetId] = useState("");
-  const [reference, setReference] = useState("");
-  const [lignes, setLignes] = useState([]);
+  const [reference, setReference] = useState(prefill?.reference || "");
+  const [lignes, setLignes] = useState(() => (prefill?.lignes || []).map((l, i) => ({ uid: `l-pre-${i}`, ...l })));
 
   const client = (clients || []).find((c) => c.id === clientId) || null;
   const resultatsClients = useMemo(() => {
@@ -1380,9 +1382,11 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
       <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between border-b border-slate-100 p-5 pb-3">
           <div>
-            <h3 className="text-sm font-extrabold text-slate-900">➕ Nouvelle facture</h3>
+            <h3 className="text-sm font-extrabold text-slate-900">{prefill?.devisNumero ? "🛒 Vente directe" : "➕ Nouvelle facture"}</h3>
             <p className="mt-0.5 text-[11px] text-slate-400">
-              Sans tâche ni bon de travail — vente au comptoir, contrat, frais, refacturation.
+              {prefill?.devisNumero
+                ? `Devis ${prefill.devisNumero} accepté — aucune tâche : la facture part telle quelle, liée au devis dans QuickBooks.`
+                : "Sans tâche ni bon de travail — vente au comptoir, contrat, frais, refacturation."}
             </p>
           </div>
           <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
@@ -1555,6 +1559,10 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
                 client,
                 projetId: projetId || null,
                 reference: reference.trim(),
+                // 🛒 Vente directe : le lien devis → facture suit.
+                devisNumero: prefill?.devisNumero || null,
+                qboEstimateId: prefill?.qboEstimateId || null,
+                adresseTravaux: prefill?.adresseTravaux || null,
                 lignes: lignesValides.map((l) => ({
                   description: String(l.description).trim(),
                   montant: (Number(l.quantite) || 0) * (Number(l.prix) || 0),
@@ -1574,7 +1582,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
   // 🌎 Traduction (tranche facturation, 2026-09-14) — nommée `tr` car le
   // fichier utilise `t` comme variable de boucle (bons/travaux).
   const { t: tr } = useLangue();
@@ -1585,6 +1593,30 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // paiements : le même enchaînement que toutes les autres factures.
   const [factureLibreOuverte, setFactureLibreOuverte] = useState(false);
   const [courrielFactureLibre, setCourrielFactureLibre] = useState(null);
+  // 🛒 VENTE DIRECTE (2026-09-14) : un devis accepté arrive de l'onglet
+  // Devis → la fenêtre « Nouvelle facture » s'ouvre pré-remplie (client,
+  // lignes du devis avec nom + description, rabais compris, référence).
+  const [factureLibrePrefill, setFactureLibrePrefill] = useState(null);
+  useEffect(() => {
+    const d = venteDirecte?.devis;
+    if (!venteDirecte?.coup || !d) return;
+    const lignesDevis = (Array.isArray(d.lignes) ? d.lignes : []).map((l) => ({
+      description: [l.nom, l.description].filter(Boolean).join("\n"),
+      quantite: Number(l.quantite) || 1,
+      prix: Number(l.prix_vendant) || 0,
+    }));
+    setFactureLibrePrefill({
+      clientId: d.clientId || (clients || []).find((c) => c.nom === d.clientNom)?.id || "",
+      lignes: lignesDevis,
+      reference: `Devis ${d.numero} — vente directe`,
+      devisNumero: d.numero,
+      qboEstimateId: d.qboEstimateId || null,
+      adresseTravaux: d.adresseTravaux || null,
+    });
+    setFactureLibreOuverte(true);
+    onVenteDirecteConsommee?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [venteDirecte?.coup]);
   // 🧾 Le registre des factures sans chantier — visibles, vérifiables,
   // renvoyables (la table est vide tant que le snippet 105 n'est pas passé).
   const [facturesLibres, setFacturesLibres] = useState([]);
@@ -2876,10 +2908,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // rattacher ».
   const emettreFactureLibre = async (donnees, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
-    const lignes = (donnees.lignes || []).filter((l) => l.description && l.montant > 0);
+    // Les lignes NÉGATIVES passent (rabais d'un devis en vente directe) ;
+    // seul le total doit rester > 0.
+    const lignes = (donnees.lignes || []).filter((l) => l.description && l.montant !== 0);
     if (lignes.length === 0) return;
     const nomClient = donnees.client?.nom || "";
     const totalDemande = lignes.reduce((s, l) => s + l.montant, 0);
+    if (!(totalDemande > 0)) return;
 
     // 🔒 VERROU ANTI-DOUBLON (2026-08-31 — factures 4251/4252 créées en
     // double chez un client) : si une facture IDENTIQUE (même client,
@@ -2936,7 +2971,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // parce que l'envoi automatique est décoché ne produisait qu'une
       // facture muette que personne ne recevait.
       envoyerA: destinataires.map((c) => c.email),
-      adresseTravaux: null,
+      adresseTravaux: donnees.adresseTravaux || null,
+      // 🛒 Vente directe : la facture référence l'estimate du devis —
+      // la comptable voit devis → accepté → facturé, comme pour un bon.
+      qboEstimateId: donnees.qboEstimateId || null,
     });
     // Le sort du brouillon suit la RÉPONSE : refus clair de QuickBooks =
     // rien n'a été créé là-bas, le brouillon s'efface ; réponse JAMAIS
@@ -3016,12 +3054,15 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       ajouterJournal(`⚠️ Facture ${numero} créée dans QuickBooks, mais NON inscrite au registre local (le snippet 117 est-il passé ?) — elle n'apparaîtra pas dans « Factures sans chantier ».`);
     }
     ajouterJournal(
-      `🧾 Facture libre ${numero} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
+      `🧾 Facture ${donnees.devisNumero ? `de vente directe ${numero} (devis ${donnees.devisNumero})` : `libre ${numero}`} créée pour ${nomClient} — ${total.toFixed(2)} $ HT` +
         (projetChoisi ? ` · rattachée au projet « ${projetChoisi.nom} » (montant intégré à sa rentabilité)` : " · sans projet") +
         (envoyee
           ? ` · envoyée par QuickBooks à ${destinataires.map((c) => c.email).join(", ")}`
           : " · ⚠️ envoi par QuickBooks NON confirmé — renvoie-la depuis QuickBooks")
     );
+    // 🛒 Le devis passe « traité — vente directe » SEULEMENT maintenant :
+    // la facture QuickBooks existe pour vrai.
+    if (donnees.devisNumero) onDevisFacture?.(donnees.devisNumero, { docNumber: numero, qboInvoiceId: r?.factureId || null });
   };
 
   // 📅 UNE FACTURE POUR TOUT UN CHANTIER (2026-08-28) — la facturation
@@ -4643,13 +4684,16 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           toutes les autres factures : destinataires, puis paiements. */}
       {factureLibreOuverte && (
         <ModalFactureLibre
+          key={factureLibrePrefill?.devisNumero || "libre"}
           clients={clientsFacturation}
           projets={projets}
           catalogue={catalogueFacturation}
           configEnt={configEnt}
-          onFermer={() => setFactureLibreOuverte(false)}
+          prefill={factureLibrePrefill}
+          onFermer={() => { setFactureLibreOuverte(false); setFactureLibrePrefill(null); }}
           onContinuer={(donnees) => {
             setFactureLibreOuverte(false);
+            setFactureLibrePrefill(null);
             setCourrielFactureLibre(donnees);
           }}
         />

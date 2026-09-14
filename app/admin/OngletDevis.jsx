@@ -40,8 +40,8 @@ export function tauxMoyenEquipe(tauxMetiers) {
 // sont hautes ; les listes compactes, elles, restent à 10).
 const DEVIS_PAR_PAGE = 5;
 
-export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onChoisirBonTravail, onChoisirProjet, onChoisirProjetExistant, tauxMoyen = 45 }) {
-  const [option, setOption] = useState(null); // "bon_travail" | "projet" | "projet_existant" | null
+export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onChoisirBonTravail, onChoisirProjet, onChoisirProjetExistant, onChoisirVenteDirecte = null, tauxMoyen = 45 }) {
+  const [option, setOption] = useState(null); // "bon_travail" | "projet" | "projet_existant" | "vente_directe" | null
   const client = clients.find((c) => c.id === devis.clientId);
   // 🏠 Pré-choisie depuis le DEVIS quand il porte son adresse des
   // travaux (2026-08-31) — plus à la resélectionner au traitement.
@@ -189,7 +189,40 @@ export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onCh
                 </div>
               </button>
             )}
+            {/* 🛒 VENTE DIRECTE (2026-09-14, demande du propriétaire :
+                « il s'agit seulement d'une vente directe sans
+                installation ») — pas de tâche, pas d'agenda : la
+                fenêtre « Nouvelle facture » s'ouvre pré-remplie. */}
+            {onChoisirVenteDirecte && (
+              <button
+                onClick={() => setOption("vente_directe")}
+                className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3.5 text-left hover:border-slate-300"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-base">🛒</div>
+                <div>
+                  <p className="text-sm font-bold text-slate-800">Vente directe — facturer sans intervention</p>
+                  <p className="text-xs text-slate-500">Aucune tâche ni technicien : la facture s&apos;ouvre déjà remplie avec les lignes du devis, prête à partir.</p>
+                </div>
+              </button>
+            )}
             <p className="text-[10px] text-slate-400">Dans tous les cas, le lien avec QuickBooks est conservé — la facturation finale se fait via l'onglet Facturation.</p>
+          </div>
+        )}
+
+        {option === "vente_directe" && (
+          <div className="space-y-3">
+            <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="font-bold">🛒 Vente directe — {devis.clientNom}</p>
+              <p className="mt-1 leading-snug">
+                Aucune tâche ne sera créée dans l&apos;agenda. La fenêtre <span className="font-bold">Nouvelle facture</span> s&apos;ouvrira
+                avec les {lignesDevis.length} ligne{lignesDevis.length > 1 ? "s" : ""} du devis ({devis.totalVendant.toFixed(2)} $ HT) — tu pourras les ajuster,
+                choisir les courriels et les modalités, puis facturer. Le devis passera « facturé — vente directe » dès que la facture QuickBooks existera.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={() => setOption(null)}>Retour</Button>
+              <Button onClick={() => onChoisirVenteDirecte(devis)}>Ouvrir la facture</Button>
+            </div>
           </div>
         )}
 
@@ -401,7 +434,7 @@ export function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, on
 }
 
 
-export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris }) {
+export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris, onVenteDirecte = null }) {
   // 🌎 Traduction (tranche devis admin, 2026-09-14) — nommée `tr`.
   const { t: tr } = useLangue();
   // Liste de prix (289 items) — sert au sélecteur de lignes de devis.
@@ -1410,6 +1443,17 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     onDevisTraite?.("agenda");
   };
 
+  // 🛒 OPTION VENTE DIRECTE (2026-09-14) — rien n'est créé ici : on
+  // ferme la fenêtre et on passe le devis à l'onglet Facturation, qui
+  // ouvre « Nouvelle facture » pré-remplie. Le devis ne devient
+  // « traité » qu'une fois la facture QuickBooks réellement créée (si
+  // l'admin annule la facture, le devis reste à traiter).
+  const traiterCommeVenteDirecte = (devis) => {
+    setDevisATraiterId(null);
+    ajouterJournal(`🛒 Devis ${devis.numero} — vente directe : facture en préparation dans l'onglet Facturation (aucune tâche créée).`);
+    onVenteDirecte?.(devis);
+  };
+
   // OPTION B — Nouveau projet d'envergure : le montant du devis
   // devient le budget initial du projet, et chaque ligne du devis
   // devient une tâche/étape distincte dans l'agenda, rattachée au
@@ -1785,7 +1829,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 )}
                 {affichee.traite && (
                   <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                    <CheckCircle2 size={11} /> Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
+                    <CheckCircle2 size={11} /> Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : affichee.modeTraitement === "vente_directe" ? `vente directe, facturé${affichee.factureVenteDirecte?.docNumber ? ` (nº ${affichee.factureVenteDirecte.docNumber})` : ""}` : "converti en bon de travail"}
                   </span>
                 )}
 
@@ -2823,6 +2867,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           onChoisirBonTravail={traiterCommeBonDeTravail}
           onChoisirProjet={traiterCommeProjet}
           onChoisirProjetExistant={traiterVersProjetExistant}
+          onChoisirVenteDirecte={onVenteDirecte ? traiterCommeVenteDirecte : null}
           projets={projets}
           tauxMoyen={tauxMoyenEquipe(tauxMetiers)}
         />
