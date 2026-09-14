@@ -1982,10 +1982,11 @@ function AppAdmin() {
     // 📝 L'OBJET DE LA VISITE — « pourquoi on vient » — sur la facture
     // ET dans le courriel. « Dépôt — appel de service » tout court
     // disait au client qu'il paie, jamais pour quoi. Depuis le
-    // 2026-09-14 (demande du propriétaire) : le TITRE de la tâche
-    // seulement — ni le nom du client (déjà sur la facture), ni la
-    // description (notes internes, trop longue sur une ligne QuickBooks).
+    // 2026-09-14 (demande du propriétaire) : le TITRE de la tâche sur la
+    // ligne, la DESCRIPTION des travaux en dessous — jamais le nom du
+    // client (déjà sur la facture).
     const objetVisite = String(infos.titre || "").trim();
+    const detailVisite = String(infos.descriptionTravaux || "").trim();
     const messageClientDepot =
       `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
       `Dès sa réception, votre rendez-vous est confirmé.\n\n${conditionsDepot}`;
@@ -1998,7 +1999,9 @@ function AppAdmin() {
       joursLimite: joursDelai,
       // La ligne de la facture QuickBooks porte l'OBJET DE LA VISITE —
       // le client lit ce qu'il réserve, pas seulement qu'il paie.
-      description: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}${objetVisite ? ` — ${objetVisite}` : ""}`,
+      description:
+        `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}${objetVisite ? ` — ${objetVisite}` : ""}` +
+        (detailVisite ? `\n${detailVisite}` : ""),
       envoyerA: adressesDepot,
       messageClient: messageClientDepot,
       envoyerAuto: configEntreprise?.envoiAutoFactureQb === true,
@@ -2048,7 +2051,7 @@ function AppAdmin() {
           `${libelleDelai}. ` +
           `${facture?.docNumber ? `Référence : facture Nº ${facture.docNumber}. ` : ""}` +
           `Dès sa réception, votre rendez-vous est confirmé.` +
-          `${objetVisite ? ` Objet de la visite : ${objetVisite}.` : ""}`,
+          `${objetVisite ? ` Objet de la visite : ${[objetVisite, detailVisite].filter(Boolean).join(" — ")}.` : ""}`,
         lignes: [{ etiquette: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}${objetVisite ? ` — ${objetVisite}` : ""}`, montant: t.ht }],
         tps: t.tps,
         tvq: t.tvq,
