@@ -5869,7 +5869,7 @@ $$;
 revoke all on function fermer_travaux_technicien(jsonb, jsonb) from public, anon;
 grant execute on function fermer_travaux_technicien(jsonb, jsonb) to authenticated;
 -- ============================================================
--- 133 - TAUX COÛTANT FIGÉ À LA SAISIE, MÊME POUR LE TECHNICIEN (2026-09-14)
+-- 142 - TAUX COÛTANT FIGÉ À LA SAISIE, MÊME POUR LE TECHNICIEN (2026-09-14) [d abord numéroté 133 par erreur]
 -- ============================================================
 -- Depuis la RLS phase 2 (snippet 128), le technicien ne peut plus lire
 -- repertoire_employes ni taux_metiers (salaires = bureau seulement).
@@ -5937,7 +5937,7 @@ grant execute on function fn_mon_taux_coutant(text) to authenticated;
 select proname from pg_proc where proname = 'fn_mon_taux_coutant';
 
 -- ============================================================
--- 142 - RLS PHASE 4 : L'ECRITURE DES TABLES « BUREAU » RESERVEE AU BUREAU (2026-09-14)
+-- 143 - RLS PHASE 4 : L'ECRITURE DES TABLES « BUREAU » RESERVEE AU BUREAU (2026-09-14) [d abord numéroté 142 par erreur]
 -- ------------------------------------------------------------
 -- Sonde du 2026-09-14 : un compte TECHNICIEN pouvait encore INSERER dans
 -- taches_attente, devis_app, clients_app, fournisseurs (et toutes les
