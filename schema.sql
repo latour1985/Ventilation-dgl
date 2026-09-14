@@ -5889,7 +5889,9 @@ language plpgsql stable security definer
 set search_path = public, extensions
 as $fn$
 declare
-  courriel text := lower(coalesce((select auth.jwt()) ->> 'email', ''));
+  -- « mon_courriel » et non « courriel » : une variable du même nom que
+  -- la colonne rendait la requête ambiguë (42702, vécu à la sonde).
+  mon_courriel text := lower(coalesce((select auth.jwt()) ->> 'email', ''));
   ent text := coalesce(public.entreprise_du_jeton(), 'dgl');
   emp record;
   sect text;
@@ -5898,7 +5900,7 @@ begin
   select metier, niveau, taux_horaire, prime_horaire, toujours_commercial
     into emp
     from repertoire_employes
-   where lower(courriel) = courriel and entreprise_id = ent
+   where lower(courriel) = mon_courriel and entreprise_id = ent
    limit 1;
   if not found then
     return query select null::numeric, secteur_tache; return;

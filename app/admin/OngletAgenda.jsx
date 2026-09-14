@@ -2492,13 +2492,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     <X size={18} className="text-slate-400" />
                   </button>
                 </div>
-                <div className="flex-1 space-y-2 overflow-y-auto p-4 md:columns-2 md:gap-x-6 md:space-y-0 md:[&>*]:mb-3 md:[&>*]:break-inside-avoid">
-              <>
+                <div className="flex-1 overflow-y-auto p-4 md:grid md:grid-cols-2 md:items-start md:gap-x-6">
               {/* 🧭 FORMULAIRE EN 4 SECTIONS (2026-09-14, demande du propriétaire :
                   « plus fluide ») — l'ordre suit la tête de celui qui planifie :
-                  1. QUI ET OÙ · 2. QUOI · 3. QUAND ET PAR QUI · 4. OPTIONS. Les
-                  blocs coulent en deux colonnes par hauteur (md:columns-2). */}
-              <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500 md:break-after-avoid">1 · Qui et où</p>
+                  1. QUI ET OÙ · 2. QUOI · 3. QUAND ET PAR QUI · 4. OPTIONS.
+                  DEUX COLONNES FIXES (décision du propriétaire) : sections 1-2
+                  à gauche, 3-4 à droite — une section ne se coupe jamais. */}
+              <div className="space-y-3">
+              <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">1 · Qui et où</p>
 
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Type de tâche</label>
@@ -3303,7 +3304,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 )}
               </div>
 
-              <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500 md:break-after-avoid">3 · Quand et par qui</p>
+              </div>
+              <div className="mt-3 space-y-3 md:mt-0">
+              <p className="border-b border-slate-200 pb-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">3 · Quand et par qui</p>
 
               {/* SECTEUR CCQ — commercial/résidentiel : décide du taux
                   coûtant. Hérité du projet choisi, changeable ici.
@@ -3843,7 +3846,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   Sinon la tâche filerait à l'agenda comme si aucun dépôt
                   n'était exigé (c'est exactement le trou qui permettait de
                   planifier un appel de service non payé). */}
-              </>
+              </div>
                 </div>
                 <div className="shrink-0 border-t border-slate-200 px-4 py-3">
                     {depotRequis && !(parseFloat(depotMontant) > 0) && (
