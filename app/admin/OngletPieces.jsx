@@ -261,6 +261,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
       montantHT: Number(a2.montantHT) || 0,
       cible: a2.tacheId ? `t:${a2.tacheId}` : a2.clientId ? `c:${a2.clientId}` : "",
       montantAttribue: a2.montantAttribue != null ? String(a2.montantAttribue) : "",
+      // 📦 Livraison prévue — modifiable quand le fournisseur confirme.
+      livraisonSouhaitee: a2.livraisonSouhaitee || "",
     });
     setBcSupprEtape(false);
   };
@@ -563,6 +565,88 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
           </span>
         )}
       </div>
+
+      {/* 📦 LIVRAISONS ATTENDUES (2026-09-15, demande du propriétaire :
+          « voir les bons de commande avec leur client et leur date de
+          livraison ») — une ligne par bon (libre, pièce, projet), triée
+          par date : en retard en rouge, cette semaine en ambre. */}
+      {(() => {
+        const aujourdhui = new Date(); aujourdhui.setHours(0, 0, 0, 0);
+        const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const ajd = iso(aujourdhui);
+        const dans7 = iso(new Date(aujourdhui.getTime() + 7 * 86400000));
+        const lignes = [
+          ...(achatsLibres || [])
+            .filter((a) => !a.recuLe)
+            .map((a) => ({
+              cle: `a-${a.id}`, numero: a.numeroBc || "(sans nº)", fournisseur: a.fournisseurNom || "", date: a.livraisonSouhaitee || null,
+              cible: a.tacheId ? `🔗 ${a.clientNom || a.tacheTitre || "job"}` : a.clientId ? `👤 ${a.clientNom || "client"}` : (a.description || "").includes("Pour l'inventaire courant") ? "📦 stock" : "achat général",
+              description: (a.description || "").split("\n")[0],
+              envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a),
+              ouvrir: () => ouvrirBc(a),
+              recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
+            })),
+          ...(pieces || [])
+            .filter((p) => p.statut === "commandee")
+            .map((p) => ({
+              cle: `p-${p.id}`, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "", date: p.dateReceptionPrevue || null,
+              cible: `🔧 ${p.clientNom || "pièce"}`, description: p.pieceRequise || "", envoye: !!p.bcEnvoyeLe, nonEnvoye: false,
+              ouvrir: null, recevoir: peutCommander && onRecue ? () => onRecue(p) : null,
+            })),
+          ...(projets || []).flatMap((pr) =>
+            (pr.bonsCommande || [])
+              .filter((bc) => bc.statut !== "Reçu" && bc.statut !== "Annulé")
+              .map((bc) => ({
+                cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || null,
+                cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
+              }))
+          ),
+        ].sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
+        if (lignes.length === 0) return null;
+        const enRetard = lignes.filter((l) => l.date && l.date < ajd).length;
+        const cetteSemaine = lignes.filter((l) => l.date && l.date >= ajd && l.date <= dans7).length;
+        return (
+          <div className={`rounded-2xl border bg-white p-3 ${enRetard > 0 ? "border-red-200" : "border-slate-200"}`}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                📦 Livraisons attendues ({lignes.length})
+                {enRetard > 0 && <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case text-red-700">{enRetard} en retard</span>}
+                {cetteSemaine > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold normal-case text-amber-700">{cetteSemaine} cette semaine</span>}
+              </p>
+              <p className="text-[10px] text-slate-400">Bons de commande pas encore reçus — triés par date de livraison. « 📦 Reçu » retire la ligne.</p>
+            </div>
+            <div className="mt-2 divide-y divide-slate-100">
+              {lignes.map((l) => {
+                const retard = l.date && l.date < ajd;
+                const proche = l.date && l.date >= ajd && l.date <= dans7;
+                return (
+                  <div key={l.cle} className="flex items-center gap-2 py-1.5 text-[11px]">
+                    <span className={`w-[92px] shrink-0 rounded-md px-1.5 py-0.5 text-center text-[10px] font-extrabold tabular-nums ${retard ? "bg-red-100 text-red-700" : proche ? "bg-amber-100 text-amber-800" : l.date ? "bg-slate-100 text-slate-600" : "bg-slate-50 text-slate-400"}`}>
+                      {l.date ? new Date(`${l.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" }) : "sans date"}
+                    </span>
+                    <button type="button" onClick={l.ouvrir || undefined} className={`min-w-0 flex-1 truncate text-left ${l.ouvrir ? "hover:underline" : "cursor-default"}`} title={l.description}>
+                      <span className="font-bold text-slate-800">{l.numero}</span>
+                      {l.fournisseur ? <span className="text-slate-600"> — {l.fournisseur}</span> : null}
+                      <span className="ml-1.5 text-slate-500">{l.cible}</span>
+                      {l.description ? <span className="ml-1.5 text-slate-400">· {l.description}</span> : null}
+                    </button>
+                    {l.nonEnvoye ? (
+                      <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700">⚠️ non envoyé</span>
+                    ) : l.envoye ? (
+                      <span className="shrink-0 text-[9px] font-bold text-emerald-600">✉️ envoyé</span>
+                    ) : null}
+                    {l.recevoir && (
+                      <button type="button" onClick={l.recevoir} title="Commande reçue" className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] font-bold text-emerald-700 hover:border-emerald-400 active:scale-95">
+                        📦 Reçu
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 🧰 COMMANDES DE MATÉRIEL CAMION — le technicien demande, la
           personne des achats commande et clique « Commande passée »
@@ -1173,6 +1257,17 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     📧{bcNonEnvoye(a2) ? " Envoyer" : ""}
                   </button>
                 )}
+                {/* 📦 Reçu (2026-09-15) — pour TOUT BC libre, pas seulement
+                    ceux du stock : la ligne quitte « Livraisons attendues ». */}
+                {peutCommander && !a2.recuLe && (
+                  <button
+                    onClick={() => onMajBcLibre?.(a2, { recuLe: new Date().toISOString() }, "📦 reçu")}
+                    title="Commande reçue"
+                    className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] font-bold text-emerald-700 hover:border-emerald-400 active:scale-95"
+                  >
+                    📦 Reçu
+                  </button>
+                )}
                 {/* ✍️ Envoyé autrement (téléphone, courriel personnel) : la
                     trace se pose à la main, comme pour les BC de pièces. */}
                 {peutCommander && bcNonEnvoye(a2) && (
@@ -1244,6 +1339,16 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   onChange={(v) => setBcEdit((f) => ({ ...f, montantHT: v }))}
                   className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm tabular-nums"
                 />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">📦 Livraison prévue</label>
+                <input
+                  type="date"
+                  value={bcEdit.livraisonSouhaitee || ""}
+                  onChange={(e) => setBcEdit((f) => ({ ...f, livraisonSouhaitee: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                />
+                <p className="mt-0.5 text-[10px] text-slate-400">Le fournisseur confirme une autre date ? Change-la ici — la liste « Livraisons attendues » suit.</p>
               </div>
               {(() => {
                 const dep = depenseQbPourBc(bcOuvert.numeroBc);
@@ -1339,6 +1444,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         clientId: c?.id || null,
                         clientNom: c?.nom || t?.clientNom || (cible.startsWith("t:") ? bcOuvert.clientNom : null) || null,
                         montantAttribue: cible ? attribue : null,
+                        livraisonSouhaitee: bcEdit.livraisonSouhaitee || null,
                       };
                       const avant = bcOuvert.tacheId
                         ? `Job « ${bcOuvert.tacheTitre || bcOuvert.tacheId} »`

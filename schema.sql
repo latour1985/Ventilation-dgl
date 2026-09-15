@@ -6472,3 +6472,24 @@ select column_name, data_type
  where table_schema = 'public' and table_name = 'achats_libres'
    and column_name in ('bc_envoye_le', 'bc_envoye_a')
  order by column_name;
+
+-- ============================================================
+-- 147 - LIVRAISONS ATTENDUES : DATE ET RECEPTION DES BC LIBRES (2026-09-15)
+-- ------------------------------------------------------------
+-- Demande du proprietaire : voir quelque part les bons de commande avec
+-- leur client et leur date de livraison. La « livraison souhaitee » d un
+-- BC libre n etait qu un texte dans la description ; elle devient une
+-- vraie date (triable, en retard ou pas), et chaque BC libre peut etre
+-- marque recu. Les BC existants : la date est relue depuis le texte par
+-- l application (aucune migration).
+-- ============================================================
+alter table achats_libres
+  add column if not exists livraison_souhaitee date,
+  add column if not exists recu_le timestamptz;
+
+-- Verification : les deux colonnes existent.
+select column_name, data_type
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'achats_libres'
+   and column_name in ('livraison_souhaitee', 'recu_le')
+ order by column_name;

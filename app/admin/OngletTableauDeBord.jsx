@@ -15,7 +15,23 @@ import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { BlocReponsesClients } from "./BlocReponsesClients";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
+  // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
+  // commandées : cette semaine, et en retard (date passée, rien reçu).
+  const livraisons = (() => {
+    const ajd = new Date(); ajd.setHours(0, 0, 0, 0);
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const a = iso(ajd), s = iso(new Date(ajd.getTime() + 7 * 86400000));
+    const dates = [
+      ...(achatsLibres || []).filter((x) => !x.recuLe).map((x) => x.livraisonSouhaitee),
+      ...(pieces || []).filter((p) => p.statut === "commandee").map((p) => p.dateReceptionPrevue),
+    ];
+    return {
+      total: dates.length,
+      semaine: dates.filter((d) => d && d >= a && d <= s).length,
+      retard: dates.filter((d) => d && d < a).length,
+    };
+  })();
   const configTdb = useEntreprise();
   // 🌎 Tranche 2 de la version anglaise : cet écran est traduit AU
   // COMPLET (repli français sur tout le reste de l'application).
@@ -279,6 +295,14 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
           <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">{t("Tâches à planifier")}</p>
           <p className="mt-1 text-3xl font-extrabold tabular-nums text-[#131B2E]">{compteAttente}</p>
           <p className="mt-1 text-[11px] text-slate-400">{t("non assignées")}</p>
+        </button>
+        {/* 📦 Livraisons attendues — un clic ouvre Pièces en commande. */}
+        <button onClick={() => setOnglet("pieces")} className={`rounded-2xl border p-4 text-left active:scale-[0.99] ${livraisons.retard > 0 ? "border-red-200 bg-red-50" : "border-slate-200 bg-white"}`}>
+          <p className={`text-[10px] font-extrabold uppercase tracking-wide ${livraisons.retard > 0 ? "text-red-500" : "text-slate-400"}`}>📦 {t("Livraisons attendues")}</p>
+          <p className={`mt-1 text-3xl font-extrabold tabular-nums ${livraisons.retard > 0 ? "text-red-700" : "text-[#131B2E]"}`}>{livraisons.total}</p>
+          <p className={`mt-1 text-[11px] ${livraisons.retard > 0 ? "text-red-600" : "text-slate-400"}`}>
+            {livraisons.semaine} {t("cette semaine")}{livraisons.retard > 0 ? ` · ${livraisons.retard} ${t("en retard")}` : ""}
+          </p>
         </button>
         <button onClick={() => setAnalyseOuverte(true)} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-left active:scale-[0.99]">
           <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-500">{t("Marge moyenne")}</p>

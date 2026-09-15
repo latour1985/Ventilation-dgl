@@ -1562,7 +1562,9 @@ function AppAdmin() {
   };
   // BC LIBRE — numéro officiel ; projet choisi = coûts du projet
   // (mécanisme existant), sinon achat général (registre à part).
-  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId, tacheId, clientId, montantAttribue }) => {
+  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId, tacheId, clientId, montantAttribue, livraisonEstimee = "" }) => {
+    // 📦 Date de livraison souhaitée — vraie donnée depuis le 2026-09-15.
+    const livraisonSouhaitee = livraisonEstimee || null;
     const numero = await numeroBonCommande().catch(() => "BC-" + Date.now());
     // 👤 ACHAT POUR UN CLIENT sans tâche ni projet (2026-08-26) : l'unité
     // commandée avant que la job soit à l'horaire. Le coût remonte dans
@@ -1577,6 +1579,7 @@ function AppAdmin() {
           description,
           montantHT,
           dateAchat: todayISO(),
+          livraisonSouhaitee,
           clientId,
           clientNom: cl?.nom || "",
           montantAttribue: attribueClient,
@@ -1592,7 +1595,7 @@ function AppAdmin() {
       return numero;
     }
     if (projetId) {
-      const bc = { id: "bc-" + Date.now(), numeroBC: numero, fournisseur: fournisseurNom || "", montantHT: Number(montantHT) || 0, statut: "En attente", date: todayISO(), description: description || "" };
+      const bc = { id: "bc-" + Date.now(), numeroBC: numero, fournisseur: fournisseurNom || "", montantHT: Number(montantHT) || 0, statut: "En attente", date: todayISO(), description: description || "", livraison: livraisonSouhaitee };
       setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] } : px)));
       const proj = projets.find((px) => px.id === projetId);
       ajouterJournal("🧾 BC " + numero + " créé et attribué au projet « " + (proj?.nom || projetId) + " » — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
@@ -1608,6 +1611,7 @@ function AppAdmin() {
           description,
           montantHT,
           dateAchat: todayISO(),
+          livraisonSouhaitee,
           tacheId,
           tacheTitre: t?.titre || t?.clientNom || "",
           clientNom: t?.clientNom || "",
@@ -1622,7 +1626,7 @@ function AppAdmin() {
           (attribue < (Number(montantHT) || 0) ? " (le reste demeure un achat de stock)" : "")
       );
     } else {
-      await creerAchatLibre({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO() }, session).catch(() => {});
+      await creerAchatLibre({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO(), livraisonSouhaitee }, session).catch(() => {});
       listerAchatsLibres().then(setAchatsLibres).catch(() => {});
       ajouterJournal("🧾 BC " + numero + " créé (achat général, sans projet) — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
     }
@@ -3323,6 +3327,7 @@ function AppAdmin() {
           projets={projets}
           travaux={travaux}
           achatsLibres={achatsLibres}
+          pieces={pieces}
           transactionsQb={transactionsQb}
           utilisateurs={utilisateursActifs}
           tauxMetiers={tauxMetiers}
