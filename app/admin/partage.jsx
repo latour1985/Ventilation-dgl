@@ -45,6 +45,58 @@ import { SEUIL_ENTRETIEN_KM, SEUIL_ENTRETIEN_MOIS } from "./OngletInspectionsVeh
 // (Supabase Storage, URL publique) ; le courriel du BC les affiche.
 // Réutilisé par : BC de projet, BC libre, commande de pièce.
 // ============================================================
+// 📎 FICHIERS POUR LE FOURNISSEUR (2026-09-15, demande du propriétaire :
+// « pas seulement une photo ») — PDF, Word, Excel, images. Jusqu'à 5,
+// 10 Mo chacun. Même stockage que les photos ; partent en VRAIE pièce
+// jointe du courriel ET en lien dans le corps (filet si la boîte du
+// fournisseur bloque les pièces jointes). Liste : [{ nom, url, taille }].
+const FICHIER_MAX_OCTETS = 10 * 1024 * 1024;
+export function ChampFichiersBc({ fichiers = [], onChange, libelle = "📎 Fichiers pour le fournisseur (facultatif — PDF, Word, Excel…)" }) {
+  const [televersement, setTeleversement] = useState(false);
+  const ajouter = async (e) => {
+    const choisis = Array.from(e.target.files || []).slice(0, 5);
+    e.target.value = "";
+    if (choisis.length === 0) return;
+    setTeleversement(true);
+    const ajoutes = [];
+    const refus = [];
+    for (const f of choisis) {
+      if (f.size > FICHIER_MAX_OCTETS) { refus.push(`${f.name} (trop lourd, max 10 Mo)`); continue; }
+      try {
+        const url = await televerserPieceJointeTache(f);
+        ajoutes.push({ nom: f.name, url, taille: f.size, type: f.type || "" });
+      } catch {
+        refus.push(f.name);
+      }
+    }
+    setTeleversement(false);
+    if (ajoutes.length) onChange([...(fichiers || []), ...ajoutes].slice(0, 5));
+    if (refus.length > 0) window.alert(`Non téléversé : ${refus.join(", ")} — réessaie.`);
+  };
+  const tailleTxt = (o) => (o >= 1024 * 1024 ? `${(o / 1024 / 1024).toFixed(1)} Mo` : `${Math.max(1, Math.round(o / 1024))} Ko`);
+  return (
+    <div>
+      <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{libelle}</label>
+      {(fichiers || []).length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1.5">
+          {fichiers.map((f) => (
+            <span key={f.url} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
+              <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline">📎 {f.nom}</a>
+              {f.taille ? <span className="text-[9px] text-slate-400">{tailleTxt(f.taille)}</span> : null}
+              <button type="button" onClick={() => onChange(fichiers.filter((x) => x.url !== f.url))} title="Retirer ce fichier" className="ml-0.5 font-bold text-slate-400 hover:text-red-600">✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1.5 text-[11px] font-bold ${televersement ? "border-slate-200 text-slate-300" : "border-slate-300 text-slate-500 hover:border-slate-400"}`}>
+        {televersement ? "⏳ Téléversement…" : "📎 Ajouter des fichiers"}
+        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,image/*,application/pdf" multiple disabled={televersement} onChange={ajouter} className="hidden" />
+      </label>
+      <p className="mt-0.5 text-[9px] text-slate-400">Jusqu&apos;à 5 fichiers de 10 Mo — en pièce jointe du courriel, plus un lien dans le message.</p>
+    </div>
+  );
+}
+
 export function ChampPhotosBc({ photos = [], onChange, libelle = "📷 Photos pour le fournisseur (facultatif)" }) {
   const [televersement, setTeleversement] = useState(false);
   const ajouter = async (e) => {

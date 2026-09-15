@@ -3085,7 +3085,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       .sort((a, b) => (nouveauType === "entretien_contrat" ? (b.estContrat ? 1 : 0) - (a.estContrat ? 1 : 0) : 0))
                       .map((d) => (
                         <option key={d.id} value={d.id}>
-                          {d.estContrat ? `📄 CONTRAT ${d.frequenceFacturationAnnuelle}×/an — ` : ""}{d.numero} — {d.clientNom}
+                          {/* 📍 L'adresse des travaux du devis dans le libellé
+                              (2026-09-15, demande du propriétaire) — un client
+                              à plusieurs adresses se choisit sans se tromper. */}
+                          {d.estContrat ? `📄 CONTRAT ${d.frequenceFacturationAnnuelle}×/an — ` : ""}{d.numero} — {d.clientNom}{d.adresseTravaux ? ` — 📍 ${d.adresseTravaux}` : ""}{Number(d.totalVendant) > 0 ? ` — ${Number(d.totalVendant).toFixed(0)} $` : ""}
                         </option>
                       ))}
                   </select>
@@ -3223,7 +3226,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 />
                 {(nouveauType === "devis" || nouveauType === "entretien_contrat") && (
                   <p className="mt-0.5 text-[9px] text-slate-400">
-                    Les items du devis (quantités × items, sans les prix) apparaissent ici dès que tu choisis le devis — modifiables avant de créer la tâche.
+                    Les items du devis (quantité × item, avec leur description, jamais les prix) apparaissent ici dès que tu choisis le devis — modifiables avant de créer la tâche.
                   </p>
                 )}
               </div>

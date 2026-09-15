@@ -162,6 +162,16 @@ export async function POST(request) {
     ? `"${nomEntreprise.replace(/"/g, "'")}" <${adresseExpedition}>`
     : process.env.COURRIEL_EXPEDITEUR || `Fluxya <${adresseExpedition}>`;
   const adresseReponse = repondreEntreprise || process.env.COURRIEL_REPONSE || adresseExpedition;
+  // 📎 PIÈCES JOINTES (2026-09-15) : [{ nom, url }] → Resend les récupère
+  // par l'URL. SEULEMENT des fichiers de NOTRE stockage (même hôte que
+  // Supabase) — la route ne sert jamais à relayer un fichier étranger.
+  // Au plus 5 ; nom nettoyé (pas de chemin, 120 caractères).
+  const hoteStockage = (() => { try { return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || "").host; } catch { return ""; } })();
+  const piecesJointes = (Array.isArray(corps?.piecesJointes) ? corps.piecesJointes : [])
+    .filter((p) => p && typeof p.url === "string")
+    .filter((p) => { try { return hoteStockage && new URL(p.url).host === hoteStockage; } catch { return false; } })
+    .slice(0, 5)
+    .map((p) => ({ filename: String(p.nom || "fichier").replace(/[\\/]/g, "_").slice(0, 120), path: p.url }));
   try {
     const reponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -171,6 +181,7 @@ export async function POST(request) {
         to: destinataires,
         subject: sujet,
         html,
+        ...(piecesJointes.length > 0 ? { attachments: piecesJointes } : {}),
         ...((copieExpediteur || copiesSupplementaires.length > 0)
           ? {
               cc: [

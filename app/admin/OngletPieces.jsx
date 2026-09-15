@@ -18,7 +18,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
-import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, SelecteurCibleAchat, Button, libelleAdresse } from "./partage";
+import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, libelleAdresse } from "./partage";
 
 export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
@@ -123,7 +123,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [] });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [], fichiers: [] });
   // 📍 RAPPEL D'ADRESSE (2026-09-09, demande du propriétaire) — avant de
   // créer un BC libre sans adresse choisie (resté sur « atelier » par
   // défaut) ET qui n'est pas du stock d'inventaire, une fenêtre demande
@@ -168,6 +168,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
         fournisseur: fiche.nom,
         description: descriptionFinale,
         photos: bcLibre.photos || [],
+        fichiers: bcLibre.fichiers || [],
         courriels: fiche.courriels,
         coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
       });
@@ -189,11 +190,12 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
         fournisseur: nomF || "fournisseur",
         description: descriptionFinale,
         photos: bcLibre.photos || [],
+        fichiers: bcLibre.fichiers || [],
         courriels: [{ id: "libre", label: "Commande", email: courrielTape, defaut: true }],
         coches: [courrielTape],
       });
     }
-    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [] });
+    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [], fichiers: [] });
     setBcLibreOuvert(false);
   };
   // 📦➕ Réception d'un BC « stock » vers l'inventaire (étage 2) — le
@@ -262,7 +264,9 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
     const r = await envoyerCourriel({
       a: offreEnvoiBc.coches,
       sujet: `Bon de commande ${offreEnvoiBc.numero} — ${configEnt.nomLegal}`,
-      html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description, photos: offreEnvoiBc.photos || [] }),
+      html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description, photos: offreEnvoiBc.photos || [], fichiers: offreEnvoiBc.fichiers || [] }),
+      // 📎 Vraies pièces jointes (PDF, Excel…) — 2026-09-15.
+      piecesJointes: offreEnvoiBc.fichiers || [],
       // La réponse du fournisseur revient à celui qui a commandé.
       copieExpediteur: true,
       // 📧 Copie permanente des BC (réglage d'entreprise, ex. commande@).
@@ -294,6 +298,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // 📷 Photos jointes au BC d'une PIÈCE — choisies sur la carte juste
   // avant l'envoi (état local, la photo sert au courriel).
   const [photosEnvoiBc, setPhotosEnvoiBc] = useState({});
+  const [fichiersEnvoiBc, setFichiersEnvoiBc] = useState({}); // 📎 par pièce
   const envoyerBcParApplication = async (p) => {
     const adresses = courrielsFournisseur(p);
     if (adresses.length === 0) return;
@@ -301,7 +306,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
     const r = await envoyerCourriel({
       a: adresses,
       sujet: `Bon de commande ${p.numeroBc || ""} — ${configEnt.nomLegal}`,
-      html: gabaritBonCommande({ config: configEnt, piece: p, photos: photosEnvoiBc[p.id] || [] }),
+      html: gabaritBonCommande({ config: configEnt, piece: p, photos: photosEnvoiBc[p.id] || [], fichiers: fichiersEnvoiBc[p.id] || [] }),
+      piecesJointes: fichiersEnvoiBc[p.id] || [],
       // Celui qui commande reçoit la copie, et la réponse du fournisseur
       // (« impossible le 14, je peux le 18 ») lui revient directement.
       copieExpediteur: true,
@@ -800,6 +806,13 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   onChange={(liste) => setOffreEnvoiBc((p) => ({ ...p, photos: liste }))}
                   libelle="📷 Photos jointes à cet envoi (facultatif)"
                 />
+                <div className="mt-2">
+                  <ChampFichiersBc
+                    fichiers={offreEnvoiBc.fichiers || []}
+                    onChange={(liste) => setOffreEnvoiBc((p) => ({ ...p, fichiers: liste }))}
+                    libelle="📎 Fichiers joints à cet envoi (facultatif — PDF, Word, Excel…)"
+                  />
+                </div>
               </div>
               <div className="mt-2 flex gap-1.5">
                 <Button
@@ -894,6 +907,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                 className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
               />
               <ChampPhotosBc photos={bcLibre.photos || []} onChange={(liste) => setBcLibre((f) => ({ ...f, photos: liste }))} />
+              <ChampFichiersBc fichiers={bcLibre.fichiers || []} onChange={(liste) => setBcLibre((f) => ({ ...f, fichiers: liste }))} />
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="flex items-center gap-1 text-[10px] text-slate-400">
                   Montant HT
@@ -1605,6 +1619,13 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                                 onChange={(liste) => setPhotosEnvoiBc((prev) => ({ ...prev, [p.id]: liste }))}
                                 libelle="📷 Photos pour ce BC (facultatif)"
                               />
+                              <div className="mt-2">
+                                <ChampFichiersBc
+                                  fichiers={fichiersEnvoiBc[p.id] || []}
+                                  onChange={(liste) => setFichiersEnvoiBc((prev) => ({ ...prev, [p.id]: liste }))}
+                                  libelle="📎 Fichiers pour ce BC (facultatif — PDF, Word, Excel…)"
+                                />
+                              </div>
                             </div>
                             <Button
                               onClick={() => envoyerBcParApplication(p)}
