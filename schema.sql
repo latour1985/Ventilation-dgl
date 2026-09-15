@@ -6116,3 +6116,24 @@ select tablename, count(*) as nb_policies,
    and tablename in ('clients_app','projets_app','devis_app','taches_attente','depots',
                      'fournisseurs','factures_maison','taches_assignees','travaux_effectues')
  group by tablename order by tablename;
+
+-- ============================================================
+-- 144 - CORRECTION TARDIVE DES HEURES : LES DEUX COLONNES MANQUANTES (2026-09-14)
+-- ------------------------------------------------------------
+-- Vecu (journal 20 h 03) : « Echec de l ajustement d heures (Charles,
+-- 2026-09-11) ». Cause : corrige_le et heures_avant_correction ont ete
+-- ajoutees a la DEFINITION de la table (create table) apres que la table
+-- existait deja en production — aucun snippet ne les a jamais creees.
+-- Toute correction d une semaine de paie DEJA FERMEE (report +/-) et
+-- toute saisie bureau tardive echouaient donc en silence cote base.
+-- ============================================================
+alter table travaux_effectues
+  add column if not exists corrige_le timestamptz,
+  add column if not exists heures_avant_correction numeric;
+
+-- Verification : les deux colonnes existent.
+select column_name, data_type
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'travaux_effectues'
+   and column_name in ('corrige_le', 'heures_avant_correction')
+ order by column_name;
