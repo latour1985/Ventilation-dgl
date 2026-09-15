@@ -14,7 +14,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
-export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [] }) {
+export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -162,6 +162,29 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [fermBon, setFermBon] = useState(false); // décochée par défaut (choix du propriétaire)
   const [fermErreur, setFermErreur] = useState("");
   const nomTechOuvert = employes?.find((e) => e.id === employeIdInitial)?.nom || "le technicien";
+  // 🏁 FERMER LA TÂCHE POUR L'ÉQUIPE (2026-09-15, GO du propriétaire —
+  // vécu « Faire sous-dalle » : 4 techniciens fermés, le 5e jamais, donc
+  // AUCUN bon de travail et rien en facturation). `equipeEtat` :
+  // [{ employeId, nom, travail }] — travail = ligne d'heures ou null.
+  const hhmmDe = (x) => { try { const d = new Date(x); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; } catch { return ""; } };
+  const equipeNonFermee = (equipeEtat || []).filter((m) => !m.travail);
+  const finLaPlusTardive = (equipeEtat || []).map((m) => m.travail?.finReelle).filter(Boolean).map(hhmmDe).sort().slice(-1)[0] || "";
+  const [equipeOuvert, setEquipeOuvert] = useState(false);
+  const [fermEquipe, setFermEquipe] = useState(() =>
+    Object.fromEntries(equipeNonFermee.map((m) => [m.employeId, { debutHM: heureInitiale || HEURE_PAR_DEFAUT, finHM: finLaPlusTardive, absent: false }]))
+  );
+  const [fermEquipeBon, setFermEquipeBon] = useState(!bonExiste);
+  const [fermEquipeErreur, setFermEquipeErreur] = useState("");
+  const majFermEquipe = (id, champs) => setFermEquipe((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), ...champs } }));
+  const validerFermetureEquipe = () => {
+    const fermetures = equipeNonFermee.map((m) => ({ employeId: m.employeId, ...(fermEquipe[m.employeId] || {}) }));
+    const invalide = fermetures.find((f) => !f.absent && (!f.finHM || f.finHM <= f.debutHM));
+    if (invalide) {
+      setFermEquipeErreur(`Heures de ${equipeEtat.find((m) => m.employeId === invalide.employeId)?.nom || "?"} : entre une fin après le début, ou coche « n'était pas là ».`);
+      return;
+    }
+    onFermerPourEquipe?.({ fermetures, creerBon: fermEquipeBon });
+  };
 
   // 📸 VISIONNEUSE des photos du technicien (retour de tests
   // 2026-08-17) : avant, chaque vignette ouvrait un onglet — il fallait
@@ -1013,6 +1036,90 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               L'admin déclare début/fin : paie au taux figé, carte fermée
               sur le téléphone (avec avis), facturation en OPTION
               (bon sans signature ni photos — décochée par défaut). */}
+          {/* 👥 ÉTAT DE L'ÉQUIPE + 🏁 FERMER POUR L'ÉQUIPE (2026-09-15) */}
+          {!estConge && dejaPlanifiee && (equipeEtat || []).length > 0 && (
+            <div className={`rounded-xl border p-3 ${equipeNonFermee.length > 0 || !bonExiste ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-700">👥 État de l&apos;équipe</p>
+              <div className="mt-1.5 space-y-1">
+                {(equipeEtat || []).map((m) => (
+                  <div key={m.employeId} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="font-semibold text-slate-800">{m.nom}</span>
+                    {m.travail ? (
+                      <span className="text-emerald-700">
+                        ✅ fermée — {(Number(m.travail.heures) || 0).toFixed(2)} h
+                        {m.travail.debutReel && m.travail.finReelle ? ` (${hhmmDe(m.travail.debutReel)} → ${hhmmDe(m.travail.finReelle)})` : ""}
+                        {(m.travail.noteInterne || "").startsWith("🏢") ? " · par le bureau" : ""}
+                      </span>
+                    ) : (
+                      <span className="font-bold text-amber-700">⏳ pas fermée — encore « planifiée » sur son téléphone</span>
+                    )}
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-2 border-t border-slate-200 pt-1 text-[11px]">
+                  <span className="font-semibold text-slate-800">Bon de travail</span>
+                  {bonExiste ? <span className="text-emerald-700">✅ créé</span> : <span className="font-bold text-red-600">❌ aucun — créé par le dernier qui ferme</span>}
+                </div>
+              </div>
+              {onFermerPourEquipe && (equipeNonFermee.length > 0 || !bonExiste) && !equipeOuvert && (
+                <button type="button" onClick={() => setEquipeOuvert(true)} className="mt-2 w-full rounded-lg border-2 border-amber-500 bg-white py-2 text-xs font-extrabold text-amber-700 active:scale-[0.99]">
+                  🏁 Fermer la tâche pour l&apos;équipe
+                </button>
+              )}
+              {equipeOuvert && (
+                <div className="mt-2 space-y-2">
+                  {equipeNonFermee.length === 0 && (
+                    <p className="text-[10px] text-amber-800">Tout le monde a fermé — il ne manque que le bon de travail d&apos;équipe.</p>
+                  )}
+                  {equipeNonFermee.map((m) => {
+                    const f = fermEquipe[m.employeId] || {};
+                    return (
+                      <div key={m.employeId} className="rounded-lg border border-amber-200 bg-white p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-bold text-slate-800">{m.nom}</p>
+                          <label className="flex cursor-pointer items-center gap-1.5 text-[10px] font-semibold text-slate-600">
+                            <input type="checkbox" checked={!!f.absent} onChange={(e) => { majFermEquipe(m.employeId, { absent: e.target.checked }); setFermEquipeErreur(""); }} className="h-3.5 w-3.5 accent-amber-600" />
+                            n&apos;était pas là (0 h)
+                          </label>
+                        </div>
+                        {!f.absent && (
+                          <div className="mt-1.5 grid grid-cols-2 gap-2">
+                            <select value={f.debutHM || HEURE_PAR_DEFAUT} onChange={(e) => { majFermEquipe(m.employeId, { debutHM: e.target.value }); setFermEquipeErreur(""); }} className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs">
+                              {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                            <select value={f.finHM || ""} onChange={(e) => { majFermEquipe(m.employeId, { finHM: e.target.value }); setFermEquipeErreur(""); }} className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 text-xs">
+                              <option value="">— fin —</option>
+                              {HEURES_QUART.map((h) => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {!bonExiste && (
+                    <label className="flex cursor-pointer items-start gap-2">
+                      <input type="checkbox" checked={fermEquipeBon} onChange={(e) => setFermEquipeBon(e.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600" />
+                      <span className="text-[10px] leading-snug text-amber-800">
+                        Créer le <span className="font-bold">bon de travail d&apos;équipe</span> (sans signature ni photos — alerte « non signé » au bureau) → il entre dans « À facturer ».
+                      </span>
+                    </label>
+                  )}
+                  <p className="text-[10px] leading-snug text-amber-800">
+                    Les heures déclarées entrent en paie au taux figé de chacun ; leur téléphone ferme la carte tout seul et n&apos;écrase plus rien. Tout est consigné au journal.
+                  </p>
+                  {fermEquipeErreur && <p className="rounded-lg bg-red-50 px-2 py-1.5 text-[11px] font-bold text-red-700">{fermEquipeErreur}</p>}
+                  <div className="flex gap-2">
+                    <button type="button" onClick={validerFermetureEquipe} className="flex-1 rounded-lg bg-[#131B2E] py-2 text-xs font-extrabold text-white active:scale-[0.99]">
+                      🏁 Fermer pour l&apos;équipe
+                    </button>
+                    <button type="button" onClick={() => setEquipeOuvert(false)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-600">
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {!estConge && dejaPlanifiee && !travailFait && onFermerPourTechnicien && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
               <p className="text-xs font-extrabold uppercase tracking-wide text-amber-800">

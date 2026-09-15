@@ -6493,3 +6493,163 @@ select column_name, data_type
  where table_schema = 'public' and table_name = 'achats_libres'
    and column_name in ('livraison_souhaitee', 'recu_le')
  order by column_name;
+
+-- ============================================================
+-- 148 - FERMETURE PAR LE BUREAU : LE TELEPHONE N ECRASE PLUS (2026-09-15)
+-- ------------------------------------------------------------
+-- Vecu ETI-NET (8 sept.) : le bureau avait ferme la tache de JF a 4,75 h ;
+-- son telephone, rouvert plus tard, a plafonne le chrono (16 h bloquee) et
+-- a ECRASE la ligne du bureau (meme cle tache/employe). Deux verrous :
+--  1. policy UPDATE de travaux_effectues : un NON-bureau ne modifie pas
+--     une ligne dont la note interne commence par « FERMEE PAR LE BUREAU » ;
+--  2. fermer_travaux_technicien (SECURITY DEFINER) : son ON CONFLICT
+--     n ecrase pas une telle ligne (le bon, lui, est quand meme ecrit).
+-- ============================================================
+
+-- ---- 1. Policy UPDATE (remplace iso_travaux_effectues_upd du 143) ----
+drop policy if exists iso_travaux_effectues_upd on travaux_effectues;
+create policy iso_travaux_effectues_upd on travaux_effectues for update to authenticated
+  using (entreprise_id = public.entreprise_du_jeton()
+    and ((select public.fn_est_bureau())
+         or (lower(coalesce(employe_email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
+             and (note_interne is null or note_interne not like '🏢 FERM%E PAR LE BUREAU%'))))
+  with check (entreprise_id = public.entreprise_du_jeton()
+    and ((select public.fn_est_bureau())
+         or lower(coalesce(employe_email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))));
+
+-- ---- 2. fermer_travaux_technicien : ON CONFLICT des heures garde la ligne du bureau ----
+create or replace function fermer_travaux_technicien(p_bon jsonb, p_travail jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  v_bon_id uuid;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  -- Un technicien ferme SES heures et SON bon ; le bureau peut fermer pour un autre.
+  if not public.fn_est_bureau() and (
+       lower(coalesce(p_bon->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+    or lower(coalesce(p_travail->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+  ) then
+    raise exception 'Fermeture terrain : seulement pour ses propres heures';
+  end if;
+  insert into bons_travail (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    description, date_travail, heures, type_tache, secteur, devis_numero,
+    adresse_travaux, projet_id, photos, courriels_envoi, signe_par_nom,
+    signe_par_collegue, client_absent, unites, modele_unite, serie_unite,
+    piece_a_commander, piece_requise, travaux_non_termines, reste_a_faire,
+    etapes, envoye_le, statut_facturation
+  ) values (
+    ent,
+    p_bon->>'tache_id',
+    p_bon->>'employe_email',
+    p_bon->>'employe_nom',
+    p_bon->>'titre',
+    p_bon->>'client_nom',
+    p_bon->>'description',
+    (p_bon->>'date_travail')::date,
+    coalesce((p_bon->>'heures')::numeric, 0),
+    p_bon->>'type_tache',
+    coalesce(p_bon->>'secteur', 'commercial'),
+    p_bon->>'devis_numero',
+    p_bon->>'adresse_travaux',
+    p_bon->>'projet_id',
+    nullif(p_bon->'photos', 'null'::jsonb),
+    coalesce(p_bon->'courriels_envoi', '[]'::jsonb),
+    p_bon->>'signe_par_nom',
+    coalesce((p_bon->>'signe_par_collegue')::boolean, false),
+    coalesce((p_bon->>'client_absent')::boolean, false),
+    coalesce(p_bon->'unites', '[]'::jsonb),
+    p_bon->>'modele_unite',
+    p_bon->>'serie_unite',
+    coalesce((p_bon->>'piece_a_commander')::boolean, false),
+    p_bon->>'piece_requise',
+    coalesce((p_bon->>'travaux_non_termines')::boolean, false),
+    p_bon->>'reste_a_faire',
+    nullif(p_bon->'etapes', 'null'::jsonb),
+    coalesce(nullif(p_bon->>'envoye_le', '')::timestamptz, now()),
+    'a_facturer'
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, description = excluded.description,
+    date_travail = excluded.date_travail, heures = excluded.heures,
+    type_tache = excluded.type_tache, secteur = excluded.secteur,
+    devis_numero = excluded.devis_numero, adresse_travaux = excluded.adresse_travaux,
+    projet_id = excluded.projet_id, photos = excluded.photos,
+    courriels_envoi = excluded.courriels_envoi, signe_par_nom = excluded.signe_par_nom,
+    signe_par_collegue = excluded.signe_par_collegue, client_absent = excluded.client_absent,
+    unites = excluded.unites, modele_unite = excluded.modele_unite,
+    serie_unite = excluded.serie_unite, piece_a_commander = excluded.piece_a_commander,
+    piece_requise = excluded.piece_requise, travaux_non_termines = excluded.travaux_non_termines,
+    reste_a_faire = excluded.reste_a_faire, etapes = excluded.etapes,
+    envoye_le = excluded.envoye_le, statut_facturation = excluded.statut_facturation
+  returning id into v_bon_id;
+
+  insert into travaux_effectues (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    date_travail, heures, est_transport, kilometres, projet_id, note_terrain,
+    note_interne, debut_reel, fin_reelle, photos, taux_coutant_fige, secteur,
+    categorie_heures, jour_bloque, bloque_raison,
+    heures_proposees, debut_propose, fin_propose, proposition_par,
+    proposition_le, groupe_proposition
+  ) values (
+    ent,
+    p_travail->>'tache_id',
+    p_travail->>'employe_email',
+    p_travail->>'employe_nom',
+    p_travail->>'titre',
+    p_travail->>'client_nom',
+    (p_travail->>'date_travail')::date,
+    coalesce((p_travail->>'heures')::numeric, 0),
+    coalesce((p_travail->>'est_transport')::boolean, false),
+    nullif(p_travail->>'kilometres', '')::numeric,
+    p_travail->>'projet_id',
+    p_travail->>'note_terrain',
+    p_travail->>'note_interne',
+    nullif(p_travail->>'debut_reel', '')::timestamptz,
+    nullif(p_travail->>'fin_reelle', '')::timestamptz,
+    nullif(p_travail->'photos', 'null'::jsonb),
+    nullif(p_travail->>'taux_coutant_fige', '')::numeric,
+    coalesce(p_travail->>'secteur', 'commercial'),
+    coalesce(p_travail->>'categorie_heures', 'projet'),
+    coalesce((p_travail->>'jour_bloque')::boolean, false),
+    p_travail->>'bloque_raison',
+    nullif(p_travail->>'heures_proposees', '')::numeric,
+    nullif(p_travail->>'debut_propose', '')::timestamptz,
+    nullif(p_travail->>'fin_propose', '')::timestamptz,
+    p_travail->>'proposition_par',
+    nullif(p_travail->>'proposition_le', '')::timestamptz,
+    p_travail->>'groupe_proposition'
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, date_travail = excluded.date_travail,
+    heures = excluded.heures, est_transport = excluded.est_transport,
+    kilometres = excluded.kilometres, projet_id = excluded.projet_id,
+    note_terrain = excluded.note_terrain, note_interne = excluded.note_interne,
+    debut_reel = excluded.debut_reel, fin_reelle = excluded.fin_reelle,
+    photos = excluded.photos, taux_coutant_fige = excluded.taux_coutant_fige,
+    secteur = excluded.secteur, categorie_heures = excluded.categorie_heures,
+    jour_bloque = excluded.jour_bloque, bloque_raison = excluded.bloque_raison,
+    heures_proposees = excluded.heures_proposees, debut_propose = excluded.debut_propose,
+    fin_propose = excluded.fin_propose, proposition_par = excluded.proposition_par,
+    proposition_le = excluded.proposition_le, groupe_proposition = excluded.groupe_proposition
+    -- 🏢 Une ligne FERMEE PAR LE BUREAU ne se fait jamais ecraser par le
+    -- chrono d un telephone (vecu ETI-NET, 2026-09-08). Seul le bureau
+    -- (policies) peut la modifier ensuite.
+    where travaux_effectues.note_interne is null
+       or travaux_effectues.note_interne not like '🏢 FERM%E PAR LE BUREAU%';
+
+  return v_bon_id;
+end;
+$$;
+
+-- Verification : la policy et la fonction portent le garde-fou.
+select 'policy' as quoi, position('FERM' in pg_get_expr(polqual, polrelid)) > 0 as garde
+  from pg_policy where polname = 'iso_travaux_effectues_upd'
+union all
+select 'fonction', position('FERM' in pg_get_functiondef(p.oid)) > 0
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.proname = 'fermer_travaux_technicien';

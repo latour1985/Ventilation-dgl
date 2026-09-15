@@ -6343,7 +6343,11 @@ function AppTechnicien() {
     // (heures réelles + taux coûtant FIGÉ à la saisie) part vers le
     // bureau via Supabase — alimente les coûts réels des projets.
     const t = taches.find((x) => x.id === id);
-    if (t) {
+    // 🏢 FERMÉE PAR LE BUREAU (2026-09-15, vécu ETI-NET) : les heures
+    // sont DÉJÀ écrites par l'administration — le téléphone n'envoie
+    // rien qui pourrait les écraser. La carte se ferme, point.
+    const fermeeParBureau = !!(t?.fermetureBureau && (!t.fermetureBureau.jour || t.fermetureBureau.jour === t.date));
+    if (t && !fermeeParBureau) {
       const chargeTravail = chargeHeuresDepuisTache(t);
       enregistrerTravailEffectue(chargeTravail, session)
         .then(() => setErreurSync(""))
@@ -6404,6 +6408,13 @@ function AppTechnicien() {
   // d'une fin de semaine — mais elle ne sert que de repère à l'admin :
   // aucun chiffre de cette journée n'entre dans la paie avant déblocage.
   const plafonnerTacheOubliee = (t) => {
+    // 🏢 Le bureau a fermé cette tâche entre-temps : on ferme la carte
+    // SANS rien écrire (ses heures existent déjà, à jour) — sinon le
+    // plafond « 16 h bloquée » écrasait la fermeture du bureau.
+    if (t.fermetureBureau && (!t.fermetureBureau.jour || t.fermetureBureau.jour === t.date)) {
+      majTache(t.id, { etat: "complete", tempsDebutSegment: null });
+      return;
+    }
     // Le plafond ÉCRIT suit la nature de la tâche : plafonner un
     // transport oublié à 16 h laisserait passer exactement ce qu'on
     // cherche à attraper.

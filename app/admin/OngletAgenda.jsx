@@ -1147,6 +1147,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     return m;
   })();
   const aujourdhuiISO = dateISO(new Date());
+  // ⏳ PAS FERMÉE (2026-09-15) : journée passée, tâche de travail, aucune
+  // heure du technicien — le bloc se hachure au lieu de rester bleu en
+  // silence (vécu « Faire sous-dalle » : Dominic jamais fermé, aucun bon).
+  const pasFermee = (tache, emp, jourISO) =>
+    !!tache && !tache.est_tache_systeme && !tache.sansHeures && !emp?.estSousTraitant &&
+    (tache.typeTache || tache.type) !== "conge" && jourISO < aujourdhuiISO && !travailTermine(tache, emp);
 
   // 📅 EN VUE SEMAINE, LE CURSEUR ATTERRIT SUR LE LUNDI (2026-09-04,
   // retour du propriétaire : « quand on bouge les semaines on arrive au
@@ -2335,6 +2341,68 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ajouterJournal(
         `⚠️ Fermeture par le bureau ÉCHOUÉE pour « ${tache.titre || tache.clientNom} » (${employe.nom || employe.courriel}) — ${e?.message || "connexion impossible"}. Réessaie.`
       );
+    }
+  };
+
+  // 🏁 FERMER LA TÂCHE POUR L'ÉQUIPE (2026-09-15, GO du propriétaire) :
+  // chaque technicien qui n'a pas fermé reçoit ses heures (ou 0 h s'il
+  // n'était pas là), le bon d'équipe est créé UNE fois s'il manque, et
+  // les téléphones ferment leur carte sans rien écraser (marque
+  // fermetureBureau + snippet 148).
+  const fermerTachePourEquipe = async (tache, jour, { fermetures, creerBon }) => {
+    if (lectureSeule) return;
+    const bonExiste = (bons || []).some((b) => b.tacheId === tache.id);
+    let bonACreer = creerBon && !bonExiste && !tache.nonFacturable;
+    const nbJours = Math.max(1, Number(tache.jours) || 1);
+    const cleHeures = nbJours > 1 ? `${tache.id}::${jour}` : tache.id;
+    for (const f of fermetures || []) {
+      const employe = employes.find((e) => e.id === f.employeId);
+      if (!employe?.courriel) continue;
+      if (f.absent) {
+        try {
+          await enregistrerTravailPourEmploye(
+            {
+              tacheId: cleHeures, secteur: tache.secteur || "commercial", titre: tache.titre || tache.clientNom || undefined,
+              clientNom: tache.clientNom || null, date: jour, heures: 0, estTransport: false,
+              categorieHeures: tache.categorieHeures || "projet", kilometres: null, projetId: tache.projetId || null,
+              noteTerrain: "", noteInterne: "🏢 FERMÉE PAR LE BUREAU — 0 h : n'était pas sur ce chantier (déclaré par l'administration).",
+              debutReel: null, finReelle: null, photosAvant: [], photosApres: [],
+            },
+            employe
+          );
+          majDonneesAssignation(tache.id, employe.courriel, { fermetureBureau: { par: "le bureau", a: new Date().toISOString(), debut: null, fin: null, jour, absent: true } }).catch(() => {});
+          ajouterJournal(`🏢 « ${tache.titre || tache.clientNom} » : ${employe.nom || employe.courriel} marqué ABSENT (0 h) par le bureau.`);
+        } catch (e) {
+          ajouterJournal(`⚠️ ${employe.nom || employe.courriel} : marque « absent » NON enregistrée (${e?.message || "connexion impossible"}).`);
+        }
+        continue;
+      }
+      await fermerTachePourTechnicien(tache, employe, jour, { debutHM: f.debutHM, finHM: f.finHM, creerBon: bonACreer });
+      bonACreer = false;
+    }
+    // Tout le monde avait fermé, mais aucun bon : le bon d'équipe seul,
+    // porté par un technicien qui a des heures sur la tâche.
+    if (bonACreer) {
+      const porteur = employes.find((e) => !e.estSousTraitant && travailTermine(tache, e));
+      const heuresPorteur = Number(travailTermine(tache, porteur)?.heures) || 0;
+      if (porteur) {
+        try {
+          await enregistrerBonTravailBureau(
+            {
+              tacheId: tache.id, titre: tache.titre || tache.clientNom || "Travail complété", clientNom: tache.clientNom || null,
+              description: `${tache.description || ""}${tache.description ? "\n" : ""}(Bon d'équipe créé par le bureau — sans signature ni photos.)`,
+              date: jour, heures: heuresPorteur, typeTache: tache.typeTache || null, secteur: tache.secteur || "commercial",
+              devisNumero: tache.devisNumero || null, adresseTravaux: tache.adresseTravaux || tache.adresseIntervention || null,
+              projetId: tache.projetId || null, photosAvant: [], photosApres: [], courrielsEnvoi: [], signeParNom: "",
+              signeParCollegue: false, clientAbsent: false, unites: [], pieceACommander: false, pieceRequise: null,
+            },
+            porteur
+          );
+          ajouterJournal(`🧾 Bon de travail d'ÉQUIPE créé par le bureau pour « ${tache.titre || tache.clientNom} » (porté par ${porteur.nom}) — dans « À facturer », sans signature.`);
+        } catch (e) {
+          ajouterJournal(`⚠️ Bon d'équipe NON créé pour « ${tache.titre || tache.clientNom} » (${e?.message || "connexion impossible"}).`);
+        }
+      }
     }
   };
 
@@ -4783,7 +4851,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                             onDropHeure(ev, emp.id, HEURES[idx]);
                             setTacheSurvolee(null);
                           }}
-                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${emp.estSousTraitant ? ST_COULEURS[statutBlocST(seg.tache.id, emp.courriel)][0] : estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : estEnCours(seg.tache, emp) ? "border-fuchsia-500 bg-fuchsia-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
+                          className={`relative z-[1] m-0.5 rounded-lg border-l-4 p-0.5 ${emp.estSousTraitant ? ST_COULEURS[statutBlocST(seg.tache.id, emp.courriel)][0] : estTerminee(seg.tache, emp) ? "border-emerald-500 bg-emerald-50" : pasFermee(seg.tache, emp, jourKey) ? "border-amber-500 bg-[repeating-linear-gradient(45deg,#fffbeb,#fffbeb_5px,#fde68a_5px,#fde68a_9px)]" : estEnCours(seg.tache, emp) ? "border-fuchsia-500 bg-fuchsia-50" : seg.tache.est_tache_systeme ? "border-slate-400 bg-slate-100" : `${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).clair} ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).bordurePastille}`}`}
                         >
                           {/* 🖱️ Clic simple = ouvrir la fiche ; clic
                               maintenu + déplacement = déplacer le bloc
@@ -4819,6 +4887,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                               </span>
                             )}
                             {!emp.estSousTraitant && estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
+                            {pasFermee(seg.tache, emp, jourKey) && <span title="Pas fermée sur le téléphone — aucune heure enregistrée. Ouvre la fiche : « Fermer la tâche pour l'équipe »." className="shrink-0 text-[9px] font-extrabold text-amber-700">⏳</span>}
                             {!emp.estSousTraitant && estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
@@ -5012,7 +5081,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
                               className="p-0.5"
                             >
-                              <span className={`block h-2 w-2 rounded-full ${emp.estSousTraitant ? ST_COULEURS[statutBlocST(tache.id, emp.courriel)][2] : estTerminee(tache, emp) ? "bg-emerald-500" : estEnCours(tache, emp) ? "animate-pulse bg-fuchsia-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
+                              <span className={`block h-2 w-2 rounded-full ${emp.estSousTraitant ? ST_COULEURS[statutBlocST(tache.id, emp.courriel)][2] : estTerminee(tache, emp) ? "bg-emerald-500" : pasFermee(tache, emp, dateISO(d)) ? "bg-amber-400 ring-2 ring-amber-200" : estEnCours(tache, emp) ? "animate-pulse bg-fuchsia-500" : tache.est_tache_systeme ? "bg-slate-400" : (COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).pastille}`} />
                             </button>
                           ) : (
                             <button
@@ -5234,6 +5303,20 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           employes={employes}
           travailFait={travailTermine(tacheDetailOuverte.tache, tacheDetailOuverte.employe)}
           techniciensSurTache={techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes)}
+          // 👥 État de l'équipe + bon (2026-09-15) — qui a fermé, qui non.
+          equipeEtat={techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes)
+            .map((x) => employes.find((e) => e.id === x.employeId))
+            .filter((e) => e && !e.estSousTraitant)
+            .map((e) => ({ employeId: e.id, nom: e.nom, travail: travailTermine(tacheDetailOuverte.tache, e) || null }))}
+          bonExiste={(bons || []).some((b) => b.tacheId === tacheDetailOuverte.tache.id)}
+          onFermerPourEquipe={
+            lectureSeule
+              ? undefined
+              : async (champs) => {
+                  await fermerTachePourEquipe(tacheDetailOuverte.tache, tacheDetailOuverte.date, champs);
+                  setTacheDetailOuverte(null);
+                }
+          }
           depot={depotDe(tacheDetailOuverte.tache.id) || null}
           commandes={commandesPourTache(tacheDetailOuverte.tache.id)}
           facturables={facturablesAssignations}
