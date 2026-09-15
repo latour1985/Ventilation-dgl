@@ -2646,6 +2646,27 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // ============================================================
   // 🔢 Le Nº de suivi du CLIENT (PO) du projet lié — part dans le champ
   // « Nº de suivi » de la facture QuickBooks (2026-09-06).
+  // 📋 DESCRIPTIF DU DEVIS SUR LA FACTURE (2026-09-14, vécu facture 4282 :
+  // « il manque tout le descriptif du devis ») — pour un bon issu d'un
+  // devis, la ligne plate reprend chaque item du devis (quantité × nom,
+  // puis sa description client). Les rabais restent hors du descriptif
+  // (ils sont dans le prix). Plafonné pour rester sous la limite de
+  // QuickBooks (4 000 caractères par description).
+  const descriptifDevis = (b) => {
+    if (!b?.devisNumero) return null;
+    const d = (devisListe || []).find((x) => x.numero === b.devisNumero);
+    const lignesD = (d?.lignes || []).filter((l) => !l.estRabais && ((l.nom || "").trim() || (l.description || "").trim()));
+    if (lignesD.length === 0) return null;
+    const texte = [
+      `Selon devis ${d.numero} :`,
+      ...lignesD.map((l) => {
+        const desc = String(l.description || "").trim();
+        return `• ${Number(l.quantite) || 1} × ${(l.nom || "").trim()}${desc ? `\n  ${desc.replace(/\n/g, "\n  ")}` : ""}`;
+      }),
+    ].join("\n");
+    return texte.length > 3200 ? `${texte.slice(0, 3197)}…` : texte;
+  };
+
   const suiviDuProjet = (projetId, projetNom = null) => {
     const p = (projets || []).find((x) => x.id === projetId) || (projetNom ? (projets || []).find((x) => x.nom === projetNom) : null);
     return (p?.numeroSuiviClient || "").trim() || null;
@@ -3108,6 +3129,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         {
           description: [
             [b.date, b.projet || "Travaux"].filter(Boolean).join(" — "),
+            // 📋 Le descriptif du devis AVANT les notes du technicien.
+            descriptifDevis(b),
             (b.description || "").trim() || null,
             heuresTxt ? `Main-d'œuvre — ${heuresTxt}` : null,
           ]
@@ -3234,7 +3257,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // montant global du bon.
     const lignes = b.lignesNonListees?.length
       ? b.lignesNonListees.map((l) => ({ description: l.description, montant: parseFloat(l.prix) || 0, quantite: l.quantite, prixUnitaire: l.prixUnitaire }))
-      : [{ description: b.projet || "Travaux", montant: Number(b.montant) || 0 }];
+      : [{
+          // 📋 Ligne plate : titre + descriptif du devis + notes (2026-09-14).
+          description: [b.projet || "Travaux", descriptifDevis(b), (b.description || "").trim() || null].filter(Boolean).join("\n"),
+          montant: Number(b.montant) || 0,
+        }];
     const r = await creerFactureQbo({
       clientId: fiche?.id || null,
       clientNom: b.client,
