@@ -12,6 +12,7 @@ import { AlertCircle, AlertTriangle, Check, CheckCircle2, Cloud, FileText, MapPi
 import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { useLangue } from "@/lib/i18n";
+import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo } from "@/lib/quickbooksClient";
@@ -1334,6 +1335,46 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
   const [projetId, setProjetId] = useState("");
   const [reference, setReference] = useState(prefill?.reference || "");
   const [lignes, setLignes] = useState(() => (prefill?.lignes || []).map((l, i) => ({ uid: `l-pre-${i}`, ...l })));
+  // 📝 BROUILLON AUTOMATIQUE (2026-09-15, même mécanique que le devis) :
+  // la facture commencée est mémorisée dans ce navigateur ; fermer la
+  // fenêtre ne perd rien, la rouvrir propose de reprendre. Effacé à
+  // « Continuer » ou « Jeter ». Pas pour une vente directe (pré-remplie).
+  const CLE_FACTURE_LIBRE = "fluxya_facture_libre_en_cours";
+  const [repriseFacture, setRepriseFacture] = useState(null);
+  const autosavePretRef = useRef(false);
+  useEffect(() => {
+    if (!prefill) {
+      try {
+        const s = JSON.parse(window.localStorage.getItem(CLE_FACTURE_LIBRE) || "null");
+        if (s && Array.isArray(s.lignes) && s.lignes.length > 0) setRepriseFacture(s);
+      } catch {}
+    }
+    autosavePretRef.current = true;
+    return () => retirerGarde("facture-libre");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!autosavePretRef.current || prefill) return;
+    try {
+      if (lignes.length === 0 && !clientId) window.localStorage.removeItem(CLE_FACTURE_LIBRE);
+      else window.localStorage.setItem(CLE_FACTURE_LIBRE, JSON.stringify({ clientId, projetId, reference, lignes, quand: Date.now() }));
+    } catch {}
+    poserGarde("facture-libre", lignes.length > 0 ? `🧾 Facture commencée (${lignes.length} ligne${lignes.length > 1 ? "s" : ""}) non envoyée.` : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, projetId, reference, lignes]);
+  const reprendreFacture = () => {
+    const s = repriseFacture;
+    if (!s) return;
+    setClientId(s.clientId || "");
+    setProjetId(s.projetId || "");
+    setReference(s.reference || "");
+    setLignes(Array.isArray(s.lignes) ? s.lignes : []);
+    setRepriseFacture(null);
+  };
+  const jeterFacture = () => {
+    try { window.localStorage.removeItem(CLE_FACTURE_LIBRE); } catch {}
+    setRepriseFacture(null);
+  };
 
   const client = (clients || []).find((c) => c.id === clientId) || null;
   const resultatsClients = useMemo(() => {
@@ -1393,6 +1434,17 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5 pt-3">
+          {repriseFacture && lignes.length === 0 && !clientId && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-extrabold text-amber-900">
+                📝 Facture commencée{(clients || []).find((c) => c.id === repriseFacture.clientId)?.nom ? ` pour ${nomAffichageClient((clients || []).find((c) => c.id === repriseFacture.clientId))}` : ""} — {repriseFacture.lignes.length} ligne{repriseFacture.lignes.length > 1 ? "s" : ""}
+              </p>
+              <div className="mt-2 flex gap-2">
+                <Button onClick={reprendreFacture} className="min-h-0 flex-1 py-2 text-xs">↩️ Reprendre</Button>
+                <Button variant="outline" onClick={jeterFacture} className="min-h-0 py-2 text-xs">Jeter</Button>
+              </div>
+            </div>
+          )}
           {/* CLIENT — une fiche existante seulement : facturer un nom
               libre créerait un client dans QuickBooks sans fiche ici,
               exactement le genre d'orphelin qu'on passe son temps à
@@ -1554,7 +1606,9 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
           <Button
             disabled={!peutContinuer}
             title={peutContinuer ? "" : "Choisis un client et ajoute au moins une ligne avec un montant"}
-            onClick={() =>
+            onClick={() => {
+              try { window.localStorage.removeItem(CLE_FACTURE_LIBRE); } catch {}
+              retirerGarde("facture-libre");
               onContinuer({
                 client,
                 projetId: projetId || null,
@@ -1569,8 +1623,8 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
                   quantite: Number(l.quantite) || 0,
                 })),
                 sousTotal,
-              })
-            }
+              });
+            }}
           >
             Continuer →
           </Button>

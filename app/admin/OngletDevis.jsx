@@ -12,6 +12,7 @@ import { Briefcase, Check, CheckCircle2, ClipboardList, Copy, FileCheck2, FileTe
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { useLangue } from "@/lib/i18n";
+import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
 import { rejeterEstimateQbo } from "@/lib/quickbooksClient";
@@ -1070,6 +1071,62 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // source sont chargées dans le constructeur pour être modifiées
   // (ajout/retrait de produits, quantités, prix) avant enregistrement.
   const [editionVersion, setEditionVersion] = useState(null);
+
+  // ============================================================
+  // 📝 BROUILLON AUTOMATIQUE DU DEVIS EN COURS (2026-09-15, vécu : une
+  // soumission entière perdue en cliquant sur un autre onglet — le
+  // constructeur ne vivait qu'à l'écran). À chaque changement, le devis
+  // neuf en cours (client, adresse, lignes, contrat) est mémorisé dans
+  // CE navigateur ; au retour, une bannière propose de le reprendre ou
+  // de le jeter. Il s'efface seul dès que le devis est créé, gardé en
+  // brouillon ou vidé. Les modifications de version (éditionVersion)
+  // ne sont pas couvertes : elles repartent toujours d'un devis existant.
+  // La garde de navigation (menu) demande confirmation tant que des
+  // lignes sont là.
+  // ============================================================
+  const cleDevisEnCours = `fluxya_devis_en_cours_${configEnt?.id || "dgl"}`;
+  const [repriseDevis, setRepriseDevis] = useState(null); // sauvegarde trouvée au montage
+  const autosavePretRef = useRef(false);
+  useEffect(() => {
+    try {
+      const brut = window.localStorage.getItem(cleDevisEnCours);
+      const s = brut ? JSON.parse(brut) : null;
+      if (s && Array.isArray(s.lignes) && s.lignes.length > 0) setRepriseDevis(s);
+    } catch {}
+    autosavePretRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!autosavePretRef.current || editionVersion) return;
+    try {
+      if (lignes.length === 0 && !clientId) {
+        window.localStorage.removeItem(cleDevisEnCours);
+      } else {
+        window.localStorage.setItem(
+          cleDevisEnCours,
+          JSON.stringify({ clientId, adresseTravauxDevis, lignes, estContrat, frequenceContrat, quand: Date.now() })
+        );
+      }
+    } catch {}
+    const nomClientGarde = clients.find((c) => c.id === clientId)?.nom;
+    poserGarde("devis", lignes.length > 0 ? `📝 Devis en cours${nomClientGarde ? ` pour ${nomClientGarde}` : ""} (${lignes.length} ligne${lignes.length > 1 ? "s" : ""}) non enregistré.` : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, adresseTravauxDevis, lignes, estContrat, frequenceContrat, editionVersion]);
+  useEffect(() => () => retirerGarde("devis"), []);
+  const reprendreDevisEnCours = () => {
+    const s = repriseDevis;
+    if (!s) return;
+    setClientId(s.clientId || "");
+    setAdresseTravauxDevis(s.adresseTravauxDevis || "");
+    setLignes(Array.isArray(s.lignes) ? s.lignes : []);
+    setEstContrat(!!s.estContrat);
+    setFrequenceContrat(Number(s.frequenceContrat) || 4);
+    setRepriseDevis(null);
+  };
+  const jeterDevisEnCours = () => {
+    try { window.localStorage.removeItem(cleDevisEnCours); } catch {}
+    setRepriseDevis(null);
+  };
   // 🪟 L'édition d'une révision se fait dans une FENÊTRE par-dessus la
   // liste (2026-08-30, demande du propriétaire : « modifier le devis
   // directement dans la fenêtre contextuelle »). Fermer la fenêtre ne
@@ -2063,6 +2120,25 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">
             {editionVersion ? tr("Modification en cours") : tr("Nouveau devis")}
           </h2>
+          {/* 📝 REPRISE DU DEVIS EN COURS — mémorisé dans ce navigateur. */}
+          {repriseDevis && !editionVersion && lignes.length === 0 && (() => {
+            const nomR = clients.find((c) => c.id === repriseDevis.clientId)?.nom;
+            const totalR = (repriseDevis.lignes || []).reduce((s, l) => s + (Number(l.prix_vendant) || 0) * (Number(l.quantite) || 0), 0);
+            const quandR = repriseDevis.quand ? new Date(repriseDevis.quand).toLocaleString("fr-CA", { dateStyle: "short", timeStyle: "short" }) : "";
+            return (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                <p className="text-xs font-extrabold text-amber-900">
+                  📝 Devis en cours{nomR ? ` pour ${nomR}` : ""} — {repriseDevis.lignes.length} ligne{repriseDevis.lignes.length > 1 ? "s" : ""}, {totalR.toFixed(2)} $
+                  {quandR ? <span className="font-normal text-amber-700"> · mémorisé le {quandR}</span> : null}
+                </p>
+                <p className="mt-0.5 text-[11px] text-amber-800">Il n&apos;a pas été enregistré. Tu peux le reprendre exactement où tu l&apos;avais laissé.</p>
+                <div className="mt-2 flex gap-2">
+                  <Button onClick={reprendreDevisEnCours} className="min-h-0 flex-1 py-2 text-xs">↩️ Reprendre</Button>
+                  <Button variant="outline" onClick={jeterDevisEnCours} className="min-h-0 py-2 text-xs">Jeter</Button>
+                </div>
+              </div>
+            );
+          })()}
           {/* MODE ÉDITION — les lignes de la version source sont chargées
               ici. Le devis d'origine reste INTACT : l'enregistrement crée
               une NOUVELLE version (règle validée : un devis envoyé ne se

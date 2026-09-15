@@ -78,6 +78,7 @@ import TourGuide, { tourDejaFait } from "./TourGuide";
 import Toasts from "@/components/Toasts";
 import RaccourcisClavier from "@/components/RaccourcisClavier";
 import { notifier } from "@/lib/toasts";
+import { navigationPermise } from "@/lib/gardeNonEnregistre";
 import { TYPES_TACHE, TYPE_INFO, estTypeSansClient, HEURES_QUART, HEURE_PAR_DEFAUT, listeCellule, cleTacheDesHeures, camionsEntretienDu, tachesDuJourPourEmploye } from "./partage";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { OngletTableauDeBord } from "./OngletTableauDeBord";
@@ -3006,7 +3007,9 @@ function AppAdmin() {
     <div className="flex min-h-screen bg-slate-50">
       <MenuLateral
         vue={vue}
-        onChoisir={(id) => setOnglet(id)}
+        // 🛡️ Un devis ou une facture non enregistrés ? On demande avant
+        // de quitter l'écran (2026-09-15, soumission perdue par un clic).
+        onChoisir={(id) => { if (id === vue || navigationPermise()) setOnglet(id); }}
         permissions={permissions}
         badges={{
           facturation: compteAlertes,
