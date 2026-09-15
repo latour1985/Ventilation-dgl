@@ -84,7 +84,16 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // Assignation MULTIPLE à la création (édition rapide) : tous les
   // techniciens cochés reçoivent la tâche avec la même date/heure/durée
   // — chacun reste ensuite ajustable individuellement via la modale.
-  const [employeIds, setEmployeIds] = useState([]);
+  // 👥 ÉQUIPE PRÉVUE PRÉ-COCHÉE (2026-09-15, vécu : tâche créée avec
+  // dépôt requis, principal + accompagnateur ; au paiement du dépôt, la
+  // mise à l'horaire n'offrait personne de coché et l'accompagnateur se
+  // perdait). Le technicien choisi à la création + l'équipe prévue
+  // arrivent cochés — décochables.
+  const [employeIds, setEmployeIds] = useState(() =>
+    dejaPlanifiee
+      ? []
+      : [...new Set([tache?.employeId, ...(Array.isArray(tache?.equipePrevue) ? tache.equipePrevue.map((m) => m.employeId) : [])].filter(Boolean))]
+  );
   const basculerEmploye = (id) =>
     setEmployeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   // Techniciens (autres que celui ouvert ici) qui recevront AUSSI la

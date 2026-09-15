@@ -1125,6 +1125,28 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const semaine = Array.from({ length: 7 }, (_, i) => ajouterJours(jourAffiche, i - jourAffiche.getDay() + 1));
   const mois = joursDuMois(jourAffiche);
   const joursAffiches = vue === "semaine" ? semaine : vue === "mois" ? mois : [];
+  // 📦 COMMANDES À RECEVOIR PAR JOUR (2026-09-15, demande du propriétaire :
+  // « facile pour les gens au bureau ») — BC libres non reçus (date de
+  // livraison), pièces commandées (réception prévue), BC de projets.
+  // Mêmes données que « Livraisons attendues » de l'onglet Pièces ; la
+  // réception se marque là-bas.
+  const livraisonsParJour = (() => {
+    const m = {};
+    const ajout = (d, x) => { if (d) (m[d] = m[d] || []).push(x); };
+    (achatsLibres || [])
+      .filter((a) => !a.recuLe && a.livraisonSouhaitee)
+      .forEach((a) => ajout(a.livraisonSouhaitee, { cle: `a-${a.id}`, texte: `${a.fournisseurNom || "BC"} — ${a.numeroBc || ""}`, detail: a.clientNom || a.tacheTitre || "" }));
+    (pieces || [])
+      .filter((p) => p.statut === "commandee" && p.dateReceptionPrevue)
+      .forEach((p) => ajout(p.dateReceptionPrevue, { cle: `p-${p.id}`, texte: `${p.fournisseurNom || "pièce"} — ${p.numeroBc || ""}`, detail: p.clientNom || p.pieceRequise || "" }));
+    (projets || []).forEach((pr) =>
+      (pr.bonsCommande || [])
+        .filter((bc) => bc.livraison && bc.statut !== "Reçu" && bc.statut !== "Annulé")
+        .forEach((bc) => ajout(bc.livraison, { cle: `bc-${pr.id}-${bc.id}`, texte: `${bc.fournisseur || "BC"} — ${bc.numeroBC || ""}`, detail: `🏗️ ${pr.nom}` }))
+    );
+    return m;
+  })();
+  const aujourdhuiISO = dateISO(new Date());
 
   // 📅 EN VUE SEMAINE, LE CURSEUR ATTERRIT SUR LE LUNDI (2026-09-04,
   // retour du propriétaire : « quand on bouge les semaines on arrive au
@@ -1423,7 +1445,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // édition). Avec date + technicien, le chemin direct plus bas les
     // assigne immédiatement, comme avant.
     const enPlusPrevus = nouveauxEmployesEnPlus.filter((id) => id && id !== nouveauEmployeId);
-    if (!(nouvelleDate && nouveauEmployeId) && enPlusPrevus.length > 0) {
+    // 💰 DÉPÔT REQUIS = pas d'assignation immédiate même avec date +
+    // technicien (2026-09-15, vécu : « le technicien accompagnateur
+    // disparaît quand le dépôt est payé ») — l'équipe doit donc être
+    // mémorisée dans ce cas aussi.
+    const bloqueeParDepot = depotRequis && parseFloat(depotMontant) > 0 && !estTypeSansClient(nouveauType);
+    if ((!(nouvelleDate && nouveauEmployeId) || bloqueeParDepot) && enPlusPrevus.length > 0) {
       nouvelle.equipePrevue = enPlusPrevus.map((id) => ({ employeId: id, facturable: facturablesEnPlus[id] }));
     }
 
@@ -2157,7 +2184,16 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // dans planning — on lui passe la version à jour (nouvelle
       // durée) pour que l'assignation reflète les derniers champs
       // édités, pas l'ancienne durée.
-      cibles.forEach((id) => assigner(tacheMiseAJour, id, new Date(`${date}T00:00:00`), heureDebut));
+      // 👥 L'équipe prévue à la création est DÉJÀ pré-cochée dans la
+      // fenêtre (2026-09-15) : ce sont les cases cochées qui font foi.
+      // On retire equipePrevue de l'objet (sinon assigner() la
+      // replacerait une 2e fois) mais on garde son choix 💰/🤝 par
+      // technicien.
+      const equipe = Array.isArray(tacheMiseAJour.equipePrevue) ? tacheMiseAJour.equipePrevue : [];
+      const { equipePrevue: _equipe, ...tacheSansEquipe } = tacheMiseAJour;
+      cibles.forEach((id) =>
+        assigner(tacheSansEquipe, id, new Date(`${date}T00:00:00`), heureDebut, equipe.find((m) => m.employeId === id)?.facturable)
+      );
     } else {
       // 🕚 La date/heure choisies SUIVENT la tâche en attente (2026-09-02,
       // bogue de Louise) : modifier « 11:00 » sans assigner de technicien
@@ -2692,6 +2728,29 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                         onChoisirDossier={(a) => { setAdresseTravauxId(a.id); setNouvelleAdresseTravaux(null); }}
                         onNouvelle={(place) => { setNouvelleAdresseTravaux(place); setAdresseTravauxId(""); }}
                         onAucune={() => { setAdresseTravauxId(""); setNouvelleAdresseTravaux(null); setNouvelleAdresseApp(""); }}
+                        // 🚪 Petit nom / app. d'une adresse DU DOSSIER, modifiables
+                        // ici (2026-09-15, vécu : « on ne peut pas mettre de numéro
+                        // d'unité ») — enregistrés à la fiche du client.
+                        onModifierChoisie={(champs) =>
+                          setClients((prev) =>
+                            prev.map((c) => {
+                              if (c.id !== nouveauClientId) return c;
+                              return {
+                                ...c,
+                                adresses: (c.adresses || []).map((a) => {
+                                  if (a.id !== adresseTravauxId) return a;
+                                  const maj = { ...a };
+                                  if (champs.nom !== undefined) maj.nom = champs.nom.trim() ? champs.nom : a.ligne1;
+                                  if (champs.appartement !== undefined) {
+                                    if (champs.appartement.trim()) maj.appartement = champs.appartement;
+                                    else delete maj.appartement;
+                                  }
+                                  return maj;
+                                }),
+                              };
+                            })
+                          )
+                        }
                         enfants={nouvelleAdresseTravaux ? (
                           <div className="mt-1.5 space-y-1.5">
                             <input
@@ -4544,6 +4603,24 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         >
           {vue === "jour" ? (
             <div className="min-w-[640px]">
+              {/* 📦 BANDE « COMMANDES À RECEVOIR » DU JOUR (2026-09-15). */}
+              {(livraisonsParJour[dateISO(jourAffiche)] || []).length > 0 && (() => {
+                const liste = livraisonsParJour[dateISO(jourAffiche)];
+                const retard = dateISO(jourAffiche) < aujourdhuiISO;
+                return (
+                  <div className={`mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] ${retard ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
+                    <span className={`font-extrabold ${retard ? "text-red-800" : "text-amber-800"}`}>
+                      📦 Commandes à recevoir{retard ? " — en retard (pas encore reçues)" : ""} :
+                    </span>
+                    {liste.map((x) => (
+                      <span key={x.cle} title={x.detail || undefined} className={`rounded-full border px-2 py-0.5 font-semibold ${retard ? "border-red-200 bg-white text-red-800" : "border-amber-200 bg-white text-amber-900"}`}>
+                        📦 {x.texte}{x.detail ? ` · ${x.detail}` : ""}
+                      </span>
+                    ))}
+                    <span className="text-[10px] text-slate-400">— marquer « reçu » dans Pièces en commande</span>
+                  </div>
+                );
+              })()}
               <div className="grid" style={{ gridTemplateColumns: `120px repeat(${HEURES.length}, minmax(52px, 1fr))` }}>
                 <div className="sticky left-0 z-10 bg-white" />
                 {HEURES.map((h) => (
@@ -4840,6 +4917,31 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   );
                 })}
               </div>
+              {/* 📦 RANGÉE « À RECEVOIR » (2026-09-15) — sous les dates, seulement
+                  si une livraison tombe dans la période affichée. */}
+              {joursAffiches.some((d) => (livraisonsParJour[dateISO(d)] || []).length > 0) && (
+                <div className="grid border-t border-amber-100 bg-amber-50/60" style={{ gridTemplateColumns: `120px repeat(${joursAffiches.length}, minmax(${vue === "mois" ? 34 : 84}px, 1fr))` }}>
+                  <div className="sticky left-0 z-10 flex items-center bg-amber-50 px-2 py-1 text-[10px] font-extrabold text-amber-800">📦 À recevoir</div>
+                  {joursAffiches.map((d) => {
+                    const l = livraisonsParJour[dateISO(d)] || [];
+                    const retard = dateISO(d) < aujourdhuiISO;
+                    const infobulle = l.map((x) => `${x.texte}${x.detail ? ` · ${x.detail}` : ""}`).join("\n");
+                    return (
+                      <div key={dateISO(d)} title={infobulle || undefined} className="flex min-w-0 flex-wrap items-start gap-0.5 px-0.5 py-1">
+                        {vue === "mois"
+                          ? l.length > 0 && (
+                              <span className={`rounded-full px-1 text-[9px] font-bold ${retard ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>📦{l.length}</span>
+                            )
+                          : l.map((x) => (
+                              <span key={x.cle} className={`max-w-full truncate rounded-md border px-1 py-0.5 text-[9px] font-semibold ${retard ? "border-red-200 bg-red-100 text-red-700" : "border-amber-200 bg-white text-amber-900"}`}>
+                                📦 {x.texte}
+                              </span>
+                            ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {rangeesAgenda.map((emp) => {
                 if (emp.enteteSection) return renderEnteteSection(emp.enteteSection);
                 return (
