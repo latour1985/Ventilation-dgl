@@ -6137,3 +6137,319 @@ select column_name, data_type
  where table_schema = 'public' and table_name = 'travaux_effectues'
    and column_name in ('corrige_le', 'heures_avant_correction')
  order by column_name;
+
+-- ============================================================
+-- 145 - RLS PHASE 4b : GARDE DE ROLE DANS LES FONCTIONS SECURITY DEFINER (2026-09-14)
+-- ------------------------------------------------------------
+-- Suite du 143. Ces fonctions contournent les policies (SECURITY
+-- DEFINER) et n avaient que la cloison entreprise : un compte
+-- Technicien qui les appelait a la main pouvait marquer des bons
+-- factures, finaliser une facture maison, rattacher une tache, ajuster
+-- des heures ou basculer la version d un devis. Meme corps qu avant,
+-- plus UNE garde : fn_est_bureau() — et pour la fermeture terrain,
+-- « ses propres heures seulement » (le bureau garde le droit de fermer
+-- pour un autre). Les fonctions PUBLIQUES par lien client
+-- (repondre_devis, choisir_version_devis, noter_consultation_*) ne
+-- changent pas : c est le jeton du lien qui les protege.
+-- ============================================================
+
+-- ---- poser_factures_emises_lot ----
+create or replace function poser_factures_emises_lot(p_lots jsonb)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  e jsonb;
+  n integer := 0;
+  touche integer;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  if not public.fn_est_bureau() then raise exception 'Marquage de facturation reserve au bureau'; end if;
+  for e in select * from jsonb_array_elements(coalesce(p_lots, '[]'::jsonb)) loop
+    update bons_travail
+       set factures_emises = coalesce(e->'factures', '[]'::jsonb),
+           statut_facturation = coalesce(nullif(e->>'statut', ''), statut_facturation)
+     where id = (e->>'id')::uuid and entreprise_id = ent;
+    get diagnostics touche = row_count;
+    if touche = 0 then
+      raise exception 'Bon % introuvable — AUCUN bon n a ete marque (tout est annule).', e->>'id';
+    end if;
+    n := n + touche;
+  end loop;
+  return n;
+end;
+$$;
+
+-- ---- finaliser_facture_maison ----
+create or replace function finaliser_facture_maison(
+  p_facture_id uuid,
+  p_statut text default null,
+  p_envoyee_le timestamptz default null,
+  p_courriels jsonb default null,
+  p_bon_id uuid default null,
+  p_factures jsonb default null,
+  p_statut_bon text default null
+)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  touche integer;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  if not public.fn_est_bureau() then raise exception 'Finalisation de facture reservee au bureau'; end if;
+  if p_facture_id is not null and p_statut is not null then
+    update factures_maison
+       set statut = p_statut,
+           envoyee_le = coalesce(p_envoyee_le, envoyee_le),
+           courriels = coalesce(p_courriels, courriels)
+     where id = p_facture_id and entreprise_id = ent;
+    get diagnostics touche = row_count;
+    if touche = 0 then raise exception 'Facture maison introuvable.'; end if;
+  end if;
+  if p_bon_id is not null then
+    update bons_travail
+       set factures_emises = coalesce(p_factures, '[]'::jsonb),
+           statut_facturation = coalesce(nullif(p_statut_bon, ''), statut_facturation)
+     where id = p_bon_id and entreprise_id = ent;
+    get diagnostics touche = row_count;
+    if touche = 0 then raise exception 'Bon de travail introuvable — rien n a ete marque.'; end if;
+  end if;
+end;
+$$;
+
+-- ---- appliquer_ajustements_heures_lot ----
+create or replace function appliquer_ajustements_heures_lot(p_ajustements jsonb)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  e jsonb;
+  n integer := 0;
+  touche integer;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  if not public.fn_est_bureau() then raise exception 'Ajustement des heures reserve au bureau'; end if;
+  for e in select * from jsonb_array_elements(coalesce(p_ajustements, '[]'::jsonb)) loop
+    update travaux_effectues
+       set heures = round(coalesce((e->>'heures')::numeric, heures), 2),
+           debut_reel = case when e ? 'debut_reel' then nullif(e->>'debut_reel', '')::timestamptz else debut_reel end,
+           fin_reelle = case when e ? 'fin_reelle' then nullif(e->>'fin_reelle', '')::timestamptz else fin_reelle end,
+           corrige_le = case when e ? 'corrige_le' then nullif(e->>'corrige_le', '')::timestamptz else corrige_le end,
+           heures_avant_correction = case when e ? 'heures_avant_correction'
+             then nullif(e->>'heures_avant_correction', '')::numeric else heures_avant_correction end,
+           heures_proposees = null, proposition_par = null, proposition_le = null,
+           debut_propose = null, fin_propose = null, groupe_proposition = null
+     where id = (e->>'id')::uuid and entreprise_id = ent;
+    get diagnostics touche = row_count;
+    if touche = 0 then
+      raise exception 'Ligne d heures % introuvable — AUCUNE correction appliquee (tout est annule).', e->>'id';
+    end if;
+    n := n + touche;
+  end loop;
+  return n;
+end;
+$$;
+
+-- ---- basculer_version_devis ----
+create or replace function basculer_version_devis(
+  p_numero_base text,
+  p_nouveau_id text,
+  p_ancien_id text default null
+)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  v_jeton text;
+  v_exp timestamptz;
+  touche integer;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  if not public.fn_est_bureau() then raise exception 'Bascule de version de devis reservee au bureau'; end if;
+  if p_ancien_id is not null and p_ancien_id <> p_nouveau_id then
+    select jeton_public, jeton_expire_le into v_jeton, v_exp
+      from devis_app where id = p_ancien_id and entreprise_id = ent;
+    update devis_app set jeton_public = null, jeton_expire_le = null
+     where id = p_ancien_id and entreprise_id = ent;
+  end if;
+  update devis_app set version_active = false
+   where numero_base = p_numero_base and entreprise_id = ent;
+  update devis_app
+     set version_active = true,
+         jeton_public = coalesce(v_jeton, jeton_public),
+         jeton_expire_le = case when v_jeton is not null then v_exp else jeton_expire_le end
+   where id = p_nouveau_id and entreprise_id = ent;
+  get diagnostics touche = row_count;
+  if touche = 0 then
+    raise exception 'Version % introuvable — rien n a change (l ancien lien du client fonctionne toujours).', p_nouveau_id;
+  end if;
+end;
+$$;
+
+-- ---- rattacher_tache_lot ----
+create or replace function rattacher_tache_lot(
+  p_tache_id text,
+  p_maj_projet boolean default false,
+  p_projet_id text default null,
+  p_toutes_categories boolean default false,
+  p_maj_devis boolean default false,
+  p_devis_numero text default null
+)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  n integer := 0;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  if not public.fn_est_bureau() then raise exception 'Rattachement de tache reserve au bureau'; end if;
+  if p_maj_projet then
+    update travaux_effectues
+       set projet_id = nullif(p_projet_id, '')
+     where entreprise_id = ent
+       and (tache_id = p_tache_id or tache_id like p_tache_id || '::%')
+       and (p_toutes_categories or coalesce(categorie_heures, 'projet') = 'projet');
+    get diagnostics n = row_count;
+  end if;
+  if p_maj_projet or p_maj_devis then
+    update bons_travail
+       set projet_id = case when p_maj_projet then nullif(p_projet_id, '') else projet_id end,
+           devis_numero = case when p_maj_devis then nullif(p_devis_numero, '') else devis_numero end
+     where tache_id = p_tache_id and entreprise_id = ent;
+  end if;
+  return n;
+end;
+$$;
+
+-- ---- fermer_travaux_technicien ----
+create or replace function fermer_travaux_technicien(p_bon jsonb, p_travail jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  v_bon_id uuid;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  -- Un technicien ferme SES heures et SON bon ; le bureau peut fermer pour un autre.
+  if not public.fn_est_bureau() and (
+       lower(coalesce(p_bon->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+    or lower(coalesce(p_travail->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+  ) then
+    raise exception 'Fermeture terrain : seulement pour ses propres heures';
+  end if;
+  insert into bons_travail (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    description, date_travail, heures, type_tache, secteur, devis_numero,
+    adresse_travaux, projet_id, photos, courriels_envoi, signe_par_nom,
+    signe_par_collegue, client_absent, unites, modele_unite, serie_unite,
+    piece_a_commander, piece_requise, travaux_non_termines, reste_a_faire,
+    etapes, envoye_le, statut_facturation
+  ) values (
+    ent,
+    p_bon->>'tache_id',
+    p_bon->>'employe_email',
+    p_bon->>'employe_nom',
+    p_bon->>'titre',
+    p_bon->>'client_nom',
+    p_bon->>'description',
+    (p_bon->>'date_travail')::date,
+    coalesce((p_bon->>'heures')::numeric, 0),
+    p_bon->>'type_tache',
+    coalesce(p_bon->>'secteur', 'commercial'),
+    p_bon->>'devis_numero',
+    p_bon->>'adresse_travaux',
+    p_bon->>'projet_id',
+    nullif(p_bon->'photos', 'null'::jsonb),
+    coalesce(p_bon->'courriels_envoi', '[]'::jsonb),
+    p_bon->>'signe_par_nom',
+    coalesce((p_bon->>'signe_par_collegue')::boolean, false),
+    coalesce((p_bon->>'client_absent')::boolean, false),
+    coalesce(p_bon->'unites', '[]'::jsonb),
+    p_bon->>'modele_unite',
+    p_bon->>'serie_unite',
+    coalesce((p_bon->>'piece_a_commander')::boolean, false),
+    p_bon->>'piece_requise',
+    coalesce((p_bon->>'travaux_non_termines')::boolean, false),
+    p_bon->>'reste_a_faire',
+    nullif(p_bon->'etapes', 'null'::jsonb),
+    coalesce(nullif(p_bon->>'envoye_le', '')::timestamptz, now()),
+    'a_facturer'
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, description = excluded.description,
+    date_travail = excluded.date_travail, heures = excluded.heures,
+    type_tache = excluded.type_tache, secteur = excluded.secteur,
+    devis_numero = excluded.devis_numero, adresse_travaux = excluded.adresse_travaux,
+    projet_id = excluded.projet_id, photos = excluded.photos,
+    courriels_envoi = excluded.courriels_envoi, signe_par_nom = excluded.signe_par_nom,
+    signe_par_collegue = excluded.signe_par_collegue, client_absent = excluded.client_absent,
+    unites = excluded.unites, modele_unite = excluded.modele_unite,
+    serie_unite = excluded.serie_unite, piece_a_commander = excluded.piece_a_commander,
+    piece_requise = excluded.piece_requise, travaux_non_termines = excluded.travaux_non_termines,
+    reste_a_faire = excluded.reste_a_faire, etapes = excluded.etapes,
+    envoye_le = excluded.envoye_le, statut_facturation = excluded.statut_facturation
+  returning id into v_bon_id;
+
+  insert into travaux_effectues (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    date_travail, heures, est_transport, kilometres, projet_id, note_terrain,
+    note_interne, debut_reel, fin_reelle, photos, taux_coutant_fige, secteur,
+    categorie_heures, jour_bloque, bloque_raison,
+    heures_proposees, debut_propose, fin_propose, proposition_par,
+    proposition_le, groupe_proposition
+  ) values (
+    ent,
+    p_travail->>'tache_id',
+    p_travail->>'employe_email',
+    p_travail->>'employe_nom',
+    p_travail->>'titre',
+    p_travail->>'client_nom',
+    (p_travail->>'date_travail')::date,
+    coalesce((p_travail->>'heures')::numeric, 0),
+    coalesce((p_travail->>'est_transport')::boolean, false),
+    nullif(p_travail->>'kilometres', '')::numeric,
+    p_travail->>'projet_id',
+    p_travail->>'note_terrain',
+    p_travail->>'note_interne',
+    nullif(p_travail->>'debut_reel', '')::timestamptz,
+    nullif(p_travail->>'fin_reelle', '')::timestamptz,
+    nullif(p_travail->'photos', 'null'::jsonb),
+    nullif(p_travail->>'taux_coutant_fige', '')::numeric,
+    coalesce(p_travail->>'secteur', 'commercial'),
+    coalesce(p_travail->>'categorie_heures', 'projet'),
+    coalesce((p_travail->>'jour_bloque')::boolean, false),
+    p_travail->>'bloque_raison',
+    nullif(p_travail->>'heures_proposees', '')::numeric,
+    nullif(p_travail->>'debut_propose', '')::timestamptz,
+    nullif(p_travail->>'fin_propose', '')::timestamptz,
+    p_travail->>'proposition_par',
+    nullif(p_travail->>'proposition_le', '')::timestamptz,
+    p_travail->>'groupe_proposition'
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, date_travail = excluded.date_travail,
+    heures = excluded.heures, est_transport = excluded.est_transport,
+    kilometres = excluded.kilometres, projet_id = excluded.projet_id,
+    note_terrain = excluded.note_terrain, note_interne = excluded.note_interne,
+    debut_reel = excluded.debut_reel, fin_reelle = excluded.fin_reelle,
+    photos = excluded.photos, taux_coutant_fige = excluded.taux_coutant_fige,
+    secteur = excluded.secteur, categorie_heures = excluded.categorie_heures,
+    jour_bloque = excluded.jour_bloque, bloque_raison = excluded.bloque_raison,
+    heures_proposees = excluded.heures_proposees, debut_propose = excluded.debut_propose,
+    fin_propose = excluded.fin_propose, proposition_par = excluded.proposition_par,
+    proposition_le = excluded.proposition_le, groupe_proposition = excluded.groupe_proposition;
+
+  return v_bon_id;
+end;
+$$;
+
+-- Verification : 6 lignes, garde_role = true partout.
+select p.proname, p.prosecdef as definer,
+       position('fn_est_bureau' in pg_get_functiondef(p.oid)) > 0 as garde_role
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+   and p.proname in ('poser_factures_emises_lot', 'finaliser_facture_maison', 'appliquer_ajustements_heures_lot', 'basculer_version_devis', 'rattacher_tache_lot', 'fermer_travaux_technicien')
+ order by 1;
