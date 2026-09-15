@@ -1636,6 +1636,32 @@ function AppAdmin() {
   // par ici, TOUJOURS tracé au journal — déplacer un coût d'un dossier
   // à l'autre ne doit jamais se faire en silence.
   // ============================================================
+  // ✉️ TRACE D'ENVOI D'UN BC (2026-09-15, vécu : un BC créé, jamais
+  // envoyé, sans que rien ne le dise). Cherché par numéro : dans les
+  // achats libres (snippet 146), sinon dans les bons de commande d'un
+  // projet (JSON du projet). `adresses` = courriels, ou ["manuel"].
+  const marquerBcEnvoye = async (numero, adresses = []) => {
+    if (!numero) return;
+    const quand = new Date().toISOString();
+    try {
+      const liste = await listerAchatsLibres();
+      const a = liste.find((x) => x.numeroBc === numero);
+      if (a) {
+        await majAchatLibre(a.id, { bcEnvoyeLe: quand, bcEnvoyeA: adresses });
+        setAchatsLibres(await listerAchatsLibres());
+        if (adresses[0] === "manuel") ajouterJournal(`✓ BC ${numero} marqué « envoyé moi-même » (hors Fluxya).`);
+        return;
+      }
+      const proj = (projets || []).find((p) => (p.bonsCommande || []).some((b) => b.numeroBC === numero));
+      if (proj) {
+        const maj = { ...proj, bonsCommande: (proj.bonsCommande || []).map((b) => (b.numeroBC === numero ? { ...b, envoyeLe: quand, envoyeA: adresses } : b)) };
+        setProjets((prev) => prev.map((p) => (p.id === proj.id ? maj : p)));
+        await sauvegarderProjet(maj);
+      }
+    } catch (e) {
+      ajouterJournal(`⚠️ BC ${numero} : la trace d'envoi n'a PAS été enregistrée (${e?.message || "connexion impossible"})${/bc_envoye/.test(e?.message || "") ? " — le snippet SQL 146 est-il passé ?" : ""}.`);
+    }
+  };
   const majBcLibre = async (achat, champs, resume) => {
     try {
       await majAchatLibre(achat.id, champs);
@@ -3022,7 +3048,10 @@ function AppAdmin() {
           // Propositions d'ajustement d'heures en attente de validation.
           // Propositions en attente + journées bloquées : les deux
           // demandent une action de l'admin, les deux comptent au badge.
-          pieces: pieces.filter((p) => p.statut !== "recue" && p.statut !== "annulee").length,
+          // + les BC libres NON ENVOYÉS (créés depuis la trace, 2026-09-15).
+          pieces:
+            pieces.filter((p) => p.statut !== "recue" && p.statut !== "annulee").length +
+            (achatsLibres || []).filter((a) => !a.bcEnvoyeLe && String(a.creeLe || "") >= "2026-09-15").length,
           paies:
             travaux.filter((t) => t.supabase && t.heuresProposees != null).length +
             joursBloques(travaux).size,
@@ -3941,6 +3970,7 @@ function AppAdmin() {
           transactionsQb={transactionsQb}
           onCreerBcLibre={creerBcLibre}
           onMajBcLibre={majBcLibre}
+          onMarquerBcEnvoye={marquerBcEnvoye}
           onSupprimerBcLibre={supprimerBcLibre}
           onDemenagerBcVersProjet={demenagerBcVersProjet}
           projets={projets}

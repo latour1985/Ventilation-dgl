@@ -6453,3 +6453,22 @@ select p.proname, p.prosecdef as definer,
  where n.nspname = 'public'
    and p.proname in ('poser_factures_emises_lot', 'finaliser_facture_maison', 'appliquer_ajustements_heures_lot', 'basculer_version_devis', 'rattacher_tache_lot', 'fermer_travaux_technicien')
  order by 1;
+
+-- ============================================================
+-- 146 - TRACE D ENVOI DES BONS DE COMMANDE LIBRES (2026-09-15)
+-- ------------------------------------------------------------
+-- Vecu par le proprietaire : un BC cree mais jamais envoye au
+-- fournisseur, sans que rien ne le signale. Les BC de pieces avaient
+-- deja bc_envoye_le ; les BC LIBRES (achats_libres) non. Deux colonnes :
+-- quand, et a qui (liste de courriels, ou ["manuel"] si envoye soi-meme).
+-- ============================================================
+alter table achats_libres
+  add column if not exists bc_envoye_le timestamptz,
+  add column if not exists bc_envoye_a jsonb not null default '[]'::jsonb;
+
+-- Verification : les deux colonnes existent.
+select column_name, data_type
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'achats_libres'
+   and column_name in ('bc_envoye_le', 'bc_envoye_a')
+ order by column_name;

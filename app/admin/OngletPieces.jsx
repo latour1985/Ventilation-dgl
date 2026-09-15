@@ -20,7 +20,7 @@ import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventa
 import { creerFactureQbo } from "@/lib/quickbooksClient";
 import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, libelleAdresse } from "./partage";
 
-export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, projets, tachesPourAchat = [], transactionsQb = [] }) {
+export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onMarquerBcEnvoye = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
@@ -162,8 +162,13 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
     const fiche = ficheFournisseurParNom(bcLibre.fournisseurNom);
     const courrielTape = bcLibre.courrielFournisseur.trim();
     const courrielTapeValide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(courrielTape);
+    // 📧 LA FENÊTRE D'ENVOI S'OUVRE TOUJOURS (2026-09-15, vécu : un BC
+    // créé puis jamais envoyé — l'encadré discret d'avant n'apparaissait
+    // même pas sans courriel au répertoire). Avec ou sans adresse
+    // connue : « L'envoyer maintenant ? » — Envoyer / Plus tard.
     if (fiche && (fiche.courriels || []).length > 0) {
       setOffreEnvoiBc({
+        nouveau: true,
         numero,
         fournisseur: fiche.nom,
         description: descriptionFinale,
@@ -171,6 +176,17 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
         fichiers: bcLibre.fichiers || [],
         courriels: fiche.courriels,
         coches: (fiche.courriels || []).filter((c) => c.defaut).map((c) => c.email),
+      });
+    } else if (!courrielTapeValide) {
+      setOffreEnvoiBc({
+        nouveau: true,
+        numero,
+        fournisseur: bcLibre.fournisseurNom.trim() || fiche?.nom || "le fournisseur",
+        description: descriptionFinale,
+        photos: bcLibre.photos || [],
+        fichiers: bcLibre.fichiers || [],
+        courriels: [],
+        coches: [],
       });
     } else if (!fiche && courrielTapeValide) {
       const nomF = bcLibre.fournisseurNom.trim();
@@ -186,6 +202,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
           .catch(() => ajouterJournal?.(`⚠️ Fournisseur « ${nomF} » affiché mais NON enregistré au répertoire — réessaie.`));
       }
       setOffreEnvoiBc({
+        nouveau: true,
         numero,
         fournisseur: nomF || "fournisseur",
         description: descriptionFinale,
@@ -255,6 +272,10 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // clique, parti (même vrai service que les pièces).
   const [offreEnvoiBc, setOffreEnvoiBc] = useState(null); // { numero, fournisseur, description, coches }
   const [envoiBcLibreEnCours, setEnvoiBcLibreEnCours] = useState(false);
+  // ⚠️ « Non envoyé » : BC libre créé DEPUIS la trace d'envoi (2026-09-15)
+  // sans envoi par Fluxya ni marque manuelle. Les plus anciens : on ne
+  // sait pas, on ne les accuse pas.
+  const bcNonEnvoye = (a) => !a?.bcEnvoyeLe && String(a?.creeLe || "") >= "2026-09-15";
   const [envoiBcAjout, setEnvoiBcAjout] = useState(""); // ➕ adresse différente
   const ficheFournisseurParNom = (nom) =>
     (fournisseurs || []).find((f) => (f.nom || "").trim().toLowerCase() === String(nom || "").trim().toLowerCase()) || null;
@@ -275,7 +296,10 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
     setEnvoiBcLibreEnCours(false);
     if (r.envoye) {
       setBcLibreMsg(`✓ ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})`);
-      ajouterJournal?.(`📧 BC libre ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})`);
+      const nbPj = (offreEnvoiBc.photos || []).length + (offreEnvoiBc.fichiers || []).length;
+      ajouterJournal?.(`📧 BC libre ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})${nbPj ? ` — ${(offreEnvoiBc.photos || []).length} photo(s), ${(offreEnvoiBc.fichiers || []).length} fichier(s)` : ""}`);
+      // ✉️ Trace « envoyé le … à … » sur le BC (snippet 146).
+      onMarquerBcEnvoye?.(offreEnvoiBc.numero, offreEnvoiBc.coches);
       setOffreEnvoiBc(null);
     } else {
       setBcLibreMsg(
@@ -722,11 +746,24 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
           {bcLibreMsg && <p className="mt-1 text-[11px] font-semibold text-emerald-700">{bcLibreMsg}</p>}
           {/* 📧 Envoi du BC libre au fournisseur — offert quand la fiche
               du répertoire a des courriels ; coche, envoie, terminé. */}
+          {/* 📧 FENÊTRE D'ENVOI (2026-09-15) — au premier plan, impossible
+              à manquer : à la création (« L'envoyer maintenant ? ») comme
+              au renvoi. « Plus tard » reste un vrai choix ; le BC porte
+              alors « Non envoyé » dans la liste jusqu'à l'envoi. */}
           {offreEnvoiBc && (
-            <div className="mt-2 rounded-xl border border-blue-200 bg-blue-50 p-2.5">
-              <p className="text-[11px] font-bold text-blue-800">
-                📧 Envoyer le {offreEnvoiBc.numero} à {offreEnvoiBc.fournisseur} ?
-              </p>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setOffreEnvoiBc(null); }}>
+            <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-blue-200 bg-white p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-extrabold text-slate-900">
+                    {offreEnvoiBc.nouveau ? `✅ ${offreEnvoiBc.numero} créé` : `📧 ${offreEnvoiBc.numero}`}
+                  </p>
+                  <p className="text-xs font-bold text-blue-800">
+                    {offreEnvoiBc.nouveau ? "L'envoyer maintenant" : "Envoyer"} à {offreEnvoiBc.fournisseur} ?
+                  </p>
+                </div>
+                <button onClick={() => setOffreEnvoiBc(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+              </div>
               <div className="mt-1.5 space-y-1">
                 {(offreEnvoiBc.courriels || []).map((c) => (
                   <label key={c.id || c.email} className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-700">
@@ -745,7 +782,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   </label>
                 ))}
                 {(offreEnvoiBc.courriels || []).length === 0 && (
-                  <p className="text-[10px] text-slate-500">Ce fournisseur n&apos;a aucun courriel au répertoire — ajoute une adresse ci-dessous.</p>
+                  <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-800">Ce fournisseur n&apos;a aucun courriel au répertoire — tape son adresse ci-dessous et clique ➕ Ajouter.</p>
                 )}
               </div>
               {/* ➕ ADRESSE DIFFÉRENTE (2026-09-04) : envoyer à quelqu'un
@@ -814,19 +851,26 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   />
                 </div>
               </div>
+              {offreEnvoiBc.coches.length === 0 && (
+                <p className="mt-2 text-[10px] font-bold text-amber-700">Pour envoyer, il manque : au moins une adresse cochée.</p>
+              )}
               <div className="mt-2 flex gap-1.5">
                 <Button
                   loading={envoiBcLibreEnCours}
                   disabled={offreEnvoiBc.coches.length === 0}
                   onClick={envoyerBcLibre}
-                  className="min-h-0 flex-1 py-1.5 text-xs"
+                  className="min-h-0 flex-1 py-2 text-xs"
                 >
-                  📧 Envoyer le bon de commande
+                  📧 Envoyer maintenant
                 </Button>
-                <Button variant="outline" onClick={() => setOffreEnvoiBc(null)} className="min-h-0 py-1.5 text-xs">
-                  Pas maintenant
+                <Button variant="outline" onClick={() => setOffreEnvoiBc(null)} className="min-h-0 py-2 text-xs">
+                  Plus tard
                 </Button>
               </div>
+              {offreEnvoiBc.nouveau && (
+                <p className="mt-1.5 text-[10px] text-slate-400">« Plus tard » : le bon restera marqué <span className="font-bold text-red-600">Non envoyé</span> dans la liste, avec un bouton pour l&apos;envoyer.</p>
+              )}
+            </div>
             </div>
           )}
           {bcLibreOuvert && (
@@ -1092,6 +1136,16 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     {ecartQbPourBc(a2) && (
                       <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700" title="Le montant réel de QuickBooks diffère du montant saisi — ouvre la fiche pour valider">⚠️ écart QB {ecartQbPourBc(a2).ecart > 0 ? "+" : ""}{ecartQbPourBc(a2).ecart.toFixed(2)} $</span>
                     )}
+                    {/* ✉️ ENVOYÉ OU PAS (2026-09-15) — seulement pour les
+                        BC créés depuis la trace (les anciens ne sont pas
+                        tous « non envoyés », on n'en sait rien). */}
+                    {a2.bcEnvoyeLe ? (
+                      <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700" title={`Envoyé le ${new Date(a2.bcEnvoyeLe).toLocaleString("fr-CA")}${(a2.bcEnvoyeA || []).length ? ` à ${a2.bcEnvoyeA.join(", ")}` : ""}`}>
+                        ✉️ envoyé {new Date(a2.bcEnvoyeLe).toLocaleDateString("fr-CA", { day: "numeric", month: "short" })}
+                      </span>
+                    ) : bcNonEnvoye(a2) ? (
+                      <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700" title="Ce bon n'a pas été envoyé au fournisseur par Fluxya">⚠️ Non envoyé</span>
+                    ) : null}
                   </span>
                   <span className="shrink-0 tabular-nums">{a2.montantHT.toFixed(2)} $</span>
                 </button>
@@ -1108,14 +1162,26 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         fournisseur: a2.fournisseurNom || "le fournisseur",
                         description: a2.description || "",
                         photos: [],
+                        fichiers: [],
                         courriels: fiche?.courriels || [],
                         coches: (fiche?.courriels || []).filter((c) => c.defaut).map((c) => c.email),
                       });
                     }}
-                    title="Renvoyer ce bon de commande par courriel"
-                    className="shrink-0 rounded-lg border border-slate-200 px-1.5 py-1 text-[10px] font-bold text-slate-500 hover:border-blue-300 hover:text-blue-700"
+                    title={bcNonEnvoye(a2) ? "Envoyer ce bon de commande par courriel" : "Renvoyer ce bon de commande par courriel"}
+                    className={`shrink-0 rounded-lg border px-1.5 py-1 text-[10px] font-bold ${bcNonEnvoye(a2) ? "border-red-300 bg-red-50 text-red-700 hover:border-red-400" : "border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-700"}`}
                   >
-                    📧
+                    📧{bcNonEnvoye(a2) ? " Envoyer" : ""}
+                  </button>
+                )}
+                {/* ✍️ Envoyé autrement (téléphone, courriel personnel) : la
+                    trace se pose à la main, comme pour les BC de pièces. */}
+                {peutCommander && bcNonEnvoye(a2) && (
+                  <button
+                    onClick={() => onMarquerBcEnvoye?.(a2.numeroBc, ["manuel"])}
+                    title="J'ai envoyé ce bon moi-même (téléphone, autre courriel) — poser la trace"
+                    className="shrink-0 rounded-lg border border-slate-200 px-1.5 py-1 text-[10px] font-bold text-slate-400 hover:text-slate-700"
+                  >
+                    ✓ moi-même
                   </button>
                 )}
                 {/* 📦➕ La boîte est arrivée — ajouter son contenu à
