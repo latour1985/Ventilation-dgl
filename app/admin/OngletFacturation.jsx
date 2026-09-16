@@ -3445,6 +3445,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // 🔢 Suivi du projet lié — la facture progressive garde la date
       // d'émission (facturation périodique, pas une date de travaux).
       numeroSuivi: suiviDuProjet(bons.find((x) => x.id === bonId)?.projetId),
+      // 📅 DATE DE LA FACTURE = DATE DES TRAVAUX (2026-09-16, demande du
+      // propriétaire : « on facture parfois plusieurs jours après, c'est
+      // la date des travaux qui compte ») — ce chemin (révision d'un bon)
+      // gardait la date du jour ; les chemins simple et groupé l'avaient déjà.
+      dateFacture: bons.find((x) => x.id === bonId)?.date || null,
       lignes: lignesEnvoyees,
       termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: `${bons.find((x) => x.id === bonId)?.devisNumero || "travaux"}`,

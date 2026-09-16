@@ -264,7 +264,13 @@ export async function POST(request) {
         } catch {
           lienConditions = "Termes et conditions disponibles sur demande.";
         }
-        const memo = [String(corps?.customerMemo || "").trim(), note.trim(), lienConditions].filter(Boolean).join("\n\n");
+        // 📍 L'ADRESSE DES TRAVAUX EN PREMIÈRE LIGNE du message (2026-09-16,
+        // demande du propriétaire) : elle est lue sur la facture ET dans
+        // le courriel de QuickBooks (le « message au client » y est
+        // repris). L'objet du courriel, lui, vient du gabarit global de
+        // QuickBooks — impossible à changer facture par facture.
+        const ligneTravaux = corps?.adresseTravaux ? `📍 Travaux : ${String(corps.adresseTravaux).trim().slice(0, 200)}` : "";
+        const memo = [ligneTravaux, String(corps?.customerMemo || "").trim(), note.trim(), lienConditions].filter(Boolean).join("\n\n");
         return memo ? { CustomerMemo: { value: memo.slice(0, 900) } } : {};
       })()),
       // L'ADRESSE DES TRAVAUX — elle change à chaque job, donc elle vit
