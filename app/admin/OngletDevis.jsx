@@ -13,6 +13,7 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { useLangue } from "@/lib/i18n";
 import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
+import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
 import { rejeterEstimateQbo } from "@/lib/quickbooksClient";
@@ -22,7 +23,7 @@ import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
 import { ModalNouveauClient } from "./OngletClients";
-import { ApercuDevisClient, BarrePagination, Button, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurAdresseTravaux, SelecteurItem, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
+import { ApercuDevisClient, BarrePagination, Button, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurAdresseTravaux, SelecteurItem, adresseFacturationClient, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
 
 // Taux coûtant moyen de l'équipe, lu dans la GRILLE CCQ de l'entreprise
 // (2026-08-28) : le champ « taux prévu » se pré-remplit avec un chiffre
@@ -801,7 +802,26 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     }
     const dejaAccepte = devis.reponseClient === "accepte";
     const estRelance = !!envoiDevis?.relance && !dejaAccepte;
+    // 📎 LE DEVIS EN PDF, JOINT AU COURRIEL (2026-09-16, retour d'un client :
+    // « c'est compliqué » avec la page seule). Même document que l'aperçu
+    // du bureau, généré ici dans le navigateur puis déposé au stockage.
+    // Un échec n'empêche jamais l'envoi (le lien part comme avant) — il
+    // est dit au journal.
+    let pdfJoint = null;
+    try {
+      const [{ pdf }, { DevisPDF }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/pdf/DocumentsPDF")]);
+      const ficheP = ficheClientDe(devisCourant);
+      const blob = await pdf(
+        <DevisPDF devis={{ ...devisCourant, adresseFacturation: devisCourant.adresseFacturation || adresseFacturationClient(ficheP) }} config={configEnt} />
+      ).toBlob();
+      const nomPdf = `Devis-${String(devisCourant.numero || "").replace(/[^a-zA-Z0-9-]+/g, "-")}.pdf`;
+      const url = await televerserPieceJointeTache(new File([blob], nomPdf, { type: "application/pdf" }));
+      pdfJoint = { nom: nomPdf, url };
+    } catch {
+      ajouterJournal(`⚠️ Devis ${devis.numero} : le PDF n'a pas pu être joint — le courriel part avec le lien seulement.`);
+    }
     const r = await envoyerCourriel({
+      piecesJointes: pdfJoint ? [pdfJoint] : [],
       a: adresses,
       // L'objet ajusté dans le panneau d'envoi fait foi ; sinon le défaut.
       sujet:
@@ -817,6 +837,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         lien: lienDevisPublic(jeton),
         dejaAccepte,
         relance: estRelance,
+        pdfJoint: !!pdfJoint,
       }),
     });
     setEnvoiDevisEnCours(false);

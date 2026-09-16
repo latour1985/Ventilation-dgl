@@ -26,6 +26,10 @@ import { chargerDevisPublic, repondreDevis, chargerOptionsDevis, chargerVersionD
 import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
 import { CONFIG_DEFAUT, calculerTaxes } from "@/lib/supabase/entreprise";
 import ContactEntreprise from "@/components/ContactEntreprise";
+import dynamic from "next/dynamic";
+
+// ⬇️ PDF du devis, généré dans le navigateur du client (2026-09-16).
+const BoutonPDFDevisPublic = dynamic(() => import("@/components/pdf/BoutonPDFDevisPublic"), { ssr: false, loading: () => null });
 
 const argent = (n) => `${(Number(n) || 0).toFixed(2)} $`;
 
@@ -347,6 +351,15 @@ export default function PageDevisPublic({ params }) {
 
         {/* LIGNES */}
         <div className="rounded-2xl bg-white p-5">
+          {/* ⬇️ TÉLÉCHARGER EN PDF (2026-09-16, retour d'un client) — le
+              même document que l'aperçu du bureau, avec l'identité de
+              l'entreprise portée par le devis. */}
+          <div className="mb-3 flex justify-end">
+            <BoutonPDFDevisPublic
+              devis={{ ...devis, adresseTravaux: devis.adresseTravaux || null }}
+              config={{ ...config, logoDonnees: devis?.entrepriseLogo || config.logoDonnees || null, adresse: devis?.entrepriseAdresse || config.adresse || "", numeroTps: devis?.entrepriseNumeroTps || config.numeroTps || "", numeroTvq: devis?.entrepriseNumeroTvq || config.numeroTvq || "" }}
+            />
+          </div>
           {devis.lignes.map((l) => (
             <div key={l.uid} className="border-b border-slate-100 py-2.5 last:border-0">
               <div className="flex items-start justify-between gap-3">
