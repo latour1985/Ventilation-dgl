@@ -1644,6 +1644,30 @@ function AppAdmin() {
   // envoyé, sans que rien ne le dise). Cherché par numéro : dans les
   // achats libres (snippet 146), sinon dans les bons de commande d'un
   // projet (JSON du projet). `adresses` = courriels, ou ["manuel"].
+  // 📦 RÉCEPTION D'UN BC depuis l'agenda (2026-09-16) — achats libres
+  // (recu_le, snippet 147) ou bons de commande d'un projet (statut Reçu).
+  const marquerBcRecu = async (numero) => {
+    if (!numero) return;
+    try {
+      const liste = await listerAchatsLibres();
+      const a = liste.find((x) => x.numeroBc === numero);
+      if (a) {
+        await majAchatLibre(a.id, { recuLe: new Date().toISOString() });
+        setAchatsLibres(await listerAchatsLibres());
+        ajouterJournal(`📦 BC ${numero} marqué reçu (depuis l'agenda).`);
+        return;
+      }
+      const proj = (projets || []).find((p) => (p.bonsCommande || []).some((b) => b.numeroBC === numero));
+      if (proj) {
+        const maj = { ...proj, bonsCommande: (proj.bonsCommande || []).map((b) => (b.numeroBC === numero ? { ...b, statut: "Reçu", recuLe: new Date().toISOString() } : b)) };
+        setProjets((prev) => prev.map((p) => (p.id === proj.id ? maj : p)));
+        await sauvegarderProjet(maj);
+        ajouterJournal(`📦 BC ${numero} du projet « ${proj.nom} » marqué reçu (depuis l'agenda).`);
+      }
+    } catch (e) {
+      ajouterJournal(`⚠️ BC ${numero} : réception NON enregistrée (${e?.message || "connexion impossible"}).`);
+    }
+  };
   const marquerBcEnvoye = async (numero, adresses = []) => {
     if (!numero) return;
     const quand = new Date().toISOString();
@@ -3535,6 +3559,8 @@ function AppAdmin() {
           achatsLibres={achatsLibres}
           fournisseurs={fournisseurs}
           cible={cibleAgenda}
+          onMarquerBcRecu={marquerBcRecu}
+          onOuvrirPieces={() => setOnglet("pieces")}
           onCibleTraitee={() => setCibleAgenda(null)}
           onMajFacturable={(tacheId, courriel, val) =>
             setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }))

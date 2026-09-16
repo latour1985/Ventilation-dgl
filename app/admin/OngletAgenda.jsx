@@ -395,7 +395,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -1135,18 +1135,20 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     const ajout = (d, x) => { if (d) (m[d] = m[d] || []).push(x); };
     (achatsLibres || [])
       .filter((a) => !a.recuLe && a.livraisonSouhaitee)
-      .forEach((a) => ajout(a.livraisonSouhaitee, { cle: `a-${a.id}`, texte: `${a.fournisseurNom || "BC"} — ${a.numeroBc || ""}`, detail: a.clientNom || a.tacheTitre || "" }));
+      .forEach((a) => ajout(a.livraisonSouhaitee, { cle: `a-${a.id}`, numero: a.numeroBc || "", texte: `${a.fournisseurNom || "BC"} — ${a.numeroBc || ""}`, detail: a.clientNom || a.tacheTitre || "", description: a.description || "", date: a.livraisonSouhaitee, envoye: !!a.bcEnvoyeLe, telephone: (a.bcEnvoyeA || []).includes("manuel"), montantHT: a.montantHT, recevable: true }));
     (pieces || [])
       .filter((p) => p.statut === "commandee" && p.dateReceptionPrevue)
-      .forEach((p) => ajout(p.dateReceptionPrevue, { cle: `p-${p.id}`, texte: `${p.fournisseurNom || "pièce"} — ${p.numeroBc || ""}`, detail: p.clientNom || p.pieceRequise || "" }));
+      .forEach((p) => ajout(p.dateReceptionPrevue, { cle: `p-${p.id}`, numero: p.numeroBc || "", texte: `${p.fournisseurNom || "pièce"} — ${p.numeroBc || ""}`, detail: p.clientNom || p.pieceRequise || "", description: p.pieceRequise || "", date: p.dateReceptionPrevue, envoye: !!p.bcEnvoyeLe, recevable: false }));
     (projets || []).forEach((pr) =>
       (pr.bonsCommande || [])
         .filter((bc) => bc.livraison && bc.statut !== "Reçu" && bc.statut !== "Annulé")
-        .forEach((bc) => ajout(bc.livraison, { cle: `bc-${pr.id}-${bc.id}`, texte: `${bc.fournisseur || "BC"} — ${bc.numeroBC || ""}`, detail: `🏗️ ${pr.nom}` }))
+        .forEach((bc) => ajout(bc.livraison, { cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "", texte: `${bc.fournisseur || "BC"} — ${bc.numeroBC || ""}`, detail: `🏗️ ${pr.nom}`, description: bc.description || "", date: bc.livraison, envoye: !!bc.envoyeLe, montantHT: bc.montantHT, recevable: true }))
     );
     return m;
   })();
   const aujourdhuiISO = dateISO(new Date());
+  // 📦 Détail d'une livraison (clic sur une pastille) — 2026-09-16.
+  const [livraisonOuverte, setLivraisonOuverte] = useState(null);
   // ⏳ PAS FERMÉE (2026-09-15) : journée passée, tâche de travail, aucune
   // heure du technicien — le bloc se hachure au lieu de rester bleu en
   // silence (vécu « Faire sous-dalle » : Dominic jamais fermé, aucun bon).
@@ -4681,11 +4683,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       📦 Commandes à recevoir{retard ? " — en retard (pas encore reçues)" : ""} :
                     </span>
                     {liste.map((x) => (
-                      <span key={x.cle} title={x.detail || undefined} className={`rounded-full border px-2 py-0.5 font-semibold ${retard ? "border-red-200 bg-white text-red-800" : "border-amber-200 bg-white text-amber-900"}`}>
+                      <button key={x.cle} type="button" onClick={() => setLivraisonOuverte(x)} title="Voir le bon de commande" className={`rounded-full border px-2 py-0.5 font-semibold hover:underline ${retard ? "border-red-200 bg-white text-red-800" : "border-amber-200 bg-white text-amber-900"}`}>
                         📦 {x.texte}{x.detail ? ` · ${x.detail}` : ""}
-                      </span>
+                      </button>
                     ))}
-                    <span className="text-[10px] text-slate-400">— marquer « reçu » dans Pièces en commande</span>
+                    <span className="text-[10px] text-slate-400">— clique pour voir le bon</span>
                   </div>
                 );
               })()}
@@ -5002,9 +5004,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                               <span className={`rounded-full px-1 text-[9px] font-bold ${retard ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>📦{l.length}</span>
                             )
                           : l.map((x) => (
-                              <span key={x.cle} className={`max-w-full truncate rounded-md border px-1 py-0.5 text-[9px] font-semibold ${retard ? "border-red-200 bg-red-100 text-red-700" : "border-amber-200 bg-white text-amber-900"}`}>
+                              <button key={x.cle} type="button" onClick={() => setLivraisonOuverte(x)} className={`max-w-full truncate rounded-md border px-1 py-0.5 text-left text-[9px] font-semibold hover:underline ${retard ? "border-red-200 bg-red-100 text-red-700" : "border-amber-200 bg-white text-amber-900"}`}>
                                 📦 {x.texte}
-                              </span>
+                              </button>
                             ))}
                       </div>
                     );
@@ -5288,6 +5290,53 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               >
                 Confirmer — débloquer la tâche
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📦 DÉTAIL D'UNE LIVRAISON depuis l'agenda (2026-09-16) — à qui,
+          quoi, quand ; « Reçu » pour un BC libre ou de projet. */}
+      {livraisonOuverte && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setLivraisonOuverte(null); }}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-extrabold text-slate-900">📦 {livraisonOuverte.texte}</p>
+                <p className="text-[11px] text-slate-500">
+                  Livraison prévue le {livraisonOuverte.date ? new Date(`${livraisonOuverte.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" }) : "—"}
+                  {livraisonOuverte.date && livraisonOuverte.date < aujourdhuiISO ? <span className="ml-1 font-bold text-red-600">— en retard</span> : null}
+                </p>
+              </div>
+              <button onClick={() => setLivraisonOuverte(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+            </div>
+            <div className="mt-3 space-y-2 text-xs">
+              {livraisonOuverte.detail && (
+                <p><span className="font-bold text-slate-500">Pour :</span> <span className="text-slate-800">{livraisonOuverte.detail}</span></p>
+              )}
+              <div>
+                <p className="font-bold text-slate-500">Contenu :</p>
+                <p className="mt-0.5 whitespace-pre-wrap rounded-lg bg-slate-50 p-2 text-[11px] leading-snug text-slate-700">{livraisonOuverte.description || "—"}</p>
+              </div>
+              {Number(livraisonOuverte.montantHT) > 0 && (
+                <p><span className="font-bold text-slate-500">Montant :</span> {Number(livraisonOuverte.montantHT).toFixed(2)} $ HT</p>
+              )}
+              <p>
+                <span className="font-bold text-slate-500">Envoi au fournisseur :</span>{" "}
+                {livraisonOuverte.telephone ? <span className="font-bold text-sky-700">📞 par téléphone</span> : livraisonOuverte.envoye ? <span className="font-bold text-emerald-700">✉️ envoyé</span> : <span className="font-bold text-red-600">⚠️ non envoyé</span>}
+              </p>
+            </div>
+            <div className="mt-3 flex gap-2">
+              {livraisonOuverte.recevable && onMarquerBcRecu && !lectureSeule && (
+                <Button onClick={() => { onMarquerBcRecu(livraisonOuverte.numero); setLivraisonOuverte(null); }} className="min-h-0 flex-1 py-2 text-xs">
+                  📦 Reçu
+                </Button>
+              )}
+              {onOuvrirPieces && (
+                <Button variant="outline" onClick={() => { setLivraisonOuverte(null); onOuvrirPieces(); }} className="min-h-0 flex-1 py-2 text-xs">
+                  Ouvrir dans Pièces
+                </Button>
+              )}
             </div>
           </div>
         </div>

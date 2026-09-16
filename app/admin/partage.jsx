@@ -45,6 +45,22 @@ import { SEUIL_ENTRETIEN_KM, SEUIL_ENTRETIEN_MOIS } from "./OngletInspectionsVeh
 // (Supabase Storage, URL publique) ; le courriel du BC les affiche.
 // Réutilisé par : BC de projet, BC libre, commande de pièce.
 // ============================================================
+// 📦 LA LIGNE « Livraison souhaitée » DU TEXTE D'UN BC SUIT LA DATE
+// (2026-09-16, vécu : date changée dans la fiche, courriel renvoyé avec
+// l'ancienne date). Remplace la ligne existante, ou l'ajoute ; sans
+// date, la retire.
+export function descriptionAvecLivraison(description, dateISO) {
+  const lignes = String(description || "").split("\n").filter((l) => !/^📦 Livraison souhaitée\s*:/.test(l.trim()));
+  if (dateISO && /^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
+    const texte = `📦 Livraison souhaitée : ${new Date(`${dateISO}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`;
+    // Avant la ligne « 📍 Livraison : … » s'il y en a une, sinon à la fin.
+    const idx = lignes.findIndex((l) => /^📍 Livraison\s*:/.test(l.trim()));
+    if (idx >= 0) lignes.splice(idx, 0, texte);
+    else lignes.push(texte);
+  }
+  return lignes.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // 📎 FICHIERS POUR LE FOURNISSEUR (2026-09-15, demande du propriétaire :
 // « pas seulement une photo ») — PDF, Word, Excel, images. Jusqu'à 5,
 // 10 Mo chacun. Même stockage que les photos ; partent en VRAIE pièce

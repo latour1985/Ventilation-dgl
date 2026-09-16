@@ -18,7 +18,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
-import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, libelleAdresse } from "./partage";
+import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, libelleAdresse, descriptionAvecLivraison } from "./partage";
 
 export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onMarquerBcEnvoye = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
@@ -582,7 +582,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
               cle: `a-${a.id}`, numero: a.numeroBc || "(sans nº)", fournisseur: a.fournisseurNom || "", date: a.livraisonSouhaitee || null,
               cible: a.tacheId ? `🔗 ${a.clientNom || a.tacheTitre || "job"}` : a.clientId ? `👤 ${a.clientNom || "client"}` : (a.description || "").includes("Pour l'inventaire courant") ? "📦 stock" : "achat général",
               description: (a.description || "").split("\n")[0],
-              envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a),
+              envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a), telephone: (a.bcEnvoyeA || []).includes("manuel"),
               ouvrir: () => ouvrirBc(a),
               recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
             })),
@@ -632,6 +632,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     </button>
                     {l.nonEnvoye ? (
                       <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700">⚠️ non envoyé</span>
+                    ) : l.telephone ? (
+                      <span className="shrink-0 text-[9px] font-bold text-sky-700" title="Commande passée par téléphone — aucun courriel envoyé par Fluxya">📞 par téléphone</span>
                     ) : l.envoye ? (
                       <span className="shrink-0 text-[9px] font-bold text-emerald-600">✉️ envoyé</span>
                     ) : null}
@@ -1224,9 +1226,15 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         BC créés depuis la trace (les anciens ne sont pas
                         tous « non envoyés », on n'en sait rien). */}
                     {a2.bcEnvoyeLe ? (
+                      (a2.bcEnvoyeA || []).includes("manuel") ? (
+                        <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700" title={`Commande passée par téléphone (ou hors Fluxya) le ${new Date(a2.bcEnvoyeLe).toLocaleString("fr-CA")} — aucun courriel envoyé par Fluxya`}>
+                          📞 par téléphone {new Date(a2.bcEnvoyeLe).toLocaleDateString("fr-CA", { day: "numeric", month: "short" })}
+                        </span>
+                      ) : (
                       <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700" title={`Envoyé le ${new Date(a2.bcEnvoyeLe).toLocaleString("fr-CA")}${(a2.bcEnvoyeA || []).length ? ` à ${a2.bcEnvoyeA.join(", ")}` : ""}`}>
                         ✉️ envoyé {new Date(a2.bcEnvoyeLe).toLocaleDateString("fr-CA", { day: "numeric", month: "short" })}
                       </span>
+                      )
                     ) : bcNonEnvoye(a2) ? (
                       <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700" title="Ce bon n'a pas été envoyé au fournisseur par Fluxya">⚠️ Non envoyé</span>
                     ) : null}
@@ -1244,7 +1252,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                       setOffreEnvoiBc({
                         numero: a2.numeroBc || "(sans nº)",
                         fournisseur: a2.fournisseurNom || "le fournisseur",
-                        description: a2.description || "",
+                        // 📦 Le texte renvoyé porte la date de livraison À JOUR.
+                        description: descriptionAvecLivraison(a2.description || "", a2.livraisonSouhaitee || null),
                         photos: [],
                         fichiers: [],
                         courriels: fiche?.courriels || [],
@@ -1273,10 +1282,10 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                 {peutCommander && bcNonEnvoye(a2) && (
                   <button
                     onClick={() => onMarquerBcEnvoye?.(a2.numeroBc, ["manuel"])}
-                    title="J'ai envoyé ce bon moi-même (téléphone, autre courriel) — poser la trace"
-                    className="shrink-0 rounded-lg border border-slate-200 px-1.5 py-1 text-[10px] font-bold text-slate-400 hover:text-slate-700"
+                    title="Commande passée par téléphone (ou envoyée hors Fluxya) — poser la trace, sans courriel"
+                    className="shrink-0 rounded-lg border border-sky-200 px-1.5 py-1 text-[10px] font-bold text-sky-700 hover:border-sky-400"
                   >
-                    ✓ moi-même
+                    📞 par téléphone
                   </button>
                 )}
                 {/* 📦➕ La boîte est arrivée — ajouter son contenu à
@@ -1427,7 +1436,9 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                       bcEdit.montantAttribue === "" ? Number(bcEdit.montantHT) || 0 : Math.min(Number(bcEdit.montantAttribue) || 0, Number(bcEdit.montantHT) || 0);
                     const champsBase = {
                       fournisseurNom: bcEdit.fournisseurNom.trim(),
-                      description: bcEdit.description.trim(),
+                      // 📦 La ligne « Livraison souhaitée » du texte suit la date
+                      // de la fiche (2026-09-16, vécu : renvoi avec l'ancienne date).
+                      description: descriptionAvecLivraison(bcEdit.description.trim(), bcEdit.livraisonSouhaitee || null),
                       montantHT: Number(bcEdit.montantHT) || 0,
                     };
                     if (cible.startsWith("p:")) {

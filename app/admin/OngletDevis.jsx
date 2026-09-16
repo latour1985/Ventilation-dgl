@@ -712,6 +712,31 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // service n'est pas configuré, le journal explique quoi faire — rien
   // n'échoue en silence.
   const [envoiDevis, setEnvoiDevis] = useState(null); // { devisId, choisis: [...], extra: "" }
+  // ✏️ CORRIGER UNE ADRESSE COURRIEL À L'ENVOI (2026-09-16, demande du
+  // propriétaire : « modifier le courriel quand on renvoie un devis ») —
+  // la correction est enregistrée à la fiche du client, et l'adresse
+  // corrigée reste cochée pour cet envoi.
+  const [courrielEnEdition, setCourrielEnEdition] = useState(null); // { ancien, valeur }
+  const corrigerCourrielFiche = (devis, ancien, nouveau) => {
+    const propre = String(nouveau || "").trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(propre) || propre.toLowerCase() === String(ancien).toLowerCase()) {
+      setCourrielEnEdition(null);
+      return;
+    }
+    const fiche = ficheClientDe(devis);
+    if (fiche) {
+      setClients((prev) =>
+        prev.map((c) =>
+          c.id !== fiche.id
+            ? c
+            : { ...c, courriels: (c.courriels || []).map((cc) => (typeof cc === "string" ? (cc === ancien ? propre : cc) : cc.email === ancien ? { ...cc, email: propre } : cc)) }
+        )
+      );
+      ajouterJournal(`✏️ Courriel corrigé à la fiche de ${fiche.nom} : ${ancien} → ${propre}.`);
+    }
+    setEnvoiDevis((prev) => (prev ? { ...prev, choisis: prev.choisis.map((a) => (a === ancien ? propre : a)) } : prev));
+    setCourrielEnEdition(null);
+  };
   const [envoiDevisEnCours, setEnvoiDevisEnCours] = useState(false);
   const ficheClientDe = (devis) =>
     clients.find((c) => c.id === devis.clientId) ||
@@ -2047,6 +2072,21 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                       const adresse = typeof c === "string" ? c : c.email;
                       if (!adresse) return null;
                       const coche = envoiDevis.choisis.includes(adresse);
+                      if (courrielEnEdition?.ancien === adresse) {
+                        return (
+                          <div key={adresse} className="mb-1 flex items-center gap-1.5">
+                            <input
+                              autoFocus
+                              value={courrielEnEdition.valeur}
+                              onChange={(e) => setCourrielEnEdition((p) => ({ ...p, valeur: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); corrigerCourrielFiche(affichee, adresse, courrielEnEdition.valeur); } if (e.key === "Escape") setCourrielEnEdition(null); }}
+                              className="min-w-0 flex-1 rounded-lg border border-[#FF6A13] px-2 py-1 text-xs"
+                            />
+                            <button type="button" onClick={() => corrigerCourrielFiche(affichee, adresse, courrielEnEdition.valeur)} className="rounded-lg bg-[#131B2E] px-2 py-1 text-[10px] font-bold text-white">✓</button>
+                            <button type="button" onClick={() => setCourrielEnEdition(null)} className="rounded-lg border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-500">✗</button>
+                          </div>
+                        );
+                      }
                       return (
                         <label key={adresse} className="mb-1 flex items-center gap-1.5 text-xs text-slate-700">
                           <input
@@ -2059,8 +2099,16 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                               }))
                             }
                           />
-                          {adresse}
+                          <span className="min-w-0 truncate">{adresse}</span>
                           {typeof c === "object" && c.label ? <span className="text-[10px] text-slate-400">({c.label})</span> : null}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.preventDefault(); setCourrielEnEdition({ ancien: adresse, valeur: adresse }); }}
+                            title="Corriger cette adresse (enregistrée à la fiche du client)"
+                            className="ml-auto shrink-0 text-[10px] font-bold text-slate-400 hover:text-slate-700"
+                          >
+                            ✏️
+                          </button>
                         </label>
                       );
                     })}
