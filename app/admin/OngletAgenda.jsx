@@ -2465,7 +2465,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               className={`ml-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-extrabold ${resumeLivraisons.retard > 0 ? "border-red-300 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}
               title="Commandes à recevoir — cliquer pour la liste"
             >
-              📦 {resumeLivraisons.total} à recevoir{resumeLivraisons.retard > 0 ? ` · ${resumeLivraisons.retard} en retard` : ""}
+              📦 {resumeLivraisons.total} livraison{resumeLivraisons.total > 1 ? "s" : ""} à recevoir{resumeLivraisons.retard > 0 ? ` · ${resumeLivraisons.retard} en retard` : ""}
             </button>
           )}
         </div>
