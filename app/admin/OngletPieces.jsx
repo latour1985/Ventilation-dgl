@@ -953,6 +953,16 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                   Plus tard
                 </Button>
               </div>
+              {/* 📞 Commande passée par téléphone (2026-09-17) — un clic
+                  marque le bon « par téléphone » (aucun courriel), utile
+                  quand le fournisseur n'a pas de courriel ou qu'on appelle. */}
+              <button
+                type="button"
+                onClick={() => { onMarquerBcEnvoye?.(offreEnvoiBc.numero, ["manuel"]); setOffreEnvoiBc(null); }}
+                className="mt-1.5 w-full rounded-lg border border-sky-300 bg-sky-50 py-2 text-xs font-bold text-sky-700 active:scale-[0.99]"
+              >
+                📞 Commande passée par téléphone (aucun courriel)
+              </button>
               {offreEnvoiBc.nouveau && (
                 <p className="mt-1.5 text-[10px] text-slate-400">« Plus tard » : le bon restera marqué <span className="font-bold text-red-600">Non envoyé</span> dans la liste, avec un bouton pour l&apos;envoyer.</p>
               )}
