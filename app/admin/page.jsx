@@ -1800,7 +1800,14 @@ function AppAdmin() {
     // c'est ce trou qui multipliait les demandes à chaque rechargement.
     if (!session || !piecesChargeesRef.current) return;
     const existantes = new Set(pieces.map((p) => p.tacheOrigineId).filter(Boolean));
+    // 🔐 UNE CLÉ PRINCIPALE (plateforme) voit les bons de TOUTES les
+    // entreprises — ne jamais créer une pièce à partir du bon d'une AUTRE
+    // compagnie dans le dossier affiché (2026-09-17, vécu « Bill Murray »,
+    // bon de ventilation-sage-test). Un bon local (sans entrepriseId)
+    // reste traité.
+    const entrepriseActive = configEntreprise?.id || "dgl";
     (bons || [])
+      .filter((b) => !b.entrepriseId || b.entrepriseId === entrepriseActive)
       .filter((b) => b.pieceACommander && b.pieceRequise && b.tacheId)
       .filter((b) => !existantes.has(b.tacheId) && !dejaCreees.current.has(b.tacheId))
       .forEach((b) => {
