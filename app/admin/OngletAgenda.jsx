@@ -1147,8 +1147,17 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     return m;
   })();
   const aujourdhuiISO = dateISO(new Date());
-  // 📦 Détail d'une livraison (clic sur une pastille) — 2026-09-16.
+  // 📦 Détail d'une livraison (clic sur une ligne) — 2026-09-16.
   const [livraisonOuverte, setLivraisonOuverte] = useState(null);
+  // 📦 PANNEAU DES COMMANDES À RECEVOIR (2026-09-17, demande du
+  // propriétaire : la bande dans la grille était coupée et lourde). Un
+  // seul bouton près de la date ; le panneau liste les jours demandés.
+  const [panneauLivraisons, setPanneauLivraisons] = useState(null); // [dateISO, …] | null
+  const joursLivraisonsAffiches = vue === "jour" ? [dateISO(jourAffiche)] : joursAffiches.map((d) => dateISO(d));
+  const resumeLivraisons = (() => {
+    const lignes = joursLivraisonsAffiches.flatMap((j) => (livraisonsParJour[j] || []).map((x) => ({ ...x, jour: j })));
+    return { total: lignes.length, retard: lignes.filter((x) => x.jour < aujourdhuiISO).length };
+  })();
   // ⏳ PAS FERMÉE (2026-09-15) : journée passée, tâche de travail, aucune
   // heure du technicien — le bloc se hachure au lieu de rester bleu en
   // silence (vécu « Faire sous-dalle » : Dominic jamais fermé, aucun bon).
@@ -1161,13 +1170,17 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // mercredi ») — la grille montrait la bonne semaine mais l'en-tête
   // gardait le jour de départ. Même formule de lundi que la grille.
   const lundiDe = (d) => ajouterJours(d, -d.getDay() + 1);
+  // ‹ › EN VUE JOUR = UNE SEMAINE (2026-09-17, demande du propriétaire :
+  // la barre lun.–dim. choisit déjà le jour ; les flèches servaient à
+  // avancer d'un jour, ce qui rendait l'autre semaine longue à atteindre).
+  // Même jour de semaine, 7 jours plus loin.
   const reculer = () =>
     setJourAffiche(
       vue === "mois"
         ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() - 1, 1)
         : vue === "semaine"
           ? lundiDe(ajouterJours(jourAffiche, -7))
-          : ajouterJours(jourAffiche, -1)
+          : ajouterJours(jourAffiche, -7)
     );
   const avancer = () =>
     setJourAffiche(
@@ -1175,7 +1188,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() + 1, 1)
         : vue === "semaine"
           ? lundiDe(ajouterJours(jourAffiche, 7))
-          : ajouterJours(jourAffiche, 1)
+          : ajouterJours(jourAffiche, 7)
     );
 
   const majDureeTache = (id, champs) => {
@@ -2447,6 +2460,18 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               largeur fixe, les flèches se déplaçaient à chaque clic. */}
           <h2 className="min-w-[230px] text-center text-sm font-extrabold capitalize text-slate-800">{vue === "mois" ? moisLabel : jourLabel}</h2>
           <button onClick={avancer} aria-label="Suivant" className="rounded-lg border border-slate-200 p-1.5"><ChevronRight size={16} /></button>
+          {/* 📦 UN SEUL BOUTON, HORS DE LA GRILLE (2026-09-17) : « N à
+              recevoir » pour la période affichée, rouge s'il y a du retard. */}
+          {resumeLivraisons.total > 0 && (
+            <button
+              type="button"
+              onClick={() => setPanneauLivraisons(joursLivraisonsAffiches)}
+              className={`ml-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-extrabold ${resumeLivraisons.retard > 0 ? "border-red-300 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}
+              title="Commandes à recevoir — cliquer pour la liste"
+            >
+              📦 {resumeLivraisons.total} à recevoir{resumeLivraisons.retard > 0 ? ` · ${resumeLivraisons.retard} en retard` : ""}
+            </button>
+          )}
         </div>
         <div className="flex rounded-lg border border-slate-200 p-0.5">
           {[["jour", "Jour"], ["semaine", "Semaine"], ["mois", "Mois"]].map(([id, labelVue]) => (
@@ -4673,24 +4698,6 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         >
           {vue === "jour" ? (
             <div className="min-w-[640px]">
-              {/* 📦 BANDE « COMMANDES À RECEVOIR » DU JOUR (2026-09-15). */}
-              {(livraisonsParJour[dateISO(jourAffiche)] || []).length > 0 && (() => {
-                const liste = livraisonsParJour[dateISO(jourAffiche)];
-                const retard = dateISO(jourAffiche) < aujourdhuiISO;
-                return (
-                  <div className={`mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] ${retard ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}>
-                    <span className={`font-extrabold ${retard ? "text-red-800" : "text-amber-800"}`}>
-                      📦 Commandes à recevoir{retard ? " — en retard (pas encore reçues)" : ""} :
-                    </span>
-                    {liste.map((x) => (
-                      <button key={x.cle} type="button" onClick={() => setLivraisonOuverte(x)} title="Voir le bon de commande" className={`rounded-full border px-2 py-0.5 font-semibold hover:underline ${retard ? "border-red-200 bg-white text-red-800" : "border-amber-200 bg-white text-amber-900"}`}>
-                        📦 {x.texte}{x.detail ? ` · ${x.detail}` : ""}
-                      </button>
-                    ))}
-                    <span className="text-[10px] text-slate-400">— clique pour voir le bon</span>
-                  </div>
-                );
-              })()}
               <div className="grid" style={{ gridTemplateColumns: `120px repeat(${HEURES.length}, minmax(52px, 1fr))` }}>
                 <div className="sticky left-0 z-10 bg-white" />
                 {HEURES.map((h) => (
@@ -4984,35 +4991,21 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     >
                       {vue === "semaine" ? d.toLocaleDateString(localeDates, { weekday: "short" }) : ""}
                       <div>{marque ? `${marque.type === "ferie" ? "🎌" : "🏖️"}${d.getDate()}` : d.getDate()}</div>
+                      {/* 📦 N commandes à recevoir ce jour (2026-09-17) — clic : le panneau. */}
+                      {(livraisonsParJour[dateISO(d)] || []).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPanneauLivraisons([dateISO(d)])}
+                          title={`${livraisonsParJour[dateISO(d)].length} commande(s) à recevoir — cliquer pour la liste`}
+                          className={`mt-0.5 rounded-full px-1.5 text-[9px] font-extrabold ${dateISO(d) < aujourdhuiISO ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}
+                        >
+                          📦{livraisonsParJour[dateISO(d)].length}
+                        </button>
+                      )}
                     </div>
                   );
                 })}
               </div>
-              {/* 📦 RANGÉE « À RECEVOIR » (2026-09-15) — sous les dates, seulement
-                  si une livraison tombe dans la période affichée. */}
-              {joursAffiches.some((d) => (livraisonsParJour[dateISO(d)] || []).length > 0) && (
-                <div className="grid border-t border-amber-100 bg-amber-50/60" style={{ gridTemplateColumns: `120px repeat(${joursAffiches.length}, minmax(${vue === "mois" ? 34 : 84}px, 1fr))` }}>
-                  <div className="sticky left-0 z-10 flex items-center bg-amber-50 px-2 py-1 text-[10px] font-extrabold text-amber-800">📦 À recevoir</div>
-                  {joursAffiches.map((d) => {
-                    const l = livraisonsParJour[dateISO(d)] || [];
-                    const retard = dateISO(d) < aujourdhuiISO;
-                    const infobulle = l.map((x) => `${x.texte}${x.detail ? ` · ${x.detail}` : ""}`).join("\n");
-                    return (
-                      <div key={dateISO(d)} title={infobulle || undefined} className="flex min-w-0 flex-wrap items-start gap-0.5 px-0.5 py-1">
-                        {vue === "mois"
-                          ? l.length > 0 && (
-                              <span className={`rounded-full px-1 text-[9px] font-bold ${retard ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-800"}`}>📦{l.length}</span>
-                            )
-                          : l.map((x) => (
-                              <button key={x.cle} type="button" onClick={() => setLivraisonOuverte(x)} className={`max-w-full truncate rounded-md border px-1 py-0.5 text-left text-[9px] font-semibold hover:underline ${retard ? "border-red-200 bg-red-100 text-red-700" : "border-amber-200 bg-white text-amber-900"}`}>
-                                📦 {x.texte}
-                              </button>
-                            ))}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
               {rangeesAgenda.map((emp) => {
                 if (emp.enteteSection) return renderEnteteSection(emp.enteteSection);
                 return (
@@ -5291,6 +5284,71 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 Confirmer — débloquer la tâche
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📦 PANNEAU « COMMANDES À RECEVOIR » (2026-09-17) — une ligne par
+          commande, groupées par jour ; « Reçu » sur chaque ligne, clic
+          sur la ligne = détail complet. */}
+      {panneauLivraisons && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setPanneauLivraisons(null); }}>
+          <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl bg-white" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-2 border-b border-slate-100 p-4 pb-3">
+              <div>
+                <p className="text-sm font-extrabold text-slate-900">📦 Commandes à recevoir</p>
+                <p className="text-[11px] text-slate-500">
+                  {panneauLivraisons.length === 1
+                    ? new Date(`${panneauLivraisons[0]}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" })
+                    : `${panneauLivraisons.length} jours affichés`}
+                  {" · "}« Reçu » retire la ligne · clique une ligne pour le contenu complet
+                </p>
+              </div>
+              <button onClick={() => setPanneauLivraisons(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-2">
+              {panneauLivraisons.filter((j) => (livraisonsParJour[j] || []).length > 0).length === 0 && (
+                <p className="py-4 text-center text-xs text-slate-400">Rien à recevoir pour cette période.</p>
+              )}
+              {panneauLivraisons.filter((j) => (livraisonsParJour[j] || []).length > 0).map((j) => {
+                const retard = j < aujourdhuiISO;
+                return (
+                  <div key={j} className="mb-3">
+                    <p className={`mb-1 text-[10px] font-extrabold uppercase tracking-wide ${retard ? "text-red-600" : "text-slate-500"}`}>
+                      {new Date(`${j}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" })}{retard ? " — en retard" : ""}
+                    </p>
+                    <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                      {(livraisonsParJour[j] || []).map((x) => (
+                        <div key={x.cle} className="flex items-center gap-2 px-2.5 py-2 text-[11px]">
+                          <button type="button" onClick={() => setLivraisonOuverte(x)} className="min-w-0 flex-1 text-left hover:underline" title="Voir le contenu complet">
+                            <span className="font-bold text-slate-800">📦 {x.texte}</span>
+                            {x.detail ? <span className="ml-1.5 text-slate-500">{x.detail}</span> : null}
+                            {x.description ? <span className="block truncate text-[10px] text-slate-400">{String(x.description).split("\n")[0]}</span> : null}
+                          </button>
+                          {x.telephone ? (
+                            <span className="shrink-0 text-[9px] font-bold text-sky-700">📞</span>
+                          ) : x.envoye ? (
+                            <span className="shrink-0 text-[9px] font-bold text-emerald-600">✉️</span>
+                          ) : (
+                            <span className="shrink-0 text-[9px] font-bold text-red-600" title="Non envoyé au fournisseur">⚠️</span>
+                          )}
+                          {x.recevable && onMarquerBcRecu && !lectureSeule && (
+                            <button type="button" onClick={() => onMarquerBcRecu(x.numero)} className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] font-bold text-emerald-700 hover:border-emerald-400 active:scale-95">
+                              📦 Reçu
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {onOuvrirPieces && (
+              <div className="border-t border-slate-100 p-3">
+                <Button variant="outline" onClick={() => { setPanneauLivraisons(null); onOuvrirPieces(); }} className="min-h-0 w-full py-2 text-xs">Ouvrir Pièces en commande</Button>
+              </div>
+            )}
           </div>
         </div>
       )}
