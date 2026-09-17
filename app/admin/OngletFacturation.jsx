@@ -24,7 +24,7 @@ import { SectionFacturesMaison } from "./FacturesMaison";
 import { majFacturesEmises, poserFacturesEmisesLot, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
-import { AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
+import { AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, devisAJourPourNumero, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 
@@ -179,6 +179,7 @@ export function FacturesEmisesListe({ bon, onPdf, onRenvoyer, onRenvoyerVers = n
 // ============================================================
 export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLesBons }) {
   const contrat = bon.type === "entretien_contrat";
+  const toutDevis = useDevis(); // liste complète — pour rattacher les bons par dossier
 
   // ============================================================
   // LE SOLDE SUIT LE DEVIS, PAS LE BON DE TRAVAIL
@@ -194,9 +195,18 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
   // (Calculé AVANT les états : le champ « % » démarre au % restant.)
   // (Les factures annulées dans QuickBooks — annuleeQb — ne comptent
   // jamais : leur montant redevient facturable.)
+  // 📄 Cumul par DOSSIER de devis (2026-09-17) : un bon peut porter un
+  // ancien numéro de version (« DEV-3542 ») alors que le devis à jour est
+  // « DEV-3542-1 » — on compare la base pour ne rien manquer.
+  const baseDevis = devis?.numeroBase || devis?.numero;
+  const memeDossier = (b) => {
+    if (!baseDevis) return false;
+    const dd = devisAJourPourNumero(toutDevis, b.devisNumero);
+    return (dd?.numeroBase || dd?.numero || b.devisNumero) === baseDevis;
+  };
   const montantCumule = devis?.numero
     ? (tousLesBons || [])
-        .filter((b) => b.devisNumero === devis.numero)
+        .filter(memeDossier)
         .reduce((s, b) => s + (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((x, f) => x + f.montant, 0), 0)
     : (bon.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + f.montant, 0);
   const montantDevis = devis ? devis.totalVendant : bon.montant;
@@ -2401,7 +2411,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // ============================================================
   const [devisQboCache, setDevisQboCache] = useState({});
   const devisFacturation = bonFacturation
-    ? devisListe.find((d) => d.numero === bonFacturation.devisNumero) ||
+    ? devisAJourPourNumero(devisListe, bonFacturation.devisNumero) ||
       devisQboCache[bonFacturation.devisNumero] ||
       null
     : null;
@@ -3334,7 +3344,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       adresseTravaux: b.adresseTravaux || null,
       // 🔗 Le bon vient d'un devis ? La facture référence son estimate
       // QuickBooks — la comptable voit devis → accepté → facturé.
-      qboEstimateId: (b.devisNumero && devisListe.find((d) => d.numero === b.devisNumero)?.qboEstimateId) || null,
+      qboEstimateId: (b.devisNumero && devisAJourPourNumero(devisListe, b.devisNumero)?.qboEstimateId) || null,
     });
     if (r?.erreur) {
       ajouterJournal(`⚠️ Facture QuickBooks NON créée pour "${b.projet}" : ${r.erreur} — le bon reste en attente`);
@@ -3415,7 +3425,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // Le devis maison d'abord ; sinon le devis QuickBooks retrouvé par
     // numéro — son total sert au statut « envoyé » (cumul atteint).
     const numeroDevisBon = bons.find((b) => b.id === bonId)?.devisNumero;
-    const devisCourant = devisListe.find((d) => d.numero === numeroDevisBon) || devisQboCache[numeroDevisBon] || null;
+    const devisCourant = devisAJourPourNumero(devisListe, numeroDevisBon) || devisQboCache[numeroDevisBon] || null;
     // Chaque facture — complète OU partielle (par pourcentage, par item,
     // ou par échéance de contrat) — est envoyée individuellement à
     // QuickBooks et y crée sa propre facture, avec son propre numéro.
@@ -4176,7 +4186,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             ? "bg-teal-500"
             : "bg-amber-400";
           const montantCumule = (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + f.montant, 0);
-          const devisAssocie = devisType || contrat ? devisListe.find((d) => d.numero === b.devisNumero) : null;
+          const devisAssocie = devisType || contrat ? devisAJourPourNumero(devisListe, b.devisNumero) : null;
           const montantDevisTotal = devisAssocie ? devisAssocie.totalVendant : b.montant;
           // 📱 flex-wrap (séance 3 mobile) : sur téléphone, la colonne
           // des montants/boutons passe SOUS le contenu au lieu de

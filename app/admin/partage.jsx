@@ -843,6 +843,24 @@ export function libelleAdresse(a) {
   return `${a.ligne1}${a.appartement ? `, app. ${a.appartement}` : ""}`;
 }
 
+// 📄 LE DEVIS À JOUR D'UN BON (2026-09-17, demande du propriétaire : « le
+// montant du devis modifié doit suivre pour la facturation et la tâche »).
+// Un bon porte le numéro du devis au moment où il a été créé (ex.
+// « DEV-3542 ») ; si le client a fait ajouter un item après coup, une
+// NOUVELLE VERSION active existe (« DEV-3542-1 ») avec le bon total. On
+// résout donc par DOSSIER (numeroBase) et on rend la version ACTIVE —
+// son total et son estimate sont ceux qui comptent. Repli : le numéro
+// exact, sinon rien.
+export function devisAJourPourNumero(devisListe, numero) {
+  if (!numero) return null;
+  const liste = devisListe || [];
+  const exact = liste.find((d) => d.numero === numero);
+  const base = exact?.numeroBase || numero;
+  const dossier = liste.filter((d) => (d.numeroBase || d.numero) === base);
+  const active = dossier.find((d) => d.versionActive !== false && d.statut !== "annule");
+  return active || exact || null;
+}
+
 // Génère une tâche de transport SYSTÈME (Début/Fin de journée). Ces
 // tâches sont recalculées automatiquement (voir recalculerTransports) et
 // ne doivent pas être supprimées à la main dans la grille.
