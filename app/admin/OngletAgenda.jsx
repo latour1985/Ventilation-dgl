@@ -2103,8 +2103,23 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     ajouterJournal(`📌 Adresse « ${entree.ligne1} » enregistrée au dossier de ${client.nom}`);
   };
 
+  // 📇 Un contact sur place saisi dans la fiche rejoint le carnet du
+  // client (2026-09-17) — anti-doublon par nom + téléphone.
+  const ajouterContactAuCarnet = (tache, contact) => {
+    if (!contact?.nom) return;
+    const client = clients.find((c) => c.id === tache.clientId) || clients.find((c) => c.nom === tache.clientNom);
+    if (!client) return;
+    const deja = (client.contacts || []).some(
+      (c) => (c.nom || "").trim().toLowerCase() === contact.nom.trim().toLowerCase() && (c.telephone || "") === (contact.telephone || "")
+    );
+    if (deja) return;
+    setClients((prev) => prev.map((x) => (x.id === client.id ? { ...x, contacts: [...(x.contacts || []), contact] } : x)));
+    ajouterJournal(`📇 Contact « ${contact.nom} »${contact.telephone ? ` (${contact.telephone})` : ""} ajouté au carnet de ${client.nom}.`);
+  };
+
   const modifierTachePlanifiee = (tache, ancienEmployeId, champs) => {
     if (champs?.nouvelleAdressePourDossier) poserAdresseAuDossier(tache, champs.nouvelleAdressePourDossier);
+    if (champs?.nouveauContactCarnet) ajouterContactAuCarnet(tache, champs.nouveauContactCarnet);
     if (lectureSeule) return;
     // Synchro Supabase : si la tâche change de technicien (ou retourne en
     // attente), on retire l'ancienne assignation. Si c'est le même
@@ -2171,11 +2186,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, nouveauContactCarnet }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
     if (nouvelleAdressePourDossier) poserAdresseAuDossier(tache, nouvelleAdressePourDossier);
+    if (nouveauContactCarnet) ajouterContactAuCarnet(tache, nouveauContactCarnet);
     const tacheMiseAJour = {
       ...tache,
       heures,

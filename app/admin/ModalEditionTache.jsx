@@ -80,6 +80,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
     const dansCarnet = (ficheClient?.contacts || []).some((x) => x.id === tache.contactSurPlace.id);
     return dansCarnet ? tache.contactSurPlace.id : "actuel";
   });
+  // 📇 Champs d'un NOUVEAU contact sur place saisi ici (2026-09-17).
+  const [contactNouvNom, setContactNouvNom] = useState("");
+  const [contactNouvRole, setContactNouvRole] = useState("");
+  const [contactNouvTel, setContactNouvTel] = useState("");
   const dejaPlanifiee = !!employeIdInitial;
   // Assignation MULTIPLE à la création (édition rapide) : tous les
   // techniciens cochés reçoivent la tâche avec la même date/heure/durée
@@ -277,8 +281,17 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const enregistrer = () => {
     // Contact sur place résolu depuis le carnet (ou conservé tel quel).
     const carnetClient = client?.contacts || [];
+    // 📇 Nouveau contact tapé ICI (2026-09-17, vécu : impossible d'ajouter
+    // un nom + numéro de la personne sur place depuis la fiche) — attaché
+    // à la tâche ET ajouté au carnet du client (via nouveauContactCarnet).
+    const nouveauContact =
+      contactTacheId === "nouveau" && contactNouvNom.trim()
+        ? { id: `ct-${Date.now()}`, nom: contactNouvNom.trim(), role: contactNouvRole.trim(), telephone: contactNouvTel.trim() }
+        : null;
     const contactChoisi =
-      contactTacheId === ""
+      contactTacheId === "nouveau"
+        ? nouveauContact
+        : contactTacheId === ""
         ? null
         : contactTacheId === "actuel"
           ? tache.contactSurPlace || null
@@ -302,6 +315,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       heureDebut,
       description,
       contactSurPlace: contactChoisi,
+      // Le nouveau contact rejoint le carnet du client (traité par l'appelant).
+      ...(nouveauContact ? { nouveauContactCarnet: nouveauContact } : {}),
       // 🛡️ Transmis SEULEMENT s'il a changé — une clé absente laisse
       // l'existant tranquille (même règle que les rattachements).
       ...(garantieRetour !== !!tache.garantie ? { garantie: garantieRetour } : {}),
@@ -775,7 +790,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               (« finalement c'est le concierge qui t'ouvre ») ; la mise à
               jour part en direct vers le téléphone du technicien. Les
               contacts s'ajoutent au carnet via la fiche client. */}
-          {(client?.contacts?.length > 0 || tache.contactSurPlace) && (
+          {/* Toujours affiché quand un client est résolu (2026-09-17) :
+              avant, sans contact au carnet, la section n'apparaissait pas
+              et on ne pouvait pas en ajouter un. */}
+          {(client || tache.contactSurPlace) && (
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Contact sur place</label>
               <select
@@ -794,7 +812,18 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                     {c.nom}{c.role ? ` — ${c.role}` : ""}{c.telephone ? ` (${c.telephone})` : ""}
                   </option>
                 ))}
+                <option value="nouveau">➕ Nouveau contact…</option>
               </select>
+              {contactTacheId === "nouveau" && (
+                <div className="mt-1.5 space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input value={contactNouvNom} onChange={(e) => setContactNouvNom(e.target.value)} placeholder="Nom" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                    <input value={contactNouvRole} onChange={(e) => setContactNouvRole(e.target.value)} placeholder="Rôle (ex : concierge)" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  </div>
+                  <input value={contactNouvTel} onChange={(e) => setContactNouvTel(e.target.value)} placeholder="Téléphone" className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  <p className="text-[10px] text-slate-400">Ajouté au carnet de {client?.nom || "ce client"} à l&apos;enregistrement — le technicien le verra avec un bouton d&apos;appel.</p>
+                </div>
+              )}
             </div>
           )}
 
