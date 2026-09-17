@@ -742,7 +742,7 @@ function PanneauMinutage({ tache, onDemarrer, onPause, onReprendre, onTerminer, 
       {tacheBloquante && tache.etat !== "complete" && (
         <div className="mt-3 flex items-start gap-2 rounded-xl bg-slate-100 p-3 text-xs font-semibold text-slate-600">
           <Lock size={14} className="mt-0.5 shrink-0" />
-          {t("Termine d'abord «")} {tacheBloquante.titre || tacheBloquante.clientNom} {t("» avant de commencer celle-ci — une seule tâche à la fois.")}
+          {t("Mets en pause «")} {tacheBloquante.titre || tacheBloquante.clientNom} {t("» avant de commencer celle-ci — une seule tâche en cours à la fois.")}
         </div>
       )}
 
@@ -6274,8 +6274,13 @@ function AppTechnicien() {
     // technicien — la tâche en cours doit être terminée avant d'en
     // commencer une autre. Les boutons sont déjà désactivés côté
     // interface (voir tacheBloquante), ceci est une garde défensive.
+    // 🔁 UNE SEULE tâche EN COURS à la fois (le chrono ne peut pas
+    // compter deux fois la même minute) — MAIS une tâche EN PAUSE ne
+    // bloque plus (2026-09-17, demande du propriétaire : sur un projet
+    // dans la même bâtisse, on jongle entre deux tâches). On met A en
+    // pause, on démarre B ; plus tard on met B en pause et on reprend A.
     const autreTacheActive = taches.some(
-      (t) => t.id !== id && t.id !== ccqEnRoute?.id && (t.etat === "en_cours" || t.etat === "en_pause")
+      (t) => t.id !== id && t.id !== ccqEnRoute?.id && t.etat === "en_cours"
     );
     if (autreTacheActive) return;
     if (ccqEnRoute) terminerTache(ccqEnRoute.id);
@@ -6889,11 +6894,15 @@ function AppTechnicien() {
   // EXCEPTION : un « Transport journalier » en cours ne bloque
   // JAMAIS — cette carte est invisible pour le technicien, et démarrer
   // n'importe quelle tâche l'arrête automatiquement (voir demarrerTache).
+  // 🔁 Seule une tâche EN COURS bloque (2026-09-17) : une tâche en PAUSE
+  // n'empêche plus d'en démarrer/reprendre une autre — on jongle entre
+  // deux tâches d'un même projet. Le chrono, lui, ne roule que sur une
+  // à la fois (démarrer B met A en pause côté écran, pas de double compte).
   const tacheBloquante = tacheActive
     ? taches.find(
         (t) =>
           t.id !== tacheActive.id &&
-          (t.etat === "en_cours" || t.etat === "en_pause") &&
+          t.etat === "en_cours" &&
           t.momentTransport !== "ccq"
       )
     : null;
