@@ -2158,6 +2158,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // rien à changer (voir la modale : elles ne partent que modifiées).
       ...(champs.projetId !== undefined ? { projetId: champs.projetId } : {}),
       ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
+      // 📄 Le titre auto « Devis X — Intervention » suit le nouveau devis.
+      ...(champs.devisNumero !== undefined && champs.devisNumero && /^Devis .+ — Intervention$/.test(tache.titre || "")
+        ? { titre: `Devis ${champs.devisNumero} — Intervention` }
+        : {}),
       // 🛡️ Retour sous garantie — clé absente = marque inchangée.
       ...(champs.garantie !== undefined ? { garantie: champs.garantie } : {}),
       // 📎 Pièces jointes ajoutées après coup — clé absente = inchangées.
@@ -2210,6 +2214,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // 🏗️/📄 Rattachements modifiés dans la fiche — clé absente = inchangé.
       ...(projetId !== undefined ? { projetId } : {}),
       ...(devisNumero !== undefined ? { devisNumero } : {}),
+      // 📄 Le TITRE auto « Devis X — Intervention » suit le nouveau devis
+      // (2026-09-17, vécu : devis changé pour DEV-3542, mais le titre — donc
+      // le libellé partout, ex. rattachement d'un BC — montrait encore 3541).
+      // On ne touche pas à un titre personnalisé.
+      ...(devisNumero !== undefined && devisNumero && /^Devis .+ — Intervention$/.test(tache.titre || "")
+        ? { titre: `Devis ${devisNumero} — Intervention` }
+        : {}),
     };
     // Assignation multiple : tous les techniciens cochés reçoivent la
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
