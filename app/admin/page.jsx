@@ -1974,12 +1974,19 @@ function AppAdmin() {
       // 🚦 Un devis PAS accepté (nouvelle version, envoyé…) remet
       // l'estimate « en attente » ; un devis accepté garde son statut.
       reinitialiserStatut: d.statut !== "accepte",
-      lignes: d.lignes.map((l) => ({
-        nom: undefined,
-        description: l.nom || l.description || "",
-        quantite: Number(l.quantite) || 1,
-        prixUnitaire: Number(l.prix_vendant) || 0,
-      })),
+      // 📝 Nom ET description de chaque ligne (2026-09-17, vécu : sur
+      // l'estimate QuickBooks, seul le nom suivait — modèle, garantie, ce
+      // qui est inclus, tout le détail manquait). Même format que le PDF
+      // et la facture : titre, puis sa description en dessous.
+      lignes: d.lignes.map((l) => {
+        const detail = String(l.description || "").trim();
+        return {
+          nom: undefined,
+          description: `${l.nom || ""}${detail ? `\n${detail}` : ""}`.trim() || l.nom || "Item du devis",
+          quantite: Number(l.quantite) || 1,
+          prixUnitaire: Number(l.prix_vendant) || 0,
+        };
+      }),
     })
       .then(async (r) => {
         if (r?.creee) {
