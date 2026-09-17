@@ -1173,22 +1173,18 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // ‹ › EN VUE JOUR = UNE SEMAINE (2026-09-17, demande du propriétaire :
   // la barre lun.–dim. choisit déjà le jour ; les flèches servaient à
   // avancer d'un jour, ce qui rendait l'autre semaine longue à atteindre).
-  // Même jour de semaine, 7 jours plus loin.
+  // On atterrit sur le LUNDI de la semaine visée (choix du propriétaire).
   const reculer = () =>
     setJourAffiche(
       vue === "mois"
         ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() - 1, 1)
-        : vue === "semaine"
-          ? lundiDe(ajouterJours(jourAffiche, -7))
-          : ajouterJours(jourAffiche, -7)
+        : lundiDe(ajouterJours(jourAffiche, -7))
     );
   const avancer = () =>
     setJourAffiche(
       vue === "mois"
         ? new Date(jourAffiche.getFullYear(), jourAffiche.getMonth() + 1, 1)
-        : vue === "semaine"
-          ? lundiDe(ajouterJours(jourAffiche, 7))
-          : ajouterJours(jourAffiche, 7)
+        : lundiDe(ajouterJours(jourAffiche, 7))
     );
 
   const majDureeTache = (id, champs) => {
