@@ -2171,7 +2171,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2191,6 +2191,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(piecesJointes !== undefined ? { piecesJointes } : {}),
       // ✅ Étapes de la job — clé absente = inchangées.
       ...(etapes !== undefined ? { etapes } : {}),
+      // 🏗️/📄 Rattachements modifiés dans la fiche — clé absente = inchangé.
+      ...(projetId !== undefined ? { projetId } : {}),
+      ...(devisNumero !== undefined ? { devisNumero } : {}),
     };
     // Assignation multiple : tous les techniciens cochés reçoivent la
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
@@ -5567,6 +5570,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           employes={employes}
           tache={tachesAttente.find((t) => t.id === tacheEnEditionId)}
           clients={clients}
+          devisListe={devisListe}
+          projets={projets}
           commandes={commandesPourTache(tacheEnEditionId)}
           onFermer={() => setTacheEnEditionId(null)}
           onEnregistrer={(champs) => enregistrerEditionRapide(tacheEnEditionId, champs)}

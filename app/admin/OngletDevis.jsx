@@ -1532,7 +1532,17 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       clientId: devis.clientId,
       clientNom: devis.clientNom,
       titre: `Devis ${devis.numero} — Intervention`,
-      description: materiaux.map((m) => `${m.quantite} × ${m.description}`).join(", "),
+      // 📝 La DESCRIPTION de chaque item suit dans la tâche (2026-09-17,
+      // vécu : seuls les noms « 1 × Canair… » apparaissaient — modèles,
+      // garantie, ce qui est inclus, tout le détail du devis manquait au
+      // technicien). Rabais exclus (pas de travail à décrire).
+      description: (devis.lignes || [])
+        .filter((l) => !l.estRabais)
+        .map((l) => {
+          const detail = String(l.description || "").trim();
+          return `${l.quantite} × ${l.nom}${detail ? `\n${detail}` : ""}`;
+        })
+        .join("\n\n"),
       statut: "a_planifier",
       heures: 1,
       jours: 0,
