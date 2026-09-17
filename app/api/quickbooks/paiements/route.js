@@ -148,6 +148,52 @@ export async function POST(request) {
       return Response.json({ credits, tronque: credits.length >= 500 });
     }
 
+    // 💳 { action: "frais-paiement" } — FRAIS DE TRAITEMENT PAR CARTE /
+    // DÉBIT (2026-09-17, demande du propriétaire) : les paiements réels
+    // sont lus du registre QuickBooks ; selon leur MODE (PaymentMethodRef),
+    // on estime les frais qui rongent la marge :
+    //   • carte de crédit : 2,9 % + 0,25 $ par paiement ;
+    //   • débit / virement (QuickBooks) : 1 %.
+    // Les autres modes (comptant, chèque) : aucun frais. Regroupé par
+    // client (via les factures liées) pour l'analyse de rentabilité.
+    // Lecture seule — la vérité vient du registre, jamais d'une supposition.
+    if (corps?.action === "frais-paiement") {
+      const depuis = new Date();
+      depuis.setMonth(depuis.getMonth() - 13);
+      const dateDepuis = depuis.toISOString().slice(0, 10);
+      const estCarte = (m) => /carte|credit|crédit|visa|master|amex|discover/i.test(m);
+      const estDebit = (m) => /debit|débit|interac|ach|virement|bank|prélèv|prelev/i.test(m);
+      const frais = [];
+      for (let position = 1; position <= 901; position += 100) {
+        const reponse = await requeteQbo(
+          acces,
+          `select * from Payment where TxnDate >= '${dateDepuis}' startposition ${position} maxresults 100`
+        );
+        const page = reponse?.Payment || [];
+        for (const p of page) {
+          const methode = String(p?.PaymentMethodRef?.name || "").trim();
+          const montant = Number(p?.TotalAmt) || 0;
+          if (montant <= 0) continue;
+          let f = 0;
+          let type = "autre";
+          if (estCarte(methode)) { f = montant * 0.029 + 0.25; type = "carte"; }
+          else if (estDebit(methode)) { f = montant * 0.01; type = "debit"; }
+          else continue; // comptant / chèque / inconnu : aucun frais
+          frais.push({
+            id: p?.Id,
+            client: p?.CustomerRef?.name || "",
+            date: p?.TxnDate || null,
+            montant: Math.round(montant * 100) / 100,
+            frais: Math.round(f * 100) / 100,
+            type,
+            methode,
+          });
+        }
+        if (page.length < 100) break;
+      }
+      return Response.json({ frais, tronque: frais.length >= 900 });
+    }
+
     // ⏱️ { action: "delais" } — TEMPS DE PAIEMENT MOYEN PAR CLIENT
     // (2026-09-06, demande du propriétaire). Les PAIEMENTS des 12
     // derniers mois sont lus du registre, rattachés à leurs factures

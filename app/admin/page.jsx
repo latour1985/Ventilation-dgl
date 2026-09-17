@@ -50,7 +50,7 @@ import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaieme
 import { termesHtmlCourriel } from "@/lib/termes";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
-import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo, refleterReponsesDevisQbo, lireCreditsQbo } from "@/lib/quickbooksClient";
+import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo, refleterReponsesDevisQbo, lireCreditsQbo, lireFraisPaiementQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
@@ -2628,6 +2628,7 @@ function AppAdmin() {
   // transactions (même cadence) pour que l'analyse de rentabilité
   // soustraie les remboursements du facturé.
   const [creditsQb, setCreditsQb] = useState([]);
+  const [fraisPaiementQb, setFraisPaiementQb] = useState([]);
   // 🧭 UN SEUL CHEMIN DE FACTURATION (2026-09-03, demande du
   // propriétaire : « ne pas mettre l'option QuickBooks si le client n'en
   // a pas besoin — il pourrait créer la mauvaise facture »). L'onglet
@@ -2968,6 +2969,13 @@ function AppAdmin() {
           if (!annule && Array.isArray(rc?.credits)) setCreditsQb(rc.credits);
         } catch {
           // silencieux — l'analyse fonctionne sans (crédits à 0)
+        }
+        // 💳 Frais de carte/débit (2026-09-17) — retranchés de la marge.
+        try {
+          const rf = await lireFraisPaiementQbo();
+          if (!annule && Array.isArray(rf?.frais)) setFraisPaiementQb(rf.frais);
+        } catch {
+          // silencieux — l'analyse fonctionne sans (frais à 0)
         }
         // ⬇️ DESCENTE SILENCIEUSE DES CLIENTS (2026-08-29, même cadence) :
         // un client créé directement dans QuickBooks (par la comptable)
@@ -3364,6 +3372,7 @@ function AppAdmin() {
           tauxMetiers={tauxMetiers}
           tauxMetiersRes={tauxMetiersRes}
           creditsQb={creditsQb}
+          fraisPaiementQb={fraisPaiementQb}
           parcCamions={parcCamions}
           clients={clients}
           compteAlertes={compteAlertes}

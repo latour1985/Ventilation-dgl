@@ -10,7 +10,7 @@ import { X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { bornesPeriodeAnalyse, dateISO } from "./partage";
 
-export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], depots = {}, utilisateurs = [], tauxMetiers = {}, tauxMetiersRes = {}, creditsQb = [], onFermer }) {
+export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], depots = {}, utilisateurs = [], tauxMetiers = {}, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], onFermer }) {
   // 🧾 DÉPENSES QUICKBOOKS RATTACHÉES (2026-08-26) — l'écran ne les
   // recevait même pas : un achat fait dans QuickBooks pour une job
   // n'apparaissait donc dans AUCUN coût ici, quoi qu'on fasse.
@@ -178,6 +178,21 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
     return m;
   })();
   const creditsTotal = creditsDansBornes.reduce((s, c) => s + (Number(c.montantHT) || 0), 0);
+  // 💳 FRAIS DE CARTE / DÉBIT de la période (2026-09-17) — lus des
+  // paiements réels QuickBooks (carte 2,9 %+0,25 $, débit 1 %). Ce sont
+  // des COÛTS : ils rongent la marge, comme les crédits baissent le revenu.
+  const fraisDansBornes = (fraisPaiementQb || []).filter((f) => f.date && f.date >= bornes.debut && f.date <= bornes.fin);
+  const fraisParClient = (() => {
+    const m = new Map();
+    fraisDansBornes.forEach((f) => {
+      const nom = f.client || "Sans client";
+      m.set(nom, (m.get(nom) || 0) + (Number(f.frais) || 0));
+    });
+    return m;
+  })();
+  const fraisTotal = fraisDansBornes.reduce((s, f) => s + (Number(f.frais) || 0), 0);
+  const fraisCarteTotal = fraisDansBornes.filter((f) => f.type === "carte").reduce((s, f) => s + (Number(f.frais) || 0), 0);
+  const fraisDebitTotal = fraisDansBornes.filter((f) => f.type === "debit").reduce((s, f) => s + (Number(f.frais) || 0), 0);
   // 🔁 COMPARATIF « à pareille date l'an passé » : les MÊMES bornes,
   // reculées d'un an. Jamais 9 mois contre 12 — ça mentirait.
   const reculerUnAn = (d) => {
@@ -317,6 +332,12 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
       e.facture -= montant;
       m.set(nom, e);
     });
+    // 💳 Frais de carte/débit → coût de plus pour le client (2026-09-17).
+    fraisParClient.forEach((montant, nom) => {
+      const e = m.get(nom) || { clientNom: nom, jobs: 0, facture: 0, cout: 0 };
+      e.cout += montant;
+      m.set(nom, e);
+    });
     return [...m.values()]
       .map((e) => ({ ...e, marge: e.facture > 0 ? ((e.facture - e.cout) / e.facture) * 100 : null }))
       .sort((a, b2) => b2.facture - a.facture);
@@ -361,6 +382,12 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
     creditsParClient.forEach((montant, nom) => {
       const e = m.get(nom) || { clientNom: nom, facture: 0, cout: 0, jobs: 0 };
       e.facture -= montant;
+      m.set(nom, e);
+    });
+    // 💳 Les frais de carte/débit s'ajoutent au coût du client (2026-09-17).
+    fraisParClient.forEach((montant, nom) => {
+      const e = m.get(nom) || { clientNom: nom, facture: 0, cout: 0, jobs: 0 };
+      e.cout += montant;
       m.set(nom, e);
     });
     return [...m.values()]
@@ -446,16 +473,29 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
             {stats.coutMateriaux > 0 && (
               <p className="text-[10px] text-slate-500">+ {fmt$(stats.coutMateriaux)} matériel et achats</p>
             )}
+            {/* 💳 Frais de traitement RÉELS (QuickBooks) — 2026-09-17. */}
+            {fraisTotal > 0 && (
+              <p className="text-[10px] text-red-500" title={`Carte : ${fmt$(fraisCarteTotal)} · Débit : ${fmt$(fraisDebitTotal)}`}>
+                + {fmt$(fraisTotal)} frais de carte/débit
+              </p>
+            )}
           </div>
           <div className="rounded-xl border border-purple-200 bg-purple-50 p-3">
             <p className="text-[9px] font-extrabold uppercase text-purple-500">👻 Coût invisible</p>
             <p className="mt-0.5 text-xl font-extrabold tabular-nums text-purple-700">{fmt$(stats.coutInvisible)}</p>
             <p className="text-[10px] text-purple-500">{stats.heuresInvisibles.toFixed(1)} h admin + divers</p>
           </div>
-          <div className={`rounded-xl border p-3 ${stats.margeOp != null && stats.margeOp < seuil ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}`}>
-            <p className="text-[9px] font-extrabold uppercase text-slate-500">Marge opérationnelle</p>
-            <p className={`mt-0.5 text-xl font-extrabold tabular-nums ${classeMarge(stats.margeOp)}`}>
-              {stats.margeOp == null ? "—" : `${stats.margeOp.toFixed(0)} %`}
+          {/* 📉 Marge NETTE : revenu moins crédits, coûts incluant les
+              frais de carte/débit réels (2026-09-17). C'est la vraie marge
+              une fois le client payé et les frais retranchés. */}
+          {(() => {
+          const revenusNet = stats.revenus - creditsTotal;
+          const margeNette = revenusNet > 0 ? ((revenusNet - stats.coutMo - stats.coutMateriaux - fraisTotal) / revenusNet) * 100 : null;
+          return (
+          <div className={`rounded-xl border p-3 ${margeNette != null && margeNette < seuil ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"}`}>
+            <p className="text-[9px] font-extrabold uppercase text-slate-500">Marge opérationnelle{creditsTotal > 0 || fraisTotal > 0 ? " (nette)" : ""}</p>
+            <p className={`mt-0.5 text-xl font-extrabold tabular-nums ${classeMarge(margeNette)}`}>
+              {margeNette == null ? "—" : `${margeNette.toFixed(0)} %`}
             </p>
             {tendance != null && (
               <p className={`text-[10px] font-bold ${tendance > 0.5 ? "text-emerald-600" : tendance < -0.5 ? "text-red-600" : "text-slate-400"}`}>
@@ -463,11 +503,14 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
               </p>
             )}
             <p className="text-[9px] text-slate-400">
-              {stats.coutMateriaux > 0
-                ? "main-d'œuvre, camion, matériel et achats rattachés"
-                : "aucun matériel ni achat rattaché à cette période"}
+              {[
+                stats.coutMateriaux > 0 ? "main-d'œuvre, camion, matériel et achats" : "main-d'œuvre et camion",
+                fraisTotal > 0 ? "frais de carte/débit" : null,
+                creditsTotal > 0 ? "net des crédits" : null,
+              ].filter(Boolean).join(", ")}
             </p>
           </div>
+          ); })()}
         </div>
 
         {/* 🔁 COMPARATIF vs L'AN PASSÉ — mêmes bornes, un an plus tôt */}
