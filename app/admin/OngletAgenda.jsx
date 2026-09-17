@@ -2486,6 +2486,28 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               largeur fixe, les flèches se déplaçaient à chaque clic. */}
           <h2 className="min-w-[230px] text-center text-sm font-extrabold capitalize text-slate-800">{vue === "mois" ? moisLabel : jourLabel}</h2>
           <button onClick={avancer} aria-label="Suivant" className="rounded-lg border border-slate-200 p-1.5"><ChevronRight size={16} /></button>
+          {/* 📅 « Aujourd'hui » (2026-09-17) — retour rapide à la période
+              actuelle après avoir avancé/reculé ; caché quand on y est déjà
+              (jour affiché = aujourd'hui, ou même semaine, ou même mois). */}
+          {(() => {
+            const auj = new Date();
+            const dejaAujourdhui =
+              vue === "mois"
+                ? jourAffiche.getFullYear() === auj.getFullYear() && jourAffiche.getMonth() === auj.getMonth()
+                : vue === "semaine"
+                  ? dateISO(lundiDe(jourAffiche)) === dateISO(lundiDe(auj))
+                  : dateISO(jourAffiche) === dateISO(auj);
+            if (dejaAujourdhui) return null;
+            return (
+              <button
+                onClick={() => setJourAffiche(new Date())}
+                className="ml-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                title="Revenir à la période actuelle"
+              >
+                📅 Aujourd&apos;hui
+              </button>
+            );
+          })()}
           {/* 📦 UN SEUL BOUTON, HORS DE LA GRILLE (2026-09-17) : « N à
               recevoir » pour la période affichée, rouge s'il y a du retard. */}
           {resumeLivraisons.total > 0 && (
