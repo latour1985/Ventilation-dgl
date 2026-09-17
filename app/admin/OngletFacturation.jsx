@@ -322,12 +322,19 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
           return {
             description: `${detailLigne(l)}${partiel ? `\n(portion facturée : ${prog.progressPercent} % de ${totalHT.toFixed(2)} $)` : ""}`,
             montant: Math.round(prog.billedAmount * 100) / 100,
+            // 🔢 Ligne PLEINE : la quantité et le prix unitaire suivent sur
+            // la facture QuickBooks (2026-09-17, vécu : tout à Qté 1). Une
+            // portion PARTIELLE n'a pas de prix unitaire propre → Qté 1.
+            ...(!partiel ? { quantite: Number(l.quantite) || 1, prixUnitaire: Number(l.prix_vendant) || 0 } : {}),
           };
         });
     } else if (devis && type === "complete" && montantCumule < 0.01) {
       lignesFacture = devis.lignes.map((l) => ({
         description: detailLigne(l),
         montant: Math.round(l.quantite * (Number(l.prix_vendant) || 0) * 100) / 100,
+        // 🔢 Quantité et prix unitaire réels → QuickBooks les affiche.
+        quantite: Number(l.quantite) || 1,
+        prixUnitaire: Number(l.prix_vendant) || 0,
       }));
     }
     if (lignesFacture) {
@@ -3045,7 +3052,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const r = await creerFactureQbo({
       clientId: donnees.client?.id || null,
       clientNom: nomClient,
-      lignes: lignes.map((l) => ({ description: l.description, montant: l.montant })),
+      // 🔢 Quantité + prix unitaire transmis (2026-09-17) — QuickBooks
+      // affiche la vraie Qté au lieu de 1 (vécu sur une vente directe).
+      lignes: lignes.map((l) => ({
+        description: l.description,
+        montant: l.montant,
+        ...(Number(l.quantite) > 0 ? { quantite: Number(l.quantite), prixUnitaire: Math.round((l.montant / Number(l.quantite)) * 10000) / 10000 } : {}),
+      })),
       termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: donnees.reference || "Facture",
       paiementCarte: paiements.carte === true,
