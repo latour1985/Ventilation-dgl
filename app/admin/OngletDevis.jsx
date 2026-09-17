@@ -2013,7 +2013,18 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                   if (peutEnvoyer) ajouter({ cle: "envoyer", libelle: accepte ? tr("✉️ Renvoyer la copie au client") : tr("✉️ Envoyer au client"), action: () => ouvrirEnvoiDevis(affichee) });
                   ajouter({ cle: "voir", libelle: "Voir version client", icone: <FileText size={13} />, action: () => setDevisAperçu(affichee) });
                   if (estActive && (!affichee.reponseClient || affichee.reponseClient === "accepte")) ajouter({ cle: "lien", libelle: lienCopie === affichee.id ? "Lien copié ✓" : accepte ? "Copier le lien du devis" : "Copier le lien d'acceptation", icone: <Copy size={13} />, action: () => creerLienAcceptation(affichee) });
-                  if (!affichee.traite && creationVersionPour !== affichee.numero) ajouter({ cle: "version", libelle: estActive ? "Nouvelle version" : "Copier vers une nouvelle version", icone: <Plus size={13} />, action: () => { setCreationVersionPour(affichee.numero); setNoteNouvelleVersion(""); } });
+                  // 📄 NOUVELLE VERSION offerte même sur un devis ACCEPTÉ /
+                  // TRAITÉ (2026-09-17, vécu : « le client veut un item de
+                  // plus, je dois pouvoir le rouvrir ») — la révision repart
+                  // fraîche (ni acceptée ni traitée), à renvoyer et faire
+                  // ré-accepter. Label explicite quand il est déjà bouclé.
+                  if (creationVersionPour !== affichee.numero && affichee.statut !== "annule")
+                    ajouter({
+                      cle: "version",
+                      libelle: !estActive ? "Copier vers une nouvelle version" : (accepte || affichee.traite) ? "➕ Ajouter un item — nouvelle version" : "Nouvelle version",
+                      icone: <Plus size={13} />,
+                      action: () => { setCreationVersionPour(affichee.numero); setNoteNouvelleVersion(""); },
+                    });
                   if (estActive && accepte) ajouter({ cle: "annuler", libelle: "❌ Le client annule — annuler ce devis accepté…", danger: true, action: () => { setAnnulationDevis(affichee); setRaisonAnnulationDevis(""); } });
                   const visibles = actions.filter((a) => !a.cache);
                   if (visibles.length === 0) return null;
@@ -2170,10 +2181,15 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 {creationVersionPour === affichee.numero ? (
                   <div className="mt-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5">
                     <p className="text-[11px] font-bold text-slate-800">Nouvelle version à partir de {affichee.numero}</p>
+                    {(affichee.reponseClient === "accepte" || affichee.traite) && (
+                      <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] leading-snug text-amber-800">
+                        Ce devis est déjà {affichee.traite ? "converti en bon de travail" : "accepté"} : la nouvelle version repart « à envoyer » (le client devra l&apos;accepter à nouveau).{affichee.traite ? " Pense à re-traiter la version acceptée pour mettre le bon de travail à jour." : ""}
+                      </p>
+                    )}
                     <input
                       value={noteNouvelleVersion}
                       onChange={(e) => setNoteNouvelleVersion(e.target.value)}
-                      placeholder="Raison (ex : le client retire le rooftop)"
+                      placeholder="Raison (ex : le client ajoute un rooftop)"
                       className="mt-1.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                     />
                     <div className="mt-1.5 flex gap-1.5">
