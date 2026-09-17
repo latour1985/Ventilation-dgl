@@ -1918,14 +1918,19 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     rendre CETTE version active (le lien du client la
                     montre), ou l'OFFRIR en option comparable — le client
                     feuillette et choisit en répondant, sur le même lien. */}
-                {!estActive && !active.traite && affichee.statut !== "annule" && (
+                {/* ⭐ « Rendre active » offerte même si la version courante
+                    est TRAITÉE (2026-09-17, vécu : révision d'un devis déjà
+                    converti en bon — impossible de basculer sur la nouvelle
+                    version pour la faire accepter). rendreVersionActive
+                    prévient déjà que l'acceptation précédente sera archivée. */}
+                {!estActive && affichee.statut !== "annule" && (
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => rendreVersionActive(versions, affichee)}
                       title="Le lien du client (toujours le même) montrera cette version — c'est elle qu'il pourra accepter"
                       className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-700 active:scale-95"
                     >
-                      ⭐ Rendre cette version active
+                      ⭐ Rendre cette version active — à faire accepter
                     </button>
                     <label className="flex cursor-pointer items-center gap-1.5 text-[10px] font-bold text-slate-600">
                       <input
