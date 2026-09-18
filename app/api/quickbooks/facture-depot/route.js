@@ -31,6 +31,7 @@ import {
   echapperQbo,
   clientQboPour,
   articleServiceQboPour,
+  articleQboParNom,
   codeTaxeVente,
   proprietesTaxe,
   envoyerFactureParQb,
@@ -182,7 +183,9 @@ export async function POST(request) {
           Amount: montantHT,
           Description: description,
           SalesItemLineDetail: {
-            ItemRef: { value: itemId },
+            // 🏷️ Un dépôt, c'est un APPEL DE SERVICE (2026-09-18) — classé
+            // comme tel dans QuickBooks ; repli : l'article général.
+            ItemRef: { value: (await articleQboParNom(acces, "Appel de service")).id || itemId },
             Qty: 1,
             UnitPrice: montantHT,
             ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),

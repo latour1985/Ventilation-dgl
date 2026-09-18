@@ -23,6 +23,7 @@ import {
   echapperQbo,
   clientQboPour,
   articleServiceQboPour,
+  resolveurArticlesQbo,
   codeTaxeVente,
   proprietesTaxe, entrepriseDuCompte } from "@/lib/quickbooksServeur";
 // 🔒 RLS phase 3 : le rôle vient de la table des permissions.
@@ -127,6 +128,10 @@ export async function POST(request) {
                 description: String(l.Description || "").trim() || "Item du devis",
                 quantite: Number(l.SalesItemLineDetail?.Qty) || 1,
                 prixUnitaire: Number(l.SalesItemLineDetail?.UnitPrice) || Number(l.Amount) || 0,
+                // 🏷️ Le Produit/service de la ligne (2026-09-18) — la
+                // facture classera la vente comme le devis l'avait fait.
+                itemId: l.SalesItemLineDetail?.ItemRef?.value || null,
+                itemNom: l.SalesItemLineDetail?.ItemRef?.name || null,
               }
         )
         .map((l, index) => ({ ...l, index }));
@@ -156,6 +161,8 @@ export async function POST(request) {
       description: String(l?.description || "").slice(0, 2000),
       quantite: Number(l?.quantite) || 1,
       prixUnitaire: Number(l?.prixUnitaire) || 0,
+      // 🏷️ L'article QuickBooks du produit (catalogue lié) — 2026-09-18.
+      itemId: /^d+$/.test(String(l?.itemId || "").trim()) ? String(l.itemId).trim() : null,
     }))
     .filter((l) => l.description && l.prixUnitaire !== 0);
   if (!clientNom || !numero || lignes.length === 0) {
@@ -182,7 +189,12 @@ export async function POST(request) {
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
 
-    const corpsEstimate = {
+    // 🏷️ Le bon article par ligne ; repli sur l'article général si
+    // QuickBooks refuse (produit désactivé chez eux…) — un devis ne
+    // bloque jamais pour une catégorie.
+    const articles = await resolveurArticlesQbo(acces, lignes, itemId);
+    const articlesParLigne = lignes.some((l) => articles.pourLigne(l) !== itemId);
+    const corpsEstimatePour = (generiques) => ({
       CustomerRef: { value: customerId },
       DocNumber: numero.slice(0, 21), // limite QBO
       PrivateNote: `Devis ${numero} — créé par l'application Ventilation DGL`,
@@ -193,12 +205,20 @@ export async function POST(request) {
         Amount: Math.round(l.quantite * l.prixUnitaire * 100) / 100,
         Description: l.description,
         SalesItemLineDetail: {
-          ItemRef: { value: itemId },
+          ItemRef: { value: generiques ? itemId : articles.pourLigne(l) },
           Qty: l.quantite,
           UnitPrice: l.prixUnitaire,
           ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
         },
       })),
+    });
+    const ecrireEstimate = async (extra = {}) => {
+      try {
+        return { r: await ecrireQbo(acces, "estimate", { ...corpsEstimatePour(false), ...extra }), replie: false };
+      } catch (e) {
+        if (!articlesParLigne) throw e;
+        return { r: await ecrireQbo(acces, "estimate", { ...corpsEstimatePour(true), ...extra }), replie: true };
+      }
     };
 
     // MISE À JOUR si l'estimate existe déjà (id fourni et retrouvable),
@@ -218,13 +238,13 @@ export async function POST(request) {
         //     EXISTANT est CONSERVÉ — un « Accepté » ne se perd jamais
         //     par accident.
         const statut = corps?.reinitialiserStatut ? "Pending" : existant.TxnStatus || "Pending";
-        const maj = await ecrireQbo(acces, "estimate", { ...corpsEstimate, Id: existant.Id, SyncToken: existant.SyncToken, TxnStatus: statut });
-        return Response.json({ creee: true, misAJour: true, estimateId: maj?.Estimate?.Id || existant.Id, docNumber: maj?.Estimate?.DocNumber || numero });
+        const { r: maj, replie } = await ecrireEstimate({ Id: existant.Id, SyncToken: existant.SyncToken, TxnStatus: statut });
+        return Response.json({ creee: true, misAJour: true, estimateId: maj?.Estimate?.Id || existant.Id, docNumber: maj?.Estimate?.DocNumber || numero, articlesReplies: replie });
       }
       // Introuvable (supprimé côté QBO ?) — on retombe sur la création.
     }
-    const cree = await ecrireQbo(acces, "estimate", corpsEstimate);
-    return Response.json({ creee: true, misAJour: false, estimateId: cree?.Estimate?.Id || null, docNumber: cree?.Estimate?.DocNumber || numero });
+    const { r: cree, replie: replieCreation } = await ecrireEstimate();
+    return Response.json({ creee: true, misAJour: false, estimateId: cree?.Estimate?.Id || null, docNumber: cree?.Estimate?.DocNumber || numero, articlesReplies: replieCreation });
   } catch (e) {
     return Response.json({ erreur: String(e?.message || "QuickBooks injoignable.") }, { status: 502 });
   }

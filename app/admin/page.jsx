@@ -2016,10 +2016,16 @@ function AppAdmin() {
           description: `${l.nom || ""}${detail ? `\n${detail}` : ""}`.trim() || l.nom || "Item du devis",
           quantite: Number(l.quantite) || 1,
           prixUnitaire: Number(l.prix_vendant) || 0,
+          // 🏷️ L'article QuickBooks du produit (2026-09-18) — la ligne du
+          // devis le porte depuis le catalogue ; repli : le catalogue du jour.
+          itemId: l.qbItemId || (catalogue || []).find((c) => c.id === l.id)?.qbItemId || null,
         };
       }),
     })
       .then(async (r) => {
+        if (r?.creee && r.articlesReplies) {
+          ajouterJournal(`⚠️ Devis ${d.numero} : QuickBooks a refusé un Produit/service (article désactivé chez eux ?) — l'estimate est parti avec l'article général « Services ». Resynchronise le catalogue au besoin.`);
+        }
         if (r?.creee) {
           if (r.estimateId && r.estimateId !== d.qboEstimateId) {
             const avecEstimate = { ...d, qboEstimateId: r.estimateId };

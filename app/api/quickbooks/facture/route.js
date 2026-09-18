@@ -26,6 +26,7 @@ import {
   requeteQbo,
   clientQboPour,
   articleServiceQboPour,
+  resolveurArticlesQbo,
   codeTaxeVente,
   proprietesTaxe,
   envoyerFactureParQb,
@@ -113,7 +114,18 @@ export async function POST(request) {
   // couramment. QuickBooks accepte 4000 — on garde 2000, largement
   // assez, et la coupure devient improbable au lieu d'être la règle.
   const lignes = (Array.isArray(corps?.lignes) ? corps.lignes : [])
-    .map((l) => ({ description: String(l?.description || "").slice(0, 2000), montant: Number(l?.montant) || 0 }))
+    // 🔢 Quantité et prix unitaire GARDÉS (2026-09-18) : ils étaient jetés
+    // ICI — ligneQbo plus bas les attendait, mais ne recevait jamais que
+    // { description, montant } : toutes les factures sortaient « Qté 1 ».
+    // 🏷️ itemId / categorie : le bon Produit/service par ligne.
+    .map((l) => ({
+      description: String(l?.description || "").slice(0, 2000),
+      montant: Number(l?.montant) || 0,
+      quantite: Number(l?.quantite) > 0 ? Number(l.quantite) : null,
+      prixUnitaire: Number(l?.prixUnitaire) > 0 ? Number(l.prixUnitaire) : null,
+      itemId: /^d+$/.test(String(l?.itemId || "").trim()) ? String(l.itemId).trim() : null,
+      categorie: l?.categorie === "appel" || l?.categorie === "heures" ? l.categorie : null,
+    }))
     .filter((l) => l.description);
   const total = lignes.reduce((s, l) => s + l.montant, 0);
   if (!clientNom || lignes.length === 0 || total <= 0) {
@@ -139,6 +151,9 @@ export async function POST(request) {
     ]);
     if (!customerId) return Response.json({ erreur: "Client QuickBooks introuvable et non créable." }, { status: 502 });
     if (!itemId) return Response.json({ erreur: "Aucun article de type Service dans ce fichier QuickBooks." }, { status: 502 });
+    // 🏷️ Le bon article par ligne (produit du catalogue, « Appel de
+    // service », « Heures ») — sinon l'article général.
+    const articles = await resolveurArticlesQbo(acces, lignes, itemId);
 
     // Échéance : terme de paiement choisi à l'envoi (ex. « Net 30 »,
     // « Payable sur réception »). « Payable sur réception » = 0 jour.
@@ -189,19 +204,25 @@ export async function POST(request) {
     // une ligne peut porter sa quantité et son prix unitaire — la
     // colonne « Qté » de QuickBooks devient vraie (« 5 × 12,50 $ »).
     // Sans quantité : 1 × montant, comme avant.
-    const ligneQbo = (l, texteSeulement) => {
+    const ligneQbo = (l, texteSeulement, articlesGeneriques = false) => {
       if (l.montant === 0 && !texteSeulement) {
         return { DetailType: "DescriptionOnly", Description: l.description, DescriptionLineDetail: {} };
       }
-      const qte = Number(l.quantite) > 0 ? Number(l.quantite) : 1;
-      const prixUnitaire =
+      let qte = Number(l.quantite) > 0 ? Number(l.quantite) : 1;
+      let prixUnitaire =
         Number(l.prixUnitaire) > 0 ? Number(l.prixUnitaire) : Math.round(((Number(l.montant) || 0) / qte) * 10000) / 10000;
+      // QuickBooks refuse une ligne dont Qté × prix ≠ montant : au moindre
+      // écart (montant retouché à la main, plafond…), 1 × montant.
+      if (Math.abs(qte * prixUnitaire - l.montant) > 0.011) {
+        qte = 1;
+        prixUnitaire = l.montant;
+      }
       return {
         DetailType: "SalesItemLineDetail",
         Amount: l.montant,
         Description: l.description,
         SalesItemLineDetail: {
-          ItemRef: { value: itemId },
+          ItemRef: { value: articlesGeneriques ? itemId : articles.pourLigne(l) },
           Qty: qte,
           UnitPrice: prixUnitaire,
           ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
@@ -209,7 +230,7 @@ export async function POST(request) {
       };
     };
 
-    const corpsFacture = async (texteSeulement, sansLienEstimate = false) => ({
+    const corpsFacture = async (texteSeulement, sansLienEstimate = false, articlesGeneriques = false) => ({
       // 🔗 LIEN VERS L'ESTIMATE (2026-08-30, GO du propriétaire) : une
       // facture issue d'un devis RÉFÉRENCE son estimate — la comptable
       // voit la chaîne devis → accepté → facturé dans QuickBooks, et
@@ -281,7 +302,7 @@ export async function POST(request) {
       // défaut silencieux pour ces factures.
       AllowOnlineCreditCardPayment: corps?.paiementCarte === true,
       AllowOnlineACHPayment: corps?.paiementVirement === true,
-      Line: lignes.map((l) => ligneQbo(l, texteSeulement)),
+      Line: lignes.map((l) => ligneQbo(l, texteSeulement, articlesGeneriques)),
     });
 
     // ⚠️ FILET : si QuickBooks refuse le type « description seulement »
@@ -295,21 +316,35 @@ export async function POST(request) {
     // QuickBooks le refuse (estimate fermé, client différent…), la
     // facture repart SANS lui — une facture bloquée coûte plus cher.
     let lienEstimatePose = !!corps?.qboEstimateId;
-    try {
-      cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(false));
-    } catch (e) {
-      if (corps?.qboEstimateId) {
-        lienEstimatePose = false;
-        try {
-          cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(false, true));
-        } catch (e2) {
-          if (!lignes.some((l) => l.montant === 0)) throw e2;
-          cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true, true));
+    const tenter = async (generiques) => {
+      try {
+        return await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(false, false, generiques));
+      } catch (e) {
+        if (corps?.qboEstimateId) {
+          lienEstimatePose = false;
+          try {
+            return await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(false, true, generiques));
+          } catch (e2) {
+            if (!lignes.some((l) => l.montant === 0)) throw e2;
+            return await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true, true, generiques));
+          }
         }
-      } else {
         if (!lignes.some((l) => l.montant === 0)) throw e;
-        cree = await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true));
+        return await ecrireQbo(acces, "invoice?include=invoiceLink", await corpsFacture(true, false, generiques));
       }
+    };
+    // 🏷️ UNE CATÉGORIE NE BLOQUE JAMAIS UNE FACTURE : si QuickBooks refuse
+    // avec les articles par ligne (produit désactivé chez eux…), la
+    // facture repart avec l'article général — et l'appelant le dit.
+    const articlesParLigne = lignes.some((l) => l.montant !== 0 && articles.pourLigne(l) !== itemId);
+    let articlesReplies = false;
+    try {
+      cree = await tenter(false);
+    } catch (eArticles) {
+      if (!articlesParLigne) throw eArticles;
+      lienEstimatePose = !!corps?.qboEstimateId;
+      articlesReplies = true;
+      cree = await tenter(true);
     }
     const facture = cree?.Invoice;
 
@@ -333,6 +368,9 @@ export async function POST(request) {
       lienPaiement: facture?.InvoiceLink || null,
       // null = aucun estimate fourni ; true/false = lien posé ou refusé.
       lienEstimate: corps?.qboEstimateId ? lienEstimatePose : null,
+      // 🏷️ Articles créés à l'occasion (« Appel de service »…) et repli.
+      articlesCrees: articles.crees,
+      articlesReplies,
       envoiQb,
       environnement: acces.environnement,
     });

@@ -326,6 +326,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
             // la facture QuickBooks (2026-09-17, vécu : tout à Qté 1). Une
             // portion PARTIELLE n'a pas de prix unitaire propre → Qté 1.
             ...(!partiel ? { quantite: Number(l.quantite) || 1, prixUnitaire: Number(l.prix_vendant) || 0 } : {}),
+            itemId: l.qbItemId || null,
           };
         });
     } else if (devis && type === "complete" && montantCumule < 0.01) {
@@ -335,6 +336,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
         // 🔢 Quantité et prix unitaire réels → QuickBooks les affiche.
         quantite: Number(l.quantite) || 1,
         prixUnitaire: Number(l.prix_vendant) || 0,
+        itemId: l.qbItemId || null,
       }));
     }
     if (lignesFacture) {
@@ -621,7 +623,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     // est ÉCRIT dans la description : un client qui voit le calcul
     // conteste moins qu'un client qui voit un montant sorti de nulle part.
     (lignesSuggerees || []).forEach((l, i) => {
-      base.push({ id: `supp-${Date.now()}-${i}`, description: l.description, ...(l.quantite != null ? { quantite: l.quantite } : {}), ...(l.prixUnitaire != null ? { prixUnitaire: l.prixUnitaire } : {}), prix: l.prix });
+      base.push({ id: `supp-${Date.now()}-${i}`, description: l.description, ...(l.quantite != null ? { quantite: l.quantite } : {}), ...(l.prixUnitaire != null ? { prixUnitaire: l.prixUnitaire } : {}), ...(l.categorie ? { categorie: l.categorie } : {}), prix: l.prix });
     });
     if (depotPaye) {
       base.push({
@@ -642,6 +644,8 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     return base;
   });
   const [attestation, setAttestation] = useState(false);
+  // 🏷️ Ligne dont on choisit le Produit/service QuickBooks (id | null).
+  const [choixProduitPour, setChoixProduitPour] = useState(null);
 
   // ============================================================
   // 📝 BROUILLON AUTOMATIQUE DE LA RÉVISION (2026-09-18, vécu ETI-NET :
@@ -655,7 +659,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   // c'est un filet, pas une donnée — la vérité reste la révision validée.
   // ============================================================
   const cleBrouillon = `fluxya_revision_brouillon_${bon.id}`;
-  const empreinte = (liste) => JSON.stringify((liste || []).map((it) => [it.description, it.quantite ?? null, it.prixUnitaire ?? null, it.prix ?? null]));
+  const empreinte = (liste) => JSON.stringify((liste || []).map((it) => [it.description, it.quantite ?? null, it.prixUnitaire ?? null, it.prix ?? null, it.qbItemId ?? null, it.categorie ?? null]));
   // L'état de DÉPART de la fenêtre (figé au montage) — sert à savoir si
   // quelque chose a vraiment été modifié.
   const [empreinteDepart] = useState(() => empreinte(items));
@@ -748,7 +752,8 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   const itemDepuisLigneDevis = (l, i) => {
     const f = infoLigneDevis(l, i);
     const texte = l.description || "Item du devis";
-    const commun = { id: `devis-${f.idx}-${Date.now()}`, devisIndex: f.idx, devisPlein: f.plein };
+    // 🏷️ Le Produit/service de la ligne du devis suit sur la facture.
+    const commun = { id: `devis-${f.idx}-${Date.now()}`, devisIndex: f.idx, devisPlein: f.plein, ...(l.itemId ? { qbItemId: l.itemId, qbItemNom: l.itemNom || "" } : {}) };
     if (f.complet) {
       return { ...commun, description: `${texte}\n✅ Déjà facturé à 100 %${mentionFactures} — ${f.plein.toFixed(2)} $`, quantite: 1, prixUnitaire: "", prix: 0, devisVerrou: true, devisPlafond: 0 };
     }
@@ -807,7 +812,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     premiereCleRef.current = cleSuggestions;
     setItems((prev) => {
       const sansAuto = prev.filter((it) => !String(it.id).startsWith("supp-"));
-      const fraiches = (lignesSuggerees || []).map((l, i) => ({ id: `supp-${Date.now()}-${i}`, description: l.description, ...(l.quantite != null ? { quantite: l.quantite } : {}), ...(l.prixUnitaire != null ? { prixUnitaire: l.prixUnitaire } : {}), prix: l.prix }));
+      const fraiches = (lignesSuggerees || []).map((l, i) => ({ id: `supp-${Date.now()}-${i}`, description: l.description, ...(l.quantite != null ? { quantite: l.quantite } : {}), ...(l.prixUnitaire != null ? { prixUnitaire: l.prixUnitaire } : {}), ...(l.categorie ? { categorie: l.categorie } : {}), prix: l.prix }));
       // Les suggestions reprennent leur place : après la 1re ligne (la
       // description de la job), avant les déductions et ajouts manuels.
       return [...sansAuto.slice(0, 1), ...fraiches, ...sansAuto.slice(1)];
@@ -889,7 +894,8 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     // demande du propriétaire) : la case « × Prix unitaire » se remplit,
     // et changer la quantité recalcule le total tout seul.
     const pu = Number(produit.prix_vendant) > 0 ? Number(produit.prix_vendant) : "";
-    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: texte, quantite: 1, prixUnitaire: pu, prix: produit.prix_vendant ?? 0 }]);
+    // 🏷️ L'article QuickBooks du produit suit la ligne (2026-09-18).
+    setItems((prev) => [...prev, { id: `item-${Date.now()}`, description: texte, quantite: 1, prixUnitaire: pu, prix: produit.prix_vendant ?? 0, ...(produit.qbItemId ? { qbItemId: produit.qbItemId, qbItemNom: nom } : {}) }]);
   };
 
   const retirerItem = (id) => {
@@ -1208,6 +1214,56 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                     {Number(it.devisPlein) !== Number(it.devisPlafond) ? ` (reste à facturer sur ${Number(it.devisPlein).toFixed(2)} $)` : ""}
                   </p>
                 ) : null}
+                {/* 🏷️ PRODUIT/SERVICE QUICKBOOKS DE LA LIGNE (2026-09-18,
+                    demande du propriétaire : « tout tombe dans Services, je
+                    ne sais plus ce que je vends »). La pastille dit où la
+                    vente sera classée ; un clic permet de la changer. Une
+                    ligne à 0 $ part en texte seulement : rien à classer. */}
+                {(parseFloat(it.prix) || 0) !== 0 && (
+                  <div className="mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setChoixProduitPour(choixProduitPour === it.id ? null : it.id)}
+                      title="Où QuickBooks classera cette vente — clique pour changer"
+                      className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${it.qbItemId || it.categorie ? "border-sky-200 bg-sky-50 text-sky-800" : "border-slate-200 bg-slate-50 text-slate-500"}`}
+                    >
+                      <span className="truncate">
+                        {it.categorie === "appel" ? "🛠️ Appel de service" : it.categorie === "heures" ? "⏱️ Heures" : it.qbItemId ? `📦 ${it.qbItemNom || "Produit QuickBooks"}` : "Services (général)"}
+                      </span>
+                      <span className="shrink-0 font-normal underline underline-offset-2">changer</span>
+                    </button>
+                    {choixProduitPour === it.id && (
+                      <div className="mt-1.5 space-y-1.5 rounded-lg border border-sky-200 bg-sky-50 p-2">
+                        <p className="text-[10px] font-semibold text-sky-800">Classer cette ligne dans QuickBooks comme :</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {[
+                            ["🛠️ Appel de service", { categorie: "appel", qbItemId: null, qbItemNom: "" }],
+                            ["⏱️ Heures", { categorie: "heures", qbItemId: null, qbItemNom: "" }],
+                            ["Services (général)", { categorie: null, qbItemId: null, qbItemNom: "" }],
+                          ].map(([libelle, champs]) => (
+                            <button
+                              key={libelle}
+                              type="button"
+                              onClick={() => { majItem(it.id, champs); setChoixProduitPour(null); }}
+                              className="rounded-lg border border-sky-300 bg-white px-2 py-1 text-[10px] font-bold text-sky-900 active:scale-95"
+                            >
+                              {libelle}
+                            </button>
+                          ))}
+                        </div>
+                        <SelecteurItem
+                          catalogue={catalogue}
+                          libelle="…ou un produit du catalogue"
+                          onChoisir={(produit) => {
+                            if (!produit) return;
+                            majItem(it.id, { categorie: null, qbItemId: produit.qbItemId || null, qbItemNom: produit.nom || "" });
+                            setChoixProduitPour(null);
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
             <div className="grid grid-cols-2 gap-1.5">
@@ -1625,6 +1681,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
         description: item ? [item.nom, item.description].filter(Boolean).join("\n") : "",
         quantite: 1,
         prix: item?.prix_vendant ?? "",
+        qbItemId: item?.qbItemId || null,
       },
     ]);
   const majLigne = (uid, champs) => setLignes((prev) => prev.map((l) => (l.uid === uid ? { ...l, ...champs } : l)));
@@ -1839,6 +1896,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
                   description: String(l.description).trim(),
                   montant: (Number(l.quantite) || 0) * (Number(l.prix) || 0),
                   quantite: Number(l.quantite) || 0,
+                  itemId: l.qbItemId || null,
                 })),
                 sousTotal,
               });
@@ -1876,6 +1934,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       description: [l.nom, l.description].filter(Boolean).join("\n"),
       quantite: Number(l.quantite) || 1,
       prix: Number(l.prix_vendant) || 0,
+      qbItemId: l.qbItemId || null,
     }));
     setFactureLibrePrefill({
       clientId: d.clientId || (clients || []).find((c) => c.nom === d.clientNom)?.id || "",
@@ -2380,6 +2439,17 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // couvre qu'une part de la révision). La prochaine révision du même
   // devis sait alors quoi verrouiller (100 %) et quoi plafonner (solde).
   // ============================================================
+  // 🏷️ Ce que QuickBooks a fait des Produits/services de la facture :
+  // un article créé à l'occasion (« Appel de service »), ou un repli sur
+  // l'article général parce qu'un produit a été refusé. Toujours dit.
+  const signalerArticlesQbo = (r, numero) => {
+    if ((r?.articlesCrees || []).length > 0) {
+      ajouterJournal(`🏷️ Article${r.articlesCrees.length > 1 ? "s" : ""} « ${r.articlesCrees.join(" », « ")} » créé${r.articlesCrees.length > 1 ? "s" : ""} dans QuickBooks (type Service, même compte de revenus que « Heures ») — tes ventes s'y classeront désormais.`);
+    }
+    if (r?.articlesReplies) {
+      ajouterJournal(`⚠️ Facture ${numero} : QuickBooks a refusé un Produit/service (article désactivé chez eux ?) — elle est partie avec l'article général « Services ». Vérifie l'article dans QuickBooks ou resynchronise le catalogue.`);
+    }
+  };
   const lignesDevisFacturees = (b, montantFacture) => {
     const tous = b?.lignesNonListees || [];
     const duDevis = tous.filter((it) => it.devisIndex != null && (parseFloat(it.prix) || 0) !== 0);
@@ -3353,6 +3423,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         description: l.description,
         montant: l.montant,
         ...(Number(l.quantite) > 0 ? { quantite: Number(l.quantite), prixUnitaire: Math.round((l.montant / Number(l.quantite)) * 10000) / 10000 } : {}),
+        itemId: l.itemId || null,
       })),
       termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: donnees.reference || "Facture",
@@ -3395,6 +3466,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     }
     const total = lignes.reduce((s, l) => s + l.montant, 0);
     const numero = r?.docNumber || r?.factureId || "—";
+    signalerArticlesQbo(r, numero);
     // Rattachement : projet choisi, sinon le dossier du client.
     const projetChoisi = (projets || []).find((p) => p.id === donnees.projetId) || null;
     if (r?.factureId) {
@@ -3486,6 +3558,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           montant: parseFloat(l.prix) || 0,
           quantite: l.quantite,
           prixUnitaire: l.prixUnitaire,
+          itemId: l.qbItemId || null,
+          categorie: l.categorie || null,
         }));
       }
       // 🧾 BON JAMAIS RÉVISÉ → la ligne plate s'enrichit (2026-09-09,
@@ -3542,6 +3616,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       return;
     }
     const numero = r?.docNumber || r?.factureId || "—";
+    signalerArticlesQbo(r, numero);
     const envoiSimple = r?.envoiQb
       ? r.envoiQb.envoyee
         ? { statut: "envoyee", date: r.envoiQb.envoyeeLe || new Date().toISOString() }
@@ -3629,7 +3704,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // Les lignes réelles de la révision (déductions incluses) — sinon le
     // montant global du bon.
     const lignes = b.lignesNonListees?.length
-      ? b.lignesNonListees.map((l) => ({ description: l.description, montant: parseFloat(l.prix) || 0, quantite: l.quantite, prixUnitaire: l.prixUnitaire }))
+      ? b.lignesNonListees.map((l) => ({ description: l.description, montant: parseFloat(l.prix) || 0, quantite: l.quantite, prixUnitaire: l.prixUnitaire, itemId: l.qbItemId || null, categorie: l.categorie || null }))
       : [{
           // 📋 Ligne plate : titre + descriptif du devis + notes (2026-09-14).
           description: [b.projet || "Travaux", descriptifDevis(b), (b.description || "").trim() || null].filter(Boolean).join("\n"),
@@ -3664,6 +3739,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       return;
     }
     const numeroReel = r?.docNumber || r?.factureId || `QBINV-${Math.floor(10000 + Math.random() * 90000)}`;
+    signalerArticlesQbo(r, numeroReel);
     if (r?.lienEstimate === false) {
       ajouterJournal(`⚠️ Facture ${numeroReel} créée, mais QuickBooks a refusé le lien vers l'estimate du devis ${b.devisNumero || ""} — relie-les à la main dans QuickBooks si nécessaire.`);
     }
@@ -3793,6 +3869,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       return;
     }
     const numeroFactureQb = rQbo?.docNumber || rQbo?.factureId || `QBINV-${Math.floor(10000 + Math.random() * 90000)}`;
+    signalerArticlesQbo(rQbo, numeroFactureQb);
     if (rQbo?.lienEstimate === false) {
       ajouterJournal(`⚠️ Facture ${numeroFactureQb} créée, mais QuickBooks a refusé le lien vers l'estimate du devis ${numeroDevisBon || ""} — relie-les à la main dans QuickBooks si nécessaire.`);
     }
@@ -5202,7 +5279,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             const be = bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser;
             // Le prix de base de l'appel (si aucun dépôt) AVANT le temps
             // supplémentaire — l'ordre naturel d'une facture.
-            return [...lignesBaseAppel(be), ...lignesTempsSupp(be)];
+            // 🏷️ Main-d'œuvre : « Appel de service » pour un appel, « Heures »
+            // pour le reste (temps et matériel…) — demande du propriétaire.
+            const categorie = be.type === "appel_service" ? "appel" : "heures";
+            return [...lignesBaseAppel(be), ...lignesTempsSupp(be)].map((l) => ({ ...l, categorie }));
           })()}
           bonEnrichi={bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || null}
           nbFacturables={(() => {
