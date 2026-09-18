@@ -1288,33 +1288,64 @@ function AppAdmin() {
   // l'éditeur de devis s'ouvre avec lui déjà sélectionné.
   const [clientPourNouveauDevis, setClientPourNouveauDevis] = useState(null);
 
+  // ⚠️ Déclarés AVANT la mémo ci-dessous qui les lit (2026-09-17) : un
+  // useState déclaré plus bas planterait le prérendu (« Cannot access
+  // before initialization » — vécu avec le tour guidé).
+  const [tachesAttente, setTachesAttente] = useState([]); // 🧹 tâche-semence de démo PURGÉE (2026-09-06)
+  const [planning, setPlanning] = useState({});
+
   // VISITES DE SOUMISSION SANS DEVIS — le suivi qui empêche une vente
   // de s'éteindre toute seule. Une visite est « réglée » dès qu'un devis
   // existe pour ce client APRÈS la date de la visite : inutile de
   // demander au technicien de rattacher quoi que ce soit à la main.
+  // 🏷️ FONDÉ SUR LE TYPE DE TÂCHE (2026-09-17, demande du propriétaire :
+  // « une place où l'on voit devis à faire / devis fait ») : avant, le
+  // suivi se fiait au MOT « soumission » dans le titre — une visite sans
+  // ce mot n'était jamais suivie. Le type « Visite pour soumission » est
+  // retrouvé par la tâche d'origine (agenda / attente) ; le titre reste
+  // un repli pour les anciennes visites. « Devis fait » = un devis lié à
+  // la tâche, OU un devis du même client daté après la visite.
   const soumissionsSansDevis = useMemo(() => {
-    const visites = (travaux || []).filter(
-      (t) => t.supabase && /soumission/i.test(t.titre || "") && (t.categorieHeures || "projet") === "administratif"
-    );
+    const tachesConnues = [
+      ...Object.values(planning || {}).flatMap((cellule) => listeCellule(cellule)),
+      ...(tachesAttente || []),
+    ];
+    const parId = new Map();
+    tachesConnues.forEach((t) => { if (t?.id) parId.set(String(t.id), t); });
+    const origine = (v) => parId.get(String(v.tacheId || "")) || null;
+    const estSoumission = (v) => {
+      const o = origine(v);
+      if (o?.typeTache) return o.typeTache === "visite_soumission";
+      return /soumission/i.test(v.titre || "") && (v.categorieHeures || "projet") === "administratif";
+    };
+    const visites = (travaux || []).filter((t) => t.supabase && !t.estTransport && estSoumission(t));
     const aujourdhui = new Date(`${dateISO(new Date())}T00:00:00`);
     return visites
       .filter((v) => {
+        const o = origine(v);
+        if (o?.devisNumero) return false; // devis rattaché à la tâche = fait
         const devisApres = (devisListe || []).some(
-          (d) => (d.clientNom || "") === (v.clientNom || "") && d.date >= v.date
+          (d) => (o?.clientId && d.clientId ? d.clientId === o.clientId : (d.clientNom || "") === (v.clientNom || "")) && d.date >= v.date
         );
         return !devisApres;
       })
-      .map((v) => ({
-        id: v.id,
-        clientNom: v.clientNom,
-        titre: v.titre,
-        date: v.date,
-        jours: Math.max(0, Math.round((aujourdhui - new Date(`${v.date}T00:00:00`)) / 86400000)),
-      }))
+      .map((v) => {
+        const o = origine(v);
+        const fiche = (clients || []).find((c) => c.id === o?.clientId) || (clients || []).find((c) => (c.nom || "") === (v.clientNom || ""));
+        return {
+          id: v.id,
+          clientId: fiche?.id || null,
+          clientNom: v.clientNom,
+          titre: v.titre,
+          adresse: o?.adresseTravaux || null,
+          date: v.date,
+          jours: Math.max(0, Math.round((aujourdhui - new Date(`${v.date}T00:00:00`)) / 86400000)),
+        };
+      })
+      // Une seule ligne par visite même si deux techniciens y étaient.
+      .filter((v, i, arr) => arr.findIndex((x) => x.clientNom === v.clientNom && x.date === v.date) === i)
       .sort((a, b) => b.jours - a.jours);
-  }, [travaux, devisListe]);
-  const [tachesAttente, setTachesAttente] = useState([]); // 🧹 tâche-semence de démo PURGÉE (2026-09-06)
-  const [planning, setPlanning] = useState({});
+  }, [travaux, devisListe, planning, tachesAttente, clients]);
   const [bons, setBons] = useState(BONS_TRAVAIL_COMPLETES_INIT);
   // Répertoire des fournisseurs (matériaux, location, sous-traitance) —
   // sert à envoyer le bon de commande directement depuis l'app.
@@ -3385,6 +3416,7 @@ function AppAdmin() {
           compteAlertes={compteAlertes}
           compteAttente={tachesAttente.length}
           soumissionsSansDevis={soumissionsSansDevis}
+          onCreerDevisPour={(id) => { setClientPourNouveauDevis(id); setOnglet("devis"); }}
           journal={journal}
           setOnglet={setOnglet}
           inspections={inspections}

@@ -15,7 +15,7 @@ import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { BlocReponsesClients } from "./BlocReponsesClients";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, onCreerDevisPour = null, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
   // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
   // commandées : cette semaine, et en retard (date passée, rien reçu).
   const livraisons = (() => {
@@ -355,15 +355,30 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
                   >
                     <div className="min-w-0">
                       <p className="text-[12px] font-bold text-slate-800">{v.clientNom || v.titre}</p>
-                      <p className="text-[10px] text-slate-500">{t("Visite du")} {v.date}</p>
+                      <p className="text-[10px] text-slate-500">
+                        {t("Visite du")} {v.date}{v.adresse ? ` · 📍 ${v.adresse}` : ""}
+                      </p>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
-                        urgent ? "bg-red-500 text-white" : "bg-indigo-100 text-indigo-700"
-                      }`}
-                    >
-                      {v.jours === 0 ? t("aujourd'hui") : `${v.jours} ${t(v.jours > 1 ? "jours" : "jour")}`}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold ${
+                          urgent ? "bg-red-500 text-white" : "bg-indigo-100 text-indigo-700"
+                        }`}
+                      >
+                        {v.jours === 0 ? t("aujourd'hui") : `${v.jours} ${t(v.jours > 1 ? "jours" : "jour")}`}
+                      </span>
+                      {/* 📄 DEVIS À FAIRE → un clic ouvre l'éditeur de devis
+                          avec le client déjà choisi (2026-09-17). */}
+                      {onCreerDevisPour && v.clientId && (
+                        <button
+                          type="button"
+                          onClick={() => onCreerDevisPour(v.clientId)}
+                          className="rounded-lg bg-[#131B2E] px-2.5 py-1 text-[10px] font-extrabold text-white active:scale-95"
+                        >
+                          📄 {t("Créer le devis")}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}

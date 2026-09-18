@@ -3918,7 +3918,14 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // seule la photo "après" est exigée pour ce type de bon (pas
   // "avant", qui reste facultative).
   const descriptionManquante = notesTerrain.trim().length === 0;
-  const photoApresManquante = photosApres.length === 0;
+  // 📝 VISITE POUR SOUMISSION = FORMULAIRE ALLÉGÉ (2026-09-17, demande du
+  // propriétaire : « il y a trop de détail »). Le technicien va VOIR et
+  // chiffrer, il ne répare rien : pas de numéros d'unité, pas de pièce à
+  // commander, pas d'état des travaux, pas de signature ni de conditions,
+  // photos « après » facultatives. Restent : ses notes (l'essentiel) et
+  // les photos au besoin. Rien ne part en facturation (nonFacturable).
+  const estVisiteSoumission = tache.typeTache === "visite_soumission";
+  const photoApresManquante = !estVisiteSoumission && photosApres.length === 0;
   // 🚧 « Travaux non terminés » coché SANS dire ce qui reste : le bureau
   // recevrait une alerte vide, impossible à planifier. On exige le
   // texte, comme on exige la description.
@@ -3939,13 +3946,15 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     !photoApresManquante &&
     !resteAFaireManquant &&
     !etapesBloquent &&
-    (jeSuisLeDernier
+    // Une visite de soumission ne fait rien signer : il n'y a pas de
+    // travaux livrés à accepter.
+    (jeSuisLeDernier && !estVisiteSoumission
       ? clientAbsent || collegueAFaitSigner || (nomMoule.trim().length > 2 && aSignature && accepteConditions)
       : true);
   const peutEnvoyer =
     !lectureSeule &&
     peutEnvoyerBase &&
-    (!necessiteDeuxiemeSignature || clientAbsent || collegueAFaitSigner || (nomMoule2.trim().length > 2 && aSignature2));
+    (!necessiteDeuxiemeSignature || estVisiteSoumission || clientAbsent || collegueAFaitSigner || (nomMoule2.trim().length > 2 && aSignature2));
 
   // ------------------------------------------------------------
   // ACTIONS DIRECTES → synchronisées immédiatement vers l'état
@@ -4523,6 +4532,16 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       )}
 
       <div className="flex-1 space-y-5 px-4 py-4">
+        {/* 📝 VISITE POUR SOUMISSION — dire d'entrée que le formulaire est
+            allégé, pour que le technicien ne cherche pas les champs. */}
+        {estVisiteSoumission && (
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5">
+            <p className="text-xs font-extrabold text-indigo-900">📝 {t("Visite pour soumission — formulaire allégé")}</p>
+            <p className="mt-0.5 text-[11px] leading-snug text-indigo-800">
+              {t("Note ce que tu as observé et les mesures utiles au devis. Photos facultatives. Aucune signature, rien ne part en facturation.")}
+            </p>
+          </div>
+        )}
         {/* 🚗 « EN ROUTE » (2026-09-14, demande du propriétaire) — avant
             de démarrer la tâche : un tap, le client reçoit « Charles est
             en route, arrivée dans ~30 min ». Courriel aux adresses par
@@ -4981,7 +5000,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             sans avoir à redemander. La case « aucun numéro » évite de
             bloquer le technicien devant une plaque illisible.
             ============================================================ */}
-        {!lectureSeule && (
+        {!lectureSeule && !estVisiteSoumission && (
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Unité vérifiée</p>
 
@@ -5176,7 +5195,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           </div>
         )}
 
-        {!lectureSeule && (
+        {!lectureSeule && !estVisiteSoumission && (
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">État des travaux</p>
             <label
@@ -5236,7 +5255,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             photos={photosApres}
             setPhotos={setPhotosApres}
             onPhotosChange={(nouvelles) => commettrePhotos("photosApres", nouvelles)}
-            obligatoire
+            obligatoire={!estVisiteSoumission}
             lectureSeule={lectureSeule}
             coffreCle={`${tache.id}|apres`}
           />
@@ -5344,6 +5363,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             quand un collègue doit fermer après. Une signature de trop ne
             fait de tort à personne ; un travail livré sans signature,
             oui. C'est ce déséquilibre qui décide de la règle. */}
+        {/* 📝 Visite pour soumission : ni conditions, ni signature — rien
+            n'est livré, il n'y a rien à faire accepter. */}
+        {!estVisiteSoumission && (<>
         {!jeSuisLeDernier && (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-[12px] leading-snug text-slate-600">
@@ -5436,6 +5458,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             lectureSeule={lectureSeule || !accepteConditions || clientAbsent}
           />
         </div>
+        </>)}
 
         {/* MODALE — TERMES ET CONDITIONS */}
         {/* CONFIRMATIONS DES DEUX FERMETURES — symétriques, parce qu'on
