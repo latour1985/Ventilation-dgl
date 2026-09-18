@@ -49,14 +49,39 @@ import { SEUIL_ENTRETIEN_KM, SEUIL_ENTRETIEN_MOIS } from "./OngletInspectionsVeh
 // (2026-09-16, vécu : date changée dans la fiche, courriel renvoyé avec
 // l'ancienne date). Remplace la ligne existante, ou l'ajoute ; sans
 // date, la retire.
-export function descriptionAvecLivraison(description, dateISO) {
-  const lignes = String(description || "").split("\n").filter((l) => !/^📦 Livraison souhaitée\s*:/.test(l.trim()));
-  if (dateISO && /^\d{4}-\d{2}-\d{2}$/.test(dateISO)) {
-    const texte = `📦 Livraison souhaitée : ${new Date(`${dateISO}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`;
+//
+// ⚡ « DÈS QUE POSSIBLE » et 🚚 RAMASSAGE (2026-09-18, demande du
+// propriétaire : commande spéciale sans date ; on ramasse parfois chez le
+// distributeur). Comme la date, ces deux états VIVENT DANS LE TEXTE du
+// bon — il est le seul porteur commun aux trois sortes de BC (libre,
+// projet, pièce) et c'est ce que le fournisseur lit. Aucune colonne.
+//   options.asap / options.ramassage : true/false pour les POSER ;
+//   absents = on garde ce que le texte disait déjà. Une date précise
+//   l'emporte toujours sur « dès que possible ».
+export const bcEstRamassage = (description) => /🚚 RAMASSAGE/i.test(String(description || ""));
+export const bcEstAsap = (description) => /DÈS QUE POSSIBLE/i.test(String(description || ""));
+export function descriptionAvecLivraison(description, dateISO, options = {}) {
+  const dateValide = !!dateISO && /^\d{4}-\d{2}-\d{2}$/.test(dateISO);
+  const ramassage = options.ramassage !== undefined ? !!options.ramassage : bcEstRamassage(description);
+  const asap = !dateValide && (options.asap !== undefined ? !!options.asap : bcEstAsap(description));
+  const lignes = String(description || "")
+    .split("\n")
+    .filter((l) => !/^(📦 Livraison souhaitée\s*:|📦 Prêt pour le\s*:|🚚 RAMASSAGE)/.test(l.trim()))
+    // Un ramassage n'a pas d'adresse de livraison.
+    .filter((l) => !(ramassage && /^📍 Livraison\s*:/.test(l.trim())));
+  const ajouts = [];
+  if (ramassage) ajouts.push("🚚 RAMASSAGE à votre comptoir — ne pas livrer. Merci de nous aviser quand la commande est prête.");
+  const etiquette = ramassage ? "📦 Prêt pour le" : "📦 Livraison souhaitée";
+  if (dateValide) {
+    ajouts.push(`${etiquette} : ${new Date(`${dateISO}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
+  } else if (asap) {
+    ajouts.push(`${etiquette} : DÈS QUE POSSIBLE — merci de nous confirmer une date dès que vous l'avez.`);
+  }
+  if (ajouts.length > 0) {
     // Avant la ligne « 📍 Livraison : … » s'il y en a une, sinon à la fin.
     const idx = lignes.findIndex((l) => /^📍 Livraison\s*:/.test(l.trim()));
-    if (idx >= 0) lignes.splice(idx, 0, texte);
-    else lignes.push(texte);
+    if (idx >= 0) lignes.splice(idx, 0, ...ajouts);
+    else lignes.push(...ajouts);
   }
   return lignes.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }

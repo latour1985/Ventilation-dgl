@@ -26,7 +26,7 @@ import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxH
 import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour } from "./partage";
+import { AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour, bcEstAsap, bcEstRamassage } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -1133,16 +1133,20 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const livraisonsParJour = (() => {
     const m = {};
     const ajout = (d, x) => { if (d) (m[d] = m[d] || []).push(x); };
+    // ⚡ SANS DATE (2026-09-18) : seulement les bons marqués « dès que
+    // possible » — rangés sous la clé "sans-date" (les vieux bons sans
+    // date, jamais marqués reçus, n'encombrent pas l'agenda).
+    // 🚚 `ramassage` : on va la chercher — la ligne le dit.
     (achatsLibres || [])
-      .filter((a) => !a.recuLe && a.livraisonSouhaitee)
-      .forEach((a) => ajout(a.livraisonSouhaitee, { cle: `a-${a.id}`, numero: a.numeroBc || "", texte: `${a.fournisseurNom || "BC"} — ${a.numeroBc || ""}`, detail: a.clientNom || a.tacheTitre || "", description: a.description || "", date: a.livraisonSouhaitee, envoye: !!a.bcEnvoyeLe, telephone: (a.bcEnvoyeA || []).includes("manuel"), montantHT: a.montantHT, recevable: true }));
+      .filter((a) => !a.recuLe && (a.livraisonSouhaitee || bcEstAsap(a.description)))
+      .forEach((a) => ajout(a.livraisonSouhaitee || "sans-date", { cle: `a-${a.id}`, numero: a.numeroBc || "", fournisseur: a.fournisseurNom || "", texte: `${a.fournisseurNom || "BC"} — ${a.numeroBc || ""}`, detail: a.clientNom || a.tacheTitre || "", description: a.description || "", date: a.livraisonSouhaitee || null, ramassage: bcEstRamassage(a.description), envoye: !!a.bcEnvoyeLe, telephone: (a.bcEnvoyeA || []).includes("manuel"), montantHT: a.montantHT, recevable: true }));
     (pieces || [])
       .filter((p) => p.statut === "commandee" && p.dateReceptionPrevue)
       .forEach((p) => ajout(p.dateReceptionPrevue, { cle: `p-${p.id}`, numero: p.numeroBc || "", texte: `${p.fournisseurNom || "pièce"} — ${p.numeroBc || ""}`, detail: p.clientNom || p.pieceRequise || "", description: p.pieceRequise || "", date: p.dateReceptionPrevue, envoye: !!p.bcEnvoyeLe, recevable: false }));
     (projets || []).forEach((pr) =>
       (pr.bonsCommande || [])
-        .filter((bc) => bc.livraison && bc.statut !== "Reçu" && bc.statut !== "Annulé")
-        .forEach((bc) => ajout(bc.livraison, { cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "", texte: `${bc.fournisseur || "BC"} — ${bc.numeroBC || ""}`, detail: `🏗️ ${pr.nom}`, description: bc.description || "", date: bc.livraison, envoye: !!bc.envoyeLe, montantHT: bc.montantHT, recevable: true }))
+        .filter((bc) => (bc.livraison || bcEstAsap(bc.description)) && bc.statut !== "Reçu" && bc.statut !== "Annulé")
+        .forEach((bc) => ajout(bc.livraison || "sans-date", { cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "", fournisseur: bc.fournisseur || "", texte: `${bc.fournisseur || "BC"} — ${bc.numeroBC || ""}`, detail: `🏗️ ${pr.nom}`, description: bc.description || "", date: bc.livraison || null, ramassage: bcEstRamassage(bc.description), envoye: !!bc.envoyeLe, montantHT: bc.montantHT, recevable: true }))
     );
     return m;
   })();
@@ -1156,7 +1160,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const joursLivraisonsAffiches = vue === "jour" ? [dateISO(jourAffiche)] : joursAffiches.map((d) => dateISO(d));
   const resumeLivraisons = (() => {
     const lignes = joursLivraisonsAffiches.flatMap((j) => (livraisonsParJour[j] || []).map((x) => ({ ...x, jour: j })));
-    return { total: lignes.length, retard: lignes.filter((x) => x.jour < aujourdhuiISO).length };
+    return { total: lignes.length, retard: lignes.filter((x) => x.jour < aujourdhuiISO).length, sansDate: (livraisonsParJour["sans-date"] || []).length };
   })();
   // ⏳ PAS FERMÉE (2026-09-15) : journée passée, tâche de travail, aucune
   // heure du technicien — le bloc se hachure au lieu de rester bleu en
@@ -2514,14 +2518,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           })()}
           {/* 📦 UN SEUL BOUTON, HORS DE LA GRILLE (2026-09-17) : « N à
               recevoir » pour la période affichée, rouge s'il y a du retard. */}
-          {resumeLivraisons.total > 0 && (
+          {(resumeLivraisons.total > 0 || resumeLivraisons.sansDate > 0) && (
             <button
               type="button"
               onClick={() => setPanneauLivraisons(joursLivraisonsAffiches)}
               className={`ml-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-extrabold ${resumeLivraisons.retard > 0 ? "border-red-300 bg-red-50 text-red-700" : "border-amber-300 bg-amber-50 text-amber-800"}`}
               title="Commandes à recevoir — cliquer pour la liste"
             >
-              📦 {resumeLivraisons.total} livraison{resumeLivraisons.total > 1 ? "s" : ""} à recevoir{resumeLivraisons.retard > 0 ? ` · ${resumeLivraisons.retard} en retard` : ""}
+              📦 {resumeLivraisons.total} livraison{resumeLivraisons.total > 1 ? "s" : ""} à recevoir{resumeLivraisons.retard > 0 ? ` · ${resumeLivraisons.retard} en retard` : ""}{resumeLivraisons.sansDate > 0 ? ` · ⏳ ${resumeLivraisons.sansDate} sans date` : ""}
             </button>
           )}
         </div>
@@ -5359,21 +5363,26 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               <button onClick={() => setPanneauLivraisons(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-2">
-              {panneauLivraisons.filter((j) => (livraisonsParJour[j] || []).length > 0).length === 0 && (
+              {panneauLivraisons.filter((j) => (livraisonsParJour[j] || []).length > 0).length === 0 && (livraisonsParJour["sans-date"] || []).length === 0 && (
                 <p className="py-4 text-center text-xs text-slate-400">Rien à recevoir pour cette période.</p>
               )}
-              {panneauLivraisons.filter((j) => (livraisonsParJour[j] || []).length > 0).map((j) => {
-                const retard = j < aujourdhuiISO;
+              {/* ⏳ « Dès que possible » d'abord (2026-09-18) : commandes
+                  spéciales sans date — toujours visibles, quelle que soit
+                  la période, pour ne pas les oublier. */}
+              {[...((livraisonsParJour["sans-date"] || []).length > 0 ? ["sans-date"] : []), ...panneauLivraisons.filter((j) => (livraisonsParJour[j] || []).length > 0)].map((j) => {
+                const sansDate = j === "sans-date";
+                const retard = !sansDate && j < aujourdhuiISO;
                 return (
                   <div key={j} className="mb-3">
-                    <p className={`mb-1 text-[10px] font-extrabold uppercase tracking-wide ${retard ? "text-red-600" : "text-slate-500"}`}>
-                      {new Date(`${j}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" })}{retard ? " — en retard" : ""}
+                    <p className={`mb-1 text-[10px] font-extrabold uppercase tracking-wide ${sansDate ? "text-amber-700" : retard ? "text-red-600" : "text-slate-500"}`}>
+                      {sansDate ? "⏳ Dès que possible — date à confirmer avec le fournisseur" : `${new Date(`${j}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" })}${retard ? " — en retard" : ""}`}
                     </p>
                     <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                       {(livraisonsParJour[j] || []).map((x) => (
                         <div key={x.cle} className="flex items-center gap-2 px-2.5 py-2 text-[11px]">
                           <button type="button" onClick={() => setLivraisonOuverte(x)} className="min-w-0 flex-1 text-left hover:underline" title="Voir le contenu complet">
-                            <span className="font-bold text-slate-800">📦 {x.texte}</span>
+                            <span className="font-bold text-slate-800">{x.ramassage ? "🚚" : "📦"} {x.texte}</span>
+                            {x.ramassage ? <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-800">à ramasser</span> : null}
                             {x.detail ? <span className="ml-1.5 text-slate-500">{x.detail}</span> : null}
                             {x.description ? <span className="block truncate text-[10px] text-slate-400">{String(x.description).split("\n")[0]}</span> : null}
                           </button>
@@ -5386,7 +5395,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                           )}
                           {x.recevable && onMarquerBcRecu && !lectureSeule && (
                             <button type="button" onClick={() => onMarquerBcRecu(x.numero)} className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] font-bold text-emerald-700 hover:border-emerald-400 active:scale-95">
-                              📦 Reçu
+                              {x.ramassage ? "🚚 Ramassé" : "📦 Reçu"}
                             </button>
                           )}
                         </div>
@@ -5412,9 +5421,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           <div className="w-full max-w-md rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-sm font-extrabold text-slate-900">📦 {livraisonOuverte.texte}</p>
+                <p className="text-sm font-extrabold text-slate-900">{livraisonOuverte.ramassage ? "🚚" : "📦"} {livraisonOuverte.texte}</p>
                 <p className="text-[11px] text-slate-500">
-                  Livraison prévue le {livraisonOuverte.date ? new Date(`${livraisonOuverte.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" }) : "—"}
+                  {livraisonOuverte.date
+                    ? `${livraisonOuverte.ramassage ? "À ramasser — prêt pour le" : "Livraison prévue le"} ${new Date(`${livraisonOuverte.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" })}`
+                    : <span className="font-bold text-amber-700">⏳ Dès que possible — date à confirmer avec le fournisseur{livraisonOuverte.ramassage ? " (à ramasser)" : ""}</span>}
                   {livraisonOuverte.date && livraisonOuverte.date < aujourdhuiISO ? <span className="ml-1 font-bold text-red-600">— en retard</span> : null}
                 </p>
               </div>
@@ -5436,10 +5447,37 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                 {livraisonOuverte.telephone ? <span className="font-bold text-sky-700">📞 par téléphone</span> : livraisonOuverte.envoye ? <span className="font-bold text-emerald-700">✉️ envoyé</span> : <span className="font-bold text-red-600">⚠️ non envoyé</span>}
               </p>
             </div>
+            {/* 🚗 COURSE DE RAMASSAGE (2026-09-18) — prépare une tâche
+                « Course » : titre, contenu du bon et adresse de la fiche
+                du fournisseur déjà remplis ; il reste à choisir qui et
+                quand dans le formulaire. */}
+            {livraisonOuverte.ramassage && !lectureSeule && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const x = livraisonOuverte;
+                  const nomF = String(x.fournisseur || "").trim().toLowerCase();
+                  const fiche = (fournisseurs || []).find((f) => String(f.nom || "").trim().toLowerCase() === nomF);
+                  setNouveauType("course");
+                  setNouveauTitre(`Ramassage ${x.numero}${x.fournisseur ? ` — ${x.fournisseur}` : ""}`);
+                  setNouvelleDescription(`Ramasser la commande ${x.numero}${x.fournisseur ? ` chez ${x.fournisseur}` : ""}.${x.detail ? `\nPour : ${x.detail}` : ""}\n\n${x.description || ""}`.trim());
+                  setAdresseCourseLibre(fiche ? (fiche.adresse ? `${fiche.nom} — ${fiche.adresse}` : fiche.nom) : x.fournisseur || "");
+                  if (fiche && !fiche.adresse) ajouterJournal(`💡 La fiche du fournisseur « ${fiche.nom} » n'a pas d'adresse — ajoute-la dans Pièces → Fournisseurs pour que le technicien ait le lien de navigation.`);
+                  setEtapeTypeTache(false);
+                  setFormulaireOuvert(true);
+                  setLivraisonOuverte(null);
+                  setPanneauLivraisons(null);
+                  ajouterJournal(`🚗 Course de ramassage préparée pour ${x.numero} — le formulaire « Nouvelle tâche » est pré-rempli : choisis le technicien et la date, puis enregistre.`);
+                }}
+                className="mt-3 min-h-0 w-full py-2 text-xs"
+              >
+                🚗 Créer la course de ramassage
+              </Button>
+            )}
             <div className="mt-3 flex gap-2">
               {livraisonOuverte.recevable && onMarquerBcRecu && !lectureSeule && (
                 <Button onClick={() => { onMarquerBcRecu(livraisonOuverte.numero); setLivraisonOuverte(null); }} className="min-h-0 flex-1 py-2 text-xs">
-                  📦 Reçu
+                  {livraisonOuverte.ramassage ? "🚚 Ramassé" : "📦 Reçu"}
                 </Button>
               )}
               {onOuvrirPieces && (

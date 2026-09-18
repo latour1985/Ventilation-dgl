@@ -13,7 +13,7 @@ import { useLangue } from "@/lib/i18n";
 import { camionIndisponible } from "@/lib/supabase/camions";
 import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { BlocReponsesClients } from "./BlocReponsesClients";
-import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO } from "./partage";
+import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap } from "./partage";
 
 export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, onCreerDevisPour = null, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
   // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
@@ -30,6 +30,9 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
       total: dates.length,
       semaine: dates.filter((d) => d && d >= a && d <= s).length,
       retard: dates.filter((d) => d && d < a).length,
+      // ⚡ « Dès que possible » sans date (2026-09-18) — commande spéciale
+      // dont le fournisseur doit encore confirmer la date : à relancer.
+      sansDate: (achatsLibres || []).filter((x) => !x.recuLe && !x.livraisonSouhaitee && bcEstAsap(x.description)).length,
     };
   })();
   const configTdb = useEntreprise();
@@ -302,6 +305,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
           <p className={`mt-1 text-3xl font-extrabold tabular-nums ${livraisons.retard > 0 ? "text-red-700" : "text-[#131B2E]"}`}>{livraisons.total}</p>
           <p className={`mt-1 text-[11px] ${livraisons.retard > 0 ? "text-red-600" : "text-slate-400"}`}>
             {livraisons.semaine} {t("cette semaine")}{livraisons.retard > 0 ? ` · ${livraisons.retard} ${t("en retard")}` : ""}
+            {livraisons.sansDate > 0 ? <span className="font-bold text-amber-700"> · ⏳ {livraisons.sansDate} {t("sans date — à confirmer")}</span> : null}
           </p>
         </button>
         <button onClick={() => setAnalyseOuverte(true)} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-left active:scale-[0.99]">

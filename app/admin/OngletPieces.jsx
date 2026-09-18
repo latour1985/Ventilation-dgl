@@ -18,7 +18,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
-import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, libelleAdresse, descriptionAvecLivraison } from "./partage";
+import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, libelleAdresse, descriptionAvecLivraison, bcEstAsap, bcEstRamassage } from "./partage";
 
 export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onMarquerBcEnvoye = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
@@ -123,7 +123,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   // `tacheId` (2026-08-25) : un achat fait POUR une job se rattache à
   // sa tâche — son montant (ajustable à la baisse) compte au coût du
   // client. `montantAttribue` vide = tout le montant.
-  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [], fichiers: [] });
+  const [bcLibre, setBcLibre] = useState({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", livraisonAsap: false, pourInventaire: false, photos: [], fichiers: [] });
   // 📍 RAPPEL D'ADRESSE (2026-09-09, demande du propriétaire) — avant de
   // créer un BC libre sans adresse choisie (resté sur « atelier » par
   // défaut) ET qui n'est pas du stock d'inventaire, une fenêtre demande
@@ -134,9 +134,10 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
   const executerCreationBc = async () => {
     setRappelAdresseBc(false);
     setBcLibreEnCours(true);
-    const livraison = bcLibre.livraisonEstimee
-      ? `\n📦 Livraison souhaitée : ${new Date(`${bcLibre.livraisonEstimee}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`
-      : "";
+    // ⚡/🚚 (2026-09-18) : « dès que possible » et « ramassage » — les
+    // lignes du bon sont écrites par descriptionAvecLivraison (partage).
+    const ramassageBc = bcLibre.livraisonChoix === "ramassage";
+    const dateBc = bcLibre.livraisonAsap ? "" : bcLibre.livraisonEstimee || "";
     const tL = bcLibre.tacheId ? (tachesPourAchat || []).find((x) => x.id === bcLibre.tacheId) : null;
     const clL = bcLibre.clientId ? (clients || []).find((x) => x.id === bcLibre.clientId) : null;
     const prL = bcLibre.projetId ? (projets || []).find((x) => x.id === bcLibre.projetId) : null;
@@ -153,10 +154,14 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
       if (c === "autre") return bcLibre.livraisonAutre.trim();
       return "";
     })();
-    const descriptionFinale = `${(bcLibre.description || "").trim()}${bcLibre.pourInventaire ? "\n📦 Pour l'inventaire courant (stock du bureau)" : ""}${livraison}${adresseLivraisonBc ? `\n📍 Livraison : ${adresseLivraisonBc}` : ""}`;
+    const descriptionFinale = descriptionAvecLivraison(
+      `${(bcLibre.description || "").trim()}${bcLibre.pourInventaire ? "\n📦 Pour l'inventaire courant (stock du bureau)" : ""}${!ramassageBc && adresseLivraisonBc ? `\n📍 Livraison : ${adresseLivraisonBc}` : ""}`,
+      dateBc || null,
+      { asap: !!bcLibre.livraisonAsap, ramassage: ramassageBc }
+    );
     const partTapee = Number(bcLibre.montantAttribue) || 0;
     const montantEffectif = (Number(bcLibre.montantHT) || 0) <= 0 && partTapee > 0 ? partTapee : bcLibre.montantHT;
-    const numero = await onCreerBcLibre?.({ ...bcLibre, montantHT: montantEffectif, description: descriptionFinale });
+    const numero = await onCreerBcLibre?.({ ...bcLibre, livraisonEstimee: dateBc, montantHT: montantEffectif, description: descriptionFinale });
     setBcLibreEnCours(false);
     setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
     const fiche = ficheFournisseurParNom(bcLibre.fournisseurNom);
@@ -212,7 +217,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
         coches: [courrielTape],
       });
     }
-    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", pourInventaire: false, photos: [], fichiers: [] });
+    setBcLibre({ fournisseurNom: "", description: "", montantHT: 0, projetId: "", tacheId: "", clientId: "", montantAttribue: "", livraisonEstimee: "", courrielFournisseur: "", enregistrerFournisseur: true, livraisonChoix: "atelier", livraisonAutre: "", livraisonAsap: false, pourInventaire: false, photos: [], fichiers: [] });
     setBcLibreOuvert(false);
   };
   // 📦➕ Réception d'un BC « stock » vers l'inventaire (étage 2) — le
@@ -263,6 +268,9 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
       montantAttribue: a2.montantAttribue != null ? String(a2.montantAttribue) : "",
       // 📦 Livraison prévue — modifiable quand le fournisseur confirme.
       livraisonSouhaitee: a2.livraisonSouhaitee || "",
+      // ⚡/🚚 Lus dans le texte du bon (2026-09-18).
+      asap: !a2.livraisonSouhaitee && bcEstAsap(a2.description),
+      ramassage: bcEstRamassage(a2.description),
     });
     setBcSupprEtape(false);
   };
@@ -582,6 +590,8 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
               cle: `a-${a.id}`, numero: a.numeroBc || "(sans nº)", fournisseur: a.fournisseurNom || "", date: a.livraisonSouhaitee || null,
               cible: a.tacheId ? `🔗 ${a.clientNom || a.tacheTitre || "job"}` : a.clientId ? `👤 ${a.clientNom || "client"}` : (a.description || "").includes("Pour l'inventaire courant") ? "📦 stock" : "achat général",
               description: (a.description || "").split("\n")[0],
+              // ⚡/🚚 Lus dans le texte du bon (2026-09-18).
+              asap: bcEstAsap(a.description), ramassage: bcEstRamassage(a.description),
               envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a), telephone: (a.bcEnvoyeA || []).includes("manuel"),
               ouvrir: () => ouvrirBc(a),
               recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
@@ -598,7 +608,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
               .filter((bc) => bc.statut !== "Reçu" && bc.statut !== "Annulé")
               .map((bc) => ({
                 cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || null,
-                cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
+                cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
               }))
           ),
         ].sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
@@ -622,8 +632,9 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                 return (
                   <div key={l.cle} className="flex items-center gap-2 py-1.5 text-[11px]">
                     <span className={`w-[92px] shrink-0 rounded-md px-1.5 py-0.5 text-center text-[10px] font-extrabold tabular-nums ${retard ? "bg-red-100 text-red-700" : proche ? "bg-amber-100 text-amber-800" : l.date ? "bg-slate-100 text-slate-600" : "bg-slate-50 text-slate-400"}`}>
-                      {l.date ? new Date(`${l.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" }) : "sans date"}
+                      {l.date ? new Date(`${l.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" }) : l.asap ? "⚡ dès que poss." : "sans date"}
                     </span>
+                    {l.ramassage ? <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-800" title="À ramasser chez le fournisseur — ne sera pas livré">🚚 à ramasser</span> : null}
                     <button type="button" onClick={l.ouvrir || undefined} className={`min-w-0 flex-1 truncate text-left ${l.ouvrir ? "hover:underline" : "cursor-default"}`} title={l.description}>
                       <span className="font-bold text-slate-800">{l.numero}</span>
                       {l.fournisseur ? <span className="text-slate-600"> — {l.fournisseur}</span> : null}
@@ -1059,14 +1070,27 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                     courriel au fournisseur — plus besoin de la taper
                     dans la description. */}
                 <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                  Livraison souhaitée
+                  {bcLibre.livraisonChoix === "ramassage" ? "Prêt pour le" : "Livraison souhaitée"}
                   <input
                     type="date"
-                    value={bcLibre.livraisonEstimee}
+                    value={bcLibre.livraisonAsap ? "" : bcLibre.livraisonEstimee}
+                    disabled={bcLibre.livraisonAsap}
                     onChange={(e) => setBcLibre((f) => ({ ...f, livraisonEstimee: e.target.value }))}
-                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                    className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs disabled:bg-slate-100 disabled:text-slate-300"
                   />
                 </span>
+                {/* ⚡ DÈS QUE POSSIBLE (2026-09-18) — commande spéciale : le
+                    fournisseur n'a pas de date. Le bon le dit, et la
+                    commande reste suivie « sans date — à confirmer ». */}
+                <label className="flex cursor-pointer items-center gap-1 text-[10px] font-semibold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={!!bcLibre.livraisonAsap}
+                    onChange={(e) => setBcLibre((f) => ({ ...f, livraisonAsap: e.target.checked }))}
+                    className="h-3.5 w-3.5 accent-[#FF6A13]"
+                  />
+                  ⚡ Dès que possible
+                </label>
                 {/* 🔎 Recherche par nom OU liste complète au clic —
                     Tâches / Clients / Projets groupés. */}
                 <SelecteurCibleAchat
@@ -1121,6 +1145,9 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                       className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
                     >
                       <option value="atelier">Atelier — {configEnt.adresse || "adresse de l'entreprise (Paramètres)"}</option>
+                      {/* 🚚 RAMASSAGE (2026-09-18) — on va chercher la commande
+                          au comptoir : le bon dit « ne pas livrer ». */}
+                      <option value="ramassage">🚚 Ramassage chez le fournisseur (pickup) — ne pas livrer</option>
                       {t?.adresse && <option value="tache">Chantier de la tâche — {t.adresse}</option>}
                       {(cl?.adresses || []).map((a) => (
                         <option key={a.id} value={`ca:${a.id}`}>{cl.nom} — {a.nom ? `${a.nom} · ` : ""}{libelleAdresse(a)}</option>
@@ -1360,14 +1387,25 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                 />
               </div>
               <div>
-                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">📦 Livraison prévue</label>
+                <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">{bcEdit.ramassage ? "🚚 Prêt pour le (ramassage)" : "📦 Livraison prévue"}</label>
                 <input
                   type="date"
-                  value={bcEdit.livraisonSouhaitee || ""}
+                  value={bcEdit.asap ? "" : bcEdit.livraisonSouhaitee || ""}
+                  disabled={!!bcEdit.asap}
                   onChange={(e) => setBcEdit((f) => ({ ...f, livraisonSouhaitee: e.target.value }))}
-                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm disabled:bg-slate-100 disabled:text-slate-300"
                 />
-                <p className="mt-0.5 text-[10px] text-slate-400">Le fournisseur confirme une autre date ? Change-la ici — la liste « Livraisons attendues » suit.</p>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <input type="checkbox" checked={!!bcEdit.asap} onChange={(e) => setBcEdit((f) => ({ ...f, asap: e.target.checked }))} className="h-3.5 w-3.5 accent-[#FF6A13]" />
+                    ⚡ Dès que possible (pas de date)
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <input type="checkbox" checked={!!bcEdit.ramassage} onChange={(e) => setBcEdit((f) => ({ ...f, ramassage: e.target.checked }))} className="h-3.5 w-3.5 accent-[#FF6A13]" />
+                    🚚 Ramassage chez le fournisseur
+                  </label>
+                </div>
+                <p className="mt-0.5 text-[10px] text-slate-400">Le fournisseur confirme une date ? Décoche « dès que possible » et inscris-la ici — le suivi des livraisons suit.</p>
               </div>
               {(() => {
                 const dep = depenseQbPourBc(bcOuvert.numeroBc);
@@ -1448,7 +1486,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                       fournisseurNom: bcEdit.fournisseurNom.trim(),
                       // 📦 La ligne « Livraison souhaitée » du texte suit la date
                       // de la fiche (2026-09-16, vécu : renvoi avec l'ancienne date).
-                      description: descriptionAvecLivraison(bcEdit.description.trim(), bcEdit.livraisonSouhaitee || null),
+                      description: descriptionAvecLivraison(bcEdit.description.trim(), bcEdit.asap ? null : bcEdit.livraisonSouhaitee || null, { asap: !!bcEdit.asap, ramassage: !!bcEdit.ramassage }),
                       montantHT: Number(bcEdit.montantHT) || 0,
                     };
                     if (cible.startsWith("p:")) {
@@ -1465,7 +1503,7 @@ export function OngletPieces({ pieces, peutCommander, onMaj, onRecue, onAnnuler,
                         clientId: c?.id || null,
                         clientNom: c?.nom || t?.clientNom || (cible.startsWith("t:") ? bcOuvert.clientNom : null) || null,
                         montantAttribue: cible ? attribue : null,
-                        livraisonSouhaitee: bcEdit.livraisonSouhaitee || null,
+                        livraisonSouhaitee: bcEdit.asap ? null : bcEdit.livraisonSouhaitee || null,
                       };
                       const avant = bcOuvert.tacheId
                         ? `Job « ${bcOuvert.tacheTitre || bcOuvert.tacheId} »`
