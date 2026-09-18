@@ -6694,3 +6694,65 @@ alter table bons_travail
 select column_name, data_type
   from information_schema.columns
  where table_schema = 'public' and table_name = 'bons_travail' and column_name = 'revision';
+
+-- ============================================================
+-- 151 - RENOMMER UN CAMION SANS PERDRE SON HISTORIQUE (2026-09-18)
+-- ------------------------------------------------------------
+-- Demande du propriétaire : pouvoir changer le numéro d'un camion —
+-- Admin principal SEULEMENT. Le « numéro » (camions.nom) sert de CLÉ
+-- dans trois historiques qui le recopient en texte : inspections,
+-- entretiens périodiques, carnet d'entretien. Renommer seulement la
+-- fiche aurait orphelin tout l'historique (et fait naître un camion
+-- fantôme « hors parc »). Ici, TOUT suit d'un seul coup, dans une
+-- transaction : ou bien tout est renommé, ou bien rien.
+--   • garde : Admin principal, et seulement SON entreprise ;
+--   • refuse un nom vide ou déjà porté par un autre camion.
+-- Retourne le nombre de lignes d'historique renommées.
+-- ============================================================
+create or replace function public.renommer_camion(p_id text, p_nouveau text)
+returns integer
+language plpgsql security definer
+set search_path = public, extensions
+as $fn$
+declare
+  v_ent text := coalesce(public.entreprise_du_jeton(), '');
+  v_ancien text;
+  v_nouveau text := btrim(coalesce(p_nouveau, ''));
+  v_total integer := 0;
+  v_n integer;
+begin
+  if public.fn_mon_role() <> 'Admin principal' then
+    raise exception 'Réservé à l''Admin principal.';
+  end if;
+  if v_nouveau = '' then
+    raise exception 'Le nouveau numéro est vide.';
+  end if;
+  select c.nom into v_ancien from camions c where c.id = p_id and c.entreprise_id = v_ent;
+  if v_ancien is null then
+    raise exception 'Camion introuvable.';
+  end if;
+  if v_ancien = v_nouveau then
+    return 0;
+  end if;
+  if exists (select 1 from camions c where c.entreprise_id = v_ent and c.id <> p_id and lower(btrim(c.nom)) = lower(v_nouveau)) then
+    raise exception 'Un autre camion porte déjà le numéro « % ».', v_nouveau;
+  end if;
+
+  update camions c set nom = v_nouveau where c.id = p_id and c.entreprise_id = v_ent;
+  update camions c set remplace_par = v_nouveau where c.entreprise_id = v_ent and c.remplace_par = v_ancien;
+
+  update inspections_vehicules i set numero_camion = v_nouveau where i.entreprise_id = v_ent and i.numero_camion = v_ancien;
+  get diagnostics v_n = row_count; v_total := v_total + v_n;
+  update entretiens_vehicules e set numero_camion = v_nouveau where e.entreprise_id = v_ent and e.numero_camion = v_ancien;
+  get diagnostics v_n = row_count; v_total := v_total + v_n;
+  update carnet_vehicules k set camion = v_nouveau where k.entreprise_id = v_ent and k.camion = v_ancien;
+  get diagnostics v_n = row_count; v_total := v_total + v_n;
+
+  return v_total;
+end;
+$fn$;
+revoke execute on function public.renommer_camion(text, text) from public, anon;
+grant execute on function public.renommer_camion(text, text) to authenticated;
+
+-- Verification : la fonction existe.
+select proname from pg_proc where proname = 'renommer_camion';

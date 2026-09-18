@@ -3448,6 +3448,7 @@ function AppAdmin() {
           persisterEntretien={({ camion, km }) => creerEntretien({ camion, km }).catch(() => {})}
           parcCamions={parcCamions}
           setParcCamions={setParcCamions}
+          estAdminPrincipal={role === "Admin principal"}
           carnet={carnetVehicules}
           setCarnet={setCarnetVehicules}
           onEntreeCarnet={(entree) => ajouterEntreeCarnet(entree, session)}

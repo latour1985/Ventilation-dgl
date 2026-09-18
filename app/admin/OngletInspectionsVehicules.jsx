@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus, X } from "lucide-react";
-import { sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
+import { sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion, renommerCamion } from "@/lib/supabase/camions";
 import { Button, PhotosInspection, todayISO, joursDepuis, moisDepuis, dateISO, ITEMS_PAR_PAGE, BarrePagination } from "./partage";
 
 // ============================================================
@@ -20,7 +20,7 @@ export const SEUIL_ENTRETIEN_KM = 10000;
 export const SEUIL_ENTRETIEN_MOIS = 6;
 
 
-export function OngletInspectionsVehicules({ inspections, setInspections, entretiens, setEntretiens, ajouterJournal, persisterPriseEnCharge, persisterEntretien, parcCamions, setParcCamions, carnet, setCarnet, onEntreeCarnet, onAnomalieReparee }) {
+export function OngletInspectionsVehicules({ inspections, setInspections, entretiens, setEntretiens, ajouterJournal, persisterPriseEnCharge, persisterEntretien, parcCamions, setParcCamions, carnet, setCarnet, onEntreeCarnet, onAnomalieReparee, estAdminPrincipal = false }) {
   const [filtreDate, setFiltreDate] = useState("");
   const [filtreCamion, setFiltreCamion] = useState("");
   const [filtreStatut, setFiltreStatut] = useState("tous");
@@ -134,6 +134,33 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
     );
     leverIndispoCamion(c.id).catch(() => ajouterJournal("⚠️ Remise en service affichée mais NON enregistrée — réessaie."));
     ajouterJournal(`✅ ${c.nom} remis en service.`);
+  };
+
+  // ✏️ RENOMMER UN CAMION (snippet 151, 2026-09-18) — Admin principal
+  // seulement. Le numéro est la CLÉ de trois historiques (inspections,
+  // entretiens, carnet) : la base renomme tout d'un seul coup, puis
+  // l'écran suit — sinon l'historique deviendrait un camion fantôme.
+  const [renommage, setRenommage] = useState(null); // { camionId, valeur, enCours, erreur }
+  const confirmerRenommage = async (c) => {
+    const nouveau = (renommage?.valeur || "").trim();
+    if (!nouveau || nouveau === c.nom) { setRenommage(null); return; }
+    if ((parcCamions || []).some((x) => x.id !== c.id && x.nom.trim().toLowerCase() === nouveau.toLowerCase())) {
+      setRenommage((p) => ({ ...p, erreur: `Un autre camion porte déjà le numéro « ${nouveau} ».` }));
+      return;
+    }
+    setRenommage((p) => ({ ...p, enCours: true, erreur: "" }));
+    try {
+      const nb = await renommerCamion(c.id, nouveau);
+      const ancien = c.nom;
+      setParcCamions((prev) => (prev || []).map((x) => (x.id === c.id ? { ...x, nom: nouveau } : x.remplacePar === ancien ? { ...x, remplacePar: nouveau } : x)));
+      setInspections?.((prev) => (prev || []).map((i) => (i.camion === ancien ? { ...i, camion: nouveau } : i)));
+      setEntretiens?.((prev) => (prev || []).map((e) => (e.camion === ancien ? { ...e, camion: nouveau } : e)));
+      setCarnet?.((prev) => (prev || []).map((k) => (k.camion === ancien ? { ...k, camion: nouveau } : k)));
+      ajouterJournal(`✏️ Camion « ${ancien} » renommé « ${nouveau} » — ${nb} ligne${nb > 1 ? "s" : ""} d'historique (inspections, entretiens, carnet) ont suivi.`);
+      setRenommage(null);
+    } catch (e) {
+      setRenommage((p) => ({ ...p, enCours: false, erreur: e?.message || "Renommage refusé." }));
+    }
   };
 
   const ajouterCamion = () => {
@@ -333,6 +360,15 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
                         <p className="text-[10px] text-slate-400">{[c.marqueModele, c.immatriculation].filter(Boolean).join(" · ") || "—"}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1.5">
+                        {/* ✏️ Renommer — Admin principal seulement. */}
+                        {estAdminPrincipal && (
+                          <button
+                            onClick={() => setRenommage(renommage?.camionId === c.id ? null : { camionId: c.id, valeur: c.nom, enCours: false, erreur: "" })}
+                            className="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-600"
+                          >
+                            ✏️ Renommer…
+                          </button>
+                        )}
                         <button
                           onClick={() =>
                             setIndispoCamion(
@@ -357,6 +393,29 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
                         </button>
                       </div>
                     </div>
+                    {renommage?.camionId === c.id && (
+                      <div className="mt-1.5 rounded-lg border border-slate-300 bg-white p-2.5">
+                        <p className="text-[11px] font-bold text-slate-800">Nouveau numéro pour « {c.nom} »</p>
+                        <p className="mt-0.5 text-[10px] leading-snug text-slate-500">
+                          Tout l&apos;historique du camion (inspections, entretiens, carnet) suivra le nouveau numéro. Les techniciens le verront sous ce nom dès leur prochaine ouverture de l&apos;app.
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <input
+                            autoFocus
+                            value={renommage.valeur}
+                            onChange={(e) => setRenommage((p) => ({ ...p, valeur: e.target.value, erreur: "" }))}
+                            onKeyDown={(e) => { if (e.key === "Enter") confirmerRenommage(c); if (e.key === "Escape") setRenommage(null); }}
+                            maxLength={40}
+                            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                          />
+                          <Button onClick={() => confirmerRenommage(c)} disabled={renommage.enCours || !renommage.valeur.trim() || renommage.valeur.trim() === c.nom} className="min-h-0 px-3 py-1.5 text-xs">
+                            {renommage.enCours ? "…" : "Renommer"}
+                          </Button>
+                          <Button variant="outline" onClick={() => setRenommage(null)} className="min-h-0 px-3 py-1.5 text-xs">Annuler</Button>
+                        </div>
+                        {renommage.erreur && <p className="mt-1 text-[10px] font-bold text-red-600">⚠️ {renommage.erreur}</p>}
+                      </div>
+                    )}
                     {camionIndisponible(c) && (
                       <p className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10px] font-bold text-amber-800">
                         🔧 Indisponible{c.indispoRaison ? ` — ${c.indispoRaison}` : ""} du {c.indispoDebut}
