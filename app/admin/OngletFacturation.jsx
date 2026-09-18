@@ -643,6 +643,61 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   });
   const [attestation, setAttestation] = useState(false);
 
+  // ============================================================
+  // 📝 BROUILLON AUTOMATIQUE DE LA RÉVISION (2026-09-18, vécu ETI-NET :
+  // « j'avais fait des modifications tantôt et elles ont disparu »).
+  // Seule une révision VALIDÉE s'enregistre en base (snippet 150). Tout
+  // ce qui est tapé AVANT de valider ne vivait que dans cette fenêtre :
+  // page rechargée, fenêtre fermée par erreur = prix à retaper. Même
+  // patron que le devis en cours : pendant qu'on tape, un brouillon par
+  // bon est gardé dans le navigateur ; à la réouverture, on offre de le
+  // reprendre. Il s'efface à la validation. Par appareil (localStorage) :
+  // c'est un filet, pas une donnée — la vérité reste la révision validée.
+  // ============================================================
+  const cleBrouillon = `fluxya_revision_brouillon_${bon.id}`;
+  const empreinte = (liste) => JSON.stringify((liste || []).map((it) => [it.description, it.quantite ?? null, it.prixUnitaire ?? null, it.prix ?? null]));
+  // L'état de DÉPART de la fenêtre (figé au montage) — sert à savoir si
+  // quelque chose a vraiment été modifié.
+  const [empreinteDepart] = useState(() => empreinte(items));
+  const empreinteDepartRef = useRef(empreinteDepart);
+  const [brouillonTrouve, setBrouillonTrouve] = useState(null); // { items, quand } | null
+  const brouillonPretRef = useRef(false);
+  useEffect(() => {
+    try {
+      const s = JSON.parse(window.localStorage.getItem(cleBrouillon) || "null");
+      const recent = s?.quand && Date.now() - s.quand < 30 * 24 * 60 * 60 * 1000;
+      if (s && Array.isArray(s.items) && s.items.length > 0 && recent && empreinte(s.items) !== empreinteDepartRef.current) {
+        setBrouillonTrouve(s);
+      } else if (s) {
+        window.localStorage.removeItem(cleBrouillon); // périmé ou identique
+      }
+    } catch {}
+    brouillonPretRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    // Rien n'est écrit tant qu'un brouillon trouvé attend la décision
+    // (on l'écraserait), ni tant que rien n'a été modifié.
+    if (!brouillonPretRef.current || brouillonTrouve) return;
+    try {
+      if (empreinte(items) === empreinteDepartRef.current) window.localStorage.removeItem(cleBrouillon);
+      else window.localStorage.setItem(cleBrouillon, JSON.stringify({ items, quand: Date.now() }));
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, brouillonTrouve]);
+  const reprendreBrouillon = () => {
+    if (!brouillonTrouve) return;
+    setItems(brouillonTrouve.items);
+    setBrouillonTrouve(null);
+  };
+  const jeterBrouillon = () => {
+    try { window.localStorage.removeItem(cleBrouillon); } catch {}
+    setBrouillonTrouve(null);
+  };
+  const effacerBrouillon = () => {
+    try { window.localStorage.removeItem(cleBrouillon); } catch {}
+  };
+
   // 📋 DEVIS QUICKBOOKS RELU EN DIRECT (2026-09-08, demande du
   // propriétaire) : quand le bon porte un numéro de devis, on relit
   // l'estimate dans QuickBooks pour AVOIR sous les yeux son total (ne
@@ -775,6 +830,32 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
           <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
         </div>
 
+        {/* 📝 BROUILLON RETROUVÉ — on choisit AVANT de retaper quoi que ce soit. */}
+        {brouillonTrouve && (() => {
+          const autoBrouillon = empreinte((brouillonTrouve.items || []).filter((it) => String(it.id).startsWith("supp-")));
+          const autoFrais = empreinte((items || []).filter((it) => String(it.id).startsWith("supp-")));
+          const totalBrouillon = (brouillonTrouve.items || []).reduce((s, it) => s + (parseFloat(it.prix) || 0), 0);
+          return (
+            <div className="border-b border-amber-200 bg-amber-50 px-5 py-2.5">
+              <p className="text-xs font-bold text-amber-900">
+                📝 Tu avais commencé cette révision le {new Date(brouillonTrouve.quand).toLocaleString("fr-CA", { dateStyle: "long", timeStyle: "short" })} — {brouillonTrouve.items.length} ligne{brouillonTrouve.items.length > 1 ? "s" : ""}, {totalBrouillon.toFixed(2)} $, non validée.
+              </p>
+              {autoBrouillon !== autoFrais && (
+                <p className="mt-0.5 text-[11px] font-semibold text-amber-800">
+                  ⚠️ Les heures ou l&apos;équipe ont changé depuis : si tu reprends, vérifie les lignes de temps (elles datent du brouillon).
+                </p>
+              )}
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                <button type="button" onClick={reprendreBrouillon} className="rounded-lg bg-[#131B2E] px-3 py-1.5 text-[11px] font-extrabold text-white active:scale-95">
+                  Reprendre où j&apos;en étais
+                </button>
+                <button type="button" onClick={jeterBrouillon} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 active:scale-95">
+                  Repartir à neuf
+                </button>
+              </div>
+            </div>
+          );
+        })()}
         <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-2 lg:overflow-hidden">
         {/* ---- PANNEAU GAUCHE : LE DOSSIER (lecture) ---- */}
         <div className="p-5 pt-3 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-slate-100">
@@ -1051,7 +1132,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
               {raisonsBlocage.map((r) => <li key={r}>• {r}</li>)}
             </ul>
           )}
-          <Button disabled={!peutValider} onClick={() => onConfirmer(items, total)} className="w-full">
+          <Button disabled={!peutValider} onClick={() => { effacerBrouillon(); onConfirmer(items, total); }} className="w-full">
             Valider et débloquer pour l&apos;envoi
           </Button>
 
