@@ -6675,3 +6675,22 @@ select table_name, column_name
    and ((table_name = 'catalogue_items' and column_name in ('depliant_url','depliant_nom'))
         or (table_name = 'devis_app' and column_name = 'titre'))
  order by table_name, column_name;
+
+-- ============================================================
+-- 150 - RÉVISION D'UN BON : ENFIN ENREGISTRÉE (2026-09-18)
+-- ------------------------------------------------------------
+-- Vécu (ETI-NET) : la révision « validée, prête pour l'envoi » d'un
+-- bon de travail ne vivait QUE dans la mémoire de l'écran. Un
+-- rechargement de page — ou un simple rafraîchissement en direct quand
+-- un technicien envoie un bon — l'effaçait : le bon retombait « à
+-- réviser » et tout était à refaire. La révision (lignes, total, qui,
+-- quand) s'enregistre désormais SUR le bon. C'est aussi ce qui permet
+-- de la ROUVRIR pour la corriger avant l'envoi.
+-- ============================================================
+alter table bons_travail
+  add column if not exists revision jsonb;
+
+-- Verification : la colonne existe.
+select column_name, data_type
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'bons_travail' and column_name = 'revision';

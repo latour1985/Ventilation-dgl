@@ -21,7 +21,7 @@ import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, ma
 import { creerFactureMaison, lienFactureMaison, finaliserFactureMaison } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
 import { SectionFacturesMaison } from "./FacturesMaison";
-import { majFacturesEmises, poserFacturesEmisesLot, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
+import { majFacturesEmises, poserFacturesEmisesLot, sauvegarderRevisionBon, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
 import { AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, devisAJourPourNumero, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
@@ -769,7 +769,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
       <div className="flex max-h-[92vh] w-full max-w-md flex-col rounded-2xl bg-white lg:max-w-5xl">
         <div className="flex items-start justify-between gap-2 border-b border-slate-100 p-5 pb-3">
           <div>
-            <h3 className="text-sm font-extrabold text-slate-900">Réviser le prix non listé</h3>
+            <h3 className="text-sm font-extrabold text-slate-900">{bon.prixNonListe ? "Réviser le prix non listé" : "✏️ Modifier la révision (avant l'envoi)"}</h3>
             <p className="text-xs text-slate-500">{bon.projet} · {bon.client}</p>
           </div>
           <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
@@ -778,9 +778,15 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
         <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-2 lg:overflow-hidden">
         {/* ---- PANNEAU GAUCHE : LE DOSSIER (lecture) ---- */}
         <div className="p-5 pt-3 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-slate-100">
-        <div className="mb-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">
-          Ce travail contient un prix qui n'existe pas dans le catalogue — vérifie chaque item avant d'autoriser l'envoi au client.
-        </div>
+        {bon.prixNonListe ? (
+          <div className="mb-3 rounded-xl bg-red-50 p-3 text-xs font-semibold text-red-700">
+            Ce travail contient un prix qui n'existe pas dans le catalogue — vérifie chaque item avant d'autoriser l'envoi au client.
+          </div>
+        ) : (
+          <div className="mb-3 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">
+            Révision déjà validée — tes lignes sont rechargées telles quelles. Corrige, puis revalide : le nouveau total remplace l&apos;ancien. Rien n&apos;est encore facturé.
+          </div>
+        )}
 
         {/* 📋 LE RÉCIT DE LA JOB (2026-09-03, demande du propriétaire :
             « ça me prend les détails et notes de la job ») — on fixe un
@@ -2139,6 +2145,41 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       `✍️ Prix révisé et validé pour "${b?.projet}" — ${items.length} item${items.length > 1 ? "s" : ""} séparé${items.length > 1 ? "s" : ""}, total ${total.toFixed(2)} $. Débloqué pour l'envoi au client.`
     );
     setBonAReviserId(null);
+    // 💾 LA RÉVISION S'ENREGISTRE (snippet 150, 2026-09-18) — avant, elle
+    // ne vivait que dans la mémoire de l'écran : un rechargement, ou le
+    // rafraîchissement en direct quand un technicien envoie un bon, la
+    // faisait disparaître et tout était à refaire.
+    if (String(bonId).startsWith("sbb-")) {
+      sauvegarderRevisionBon(String(bonId).slice(4), {
+        lignes: items,
+        montant: total,
+        valideLe: new Date().toISOString(),
+        validePar: nomAdmin || null,
+      })
+        .then((ok) => {
+          if (ok === false) ajouterJournal(`⚠️ Révision de "${b?.projet}" gardée À L'ÉCRAN seulement — le snippet 150 n'est pas passé : elle se perdra au rechargement de la page. Facture sans tarder, ou passe le snippet.`);
+        })
+        .catch(() => ajouterJournal(`⚠️ Révision de "${b?.projet}" NON enregistrée (connexion ?) — elle reste à l'écran, mais se perdra au rechargement. Revalide-la pour réessayer.`));
+    }
+  };
+  // ✏️ ROUVRIR UNE RÉVISION VALIDÉE (2026-09-18, vécu ETI-NET : « je ne
+  // peux plus remodifier une facture lorsqu'elle est prête pour l'envoi »).
+  // Valider retirait le bouton « Réviser » pour de bon. Tant que RIEN
+  // n'est facturé, la révision se rouvre : la fenêtre recharge les lignes
+  // déjà validées (rien n'est recalculé). Après une facture — même
+  // partielle — c'est verrouillé : la correction se fait dans QuickBooks
+  // (crédit / annulation), sinon les deux systèmes divergeraient.
+  const revisionModifiable = (b) =>
+    !!b &&
+    !b.prixNonListe &&
+    (b.lignesNonListees || []).length > 0 &&
+    b.statutQb !== "envoye" &&
+    b.statutQb !== "retire" &&
+    (b.facturesEmises || []).filter((f) => !f.annuleeQb).length === 0;
+  const rouvrirRevision = (b) => {
+    if (!revisionModifiable(b)) return;
+    ajouterJournal(`✏️ Révision ROUVERTE pour "${b.projet}" (était ${(Number(b.montant) || 0).toFixed(2)} $) — rien n'est facturé, les lignes validées sont rechargées pour correction.`);
+    setBonAReviserId(b.id);
   };
 
   // ============================================================
@@ -3809,6 +3850,17 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                                 ) : (
                                   <span className="flex shrink-0 items-center gap-1.5">
                                     <span className="font-bold tabular-nums text-slate-600">{resteAFacturerDe(bx).toFixed(2)} $</span>
+                                    {/* ✏️ Corriger AVANT l'envoi (2026-09-18) — rouvre
+                                        la révision validée, tant que rien n'est facturé. */}
+                                    {revisionModifiable(bx) && (
+                                      <button
+                                        onClick={() => rouvrirRevision(bx)}
+                                        title="Corriger les lignes et les prix avant de facturer"
+                                        className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 active:scale-95"
+                                      >
+                                        ✏️ Modifier
+                                      </button>
+                                    )}
                                     {/* 🧾 UN BON À LA FOIS (2026-09-08, demande du
                                         propriétaire : « il faut pouvoir les envoyer
                                         une à la fois ») — chaque bon prêt a SON
@@ -4496,6 +4548,16 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                         facture, ça se relance autrement. */}
                     <BadgeConsultation consulteLe={b.consulteLe} consultations={b.consultations} derniereLe={b.derniereConsultationLe} className="text-[9px]" />
                   </p>
+                )}
+                {/* ✏️ Corriger AVANT l'envoi (2026-09-18) — même geste que
+                    dans le tableau du haut. */}
+                {revisionModifiable(b) && (
+                  <button
+                    onClick={() => rouvrirRevision(b)}
+                    className="mt-1 flex items-center gap-1 text-[10px] font-bold text-amber-700 underline underline-offset-2 hover:text-amber-800"
+                  >
+                    ✏️ Modifier la révision
+                  </button>
                 )}
                 {b.statutQb === "en_attente" && !b.retraitStatut && (
                   <button
