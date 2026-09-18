@@ -23,7 +23,7 @@ import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
 import { ModalNouveauClient } from "./OngletClients";
-import { ApercuDevisClient, BarrePagination, Button, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurAdresseTravaux, SelecteurItem, adresseFacturationClient, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
+import { ApercuDevisClient, BarrePagination, Button, ChampFichiersBc, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurAdresseTravaux, SelecteurItem, adresseFacturationClient, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
 
 // Taux coûtant moyen de l'équipe, lu dans la GRILLE CCQ de l'entreprise
 // (2026-08-28) : le champ « taux prévu » se pré-remplit avec un chiffre
@@ -451,6 +451,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // identifie le devis dans les listes, part dans l'objet du courriel
   // et suit jusqu'à la tâche ou au projet. Texte figé sur le devis.
   const [adresseTravauxDevis, setAdresseTravauxDevis] = useState("");
+  // 🏷️ TITRE DU DEVIS (snippet 149, demande du propriétaire) — souvent il
+  // n'y a pas d'adresse pour identifier le devis (« Remplacement
+  // thermopompe », « Entretien annuel »). Le titre sert alors d'étiquette
+  // dans les listes, dans l'objet du courriel et en tête du PDF.
+  const [titreDevis, setTitreDevis] = useState("");
   useEffect(() => {
     // Changement de client : une adresse qui ne lui appartient pas se
     // vide (une révision du même client garde la sienne).
@@ -757,10 +762,13 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // plus vite dans sa boîte).
       // L'adresse des travaux, quand elle existe, part D'OFFICE dans
       // l'objet — c'était sa pratique manuelle, maintenant automatique.
+      // 📎 Fichiers ajoutés à la main pour CET envoi (dépliants ponctuels,
+      // fiche technique) — en plus des dépliants joints d'office.
+      piecesAdHoc: [],
       objet:
         devis.reponseClient === "accepte"
-          ? `Votre copie du devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
-          : `Devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+          ? `Votre copie du devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
+          : `Devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
     });
   };
   // 🔔 RELANCE EN UN CLIC (2026-09-04, chantier approuvé — JAMAIS
@@ -771,7 +779,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEnvoiDevis((prev) => ({
       ...prev,
       relance: true,
-      objet: `Rappel — Devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      objet: `Rappel — Devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
     }));
   };
   const envoyerDevisParCourriel = async (devis) => {
@@ -845,15 +853,36 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     } catch {
       ajouterJournal(`⚠️ Devis ${devis.numero} : le PDF n'a pas pu être joint — le courriel part avec le lien seulement.`);
     }
+    // 📎 DÉPLIANTS DES UNITÉS VENDUES (snippet 149, demande du propriétaire) —
+    // joints AUTOMATIQUEMENT : chaque item du devis qui a un dépliant au
+    // catalogue ajoute sa fiche. Le dépliant est relu au catalogue (frais)
+    // avec repli sur la copie figée dans la ligne. Dédoublonné par URL —
+    // deux unités identiques ne joignent qu'une fois le même dépliant.
+    const depliantsAuto = [];
+    const urlsVues = new Set();
+    for (const l of devisCourant.lignes || []) {
+      const item = (catalogue || []).find((c) => c.id === l.id);
+      const urlDep = item?.depliantUrl || l.depliantUrl || null;
+      if (urlDep && !urlsVues.has(urlDep)) {
+        urlsVues.add(urlDep);
+        depliantsAuto.push({ nom: item?.depliantNom || l.depliantNom || "Dépliant", url: urlDep });
+      }
+    }
+    // 📎 Fichiers ajoutés à la main pour cet envoi (1A) — dépliants
+    // ponctuels que le bureau choisit au moment d'envoyer.
+    const piecesAdHoc = (envoiDevis?.piecesAdHoc || []).map((f) => ({ nom: f.nom, url: f.url }));
+    // Le PDF du devis EN PREMIER : si le total dépasse le plafond de la
+    // route (5 pièces), c'est lui qui survit à coup sûr.
+    const piecesJointes = [...(pdfJoint ? [pdfJoint] : []), ...depliantsAuto, ...piecesAdHoc];
     const r = await envoyerCourriel({
-      piecesJointes: pdfJoint ? [pdfJoint] : [],
+      piecesJointes,
       a: adresses,
       // L'objet ajusté dans le panneau d'envoi fait foi ; sinon le défaut.
       sujet:
         (envoiDevis?.objet || "").trim() ||
         (dejaAccepte
-          ? `Votre copie du devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
-          : `Devis ${devis.numero}${devis.adresseTravaux ? ` — ${devis.adresseTravaux}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`),
+          ? `Votre copie du devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
+          : `Devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`),
       html: gabaritDevis({
         config: configEnt,
         numero: devis.numero,
@@ -1150,20 +1179,21 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       } else {
         window.localStorage.setItem(
           cleDevisEnCours,
-          JSON.stringify({ clientId, adresseTravauxDevis, lignes, estContrat, frequenceContrat, quand: Date.now() })
+          JSON.stringify({ clientId, adresseTravauxDevis, titreDevis, lignes, estContrat, frequenceContrat, quand: Date.now() })
         );
       }
     } catch {}
     const nomClientGarde = clients.find((c) => c.id === clientId)?.nom;
     poserGarde("devis", lignes.length > 0 ? `📝 Devis en cours${nomClientGarde ? ` pour ${nomClientGarde}` : ""} (${lignes.length} ligne${lignes.length > 1 ? "s" : ""}) non enregistré.` : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, adresseTravauxDevis, lignes, estContrat, frequenceContrat, editionVersion]);
+  }, [clientId, adresseTravauxDevis, titreDevis, lignes, estContrat, frequenceContrat, editionVersion]);
   useEffect(() => () => retirerGarde("devis"), []);
   const reprendreDevisEnCours = () => {
     const s = repriseDevis;
     if (!s) return;
     setClientId(s.clientId || "");
     setAdresseTravauxDevis(s.adresseTravauxDevis || "");
+    setTitreDevis(s.titreDevis || "");
     setLignes(Array.isArray(s.lignes) ? s.lignes : []);
     setEstContrat(!!s.estContrat);
     setFrequenceContrat(Number(s.frequenceContrat) || 4);
@@ -1199,6 +1229,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setFrequenceContrat(source.frequenceFacturationAnnuelle || 4);
     setEditionVersion({ source, note: (note || "").trim() });
     setAdresseTravauxDevis(source.adresseTravaux || "");
+    setTitreDevis(source.titre || "");
     setCreationVersionPour(null);
     setNoteNouvelleVersion("");
     // La fenêtre du DOSSIER se ferme et celle de l'ÉDITION s'ouvre :
@@ -1222,6 +1253,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEditionEnFenetre(false);
     setEditionVersion(null);
     setAdresseTravauxDevis("");
+    setTitreDevis("");
     setLignes([]);
     setEstContrat(false);
     setFrequenceContrat(4);
@@ -1282,6 +1314,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // bureau coche lui-même les options qu'il veut montrer au client.
       offerteComparaison: false,
       adresseTravaux: adresseTravauxDevis || null,
+      titre: titreDevis.trim() || null,
     };
     // 🔒 LE CLIENT NE VOIT RIEN TANT QU'ON N'ENVOIE PAS (2026-09-09,
     // demande du propriétaire : « Enregistrer sans envoyer » montrait
@@ -1432,10 +1465,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       estContrat,
       frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
       adresseTravaux: adresseTravauxDevis || null,
+      titre: titreDevis.trim() || null,
     };
     setDevisListe((prev) => [nouveauDevis, ...prev]);
     setLignes([]);
     setAdresseTravauxDevis("");
+    setTitreDevis("");
     setEstContrat(false);
     setFrequenceContrat(4);
     setCourrielModalOuvert(false);
@@ -1470,7 +1505,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     // « créé et envoyé » fictif.
     const r = await envoyerCourriel({
       a: destinataires.map((c) => c.email),
-      sujet: `Devis ${numero}${adresseTravauxDevis ? ` — ${adresseTravauxDevis}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      sujet: `Devis ${numero}${(adresseTravauxDevis || titreDevis.trim()) ? ` — ${adresseTravauxDevis || titreDevis.trim()}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
       html: gabaritDevis({
         config: configEnt,
         numero,
@@ -1825,6 +1860,11 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     {affichee.adresseTravaux && (
                       <p className="truncate text-[11px] font-semibold text-slate-600">🏠 {affichee.adresseTravaux}</p>
                     )}
+                    {/* 🏷️ Titre du devis (snippet 149) — l'identifiant
+                        quand il n'y a pas d'adresse. */}
+                    {affichee.titre && (
+                      <p className="truncate text-[11px] font-semibold text-slate-600">🏷️ {affichee.titre}</p>
+                    )}
                     {/* 📌 Étiquette du devis : sa première ligne — pour le
                         reconnaître d'un coup d'œil dans la liste. */}
                     {affichee.lignes?.[0]?.nom && (
@@ -2155,6 +2195,38 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                         💾 Ajouter cette adresse à la fiche du client
                       </label>
                     )}
+                    {/* 📎 DÉPLIANTS (snippet 149) — ceux des unités vendues
+                        partent d'office ; on peut en ajouter à la main pour
+                        cet envoi. */}
+                    {(() => {
+                      const auto = [];
+                      const vus = new Set();
+                      for (const l of affichee.lignes || []) {
+                        const item = (catalogue || []).find((c) => c.id === l.id);
+                        const u = item?.depliantUrl || l.depliantUrl || null;
+                        if (u && !vus.has(u)) { vus.add(u); auto.push({ nom: item?.depliantNom || l.depliantNom || "Dépliant", url: u }); }
+                      }
+                      return auto.length > 0 ? (
+                        <div className="mb-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+                          <p className="text-[10px] font-bold text-slate-500">📎 Dépliants joints automatiquement :</p>
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {auto.map((d) => (
+                              <a key={d.url} href={d.url} target="_blank" rel="noreferrer"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:underline">
+                                📄 {d.nom}
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
+                    <div className="mb-2">
+                      <ChampFichiersBc
+                        fichiers={envoiDevis.piecesAdHoc || []}
+                        onChange={(fs) => setEnvoiDevis((prev) => ({ ...prev, piecesAdHoc: fs }))}
+                        libelle="📎 Joindre d'autres documents à cet envoi (dépliant, fiche technique…)"
+                      />
+                    </div>
                     <div className="flex gap-1.5">
                       <Button
                         onClick={() => envoyerDevisParCourriel(affichee)}
@@ -2370,6 +2442,23 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 onModifierChoisie={modifierAdresseChoisie}
                 indice="Vide = adresse de facturation. Elle identifie le devis dans les listes, part dans l'objet du courriel et suit jusqu'à la tâche ou au projet."
               />
+            </div>
+          )}
+
+          {/* 🏷️ TITRE DU DEVIS (snippet 149, demande du propriétaire) —
+              utile quand il n'y a pas d'adresse : il identifie le devis
+              dans les listes et l'objet du courriel. Facultatif. */}
+          {client && (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">🏷️ Titre du devis (facultatif)</label>
+              <input
+                value={titreDevis}
+                onChange={(e) => setTitreDevis(e.target.value)}
+                placeholder="Ex. Remplacement thermopompe, Entretien annuel…"
+                maxLength={120}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-[#FF6A13]"
+              />
+              <p className="mt-0.5 text-[11px] text-slate-400">Sert d&apos;étiquette quand il n&apos;y a pas d&apos;adresse — apparaît dans les listes et l&apos;objet du courriel.</p>
             </div>
           )}
 

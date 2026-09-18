@@ -12,6 +12,7 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { ZONES_DEPOTS, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { listerCatalogueRetires, margePourcent, profitDollars, vendantPourMarge } from "@/lib/supabase/catalogue";
+import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { listerItemsQbo } from "@/lib/quickbooksClient";
 import { itemsDepuisCsv, itemsDepuisLignes } from "@/lib/importCatalogue";
 import { Button, zonesEffectives, METIERS_BUREAU, METIERS_TERRAIN, NIVEAUX_CCQ_DEFAUT, metiersTerrainDe, niveauxPourMetier } from "./partage";
@@ -644,10 +645,35 @@ export function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }
     prix_coutant: item?.prix_coutant ?? "",
     prix_vendant: item?.prix_vendant ?? "",
     description: item?.description || "",
+    // 📎 Dépliant du produit (snippet 149) — joint automatiquement à tout
+    // devis qui contient cet item.
+    depliantUrl: item?.depliantUrl || null,
+    depliantNom: item?.depliantNom || "",
   });
   const [etat, setEtat] = useState("");
   const [erreur, setErreur] = useState("");
+  const [televersement, setTeleversement] = useState(false);
   const maj = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  // TÉLÉVERSEMENT DU DÉPLIANT — un seul fichier (PDF ou image), stocké
+  // dans le même bucket que les pièces jointes de tâche. On garde l'URL
+  // publique et le nom d'origine ; « Retirer » remet les deux à vide.
+  const choisirDepliant = async (evenement) => {
+    const fichier = evenement.target.files?.[0];
+    evenement.target.value = "";
+    if (!fichier) return;
+    if (fichier.size > 10 * 1024 * 1024) { setErreur("Le dépliant dépasse 10 Mo."); return; }
+    setErreur("");
+    setTeleversement(true);
+    try {
+      const url = await televerserPieceJointeTache(fichier, { blob: fichier, contentType: fichier.type });
+      setF((p) => ({ ...p, depliantUrl: url, depliantNom: fichier.name }));
+    } catch (e) {
+      setErreur(e?.message || "Le téléversement du dépliant a échoué.");
+    } finally {
+      setTeleversement(false);
+    }
+  };
 
   const coutant = f.prix_coutant === "" ? null : Number(f.prix_coutant);
   const vendant = f.prix_vendant === "" ? null : Number(f.prix_vendant);
@@ -758,6 +784,33 @@ export function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }
             <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Description (apparaît sur le devis)</label>
             <textarea rows={3} value={f.description} onChange={(e) => maj("description", e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none" />
+          </div>
+
+          {/* 📎 DÉPLIANT DU PRODUIT (snippet 149) — joint automatiquement
+              à tout devis contenant cet item. Un seul fichier. */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Dépliant du produit</p>
+            <p className="mb-2 text-[10px] leading-snug text-slate-500">
+              Joint <span className="font-bold">automatiquement</span> au devis dès que cet item y figure (PDF ou image, max 10&nbsp;Mo).
+            </p>
+            {f.depliantUrl ? (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5">
+                <a href={f.depliantUrl} target="_blank" rel="noopener noreferrer"
+                  className="truncate text-xs font-semibold text-sky-700 hover:underline">
+                  {f.depliantNom || "dépliant"}
+                </a>
+                <button type="button" onClick={() => setF((p) => ({ ...p, depliantUrl: null, depliantNom: "" }))}
+                  className="shrink-0 rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Retirer le dépliant">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ) : (
+              <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 ${televersement ? "pointer-events-none opacity-60" : ""}`}>
+                <Plus size={14} />
+                {televersement ? "Téléversement…" : "Ajouter un dépliant"}
+                <input type="file" accept="application/pdf,image/*" className="hidden" onChange={choisirDepliant} disabled={televersement} />
+              </label>
+            )}
           </div>
         </div>
 

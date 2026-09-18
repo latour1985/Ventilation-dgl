@@ -6653,3 +6653,25 @@ union all
 select 'fonction', position('FERM' in pg_get_functiondef(p.oid)) > 0
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname = 'fermer_travaux_technicien';
+
+-- ============================================================
+-- 149 - DÉPLIANTS PAR PRODUIT + TITRE DE DEVIS (2026-09-17)
+-- ------------------------------------------------------------
+-- Demande du propriétaire : (A/B) joindre les dépliants des unités
+-- vendues au devis — un dépliant stocké UNE fois par item du catalogue,
+-- joint automatiquement dès que l'item est sur un devis ; (2) un TITRE
+-- de devis, utile quand il n'y a pas d'adresse.
+-- ============================================================
+alter table catalogue_items
+  add column if not exists depliant_url text,
+  add column if not exists depliant_nom text;
+alter table devis_app
+  add column if not exists titre text;
+
+-- Verification : les trois colonnes existent.
+select table_name, column_name
+  from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name = 'catalogue_items' and column_name in ('depliant_url','depliant_nom'))
+        or (table_name = 'devis_app' and column_name = 'titre'))
+ order by table_name, column_name;

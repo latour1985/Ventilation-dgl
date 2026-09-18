@@ -226,6 +226,7 @@ export function DevisPDF({ devis, config }) {
       <Page size="A4" style={s.page}>
         <EnTetePDF config={config} />
         <Text style={s.title}>DEVIS {devis?.numero}</Text>
+        {devis?.titre ? <Text style={s.meta}>Objet : {devis.titre}</Text> : null}
         <Text style={s.meta}>Date : {devis?.date}</Text>
         <AdressesPDF clientNom={devis?.clientNom} adresseFacturation={devis?.adresseFacturation} adresseTravaux={devis?.adresseTravaux} />
 
