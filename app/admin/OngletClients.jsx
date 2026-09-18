@@ -8,7 +8,7 @@
 // quel — seuls des export/import s'ajoutent.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, BarChart3, Briefcase, Camera, Check, ChevronRight, ClipboardList, Cloud, CreditCard, FileText, KeyRound, Lock, Mail, Phone, Plus, RefreshCw, Search, Trash2, UserPlus, X } from "lucide-react";
+import { AlertCircle, BarChart3, Briefcase, Camera, Check, ChevronRight, Cloud, CreditCard, FileText, KeyRound, Lock, Mail, Phone, Plus, RefreshCw, Search, Trash2, UserPlus, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { sauvegarderClient } from "@/lib/supabase/clients";
@@ -738,6 +738,74 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
     setRechercheTravaux("");
     setFiltreTravauxStatut("tous");
   }, [clientOuvertId]);
+  // ============================================================
+  // 🗂️ FICHE À ONGLETS (2026-09-18, demande du propriétaire : « beaucoup
+  // trop lourd visuellement »). La fiche empilait TOUT, ouvert en même
+  // temps : identité, courriels, rendez-vous, travaux, projets, coûts,
+  // équipements, devis, factures, commandes. Désormais : une carte
+  // d'identité compacte, puis UNE section à la fois. Rien n'est retiré —
+  // tout est rangé. « Aperçu » = ce qui demande une action.
+  // ============================================================
+  const [ongletFiche, setOngletFiche] = useState("apercu");
+  // La gestion des courriels (liste complète + ajout) se déplie au besoin.
+  const [gestionCourriels, setGestionCourriels] = useState(false);
+  // Travaux : les 5 plus récents, le reste sur demande.
+  const [travauxToutVisibles, setTravauxToutVisibles] = useState(false);
+  // ⓘ Explication du calcul des coûts — repliée par défaut.
+  const [detailCoutsOuvert, setDetailCoutsOuvert] = useState(false);
+  useEffect(() => {
+    // Arrivée par la recherche rapide sur un DEVIS : son onglet s'ouvre.
+    setOngletFiche(devisCible ? "devis" : "apercu");
+    setGestionCourriels(false);
+    setTravauxToutVisibles(false);
+    setDetailCoutsOuvert(false);
+  }, [clientOuvertId, devisCible]);
+  // Unités relevées sur les bons du client (modèle + série dédoublonnés,
+  // emplacement complété au fil des visites) — sert à l'onglet ET à son
+  // compteur.
+  const unitesDuClient = (c) => {
+    const unites = [];
+    (bons || [])
+      .filter((b) => b.client === c.nom)
+      .forEach((b) => {
+        const listeU =
+          Array.isArray(b.unites) && b.unites.length > 0
+            ? b.unites
+            : b.modeleUnite || b.serieUnite
+              ? [{ modele: b.modeleUnite, serie: b.serieUnite }]
+              : [];
+        listeU.forEach((ub) => {
+          if (!(ub.modele || ub.serie || ub.emplacement)) return;
+          const cle = `${ub.modele || ""}|${ub.serie || ""}`;
+          const existe = unites.find((u) => `${u.modele || ""}|${u.serie || ""}` === cle);
+          if (existe) {
+            if (b.date > existe.derniereVisite) existe.derniereVisite = b.date;
+            if (ub.emplacement && !existe.emplacement) existe.emplacement = ub.emplacement;
+          } else {
+            unites.push({ modele: ub.modele, serie: ub.serie, emplacement: ub.emplacement || "", derniereVisite: b.date });
+          }
+        });
+      });
+    return unites;
+  };
+  // Compteurs des onglets de la fiche OUVERTE (calculés pour elle seule).
+  const compteursFiche = (c) => {
+    const devisDuClient = (devisListe || []).filter((d) => d.clientId === c.id);
+    const actifs = devisDuClient.filter((d) => d.versionActive !== false);
+    return {
+      travaux: (travaux || []).filter((t) => t.clientId === c.id || (t.clientNom && t.clientNom === c.nom)).length,
+      devis: new Set(devisDuClient.map((d) => d.numeroBase || d.numero)).size,
+      // En attente = envoyé, version active, sans réponse du client.
+      devisEnAttente: actifs.filter((d) => d.statut === "envoye" && !d.reponseClient).length,
+      devisATraiter: actifs.filter((d) => d.statut === "accepte" && !d.traite).length,
+      projets: (projets || []).filter((p) => p.clientId === c.id).length,
+      equipements: unitesDuClient(c).length,
+      factures:
+        (facturesLibresClients || []).filter((fl) => (fl.clientId && fl.clientId === c.id) || (!fl.clientId && fl.clientNom === c.nom)).length +
+        (achatsLibres || []).filter((a) => (a.clientId && a.clientId === c.id) || (a.clientNom && a.clientNom === c.nom)).length +
+        (piecesCommandees || []).filter((p) => p.clientNom && p.clientNom === c.nom).length,
+    };
+  };
   const [nouveauCourrielLabel, setNouveauCourrielLabel] = useState("");
   // ✏️ Édition en place d'un courriel existant — { clientId, courrielId, email, label }.
   const [editionCourriel, setEditionCourriel] = useState(null);
@@ -1389,6 +1457,8 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
         })()}
         {clientsFiltres.slice((Math.min(pageClients, Math.max(1, Math.ceil(clientsFiltres.length / ITEMS_PAR_PAGE))) - 1) * ITEMS_PAR_PAGE, Math.min(pageClients, Math.max(1, Math.ceil(clientsFiltres.length / ITEMS_PAR_PAGE))) * ITEMS_PAR_PAGE).map((c) => {
           const ouvert = clientOuvertId === c.id;
+          // 🗂️ Compteurs des onglets — seulement pour la fiche ouverte.
+          const compte = ouvert ? compteursFiche(c) : null;
           return (
             <div key={c.id} id={`fiche-client-${c.id}`} className="rounded-xl border border-slate-200 bg-white">
               <button
@@ -1422,14 +1492,56 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
 
               {ouvert && (
                 <div className="space-y-1.5 border-t border-slate-100 px-3.5 pb-3.5 pt-2 text-xs text-slate-500">
-                  <div className="flex items-start justify-between gap-2">
+                  {/* 🪪 CARTE D'IDENTITÉ COMPACTE (2026-09-18) — l'essentiel
+                      en trois lignes ; les actions fréquentes à portée. */}
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                     <p className="text-sm font-extrabold text-[#131B2E]">{c.entreprise || "Particulier (aucune entreprise)"}</p>
-                    <button
-                      onClick={() => setClientEnEditionId(c.id)}
-                      className="shrink-0 rounded-lg border border-slate-300 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
-                    >
-                      ✏️ Modifier la fiche
-                    </button>
+                    <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                      <button
+                        onClick={() => onCreerDevis?.(c.id)}
+                        className="rounded-lg bg-[#131B2E] px-2.5 py-1 text-[11px] font-bold text-white active:scale-95"
+                      >
+                        + Devis
+                      </button>
+                      <button
+                        onClick={() => { setOngletFiche("projets"); setFormulaireProjetPourClient(c.id); }}
+                        className="rounded-lg border border-slate-300 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                      >
+                        + Projet
+                      </button>
+                      <button
+                        onClick={() => setClientEnEditionId(c.id)}
+                        className="rounded-lg border border-slate-300 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+                      >
+                        ✏️ Modifier
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {c.telephone && (
+                      <a href={`tel:${String(c.telephone).replace(/[^+0-9]/g, "")}`} className="flex items-center gap-1.5 font-semibold text-slate-700 hover:underline">
+                        <Phone size={11} /> {c.telephone}
+                      </a>
+                    )}
+                    {(() => {
+                      const liste = c.courriels || [];
+                      const principal = liste.find((x) => x.defaut) || liste[0];
+                      return (
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <Mail size={11} className="shrink-0" />
+                          {principal ? <span className="truncate font-semibold text-slate-700">{principal.email}</span> : <span className="italic text-amber-600">aucun courriel</span>}
+                          <button
+                            onClick={() => setGestionCourriels((v) => !v)}
+                            className="shrink-0 text-[10px] font-semibold text-blue-600 hover:underline"
+                          >
+                            {liste.length > 1 ? `+${liste.length - 1} autre${liste.length > 2 ? "s" : ""} · ` : ""}{gestionCourriels ? "fermer" : "gérer"}
+                          </button>
+                        </span>
+                      );
+                    })()}
+                    {c.termeFacturation && (
+                      <span className="flex items-center gap-1.5"><CreditCard size={11} /> {c.termeFacturation}</span>
+                    )}
                   </div>
                   {/* ADRESSE DE FACTURATION — la règle : champ explicite,
                       sinon l'adresse PRINCIPALE (première de la fiche). */}
@@ -1438,6 +1550,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                     {adresseFacturationClient(c) || <span className="italic text-amber-600">aucune adresse — à compléter via ✏️</span>}
                   </p>
 
+                  {gestionCourriels && (
                   <div className="space-y-1 rounded-lg bg-slate-50 p-2">
                     <p className="text-[10px] font-bold uppercase text-slate-400">Courriels ({(c.courriels || []).length})</p>
                     {(c.courriels || []).map((cc) =>
@@ -1513,13 +1626,8 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       </Button>
                     </div>
                   </div>
+                  )}
 
-                  {c.telephone && (
-                    <div className="flex items-center gap-1.5"><Phone size={11} /> {c.telephone}</div>
-                  )}
-                  {c.termeFacturation && (
-                    <div className="flex items-center gap-1.5"><CreditCard size={11} /> {c.termeFacturation}</div>
-                  )}
                   {/* 📌 La note générale SAUTE AUX YEUX sur la carte —
                       c'est sa raison d'être : le problème noté se voit
                       sans ouvrir la fiche. */}
@@ -1529,7 +1637,57 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                     </p>
                   )}
 
+                  {/* 🗂️ BARRE D'ONGLETS — une section à la fois. Équipements
+                      et Factures/commandes n'apparaissent que s'ils ont
+                      du contenu ; les autres restent (on y crée). */}
+                  <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-slate-200 px-1 pt-1">
+                    {[
+                      ["apercu", "Aperçu", null, true],
+                      ["travaux", "Travaux", compte.travaux, true],
+                      ["devis", "Devis", compte.devis, true],
+                      ["projets", "Projets", compte.projets, true],
+                      ["equipements", "Équipements", compte.equipements, compte.equipements > 0],
+                      ["factures", "Factures & commandes", compte.factures, compte.factures > 0],
+                    ]
+                      .filter(([, , , visible]) => visible)
+                      .map(([id, libelle, n]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setOngletFiche(id)}
+                          className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2.5 py-1.5 text-[11px] font-bold ${
+                            ongletFiche === id ? "border-[#FF6A13] text-[#131B2E]" : "border-transparent text-slate-400 hover:text-slate-600"
+                          }`}
+                        >
+                          {libelle}
+                          {n > 0 ? <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] tabular-nums ${ongletFiche === id ? "bg-orange-100 text-[#B14E0E]" : "bg-slate-100 text-slate-500"}`}>{n}</span> : null}
+                        </button>
+                      ))}
+                  </div>
+
+                  {/* 👀 APERÇU — seulement ce qui demande une action. */}
+                  {ongletFiche === "apercu" && (compte.devisEnAttente > 0 || compte.devisATraiter > 0) && (
+                    <button
+                      type="button"
+                      onClick={() => setOngletFiche("devis")}
+                      className="mt-2 flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-[11px] hover:bg-slate-50"
+                    >
+                      <span className="text-slate-700">
+                        📄{" "}
+                        {compte.devisATraiter > 0 && <span className="font-bold text-emerald-700">{compte.devisATraiter} devis accepté{compte.devisATraiter > 1 ? "s" : ""} à traiter</span>}
+                        {compte.devisATraiter > 0 && compte.devisEnAttente > 0 ? " · " : ""}
+                        {compte.devisEnAttente > 0 && <span className="font-bold">{compte.devisEnAttente} devis en attente de réponse</span>}
+                      </span>
+                      <ChevronRight size={13} className="shrink-0 text-slate-300" />
+                    </button>
+                  )}
+                  {ongletFiche === "apercu" && rendezVousAVenir(c).length === 0 && compte.devisEnAttente === 0 && compte.devisATraiter === 0 && !(bons || []).some((b) => b.client === c.nom) && compte.projets === 0 && (
+                    <p className="mt-2 rounded-xl border border-dashed border-slate-200 px-3 py-3 text-center text-[11px] text-slate-400">
+                      Rien en cours pour ce client — crée un devis ou un projet avec les boutons ci-dessus.
+                    </p>
+                  )}
                   {(() => {
+                    if (ongletFiche !== "apercu") return null;
                     const rdv = rendezVousAVenir(c);
                     if (rdv.length === 0) return null;
                     return (
@@ -1546,16 +1704,15 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                     );
                   })()}
 
-                  <div className="mt-2 border-t border-slate-100 pt-2">
-                    <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase text-slate-400">
-                      <ClipboardList size={12} /> Travaux (passés et à venir)
-                    </p>
-                    {travaux.filter((t) => t.clientId === c.id || (t.clientNom && t.clientNom === c.nom)).length === 0 ? (
-                      <p className="text-xs text-slate-400">Aucun travail enregistré pour ce client.</p>
+                  {ongletFiche === "travaux" && (
+                  <div className="mt-2">
+                    {compte.travaux === 0 ? (
+                      <p className="py-2 text-xs text-slate-400">Aucun travail enregistré pour ce client.</p>
                     ) : (
                       <>
-                        {/* RECHERCHE RAPIDE dans les travaux du client */}
-                        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                        {/* RECHERCHE RAPIDE dans les travaux du client —
+                            seulement quand la liste est longue (> 5). */}
+                        <div className={`mb-1.5 flex flex-wrap items-center gap-1.5 ${compte.travaux > 5 ? "" : "hidden"}`}>
                           <div className="flex min-w-[160px] flex-1 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5">
                             <Search size={12} className="shrink-0 text-slate-400" />
                             <input
@@ -1600,7 +1757,11 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                                     .filter(Boolean)
                                     .some((champ) => champ.toLowerCase().includes(q))
                             )
-                            .sort((a, b) => a.date.localeCompare(b.date));
+                            // Les plus récents (et ceux à venir) d'abord.
+                            .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+                          // 5 d'abord ; tout si on cherche ou si demandé.
+                          const limite = q || travauxToutVisibles ? listeFiltree.length : 5;
+                          const masques = listeFiltree.length - Math.min(limite, listeFiltree.length);
                           if (listeFiltree.length === 0) {
                             return (
                               <p className="rounded-lg border border-dashed border-slate-200 px-2.5 py-2 text-center text-xs text-slate-400">
@@ -1609,8 +1770,9 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                             );
                           }
                           return (
+                            <>
                             <div className="overflow-hidden rounded-lg border border-slate-100">
-                              {listeFiltree.map((t) => (
+                              {listeFiltree.slice(0, limite).map((t) => (
                             <button
                               key={t.id}
                               onClick={() => setTravailOuvertId(t.id)}
@@ -1635,13 +1797,25 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                             </button>
                               ))}
                             </div>
+                            {masques > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setTravauxToutVisibles(true)}
+                                className="mt-1.5 w-full rounded-lg border border-dashed border-slate-300 py-1.5 text-[11px] font-bold text-slate-500 hover:bg-slate-50"
+                              >
+                                Voir les {masques} autre{masques > 1 ? "s" : ""}
+                              </button>
+                            )}
+                            </>
                           );
                         })()}
                       </>
                     )}
                   </div>
+                  )}
 
-                  <div className="mt-2 border-t border-slate-100 pt-2">
+                  <div className="mt-2">
+                    {ongletFiche === "projets" && (
                     <div className="mb-1 flex items-center justify-between">
                       <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase text-slate-400">
                         <Briefcase size={12} /> Projets / chantiers
@@ -1654,8 +1828,9 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                         <Plus size={10} /> Créer un projet
                       </Button>
                     </div>
+                    )}
 
-                    {formulaireProjetPourClient === c.id && (
+                    {ongletFiche === "projets" && formulaireProjetPourClient === c.id && (
                       <div className="mb-2 space-y-1.5 rounded-lg bg-slate-50 p-2">
                         <div>
                           <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Nom du projet</label>
@@ -1876,32 +2051,12 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                         bonne pièce et à retrouver les clients touchés par
                         un rappel de fabricant. */}
                     {(() => {
-                      const unites = [];
+                      if (ongletFiche !== "equipements") return null;
                       // Toutes les unités de chaque bon (un immeuble peut
-                      // en avoir 3) — avant, seule la première comptait.
-                      // L'EMPLACEMENT (« RTU toit côté nord », 2026-08-19)
-                      // suit et se complète au fil des visites.
-                      (bons || [])
-                        .filter((b) => b.client === c.nom)
-                        .forEach((b) => {
-                          const listeU =
-                            Array.isArray(b.unites) && b.unites.length > 0
-                              ? b.unites
-                              : b.modeleUnite || b.serieUnite
-                                ? [{ modele: b.modeleUnite, serie: b.serieUnite }]
-                                : [];
-                          listeU.forEach((ub) => {
-                            if (!(ub.modele || ub.serie || ub.emplacement)) return;
-                            const cle = `${ub.modele || ""}|${ub.serie || ""}`;
-                            const existe = unites.find((u) => `${u.modele || ""}|${u.serie || ""}` === cle);
-                            if (existe) {
-                              if (b.date > existe.derniereVisite) existe.derniereVisite = b.date;
-                              if (ub.emplacement && !existe.emplacement) existe.emplacement = ub.emplacement;
-                            } else {
-                              unites.push({ modele: ub.modele, serie: ub.serie, emplacement: ub.emplacement || "", derniereVisite: b.date });
-                            }
-                          });
-                        });
+                      // en avoir 3) ; l'EMPLACEMENT (« RTU toit côté nord »)
+                      // suit et se complète au fil des visites — calcul
+                      // commun avec le compteur de l'onglet (unitesDuClient).
+                      const unites = unitesDuClient(c);
                       if (unites.length === 0) return null;
                       return (
                         <div className="mb-2 rounded-xl border border-slate-200 bg-white p-2.5">
@@ -1940,6 +2095,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                         lié). Écran ADMIN uniquement — jamais sur un document
                         client. */}
                     {(() => {
+                      if (ongletFiche !== "apercu") return null;
                       const bonsDuClient = (bons || []).filter((b) => b.client === c.nom);
                       if (bonsDuClient.length === 0) return null;
                       const camionDefautClient = Number(configClients?.coutCamionHoraire) || 0;
@@ -1986,36 +2142,25 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       });
                       const profit = cumul.facture - cumul.cout;
                       const marge = cumul.facture > 0 ? (profit / cumul.facture) * 100 : null;
+                      // UNE LIGNE (2026-09-18) : quatre chiffres côte à côte,
+                      // l'explication du calcul derrière le ⓘ.
                       return (
-                        <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-                          <p className="mb-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-                            💵 Coût des travaux — {cumul.jobs} tâche{cumul.jobs > 1 ? "s" : ""} · {cumul.heures.toFixed(1)} h
-                          </p>
-                          <div className="grid grid-cols-4 gap-1.5 text-center">
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-slate-400">Facturé</p>
-                              <p className="text-xs font-extrabold tabular-nums text-slate-800">{cumul.facture.toFixed(0)} $</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-orange-500">Coût réel</p>
-                              <p className="text-xs font-extrabold tabular-nums text-orange-600">{cumul.cout.toFixed(0)} $</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-slate-400">Profit</p>
-                              <p className={`text-xs font-extrabold tabular-nums ${profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{profit.toFixed(0)} $</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-slate-400">Marge</p>
-                              <p className={`text-xs font-extrabold tabular-nums ${marge != null && marge < (Number(configClients?.seuilMargeAlerte) || 25) ? "text-red-600" : "text-emerald-700"}`}>
-                                {marge != null ? `${marge.toFixed(0)} %` : "—"}
-                              </p>
-                            </div>
+                        <div className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                            <span className="font-bold text-slate-600">💵 Travaux · {cumul.jobs} tâche{cumul.jobs > 1 ? "s" : ""} · {cumul.heures.toFixed(1)} h</span>
+                            <span>Facturé <span className="font-extrabold tabular-nums text-slate-800">{cumul.facture.toFixed(0)} $</span></span>
+                            <span>Coût réel <span className="font-extrabold tabular-nums text-orange-600">{cumul.cout.toFixed(0)} $</span></span>
+                            <span>Profit <span className={`font-extrabold tabular-nums ${profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{profit.toFixed(0)} $</span></span>
+                            <span>Marge <span className={`font-extrabold tabular-nums ${marge != null && marge < (Number(configClients?.seuilMargeAlerte) || 25) ? "text-red-600" : "text-emerald-700"}`}>{marge != null ? `${marge.toFixed(0)} %` : "—"}</span></span>
+                            <button type="button" onClick={() => setDetailCoutsOuvert((v) => !v)} className="ml-auto text-slate-400 hover:text-slate-600" title="Comment c'est calculé">ⓘ</button>
                           </div>
-                          <p className="mt-1 text-[9px] leading-snug text-slate-400">
-                            Heures pointées × taux figés + camion (inspection du jour) + matériel : coûtant du devis lié,
-                            stock au coût standard et achats rattachés (part attribuée).
-                            {cumul.facture === 0 ? " Rien de facturé encore — le coût court déjà." : ""}
-                          </p>
+                          {detailCoutsOuvert && (
+                            <p className="mt-1 text-[10px] leading-snug text-slate-400">
+                              Heures pointées × taux figés + camion (inspection du jour) + matériel : coûtant du devis lié,
+                              stock au coût standard et achats rattachés (part attribuée).
+                              {cumul.facture === 0 ? " Rien de facturé encore — le coût court déjà." : ""}
+                            </p>
+                          )}
                         </div>
                       );
                     })()}
@@ -2028,6 +2173,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                         Écran ADMIN uniquement : ces chiffres ne sortent
                         jamais sur un devis ni sur un bon de travail. */}
                     {(() => {
+                      if (ongletFiche !== "apercu" && ongletFiche !== "projets") return null;
                       const projetsDuClient = projets.filter((p) => p.clientId === c.id);
                       if (projetsDuClient.length === 0) return null;
                       const cumul = projetsDuClient.reduce(
@@ -2043,43 +2189,29 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       const marge = cumul.vendant > 0 ? (profit / cumul.vendant) * 100 : null;
                       const bon = profit >= 0;
                       return (
-                        <div className="mb-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-                          <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-                            <BarChart3 size={11} /> Rentabilité — {projetsDuClient.length} projet{projetsDuClient.length > 1 ? "s" : ""}
-                          </p>
-                          <div className="grid grid-cols-4 gap-2">
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-slate-400">Vendant</p>
-                              <p className="text-xs font-bold tabular-nums text-slate-800">{cumul.vendant.toFixed(2)} $</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-orange-500">Coûtant</p>
-                              <p className="text-xs font-bold tabular-nums text-orange-600">{cumul.coutant.toFixed(2)} $</p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-slate-400">Profit</p>
-                              <p className={`text-xs font-extrabold tabular-nums ${bon ? "text-emerald-600" : "text-red-600"}`}>
-                                {profit.toFixed(2)} $
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-[9px] font-bold uppercase text-slate-400">Marge</p>
-                              <p className={`text-xs font-extrabold tabular-nums ${bon ? "text-emerald-600" : "text-red-600"}`}>
-                                {marge != null ? `${marge.toFixed(1)} %` : "—"}
-                              </p>
-                            </div>
+                        <div className="mb-2 mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-slate-500">
+                            <span className="flex items-center gap-1 font-bold text-slate-600"><BarChart3 size={11} /> {projetsDuClient.length} projet{projetsDuClient.length > 1 ? "s" : ""}</span>
+                            <span>Vendant <span className="font-extrabold tabular-nums text-slate-800">{cumul.vendant.toFixed(0)} $</span></span>
+                            <span>Coûtant <span className="font-extrabold tabular-nums text-orange-600">{cumul.coutant.toFixed(0)} $</span></span>
+                            <span>Profit <span className={`font-extrabold tabular-nums ${bon ? "text-emerald-600" : "text-red-600"}`}>{profit.toFixed(0)} $</span></span>
+                            <span>Marge <span className={`font-extrabold tabular-nums ${bon ? "text-emerald-600" : "text-red-600"}`}>{marge != null ? `${marge.toFixed(1)} %` : "—"}</span></span>
+                            <button type="button" onClick={() => setDetailCoutsOuvert((v) => !v)} className="ml-auto text-slate-400 hover:text-slate-600" title="Comment c'est calculé">ⓘ</button>
                           </div>
-                          <p className="mt-1 text-[9px] text-slate-400">
-                            Marge = (vendant − coûtant) ÷ vendant · coûtant calculé aux taux figés à la saisie
-                          </p>
+                          {detailCoutsOuvert && (
+                            <p className="mt-1 text-[10px] text-slate-400">
+                              Marge = (vendant − coûtant) ÷ vendant · coûtant calculé aux taux figés à la saisie
+                            </p>
+                          )}
                         </div>
                       );
                     })()}
 
                     {(() => {
+                      if (ongletFiche !== "projets") return null;
                       const projetsDuClient = projets.filter((p) => p.clientId === c.id);
                       return projetsDuClient.length === 0 ? (
-                        <p className="text-xs text-slate-400">Aucun projet pour ce client.</p>
+                        formulaireProjetPourClient === c.id ? null : <p className="py-2 text-xs text-slate-400">Aucun projet pour ce client.</p>
                       ) : (
                         <div className="space-y-1.5">
                           {projetsDuClient.map((p) => (
@@ -2100,10 +2232,11 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                     {/* DEVIS DU CLIENT — chaque dossier avec ses versions.
                         C'est ici qu'on retrouve les devis, plutôt que dans
                         une grande liste générale qui devient vite illisible. */}
-                    <div className="mt-4 border-t border-slate-100 pt-3">
+                    {ongletFiche === "devis" && (
+                    <div>
                       <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                          Devis ({(devisListe || []).filter((d) => d.clientId === c.id).length})
+                        <p className="text-[11px] font-bold uppercase text-slate-400">
+                          Devis ({compte.devis} dossier{compte.devis > 1 ? "s" : ""})
                         </p>
                         {/* Amène à l'éditeur de devis avec CE client déjà
                             choisi. On n'y recopie pas un mini-formulaire :
@@ -2121,6 +2254,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       </div>
                       <DevisDuClient devisListe={devisListe} clientId={c.id} surlignerNumero={devisCible} compact onNouvelleVersion={onNouvelleVersionDevis} />
                     </div>
+                    )}
 
                     {/* 🧾 FACTURES SANS CHANTIER DU CLIENT (2026-08-31) —
                         celles émises depuis « Nouvelle facture » : la
@@ -2130,10 +2264,10 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       const facturesDuClient = (facturesLibresClients || []).filter(
                         (fl) => (fl.clientId && fl.clientId === c.id) || (!fl.clientId && fl.clientNom === c.nom)
                       );
-                      if (facturesDuClient.length === 0) return null;
+                      if (ongletFiche !== "factures" || facturesDuClient.length === 0) return null;
                       return (
-                        <div className="mt-4 border-t border-slate-100 pt-3">
-                          <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                        <div className="mb-3">
+                          <p className="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
                             Factures sans chantier ({facturesDuClient.length})
                           </p>
                           <div className="space-y-1">
@@ -2201,10 +2335,10 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                             date: p.dateReceptionPrevue || "",
                           })),
                       ];
-                      if (commandesDuClient.length === 0) return null;
+                      if (ongletFiche !== "factures" || commandesDuClient.length === 0) return null;
                       return (
-                        <div className="mt-4 border-t border-slate-100 pt-3">
-                          <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-400">
+                        <div>
+                          <p className="mb-1.5 text-[11px] font-bold uppercase text-slate-400">
                             🧾 Commandes ({commandesDuClient.length})
                           </p>
                           <div className="space-y-1">
