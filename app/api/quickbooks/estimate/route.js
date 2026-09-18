@@ -108,13 +108,28 @@ export async function POST(request) {
       );
       const est = lu?.Estimate?.[0];
       if (!est) return Response.json({ trouve: false });
+      // 💸 LES RABAIS COMPTENT (2026-09-18, vécu devis s3238) : une ligne
+      // d'item au prix NÉGATIF passait déjà ; le vrai rabais QuickBooks
+      // (DiscountLineDetail — « Remise ») était ignoré, et le total lu
+      // dépassait alors le vrai total du devis. Il devient une ligne
+      // négative comme les autres. `index` = position stable de la ligne,
+      // pour suivre ce qui a déjà été facturé ligne par ligne.
       const lignes = (est.Line || [])
-        .filter((l) => l.DetailType === "SalesItemLineDetail")
-        .map((l) => ({
-          description: String(l.Description || "").trim() || "Item du devis",
-          quantite: Number(l.SalesItemLineDetail?.Qty) || 1,
-          prixUnitaire: Number(l.SalesItemLineDetail?.UnitPrice) || Number(l.Amount) || 0,
-        }));
+        .filter((l) => l.DetailType === "SalesItemLineDetail" || l.DetailType === "DiscountLineDetail")
+        .map((l) =>
+          l.DetailType === "DiscountLineDetail"
+            ? {
+                description: `Rabais${l.DiscountLineDetail?.PercentBased && l.DiscountLineDetail?.DiscountPercent ? ` (${l.DiscountLineDetail.DiscountPercent} %)` : ""}`,
+                quantite: 1,
+                prixUnitaire: -Math.abs(Number(l.Amount) || 0),
+              }
+            : {
+                description: String(l.Description || "").trim() || "Item du devis",
+                quantite: Number(l.SalesItemLineDetail?.Qty) || 1,
+                prixUnitaire: Number(l.SalesItemLineDetail?.UnitPrice) || Number(l.Amount) || 0,
+              }
+        )
+        .map((l, index) => ({ ...l, index }));
       return Response.json({
         trouve: true,
         estimateId: est.Id,

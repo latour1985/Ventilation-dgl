@@ -596,7 +596,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null, descriptionTache = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null, descriptionTache = null, calculerFacturationDevis = null }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -718,14 +718,78 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
       .catch(() => {});
     return () => { annule = true; };
   }, [bon.devisNumero]);
-  const insererLigneDevis = (l) => {
-    const pu = Number(l.prixUnitaire) > 0 ? Number(l.prixUnitaire) : "";
+  // ============================================================
+  // 📋 LES LIGNES DU DEVIS, AVEC CE QUI RESTE À FACTURER (2026-09-18,
+  // demande du propriétaire). Trois règles :
+  //   • un RABAIS (ligne négative) entre EN NÉGATIF — avant, le prix
+  //     négatif était vidé et la ligne entrait à 0 $ : la facture
+  //     dépassait le devis du montant exact du rabais (vécu s3238) ;
+  //   • une ligne déjà facturée à 100 % APPARAÎT quand même, à 0 $, avec
+  //     la mention « déjà facturé » et un montant VERROUILLÉ ;
+  //   • une ligne facturée en partie est proposée pour son SOLDE, et ne
+  //     peut pas le dépasser (plafond).
+  // ============================================================
+  const factDevis = useMemo(
+    () => (devisQbo && calculerFacturationDevis ? calculerFacturationDevis(devisQbo.total) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [devisQbo]
+  );
+  const infoLigneDevis = (l, i) => {
+    const idx = l.index ?? i;
     const qte = Number(l.quantite) > 0 ? Number(l.quantite) : 1;
-    setItems((prev) => [
-      ...prev,
-      { id: `devis-${Date.now()}`, description: l.description || "Item du devis", quantite: qte, prixUnitaire: pu, prix: Math.round(qte * (Number(pu) || 0) * 100) / 100 },
-    ]);
+    const plein = Math.round(qte * (Number(l.prixUnitaire) || 0) * 100) / 100;
+    let deja = factDevis ? (Number(factDevis.parIndex?.[idx]) || 0) + plein * (factDevis.fractionGlobale || 0) : 0;
+    if (Math.abs(deja) > Math.abs(plein)) deja = plein; // jamais plus que la ligne
+    deja = Math.round(deja * 100) / 100;
+    const reste = Math.round((plein - deja) * 100) / 100;
+    return { idx, qte, plein, deja, reste, pct: plein !== 0 ? Math.round((deja / plein) * 100) : 0, complet: plein !== 0 && Math.abs(reste) < 0.005 };
   };
+  const mentionFactures = factDevis?.numeros?.length ? ` (facture${factDevis.numeros.length > 1 ? "s" : ""} nº ${factDevis.numeros.join(", ")})` : "";
+  const itemDepuisLigneDevis = (l, i) => {
+    const f = infoLigneDevis(l, i);
+    const texte = l.description || "Item du devis";
+    const commun = { id: `devis-${f.idx}-${Date.now()}`, devisIndex: f.idx, devisPlein: f.plein };
+    if (f.complet) {
+      return { ...commun, description: `${texte}\n✅ Déjà facturé à 100 %${mentionFactures} — ${f.plein.toFixed(2)} $`, quantite: 1, prixUnitaire: "", prix: 0, devisVerrou: true, devisPlafond: 0 };
+    }
+    if (f.deja !== 0) {
+      return { ...commun, description: `${texte}\n(Solde — ${f.pct} % déjà facturé${mentionFactures})`, quantite: 1, prixUnitaire: "", prix: f.reste, devisPlafond: f.reste };
+    }
+    // Rien de facturé : la ligne entière. Un prix NÉGATIF (rabais) se
+    // tape en mode simple — la case « prix unitaire » n'accepte que du positif.
+    const pu = Number(l.prixUnitaire) > 0 ? Number(l.prixUnitaire) : "";
+    return { ...commun, description: texte, quantite: pu === "" ? 1 : f.qte, prixUnitaire: pu, prix: f.plein, devisPlafond: f.plein };
+  };
+  const insererLigneDevis = (l, i) => {
+    setItems((prev) => [...prev, itemDepuisLigneDevis(l, i)]);
+  };
+  // 📥 PRÉ-REMPLISSAGE (2026-09-18) : sur une révision NEUVE, toutes les
+  // lignes du devis arrivent d'office — on retire celles qu'on ne veut
+  // pas, plutôt que de cliquer chaque « + ». Jamais par-dessus une
+  // révision enregistrée, un brouillon (en attente ou repris) ou des
+  // lignes déjà touchées. Les factures d'AVANT le suivi par ligne ne
+  // disent pas quelle ligne elles couvraient : leur montant devient UNE
+  // déduction claire, et le total tombe sur le solde du devis.
+  const prefillFaitRef = useRef(false);
+  useEffect(() => {
+    if (!devisQbo || prefillFaitRef.current || brouillonTrouve) return;
+    prefillFaitRef.current = true;
+    if (bon.lignesNonListees?.length) return;
+    if ((devisQbo.lignes || []).length === 0) return;
+    if (empreinte(items) !== empreinteDepartRef.current) return; // déjà touché à la main
+    if (items.some((it) => it.devisIndex != null)) return;
+    const duDevis = devisQbo.lignes.map((l, i) => itemDepuisLigneDevis(l, i));
+    const deduction =
+      factDevis && factDevis.nonAttribue > 0
+        ? [{ id: `dejafact-${Date.now()}`, description: `Déjà facturé sur ce devis${mentionFactures}`, prix: -factDevis.nonAttribue }]
+        : [];
+    // Les déductions existantes (dépôt, pièce payée d'avance) restent en bas.
+    const estDeduction = (it) => /^(depot|piece)-/.test(String(it.id));
+    const suivants = [...items.filter((it) => !estDeduction(it)), ...duDevis, ...deduction, ...items.filter(estDeduction)];
+    empreinteDepartRef.current = empreinte(suivants); // l'état « de départ » inclut le pré-remplissage
+    setItems(suivants);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devisQbo, brouillonTrouve]);
 
   // 🔁 RESYNCHRONISATION DES LIGNES SUGGÉRÉES (2026-09-04) : quand un
   // 💰/🤝 bascule dans le récit ci-contre, le parent recalcule
@@ -778,7 +842,27 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   ].filter(Boolean);
 
   const majItem = (id, champs) => {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...champs } : it)));
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.id !== id) return it;
+        // 🔒 Ligne du devis déjà facturée à 100 % : seul le texte bouge.
+        if (it.devisVerrou) return { ...it, ...(champs.description !== undefined ? { description: champs.description } : {}) };
+        const suivant = { ...it, ...champs };
+        // 📏 Ligne du devis : jamais plus que ce qui RESTE à facturer
+        // (même règle pour un rabais, borné entre son solde et 0).
+        if (it.devisPlafond != null) {
+          const prix = parseFloat(suivant.prix) || 0;
+          const plafond = Number(it.devisPlafond);
+          const hors = plafond >= 0 ? prix > plafond + 0.005 || prix < 0 : prix < plafond - 0.005 || prix > 0;
+          if (hors) {
+            const borne = plafond >= 0 ? Math.min(Math.max(prix, 0), plafond) : Math.max(Math.min(prix, 0), plafond);
+            return { ...suivant, quantite: 1, prixUnitaire: "", prix: borne, plafonne: true };
+          }
+          return { ...suivant, plafonne: false };
+        }
+        return suivant;
+      })
+    );
   };
 
   const ajouterItem = () => {
@@ -1006,26 +1090,44 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
               <p className="text-[11px] font-bold text-sky-800">
                 📋 Devis QuickBooks #{bon.devisNumero} — total {devisQbo.total.toFixed(2)} $ HT
               </p>
-              {total > devisQbo.total + 0.01 && (
+              {/* Ce qui est DÉJÀ facturé contre ce devis compte dans la comparaison. */}
+              {factDevis && factDevis.totalDeja > 0 && (
+                <p className="mt-0.5 text-[11px] font-semibold text-sky-800">
+                  Déjà facturé contre ce devis : {factDevis.totalDeja.toFixed(2)} ${mentionFactures} — reste {Math.max(0, devisQbo.total - factDevis.totalDeja).toFixed(2)} $.
+                </p>
+              )}
+              {total + (factDevis?.totalDeja || 0) > devisQbo.total + 0.05 && (
                 <p className="mt-0.5 text-[11px] font-bold text-red-600">
-                  ⚠️ La facture ({total.toFixed(2)} $) DÉPASSE le devis de {(total - devisQbo.total).toFixed(2)} $.
+                  ⚠️ {factDevis?.totalDeja > 0 ? "Avec ce qui est déjà facturé, cette facture" : "La facture"} ({total.toFixed(2)} $) DÉPASSE le devis de {(total + (factDevis?.totalDeja || 0) - devisQbo.total).toFixed(2)} $.
                 </p>
               )}
               {devisQbo.lignes.length > 0 && (
                 <div className="mt-1.5 space-y-1">
                   <p className="text-[10px] font-bold uppercase text-sky-700">Lignes du devis — clique pour les ajouter à la facture</p>
-                  {devisQbo.lignes.map((l, i) => (
-                    <button
-                      key={i}
-                      onClick={() => insererLigneDevis(l)}
-                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-sky-200 bg-white px-2 py-1 text-left text-[11px] hover:border-sky-400 active:scale-[0.99]"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-slate-700">➕ {l.description}</span>
-                      <span className="shrink-0 font-bold tabular-nums text-slate-600">
-                        {Number(l.quantite) > 1 ? `${l.quantite} × ` : ""}{(Number(l.prixUnitaire) || 0).toFixed(2)} $
-                      </span>
-                    </button>
-                  ))}
+                  {devisQbo.lignes.map((l, i) => {
+                    const f = infoLigneDevis(l, i);
+                    const dejaLa = items.some((it) => it.devisIndex === f.idx);
+                    return (
+                      <button
+                        key={i}
+                        disabled={dejaLa}
+                        onClick={() => insererLigneDevis(l, i)}
+                        title={dejaLa ? "Déjà sur cette facture" : f.complet ? "Déjà facturée à 100 % — s'ajoute à 0 $, pour mémoire" : ""}
+                        className="flex w-full items-center justify-between gap-2 rounded-lg border border-sky-200 bg-white px-2 py-1 text-left text-[11px] hover:border-sky-400 active:scale-[0.99] disabled:cursor-default disabled:opacity-50 disabled:hover:border-sky-200"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-slate-700">{dejaLa ? "✓" : "➕"} {l.description}</span>
+                        <span className="shrink-0 text-right font-bold tabular-nums text-slate-600">
+                          {f.complet ? (
+                            <span className="text-emerald-700">✅ facturé 100 %</span>
+                          ) : f.deja !== 0 ? (
+                            <span>solde {f.reste.toFixed(2)} $ <span className="font-normal text-slate-400">({f.pct} % facturé)</span></span>
+                          ) : (
+                            <>{Number(l.quantite) > 1 ? `${l.quantite} × ` : ""}{(Number(l.prixUnitaire) || 0).toFixed(2)} $</>
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1067,6 +1169,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                   <span className="text-[11px] text-slate-400">Qté</span>
                   <InputNombreDecimal
                     valeur={it.quantite ?? 1}
+                    readOnly={!!it.devisVerrou}
                     onChange={(q) => {
                       const pu = parseFloat(it.prixUnitaire) || 0;
                       majItem(it.id, { quantite: q, ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100 } : {}) });
@@ -1078,6 +1181,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                     valeur={it.prixUnitaire === "" || it.prixUnitaire == null ? 0 : Number(it.prixUnitaire)}
                     videSiZero
                     placeholder="—"
+                    readOnly={!!it.devisVerrou}
                     onChange={(pu) => {
                       const q = Number(it.quantite) > 0 ? Number(it.quantite) : 1;
                       // 0 = case vidée : retour au mode simple (Prix tapé à la main).
@@ -1088,12 +1192,22 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                   <span className="text-[11px] text-slate-400">= Prix ($)</span>
                   <InputNombreDecimal
                     valeur={it.prix}
-                    readOnly={parseFloat(it.prixUnitaire) > 0}
-                    title={parseFloat(it.prixUnitaire) > 0 ? "Calculé : quantité × prix unitaire (vide le prix unitaire pour taper le total à la main)" : ""}
+                    readOnly={parseFloat(it.prixUnitaire) > 0 || !!it.devisVerrou}
+                    title={it.devisVerrou ? "Déjà facturé à 100 % — montant verrouillé" : parseFloat(it.prixUnitaire) > 0 ? "Calculé : quantité × prix unitaire (vide le prix unitaire pour taper le total à la main)" : ""}
                     onChange={(v) => majItem(it.id, { prix: v })}
-                    className={`w-28 rounded-lg border px-2 py-1 text-right text-sm font-bold tabular-nums ${parseFloat(it.prixUnitaire) > 0 ? "border-slate-200 bg-slate-50 text-slate-600" : "border-slate-300"}`}
+                    className={`w-28 rounded-lg border px-2 py-1 text-right text-sm font-bold tabular-nums ${parseFloat(it.prixUnitaire) > 0 || it.devisVerrou ? "border-slate-200 bg-slate-50 text-slate-600" : "border-slate-300"}`}
                   />
                 </div>
+                {/* 📋 Ligne venue du devis : verrou (100 % facturé) ou plafond (solde). */}
+                {it.devisVerrou ? (
+                  <p className="mt-1 text-[10px] font-bold text-emerald-700">🔒 Déjà facturé à 100 % — la ligne reste pour mémoire, à 0 $ ; son montant ne peut pas être changé.</p>
+                ) : it.devisPlafond != null ? (
+                  <p className={`mt-1 text-[10px] font-semibold ${it.plafonne ? "text-red-600" : "text-slate-400"}`}>
+                    {it.plafonne ? "⚠️ Ramené au maximum : " : "Ligne du devis — maximum "}
+                    {Number(it.devisPlafond).toFixed(2)} $
+                    {Number(it.devisPlein) !== Number(it.devisPlafond) ? ` (reste à facturer sur ${Number(it.devisPlein).toFixed(2)} $)` : ""}
+                  </p>
+                ) : null}
               </div>
             ))}
             <div className="grid grid-cols-2 gap-1.5">
@@ -2257,6 +2371,62 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     b.statutQb !== "envoye" &&
     b.statutQb !== "retire" &&
     (b.facturesEmises || []).filter((f) => !f.annuleeQb).length === 0;
+  // ============================================================
+  // 📋 FACTURÉ LIGNE PAR LIGNE CONTRE LE DEVIS (2026-09-18, demande du
+  // propriétaire). Avant, Fluxya retenait COMBIEN avait été facturé
+  // contre un devis, jamais SUR QUELLES LIGNES. Chaque item de révision
+  // venu du devis porte `devisIndex` ; à l'émission, l'entrée de facture
+  // garde { index, montant } par ligne (au prorata si la facture ne
+  // couvre qu'une part de la révision). La prochaine révision du même
+  // devis sait alors quoi verrouiller (100 %) et quoi plafonner (solde).
+  // ============================================================
+  const lignesDevisFacturees = (b, montantFacture) => {
+    const tous = b?.lignesNonListees || [];
+    const duDevis = tous.filter((it) => it.devisIndex != null && (parseFloat(it.prix) || 0) !== 0);
+    if (duDevis.length === 0) return null;
+    const totalRev = tous.reduce((s, it) => s + (parseFloat(it.prix) || 0), 0);
+    const fraction = totalRev > 0 && montantFacture != null ? Math.min(1, Math.max(0, Number(montantFacture) / totalRev)) : 1;
+    return duDevis.map((it) => ({ index: it.devisIndex, montant: Math.round((parseFloat(it.prix) || 0) * fraction * 100) / 100 }));
+  };
+  // Ce qui a DÉJÀ été facturé contre le devis d'un bon — tous bons du
+  // même dossier confondus, factures annulées exclues :
+  //   parIndex    : { index → $ } (factures qui portent le détail par ligne)
+  //   fractionGlobale : part du devis facturée « en % » (progressif) —
+  //                 s'applique à CHAQUE ligne au même pourcentage
+  //   nonAttribue : $ facturés sans détail par ligne (factures d'avant)
+  //   numeros     : nº des factures concernées (pour les mentions)
+  const facturationDuDevis = (bon, totalDevis) => {
+    const num = String(bon?.devisNumero || "").trim();
+    if (!num) return null;
+    const baseDe = (n) => { const dd = devisAJourPourNumero(devisListe, n); return dd?.numeroBase || dd?.numero || String(n || "").trim(); };
+    const base = baseDe(num);
+    const parIndex = {};
+    let fractionGlobale = 0;
+    let nonAttribue = 0;
+    let totalDeja = 0;
+    const numeros = [];
+    (bons || [])
+      .filter((b) => b.devisNumero && baseDe(b.devisNumero) === base)
+      .forEach((b) =>
+        (b.facturesEmises || [])
+          .filter((f) => !f.annuleeQb)
+          .forEach((f) => {
+            const m = Number(f.montant) || 0;
+            if (f.numeroFactureQb) numeros.push(f.numeroFactureQb);
+            if (Array.isArray(f.lignesDevis) && f.lignesDevis.length > 0) {
+              f.lignesDevis.forEach((l) => { parIndex[l.index] = (parIndex[l.index] || 0) + (Number(l.montant) || 0); });
+              totalDeja += f.lignesDevis.reduce((s, l) => s + (Number(l.montant) || 0), 0);
+            } else if ((f.type === "pourcentage" || f.type === "echeance") && Number(totalDevis) > 0) {
+              fractionGlobale += m / Number(totalDevis);
+              totalDeja += m;
+            } else {
+              nonAttribue += m;
+              totalDeja += m;
+            }
+          })
+      );
+    return { parIndex, fractionGlobale: Math.min(1, fractionGlobale), nonAttribue: Math.round(nonAttribue * 100) / 100, totalDeja: Math.round(totalDeja * 100) / 100, numeros: [...new Set(numeros)] };
+  };
   const rouvrirRevision = (b) => {
     if (!revisionModifiable(b)) return;
     ajouterJournal(`✏️ Révision ROUVERTE pour "${b.projet}" (était ${(Number(b.montant) || 0).toFixed(2)} $) — rien n'est facturé, les lignes validées sont rechargées pour correction.`);
@@ -2967,6 +3137,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       montant: sousTotal,
       type: "complete",
       detail: "facture maison",
+      ...(lignesDevisFacturees(b, sousTotal) ? { lignesDevis: lignesDevisFacturees(b, sousTotal) } : {}),
       date: dateISO(new Date()),
       numeroFactureQb: creee.numero,
       factureMaisonId: creee.id,
@@ -3392,6 +3563,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           montant: partDe.get(b.id) || 0,
           type: "complete",
           detail: `facture groupée ${numero}`,
+          ...(lignesDevisFacturees(b, partDe.get(b.id) || 0) ? { lignesDevis: lignesDevisFacturees(b, partDe.get(b.id) || 0) } : {}),
           date: dateISO(new Date()),
           numeroFactureQb: numero,
           qboInvoiceId: r?.factureId || null,
@@ -3506,6 +3678,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       montant: Number(b.montant) || lignes.reduce((x, l) => x + l.montant, 0),
       type: "complete",
       detail: "envoi direct",
+      ...(lignesDevisFacturees(b, Number(b.montant) || null) ? { lignesDevis: lignesDevisFacturees(b, Number(b.montant) || null) } : {}),
       date: dateISO(new Date()),
       numeroFactureQb: numeroReel,
       qboInvoiceId: r?.factureId || null,
@@ -3636,6 +3809,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       montant,
       type,
       detail,
+      ...(lignesDevisFacturees(bons.find((x) => x.id === bonId), montant) ? { lignesDevis: lignesDevisFacturees(bons.find((x) => x.id === bonId), montant) } : {}),
       date: dateISO(new Date()),
       numeroFactureQb,
       qboInvoiceId: rQbo?.factureId || null,
@@ -5049,6 +5223,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             if (!be?.equipe) return null;
             return be.equipe.filter((t) => facturablesAssignations[`${be.tacheId || ""}|${(t.courriel || "").toLowerCase()}`] !== false).length;
           })()}
+          // 📋 Ce qui est déjà facturé contre le devis du bon, ligne par
+          // ligne (le total du devis n'est connu qu'une fois relu dans
+          // QuickBooks — d'où la fonction).
+          calculerFacturationDevis={(totalDevis) => facturationDuDevis(bonAReviser, totalDevis)}
           onFermer={() => setBonAReviserId(null)}
           onConfirmer={(items, total) => reviserPrixNonListe(bonAReviser.id, items, total)}
         />
