@@ -3911,72 +3911,59 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           </div>
         );
       })()}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-7">
-        <button
-          onClick={() => basculerFiltre("rouge")}
-          className={`rounded-xl border p-3 text-left transition-shadow ${
-            filtresActifs.includes("rouge") ? "border-red-400 bg-red-50 ring-2 ring-red-300" : "border-red-100 bg-red-50"
-          }`}
-        >
-          <p className="text-2xl font-extrabold text-red-600 tabular-nums">{rouges}</p>
-          <p className="text-xs font-semibold text-red-600">{tr("À réviser — prix non listé")}</p>
-        </button>
-        <button
-          onClick={() => basculerFiltre("bleu")}
-          className={`rounded-xl border p-3 text-left transition-shadow ${
-            filtresActifs.includes("bleu") ? "border-blue-400 bg-blue-50 ring-2 ring-blue-300" : "border-blue-100 bg-blue-50"
-          }`}
-        >
-          <p className="text-2xl font-extrabold text-blue-600 tabular-nums">{bleus}</p>
-          <p className="text-xs font-semibold text-blue-600">{tr("À valider — selon devis")}</p>
-        </button>
-        <button
-          onClick={() => basculerFiltre("violet")}
-          className={`rounded-xl border p-3 text-left transition-shadow ${
-            filtresActifs.includes("violet") ? "border-purple-400 bg-purple-50 ring-2 ring-purple-300" : "border-purple-100 bg-purple-50"
-          }`}
-        >
-          <p className="text-2xl font-extrabold text-purple-600 tabular-nums">{violets}</p>
-          <p className="text-xs font-semibold text-purple-600">{tr("À valider — contrat")}</p>
-        </button>
-        <button
-          onClick={() => basculerFiltre("jaune")}
-          className={`rounded-xl border p-3 text-left transition-shadow ${
-            filtresActifs.includes("jaune") ? "border-amber-400 bg-amber-50 ring-2 ring-amber-300" : "border-amber-100 bg-amber-50"
-          }`}
-        >
-          <p className="text-2xl font-extrabold text-amber-600 tabular-nums">{jaunes}</p>
-          <p className="text-xs font-semibold text-amber-600">{tr("Prêts — bon de commande")}</p>
-        </button>
-        <button
-          onClick={() => basculerFiltre("gris")}
-          className={`rounded-xl border p-3 text-left transition-shadow ${
-            filtresActifs.includes("gris") ? "border-teal-400 bg-teal-100 ring-2 ring-teal-300" : "border-teal-200 bg-teal-50"
-          }`}
-        >
-          <p className="text-2xl font-extrabold text-teal-600 tabular-nums">{gris}</p>
-          <p className="text-xs font-semibold text-teal-700">{tr("Appels de service")}</p>
-        </button>
-        <button
-          onClick={() => basculerFiltre("retire")}
-          className={`rounded-xl border p-3 text-left transition-shadow ${
-            filtresActifs.includes("retire") ? "border-slate-400 bg-slate-100 ring-2 ring-slate-300" : "border-slate-200 bg-slate-50"
-          }`}
-        >
-          <p className="text-2xl font-extrabold text-slate-500 tabular-nums">{retires}</p>
-          <p className="text-xs font-semibold text-slate-500">{tr("Retirés — garantie / maison / hors Fluxya")}</p>
-        </button>
-        <button
-          onClick={() => basculerFiltre("facture")}
-          title="Bons complètement facturés — hors de la liste par défaut, un clic les montre"
-          className={`rounded-xl border p-3 text-left transition-shadow ${
-            filtresActifs.includes("facture") ? "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-300" : "border-emerald-100 bg-emerald-50"
-          }`}
-        >
-          <p className="text-2xl font-extrabold text-emerald-600 tabular-nums">{dejaFactures}</p>
-          <p className="text-xs font-semibold text-emerald-700">{tr("✅ Déjà facturés")}</p>
-        </button>
-      </div>
+      {/* ============================================================
+          🧭 QUATRE TUILES = QUATRE ÉTAPES (2026-09-18, demande du
+          propriétaire : « pourquoi tout est à zéro ? »). Les sept tuiles
+          d'avant mélangeaient ÉTAPE et TYPE : « À valider — selon devis »
+          laissait croire que toutes les tâches avec devis s'y trouvaient,
+          alors qu'un bon n'y entre qu'entre « Valider » et « Facturer ».
+          Chaque tuile nomme maintenant l'ÉTAPE ; le détail par type est
+          écrit dessous. Un clic filtre la liste, comme avant (les
+          catégories internes — rouge, bleu, violet, jaune, gris — ne
+          changent pas).
+          ============================================================ */}
+      {(() => {
+        const etapeDe = (c) => (c === "rouge" ? "reviser" : c === "retire" ? "retire" : c === "facture" ? "facture" : "pret");
+        const nomType = (t) => (t === "appel_service" ? "appel" : t === "devis" ? "devis" : t === "entretien_contrat" ? "contrat" : "T&M");
+        const pluriel = (nom, n) => (nom === "T&M" || nom === "devis" ? nom : n > 1 ? `${nom}s` : nom);
+        const detail = { reviser: {}, pret: {}, retire: {}, facture: {} };
+        bonsGroupes.forEach((b) => {
+          const e = etapeDe(categorieBon(b));
+          const t = nomType(b.type);
+          detail[e][t] = (detail[e][t] || 0) + 1;
+        });
+        const texteDetail = (e) =>
+          Object.entries(detail[e])
+            .sort((a, b) => b[1] - a[1])
+            .map(([nom, n]) => `${n} ${pluriel(nom, n)}`)
+            .join(" · ");
+        const CATS_PRET = ["bleu", "violet", "jaune", "gris"];
+        const pretActif = CATS_PRET.some((c) => filtresActifs.includes(c));
+        const basculerPrets = () => {
+          setFiltresActifs((prev) => {
+            if (CATS_PRET.some((c) => prev.includes(c))) return prev.filter((c) => !CATS_PRET.includes(c));
+            setTimeout(() => refListeFact.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+            return [...prev, ...CATS_PRET];
+          });
+        };
+        const tuiles = [
+          { cle: "reviser", n: rouges, titre: tr("À réviser"), sous: tr("prix à fixer avant la facture"), actif: filtresActifs.includes("rouge"), clic: () => basculerFiltre("rouge"), c: ["text-red-600", "border-red-100 bg-red-50", "border-red-400 bg-red-50 ring-2 ring-red-300"] },
+          { cle: "pret", n: bleus + violets + jaunes + gris, titre: tr("Prêts à facturer"), sous: tr("prix validé, pas encore envoyé"), actif: pretActif, clic: basculerPrets, c: ["text-amber-600", "border-amber-100 bg-amber-50", "border-amber-400 bg-amber-50 ring-2 ring-amber-300"] },
+          { cle: "retire", n: retires, titre: tr("Retirés"), sous: tr("garantie / maison / hors Fluxya"), actif: filtresActifs.includes("retire"), clic: () => basculerFiltre("retire"), c: ["text-slate-500", "border-slate-200 bg-slate-50", "border-slate-400 bg-slate-100 ring-2 ring-slate-300"] },
+          { cle: "facture", n: dejaFactures, titre: tr("✅ Déjà facturés"), sous: tr("hors de la liste — un clic les montre"), actif: filtresActifs.includes("facture"), clic: () => basculerFiltre("facture"), c: ["text-emerald-600", "border-emerald-100 bg-emerald-50", "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-300"] },
+        ];
+        return (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {tuiles.map((tu) => (
+              <button key={tu.cle} onClick={tu.clic} className={`rounded-xl border p-3 text-left transition-shadow ${tu.actif ? tu.c[2] : tu.c[1]}`}>
+                <p className={`text-2xl font-extrabold tabular-nums ${tu.c[0]}`}>{tu.n}</p>
+                <p className={`text-xs font-bold ${tu.c[0]}`}>{tu.titre}</p>
+                <p className="mt-0.5 text-[10px] leading-snug text-slate-500">{tu.n > 0 ? texteDetail(tu.cle) : tu.sous}</p>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* 📋 À FACTURER — PAR CLIENT ET PAR PROJET.
           TOUJOURS affiché (même vide) : caché, on ne pouvait pas savoir
