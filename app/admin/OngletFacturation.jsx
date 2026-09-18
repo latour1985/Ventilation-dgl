@@ -1971,7 +1971,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           const factH = Math.max(minH, arrondiH);
           return {
             description:
-              `Appel de service 2 techniciens — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ` +
+              // 👥 Le NOMBRE suit l'équipe facturable (2026-09-18, vécu
+              // ETI-NET : « 2 techniciens » écrit alors qu'ils étaient 3).
+              `Appel de service ${sources.length} techniciens — ${s.nom || "technicien"}${s.passager ? " (même camion)" : ""} : ` +
               `${s.site.toFixed(2)} h sur place + ${s.transport.toFixed(2)} h transport` +
               `${factH > arrondiH ? ` (minimum ${minH} h appliqué)` : ""} = ${factH.toFixed(2)} h × ${taux.toFixed(2)} $/h`,
             quantite: factH,
