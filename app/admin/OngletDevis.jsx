@@ -743,6 +743,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setCourrielEnEdition(null);
   };
   const [envoiDevisEnCours, setEnvoiDevisEnCours] = useState(false);
+  // ✅ Confirmation visible sur la carte juste après un envoi réussi —
+  // { devisId, quand, adresses } : on ne doute plus, on ne renvoie plus.
+  const [envoiConfirme, setEnvoiConfirme] = useState(null);
   const ficheClientDe = (devis) =>
     clients.find((c) => c.id === devis.clientId) ||
     clients.find((c) => (c.nom || "").trim().toLowerCase() === (devis.clientNom || "").trim().toLowerCase());
@@ -896,6 +899,14 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     });
     setEnvoiDevisEnCours(false);
     if (r.envoye) {
+      // ✉️ L'ENVOI S'INSCRIT SUR LE DEVIS (2026-09-18, vécu DEV-3540-3 :
+      // trois envois identiques au client). Une RÉVISION repart avec une
+      // liste d'envois vide ; le courriel partait, le journal l'écrivait,
+      // mais rien ne s'inscrivait sur le devis — la carte le croyait
+      // « jamais envoyé » et réoffrait « Envoyer au client » à l'infini.
+      const envoisConnus = [...new Set([...(devisCourant.courrielsEnvoi || []), ...adresses])];
+      devisCourant = { ...devisCourant, courrielEnvoi: devisCourant.courrielEnvoi || adresses[0] || null, courrielsEnvoi: envoisConnus };
+      setEnvoiConfirme({ devisId: devis.id, quand: Date.now(), adresses });
       if (estRelance) {
         // 🔔 La trace de la relance vit SUR le devis — la carte montre
         // « relancé N fois » et on sait quand ne pas harceler.
@@ -907,6 +918,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         persisterDevis(majRelance).catch(() => {});
         ajouterJournal(`🔔 RELANCE du devis ${devis.numero} envoyée à ${adresses.join(", ")}.`);
       } else {
+        const majEnvoi = devisCourant;
+        setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? majEnvoi : d)));
+        persisterDevis(majEnvoi).catch(() => {});
         ajouterJournal(
           dejaAccepte
             ? `✉️ Copie du devis ${devis.numero} (déjà accepté) renvoyée à ${adresses.join(", ")}.`
@@ -1514,6 +1528,16 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         lien: lienDevisPublic(jeton),
       }),
     });
+    if (!r.envoye) {
+      // Le courriel n'est PAS parti : la carte ne doit pas dire « Envoyé
+      // à… » — la liste d'envois redevient vide, le bouton principal
+      // reste « Envoyer au client » (2026-09-18).
+      const nonEnvoye = { ...nouveauDevis, courrielEnvoi: null, courrielsEnvoi: [] };
+      setDevisListe((prev) => prev.map((d) => (d.id === nouveauDevis.id ? nonEnvoye : d)));
+      persisterDevis?.(nonEnvoye);
+    } else {
+      setEnvoiConfirme({ devisId: nouveauDevis.id, quand: Date.now(), adresses: destinataires.map((c) => c.email) });
+    }
     if (r.envoye) {
       ajouterJournal(`✉️ Devis ${numero} créé ET envoyé à ${libelleDestinataires(destinataires)} pour ${client.nom} (${totaux.vendant.toFixed(2)} $) — le client peut accepter en ligne.`);
     } else if (r.simule) {
@@ -2039,6 +2063,16 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     Le reste (voir, copier le lien, nouvelle version,
                     annuler) attend derrière « ⋯ ». Relance JAMAIS
                     automatique (règle du propriétaire). */}
+                {/* ✉️ TRACE D'ENVOI sur la carte (2026-09-18) — confirmation
+                    verte juste après l'envoi, sinon rappel discret « envoyé
+                    à… » : plus de doute, plus de doublon. */}
+                {envoiConfirme?.devisId === affichee.id ? (
+                  <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-bold text-emerald-800">
+                    ✅ Envoyé à {envoiConfirme.adresses.join(", ")} à {new Date(envoiConfirme.quand).toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" })} — le client l&apos;a reçu, inutile de renvoyer.
+                  </p>
+                ) : (affichee.courrielsEnvoi || []).length > 0 && affichee.statut !== "brouillon" ? (
+                  <p className="mt-2 truncate text-[10px] font-semibold text-slate-500">✉️ Envoyé à {affichee.courrielsEnvoi.join(", ")}</p>
+                ) : null}
                 {(() => {
                   const accepte = affichee.statut === "accepte";
                   const annule = affichee.statut === "annule";
