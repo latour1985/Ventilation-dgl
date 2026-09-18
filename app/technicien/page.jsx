@@ -3688,6 +3688,46 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       setEnRouteEnvoi(false);
     }
   };
+  // 📱 « EN ROUTE » PAR TEXTO (2026-09-17, demande du propriétaire) — le
+  // texto part du CELLULAIRE du technicien : on ouvre sa propre appli de
+  // messagerie, message déjà écrit et numéro du client déjà mis, il n'a
+  // qu'à appuyer « Envoyer ». Aucun service SMS payant, aucun numéro à
+  // configurer ; le client reçoit un vrai texto d'un vrai numéro. On
+  // marque la tâche « client averti » car le composeur s'est ouvert (même
+  // logique que l'appel : on ne peut pas confirmer l'envoi, mais le geste
+  // a été fait). Fonctionne aussi hors ligne (l'appli SMS gère l'attente).
+  const texterEnRoute = (delaiMinutes, numero) => {
+    const num = String(numero || "").replace(/[^+0-9]/g, "");
+    if (!num) return;
+    const nomComplet = session?.user?.user_metadata?.nom || (session?.user?.email || "").split("@")[0];
+    const prenom = String(nomComplet).trim().split(/\s+/)[0] || nomComplet;
+    const nomEnt = configEntRoute?.nomCommercial || configEntRoute?.nomLegal || "";
+    const message = `Bonjour, ${prenom}${nomEnt ? ` de ${nomEnt}` : ""} est en route — arrivée prévue dans environ ${delaiMinutes} minutes. Merci !`;
+    // Ouvre l'appli de texto du téléphone, message pré-rempli.
+    try {
+      window.location.href = `sms:${num}?&body=${encodeURIComponent(message)}`;
+    } catch {
+      return;
+    }
+    onMajTache(tache.id, { enRouteEnvoyeLe: Date.now(), enRouteDelai: delaiMinutes });
+    // 🕘 Trace au journal du bureau — jamais bloquant.
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        const jeton = data?.session?.access_token;
+        if (jeton) {
+          fetch("/api/journal", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${jeton}` },
+            body: JSON.stringify({
+              action: "ajouter",
+              texte: `📱 « En route » par texto préparé au ${num} pour « ${tache.titre || tache.clientNom || "tâche"} » — arrivée annoncée dans ~${delaiMinutes} min`,
+            }),
+          }).catch(() => {});
+        }
+      } catch {}
+    })();
+  };
   // ============================================================
   // TRAVAIL PARTAGÉ À PLUSIEURS TECHNICIENS
   // ------------------------------------------------------------
@@ -4493,6 +4533,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           const courriels = (tache.clientCourriels || []);
           const defauts = courriels.filter((c) => c.defaut).map((c) => c.email);
           const cibles = (defauts.length > 0 ? defauts : courriels.map((c) => c.email)).filter(Boolean);
+          const numeroClient = tache.clientTelephone || "";
           if (tache.enRouteEnvoyeLe) {
             return (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">
@@ -4501,31 +4542,57 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               </div>
             );
           }
-          if (cibles.length === 0) {
+          if (cibles.length === 0 && !numeroClient) {
             return (
               <p className="rounded-xl border border-dashed border-slate-300 px-3 py-2 text-[11px] text-slate-400">
-                🚗 {t("« En route » indisponible : aucun courriel au dossier de ce client.")}
+                🚗 {t("« En route » indisponible : aucun téléphone ni courriel au dossier de ce client.")}
               </p>
             );
           }
           return (
             <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
               <p className="text-xs font-extrabold text-sky-900">🚗 {t("Avertir le client que tu es en route")}</p>
-              <p className="mt-0.5 text-[11px] text-sky-800">{t("Un courriel part à")} {cibles.join(", ")} — {t("choisis ton délai :")}</p>
-              <div className="mt-2 grid grid-cols-4 gap-1.5">
-                {[15, 30, 45, 60].map((min) => (
-                  <button
-                    key={min}
-                    type="button"
-                    disabled={!enLigne || enRouteEnvoi}
-                    onClick={() => envoyerEnRoute(min, cibles)}
-                    className="rounded-lg border border-sky-300 bg-white py-2 text-sm font-extrabold text-sky-900 active:scale-95 disabled:opacity-40"
-                  >
-                    {min} min
-                  </button>
-                ))}
-              </div>
-              {!enLigne && <p className="mt-1.5 text-[10px] font-bold text-amber-700">📶 {t("Hors ligne — réessaie dès que le réseau revient.")}</p>}
+              {/* 📱 TEXTO (2026-09-17) — la voie principale : part de TON
+                  téléphone, message déjà écrit ; un tap ouvre ta messagerie,
+                  tu n'as qu'à appuyer « Envoyer ». Marche même hors ligne. */}
+              {numeroClient && (
+                <div className="mt-2">
+                  <p className="text-[11px] font-bold text-sky-800">📱 {t("Par texto (de ton téléphone) au")} {numeroClient} — {t("choisis ton délai :")}</p>
+                  <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                    {[15, 30, 45, 60].map((min) => (
+                      <button
+                        key={min}
+                        type="button"
+                        onClick={() => texterEnRoute(min, numeroClient)}
+                        className="rounded-lg border border-sky-400 bg-white py-2 text-sm font-extrabold text-sky-900 active:scale-95"
+                      >
+                        {min} min
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* ✉️ Courriel — repli, quand le client n'a pas de cellulaire
+                  ou préfère le courriel (nécessite le réseau). */}
+              {cibles.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[11px] font-semibold text-sky-700">{numeroClient ? t("…ou par courriel à") : t("Un courriel part à")} {cibles.join(", ")} :</p>
+                  <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+                    {[15, 30, 45, 60].map((min) => (
+                      <button
+                        key={min}
+                        type="button"
+                        disabled={!enLigne || enRouteEnvoi}
+                        onClick={() => envoyerEnRoute(min, cibles)}
+                        className="rounded-lg border border-sky-300 bg-white py-1.5 text-xs font-bold text-sky-800 active:scale-95 disabled:opacity-40"
+                      >
+                        {min} min
+                      </button>
+                    ))}
+                  </div>
+                  {!enLigne && <p className="mt-1.5 text-[10px] font-bold text-amber-700">📶 {t("Courriel hors ligne — utilise le texto, ou réessaie dès que le réseau revient.")}</p>}
+                </div>
+              )}
               {enRouteEnvoi && <p className="mt-1.5 text-[10px] font-bold text-sky-700">{t("Envoi…")}</p>}
               {enRouteErreur && <p className="mt-1.5 text-[10px] font-bold text-red-600">{enRouteErreur}</p>}
             </div>

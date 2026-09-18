@@ -2151,6 +2151,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         ? { adresseTravaux: champs.adresseTravaux, adresseIntervention: champs.adresseIntervention, adresseUnite: champs.adresseUnite || null }
         : {}),
       description: champs.description,
+      // 🏷️ Type de tâche corrigé dans la fiche — clé absente = inchangé.
+      ...(champs.typeTache !== undefined ? { typeTache: champs.typeTache } : {}),
       // Contact sur place : suit la modification (null = retiré) ; si la
       // modale ne l'a pas touché (undefined), l'existant est conservé.
       contactSurPlace: champs.contactSurPlace !== undefined ? champs.contactSurPlace : tache.contactSurPlace || null,
@@ -2190,7 +2192,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, nouveauContactCarnet }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2204,6 +2206,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(sauterFeries !== undefined ? { sauterFeries } : {}),
       ...(adresseIntervention !== undefined ? { adresseTravaux, adresseIntervention, adresseUnite: adresseUnite || null } : {}),
       description: description ?? tache.description,
+      // 🏷️ Type de tâche corrigé dans la fiche — clé absente = inchangé.
+      ...(typeTache !== undefined ? { typeTache } : {}),
       contactSurPlace: contactSurPlace !== undefined ? contactSurPlace : tache.contactSurPlace || null,
       // 🛡️ Retour sous garantie — clé absente = marque inchangée.
       ...(garantie !== undefined ? { garantie } : {}),

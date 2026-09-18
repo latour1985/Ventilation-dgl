@@ -12,7 +12,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
@@ -37,6 +37,12 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [sauterFeries, setSauterFeries] = useState(!!tache.sauterFeries);
   const [employeId, setEmployeId] = useState(employeIdInitial || "");
   const [description, setDescription] = useState(tache.description || "");
+  // 🏷️ TYPE DE TÂCHE MODIFIABLE (2026-09-17, demande du propriétaire :
+  // « on ne peut pas changer le type quand la tâche est créée » — ex. une
+  // tâche entrée « temps et matériel » qui aurait dû être « appel de
+  // service »). Corrigeable ici tant que les travaux ne sont pas commencés.
+  const typeActuel = tache.typeTache || tache.type || "appel_service";
+  const [typeChoisi, setTypeChoisi] = useState(typeActuel);
   // 🛡️ Retour sous garantie — corrigeable après coup : le courriel de
   // fin de travaux omet alors la demande d'avis Google (2026-09-06).
   const [garantieRetour, setGarantieRetour] = useState(!!tache.garantie);
@@ -314,6 +320,9 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       date,
       heureDebut,
       description,
+      // 🏷️ Type de tâche — transmis SEULEMENT s'il a changé (clé absente
+      // = type inchangé, comme les autres champs conditionnels).
+      ...(typeChoisi !== typeActuel ? { typeTache: typeChoisi } : {}),
       contactSurPlace: contactChoisi,
       // Le nouveau contact rejoint le carnet du client (traité par l'appelant).
       ...(nouveauContact ? { nouveauContactCarnet: nouveauContact } : {}),
@@ -608,6 +617,27 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
         )}
 
         <div className="space-y-3">
+          {/* 🏷️ TYPE DE TÂCHE — corrigeable après création (2026-09-17). */}
+          {!estConge && (
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">Type de tâche</label>
+              <select
+                value={typeChoisi}
+                onChange={(e) => setTypeChoisi(e.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+              >
+                {TYPES_TACHE.filter((t) => t.id !== "conge").map((t) => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
+              </select>
+              {typeChoisi !== typeActuel && (
+                <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1.5 text-[10px] font-semibold text-amber-800">
+                  ⚠️ Change le type de préférence AVANT le début des travaux : la façon de facturer dépend du type
+                  (un « appel de service » se facture depuis le bon de commande, un « devis » depuis le devis).
+                </p>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Date</label>
