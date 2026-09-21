@@ -22,7 +22,13 @@ import { dateISO, ajouterJours, dimancheDeSemaineISO, Button, DefilementHorizont
 // enregistrées par les techniciens au bouton « Terminer »).
 // Heures seulement — AUCUN montant de salaire ici.
 // ============================================================
-export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets, ajouterJournal, nomAdmin }) {
+export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets, ajouterJournal, nomAdmin, semainesPayees = [], onMarquerSemainePayee = null, onAnnulerSemainePayee = null }) {
+  // 💵 SEMAINES DE PAIE FAITES (snippet 152, 2026-09-21) — voir
+  // lib/supabase/semainesPaie.js. Une correction ne devient un report que
+  // si la semaine de la ligne est marquée payée.
+  const semainePayeeDe = (dateISOJour) => (semainesPayees || []).find((x) => x.debut === dimancheDeSemaineISO(dateISOJour)) || null;
+  const [paieEnCours, setPaieEnCours] = useState(false);
+  const [paieErreur, setPaieErreur] = useState("");
   // Journée dont on demande le déblocage (fenêtre de confirmation).
   const [deblocageDemande, setDeblocageDemande] = useState(null);
   // Détail des heures administratives d'un employé (quelles visites,
@@ -78,7 +84,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     // les heures ajoutées partent en Report ± sur la semaine courante,
     // la semaine payée n'est jamais rouverte.
     const dimancheCourant = dimancheDeSemaineISO(new Date());
-    const tardive = dimancheDeSemaineISO(iso) < dimancheCourant;
+    const tardive = dimancheDeSemaineISO(iso) < dimancheCourant && !!semainePayeeDe(iso);
     try {
       await enregistrerTravailPourEmploye(
         {
@@ -244,7 +250,14 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   lignesSemaine.forEach((t) => {
     const cle = t.employeEmail.toLowerCase();
     const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, residentielChantier: 0, residentielTransport: 0, details: [] });
-    const h = Number(t.heures) || 0;
+    // 🧾 SEMAINE PAYÉE = AFFICHÉE TELLE QUE PAYÉE (2026-09-21) : une ligne
+    // corrigée après la paie de sa semaine compte ICI pour ses heures
+    // D'AVANT (ce que la paie a versé) ; l'écart est dans le Report ± de
+    // la semaine de la correction. Avant, cette semaine montrait déjà les
+    // heures corrigées ET l'autre recevait le report : la somme des deux
+    // écrans comptait la correction deux fois.
+    const payeeAvantCorrection = t.corrigeLe && t.heuresAvantCorrection != null && dimancheDeSemaineISO(t.corrigeLe) > dimancheDeSemaineISO(t.date);
+    const h = payeeAvantCorrection ? Number(t.heuresAvantCorrection) || 0 : Number(t.heures) || 0;
     e.parJour[t.date] = (e.parJour[t.date] || 0) + h;
     // ADMINISTRATIF et DIVERS passent AVANT le classement habituel :
     // ce sont des heures payées, mais qui ne sont ni du chantier ni du
@@ -1163,7 +1176,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                                           className="rounded-full bg-purple-100 px-2 py-0.5 text-[9px] font-bold text-purple-700"
                                           title={`Corrigée après la fermeture de cette semaine de paie (avant : ${(Number(t.heuresAvantCorrection) || 0).toFixed(2)} h) — la différence est reportée sur la semaine du ${dimancheDeSemaineISO(t.corrigeLe)}.`}
                                         >
-                                          ✏️ reportée → sem. du {dimancheDeSemaineISO(t.corrigeLe)}
+                                          ✏️ payée {hM(t.heuresAvantCorrection)} · écart reporté → sem. du {dimancheDeSemaineISO(t.corrigeLe)}
                                         </span>
                                       )}
                                       {t.heuresProposees != null && (
@@ -1313,7 +1326,9 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                                 </div>
                                 {dimancheDeSemaineISO(iso) < dimancheDeSemaineISO(new Date()) && (
                                   <p className="mb-1.5 text-[10px] font-semibold text-purple-700">
-                                    ✏️ Semaine de paie déjà passée : ces heures partiront en Report ± sur la semaine courante — la semaine payée n&apos;est pas rouverte.
+                                    {semainePayeeDe(iso)
+                                      ? "✏️ Paie de cette semaine déjà FAITE : ces heures partiront en Report ± sur la semaine courante — la semaine payée n'est pas rouverte."
+                                      : "✏️ Paie de cette semaine pas encore faite : ces heures s'ajoutent directement à cette semaine."}
                                   </p>
                                 )}
                                 {ajoutErreur && <p className="mb-1.5 text-[10px] font-bold text-red-600">⚠️ {ajoutErreur}</p>}
@@ -1349,6 +1364,49 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
               {copie ? <><Check size={14} /> Copié !</> : <><Copy size={14} /> Copier pour la paie</>}
             </Button>
           </div>
+          {/* 💵 PAIE FAITE ? (snippet 152, 2026-09-21) — c'est CE geste qui
+              décide si une correction devient un report. Offert seulement
+              pour une semaine TERMINÉE. */}
+          {(() => {
+            const payee = semainePayeeDe(debutISO);
+            const terminee = finISO < dateISO(new Date());
+            const basculer = async (action) => {
+              setPaieEnCours(true);
+              setPaieErreur("");
+              try { await action(debutISO); } catch (err) { setPaieErreur(err?.message || "Action impossible — réessaie."); }
+              setPaieEnCours(false);
+            };
+            return (
+              <div className={`mt-2 rounded-xl border px-3 py-2.5 ${payee ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
+                {payee ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold text-emerald-800">
+                      ✅ Paie de cette semaine FAITE{payee.payeeLe ? ` le ${new Date(payee.payeeLe).toLocaleDateString("fr-CA", { day: "numeric", month: "long" })}` : ""}{payee.payeePar ? ` — ${payee.payeePar}` : ""}
+                      <span className="block text-[10px] font-normal text-emerald-700">Semaine verrouillée telle que payée : toute correction partira en « Report ± » sur la semaine en cours.</span>
+                    </p>
+                    {onAnnulerSemainePayee && (
+                      <button type="button" disabled={paieEnCours} onClick={() => basculer(onAnnulerSemainePayee)} className="text-[10px] font-semibold text-slate-500 underline underline-offset-2 hover:text-slate-700 disabled:opacity-50">
+                        Marquée par erreur — annuler
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] text-slate-600">
+                      <span className="font-bold">Paie pas encore faite</span> — les corrections s&apos;appliquent directement à cette semaine (aucun report).
+                      {!terminee && <span className="block text-[10px] text-slate-400">Le bouton s&apos;activera une fois la semaine terminée.</span>}
+                    </p>
+                    {onMarquerSemainePayee && (
+                      <Button variant="outline" disabled={!terminee || paieEnCours} onClick={() => basculer(onMarquerSemainePayee)} className="min-h-0 px-3 py-1.5 text-xs">
+                        {paieEnCours ? "…" : "✅ La paie de cette semaine est faite"}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {paieErreur && <p className="mt-1 text-[10px] font-bold text-red-600">⚠️ {paieErreur}</p>}
+              </div>
+            );
+          })()}
         </>
       )}
     </div>

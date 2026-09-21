@@ -6756,3 +6756,50 @@ grant execute on function public.renommer_camion(text, text) to authenticated;
 
 -- Verification : la fonction existe.
 select proname from pg_proc where proname = 'renommer_camion';
+
+-- ============================================================
+-- 152 - SEMAINES DE PAIE FAITES : LE REPORT NE DEVINE PLUS (2026-09-21)
+-- ------------------------------------------------------------
+-- Vécu : deux corrections d'heures faites un LUNDI — le lendemain de la
+-- fin de la semaine, AVANT que la paie soit produite. Fluxya décidait
+-- « semaine déjà payée » au seul calendrier : la différence partait en
+-- Report ± sur la semaine suivante… alors que l'écran de l'ancienne
+-- semaine montrait déjà les heures corrigées. Résultat : la correction
+-- comptée DEUX fois (Charles −9 h, Raphaël −1 h 41).
+-- Désormais la personne qui fait la paie le DIT : une ligne par semaine
+-- payée. Une correction ne devient un report QUE si la semaine de la
+-- ligne est marquée payée ; sinon elle corrige la semaine, tout
+-- simplement. Lecture : l'entreprise ; écriture : le bureau.
+-- ============================================================
+create table if not exists semaines_paie (
+  entreprise_id text not null default 'dgl',
+  debut_semaine date not null,            -- le DIMANCHE de la semaine de paie
+  payee_le timestamptz not null default now(),
+  payee_par text,
+  primary key (entreprise_id, debut_semaine)
+);
+alter table semaines_paie enable row level security;
+drop policy if exists "semaines_paie_lecture" on semaines_paie;
+create policy "semaines_paie_lecture" on semaines_paie
+  for select to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), ''));
+drop policy if exists "semaines_paie_ins" on semaines_paie;
+create policy "semaines_paie_ins" on semaines_paie
+  for insert to authenticated
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '') and public.fn_est_bureau());
+drop policy if exists "semaines_paie_del" on semaines_paie;
+create policy "semaines_paie_del" on semaines_paie
+  for delete to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '') and public.fn_est_bureau());
+drop trigger if exists trg_entreprise_semaines_paie on semaines_paie;
+create trigger trg_entreprise_semaines_paie before insert on semaines_paie
+  for each row execute function public.poser_entreprise_id();
+
+-- La semaine du 6 au 12 septembre 2026 a été payée le mardi 15
+-- (confirmé par Louise) — on l'inscrit pour partir du bon pied.
+insert into semaines_paie (entreprise_id, debut_semaine, payee_le, payee_par)
+values ('dgl', '2026-09-06', '2026-09-15 12:00:00-04', 'Louise Latour (inscrit à la mise en place)')
+on conflict do nothing;
+
+-- Verification : la table existe et contient la semaine du 6 septembre.
+select debut_semaine, payee_le, payee_par from semaines_paie order by debut_semaine;

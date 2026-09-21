@@ -27,6 +27,7 @@ import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supa
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
+import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter } from "@/lib/supabase/devis";
@@ -2270,6 +2271,17 @@ function AppAdmin() {
     };
   }, [session]);
 
+  // 💵 SEMAINES DE PAIE FAITES (snippet 152, 2026-09-21) — une correction
+  // d'heures ne devient un « Report ± » QUE si la semaine de la ligne est
+  // marquée payée ici. Avant : décidé au calendrier → une correction du
+  // lundi, faite AVANT la paie, comptait deux fois (Charles −9 h).
+  const [semainesPayees, setSemainesPayees] = useState([]);
+  useEffect(() => {
+    if (!session) return;
+    listerSemainesPayees().then(setSemainesPayees).catch(() => {});
+  }, [session]);
+  const estSemainePayee = (dateISOJour) => !!dateISOJour && semainesPayees.some((x) => x.debut === dimancheDeSemaineISO(dateISOJour));
+
   // Répertoire des fournisseurs — chargé à la connexion.
   useEffect(() => {
     if (!session) return;
@@ -3844,6 +3856,18 @@ function AppAdmin() {
       )}
       {vue === "paies" && (
         <OngletPaies
+          semainesPayees={semainesPayees}
+          onMarquerSemainePayee={async (debut) => {
+            const par = session?.user?.user_metadata?.nom || session?.user?.email || "";
+            await marquerSemainePayee(debut, par);
+            setSemainesPayees(await listerSemainesPayees());
+            ajouterJournal(`💵 Paie de la semaine du ${debut} marquée FAITE — toute correction de cette semaine partira désormais en Report ± sur la semaine en cours.`);
+          }}
+          onAnnulerSemainePayee={async (debut) => {
+            await annulerSemainePayee(debut);
+            setSemainesPayees(await listerSemainesPayees());
+            ajouterJournal(`↩️ Paie de la semaine du ${debut} remise à « pas encore faite » — les corrections s'appliqueront de nouveau directement à cette semaine.`);
+          }}
           travaux={travaux}
           utilisateurs={utilisateursActifs}
           ajouterJournal={ajouterJournal}
@@ -3867,7 +3891,9 @@ function AppAdmin() {
             const dimancheCourant = dimancheDeSemaineISO(new Date());
             const enrichir = (a) => {
               const t = a.travail;
-              if (!t.date || dimancheDeSemaineISO(t.date) >= dimancheCourant) return a;
+              // Report SEULEMENT si la semaine de la ligne est marquée payée
+              // (snippet 152) — sinon la correction s'applique à sa semaine.
+              if (!t.date || !estSemainePayee(t.date) || dimancheDeSemaineISO(t.date) >= dimancheCourant) return a;
               const dejaCetteSemaine = t.corrigeLe && dimancheDeSemaineISO(t.corrigeLe) === dimancheCourant;
               return {
                 ...a,
@@ -3879,7 +3905,7 @@ function AppAdmin() {
               .map((a) => `« ${a.travail.titre} » ${(Number(a.travail.heures) || 0).toFixed(2)} h → ${a.heures.toFixed(2)} h`)
               .join(" · ");
             const qui = `${ajustements[0]?.travail.employeNom || ajustements[0]?.travail.employeEmail} · ${ajustements[0]?.travail.date}`;
-            const tardive = ajustements.some((a) => a.travail.date && dimancheDeSemaineISO(a.travail.date) < dimancheCourant);
+            const tardive = ajustements.some((a) => a.travail.date && estSemainePayee(a.travail.date) && dimancheDeSemaineISO(a.travail.date) < dimancheCourant);
             if (role === "Admin principal" || role === "Admin régulier") {
               const plan = ajustements.map(enrichir);
               setTravaux((prev) =>
@@ -3928,7 +3954,7 @@ function AppAdmin() {
             // passée, la différence part en Report ± sur la semaine courante.
             const dimancheCourant = dimancheDeSemaineISO(new Date());
             const lignesEnrichies = lignes.map((l) => {
-              if (!l.date || dimancheDeSemaineISO(l.date) >= dimancheCourant) return l;
+              if (!l.date || !estSemainePayee(l.date) || dimancheDeSemaineISO(l.date) >= dimancheCourant) return l;
               const dejaCetteSemaine = l.corrigeLe && dimancheDeSemaineISO(l.corrigeLe) === dimancheCourant;
               return {
                 ...l,
