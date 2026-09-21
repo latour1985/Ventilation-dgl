@@ -3632,6 +3632,123 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
 // ============================================================
 // FORMULAIRE BON DE TRAVAIL
 // ============================================================
+// 🚚 LISTE DE RAMASSAGE (2026-09-21, demande du propriétaire). Chaque bon
+// s'annonce au comptoir par son NUMÉRO ; « Ramassé » le sort de la liste
+// (recu_le en base, via /api/ramassage — la RLS interdit l'écriture directe
+// au technicien) ; « Pas prêt » garde le bon ouvert et prévient le bureau.
+// L'état « fait » est gardé localement (localStorage) pour que la liste
+// reste juste même si la tâche n'est pas rafraîchie tout de suite.
+function ListeRamassage({ tache, session, enLigne, lectureSeule }) {
+  const { t } = useLangue();
+  const cle = `fluxya_ramassage_${tache.id}`;
+  const [faits, setFaits] = useState(() => { try { return JSON.parse(window.localStorage.getItem(cle) || "{}"); } catch { return {}; } });
+  const [enCours, setEnCours] = useState(null); // numéro
+  const [pasPretPour, setPasPretPour] = useState(null); // { numero, note }
+  const [erreur, setErreur] = useState("");
+  const [photoPour, setPhotoPour] = useState({}); // numero → url
+  const memoriser = (numero, etat) => {
+    setFaits((prev) => { const s = { ...prev, [numero]: etat }; try { window.localStorage.setItem(cle, JSON.stringify(s)); } catch {} return s; });
+  };
+  const envoyer = async (numero, geste, note, photoUrl) => {
+    setEnCours(numero);
+    setErreur("");
+    try {
+      const jeton = session?.access_token || (await supabase.auth.getSession()).data?.session?.access_token;
+      const r = await fetch("/api/ramassage", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${jeton}` }, body: JSON.stringify({ numero, geste, note, photoUrl }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.erreur || `Refus du serveur (${r.status})`);
+      memoriser(numero, geste === "ramasse" ? "ramasse" : { pasPret: note, quand: Date.now() });
+      setPasPretPour(null);
+    } catch (e) {
+      setErreur(`${numero} : ${e?.message || "envoi impossible"}`);
+    }
+    setEnCours(null);
+  };
+  const prendrePhoto = async (numero, fichier) => {
+    if (!fichier) return;
+    try {
+      const { blob } = await compresserImage(fichier);
+      const url = await televerserPhotoTravail(blob, "camera");
+      setPhotoPour((p) => ({ ...p, [numero]: url }));
+    } catch {
+      setErreur(`${numero} : photo non téléversée — réessaie.`);
+    }
+  };
+  const arrets = [];
+  tache.ramassages.forEach((b) => {
+    let a = arrets.find((x) => x.fournisseur.toLowerCase() === String(b.fournisseur || "").toLowerCase());
+    if (!a) { a = { fournisseur: b.fournisseur || "Fournisseur", adresse: b.adresse || "", telephone: b.telephone || "", bons: [] }; arrets.push(a); }
+    a.bons.push(b);
+  });
+  const restants = tache.ramassages.filter((b) => faits[b.numero] !== "ramasse").length;
+  return (
+    <div className="rounded-2xl border-2 border-sky-200 bg-sky-50 p-4">
+      <p className="text-xs font-extrabold uppercase tracking-wide text-sky-800">🚚 {t("Tournée de ramassage")} — {restants}/{tache.ramassages.length} {t("à ramasser")}</p>
+      <p className="mt-0.5 text-[11px] text-sky-700">{t("Donne le numéro du bon au comptoir. Coche « Ramassé » quand tu l'as dans le camion.")}</p>
+      {!enLigne && <p className="mt-1 text-[10px] font-bold text-amber-700">📶 {t("Hors ligne — les cases se cocheront quand le réseau reviendra.")}</p>}
+      {erreur && <p className="mt-1 text-[10px] font-bold text-red-600">⚠️ {erreur}</p>}
+      <div className="mt-3 space-y-3">
+        {arrets.map((a) => (
+          <div key={a.fournisseur} className="rounded-xl border border-sky-200 bg-white p-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-sm font-extrabold text-slate-900">🏭 {a.fournisseur}</p>
+                {a.adresse ? <p className="text-[11px] text-slate-500">{a.adresse}</p> : <p className="text-[11px] italic text-amber-600">{t("Adresse non connue — demande au bureau")}</p>}
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                {a.adresse && (
+                  <a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(a.adresse)}`} target="_blank" rel="noreferrer" className="rounded-lg bg-[#131B2E] px-2.5 py-1.5 text-[11px] font-bold text-white">🧭 {t("Y aller")}</a>
+                )}
+                {a.telephone && <a href={`tel:${String(a.telephone).replace(/[^+0-9]/g, "")}`} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-700">📞</a>}
+              </div>
+            </div>
+            <div className="mt-2 space-y-2">
+              {a.bons.map((b) => {
+                const etat = faits[b.numero];
+                const fait = etat === "ramasse";
+                return (
+                  <div key={b.numero} className={`rounded-xl border p-2.5 ${fait ? "border-emerald-200 bg-emerald-50" : etat?.pasPret ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-slate-50"}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-base font-extrabold tabular-nums text-slate-900">🧾 {b.numero}</p>
+                      {fait && <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-extrabold text-white">✅ {t("Ramassé")}</span>}
+                    </div>
+                    {b.pourJob && <p className="text-[11px] text-slate-600">{t("Pour")} : <span className="font-semibold">{b.pourJob}</span></p>}
+                    {b.texte && <p className="mt-1 whitespace-pre-wrap text-[12px] leading-snug text-slate-700">{b.texte}</p>}
+                    <p className="mt-1 rounded-lg bg-white px-2 py-1 text-[11px] font-bold text-slate-700">📦 {t("Déposer à")} : {b.depotA || "Atelier"}</p>
+                    {etat?.pasPret && <p className="mt-1 text-[11px] font-bold text-amber-800">⚠️ {t("Signalé pas prêt")} : {etat.pasPret}</p>}
+                    {!fait && !lectureSeule && (
+                      <div className="mt-2 space-y-1.5">
+                        <div className="flex gap-1.5">
+                          <button type="button" disabled={enCours === b.numero || !enLigne} onClick={() => envoyer(b.numero, "ramasse", "", photoPour[b.numero] || null)} className="min-h-[44px] flex-1 rounded-xl bg-emerald-600 text-sm font-extrabold text-white active:scale-[0.99] disabled:opacity-50">
+                            {enCours === b.numero ? "…" : `✅ ${t("Ramassé")}`}
+                          </button>
+                          <button type="button" disabled={enCours === b.numero} onClick={() => setPasPretPour(pasPretPour?.numero === b.numero ? null : { numero: b.numero, note: "" })} className="min-h-[44px] rounded-xl border border-amber-400 bg-white px-3 text-sm font-bold text-amber-800 active:scale-[0.99]">
+                            ⚠️ {t("Pas prêt")}
+                          </button>
+                          <label className={`flex min-h-[44px] cursor-pointer items-center rounded-xl border px-3 text-sm font-bold active:scale-[0.99] ${photoPour[b.numero] ? "border-emerald-400 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-white text-slate-600"}`} title={t("Photo du bon de livraison")}>
+                            📷
+                            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; prendrePhoto(b.numero, f); }} />
+                          </label>
+                        </div>
+                        {pasPretPour?.numero === b.numero && (
+                          <div className="flex gap-1.5">
+                            <input value={pasPretPour.note} onChange={(e) => setPasPretPour((p) => ({ ...p, note: e.target.value }))} placeholder={t("Qu'est-ce qui manque ?")} className="min-w-0 flex-1 rounded-xl border border-amber-300 px-3 py-2 text-sm" />
+                            <button type="button" disabled={pasPretPour.note.trim().length < 3 || enCours === b.numero || !enLigne} onClick={() => envoyer(b.numero, "pas_pret", pasPretPour.note.trim(), null)} className="rounded-xl bg-amber-600 px-3 text-sm font-bold text-white disabled:opacity-50">{t("Envoyer")}</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile, onChargeHeures }) {
   // 🌎 Version anglaise (tranche « bon de travail », 2026-09-04) —
   // interface seulement : le bon envoyé au client et les données
@@ -4835,8 +4952,14 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           </button>
         )}
 
+        {/* 🚚 TOURNÉE DE RAMASSAGE (2026-09-21) — les bons à aller chercher,
+            groupés par fournisseur : le numéro à donner au comptoir, où
+            déposer, et deux gestes par bon. */}
+        {Array.isArray(tache.ramassages) && tache.ramassages.length > 0 && (
+          <ListeRamassage tache={tache} session={session} enLigne={enLigne} lectureSeule={lectureSeule} />
+        )}
         {/* DESCRIPTION DES TRAVAUX — rédigée par l'administration */}
-        {tache.description && (
+        {tache.description && !(Array.isArray(tache.ramassages) && tache.ramassages.length > 0) && (
           <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
             <p className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700">
               <FileText size={13} /> Description des travaux — par l'administration

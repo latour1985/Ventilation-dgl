@@ -25,6 +25,7 @@ import { enregistrerBonTravailBureau, rattacherAuBon } from "@/lib/supabase/bons
 import { enregistrerTravailPourEmploye, heuresRattachablesA, rattacherProjetAuxHeures, rattacherTacheLot } from "@/lib/supabase/travauxEffectues";
 import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/quickbooksClient";
 import { ModalEditionTache } from "./ModalEditionTache";
+import { ModalTourneeRamassage } from "./ModalTourneeRamassage";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
 import { AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour, bcEstAsap, bcEstRamassage } from "./partage";
 
@@ -395,7 +396,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null, onMajRamassageBc = null }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -2288,6 +2289,23 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       if (heureActuelle === null || hCle < heureActuelle) heureActuelle = hCle;
     });
     if (!tache || tache.est_tache_systeme) return;
+    // 🚚 TOURNÉE DE RAMASSAGE (2026-09-21) : la tournée n'est qu'une
+    // projection des bons — la déplacer, c'est changer le JOUR (et la
+    // personne) de CHACUN de ses bons. La tournée se recalcule ensuite
+    // toute seule (page.jsx), sous la bonne rangée et le bon jour.
+    if (Array.isArray(tache.ramassages) && tache.ramassages.length > 0) {
+      const cibleEmp = employes.find((e) => e.id === employeCibleId);
+      if (!cibleEmp?.courriel) {
+        ajouterJournal("⚠️ Tournée non déplacée — la personne visée n'a pas de courriel au répertoire.");
+        return;
+      }
+      const memePersonne = String(employeCibleId) === String(ancienEmployeId);
+      tache.ramassages.forEach((r) =>
+        onMajRamassageBc?.(r.numero, { date: dateCible, ...(memePersonne ? {} : { ramassePar: cibleEmp.courriel }) }, true)
+      );
+      ajouterJournal(`🚚 Tournée de ramassage (${tache.ramassages.length} bon${tache.ramassages.length > 1 ? "s" : ""}) déplacée au ${dateCible}${memePersonne ? "" : ` — confiée à ${cibleEmp.nom}`}.`);
+      return;
+    }
     // ON NE DÉPLACE PAS LE PASSÉ : des heures déjà pointées sur cette
     // tâche par ce technicien = déplacement refusé, expliqué au journal.
     const ancienEmploye = employes.find((x) => x.id === ancienEmployeId);
@@ -5490,7 +5508,20 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         </div>
       )}
 
-      {tacheDetailOuverte && (
+      {/* 🚚 La fiche d'une TOURNÉE de ramassage : ses bons, pas le
+          formulaire habituel (elle est calculée à partir des bons). */}
+      {tacheDetailOuverte && Array.isArray(tacheDetailOuverte.tache?.ramassages) && tacheDetailOuverte.tache.ramassages.length > 0 && (
+        <ModalTourneeRamassage
+          tache={tacheDetailOuverte.tache}
+          date={tacheDetailOuverte.date}
+          employe={tacheDetailOuverte.employe}
+          employes={employes}
+          lectureSeule={lectureSeule}
+          onMajRamassageBc={onMajRamassageBc}
+          onFermer={() => setTacheDetailOuverte(null)}
+        />
+      )}
+      {tacheDetailOuverte && !(Array.isArray(tacheDetailOuverte.tache?.ramassages) && tacheDetailOuverte.tache.ramassages.length > 0) && (
         <ModalEditionTache
           tache={tacheDetailOuverte.tache}
           clients={clients}

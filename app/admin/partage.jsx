@@ -709,9 +709,20 @@ export const METIERS_TERRAIN = ["Frigoriste", "Ferblantier", "Électricien", "Pl
 
 export const METIERS_BUREAU = ["Adjointe administrative", "Chargé de projet", "Estimateur", "Répartiteur", "Directeur"];
 
-export const METIERS = [...METIERS_TERRAIN, ...METIERS_BUREAU];
+// 🚚 MÉTIERS DE TERRAIN HORS GRILLE CCQ (2026-09-21, demande du
+// propriétaire) — le COMMISSIONNAIRE va chercher le matériel chez les
+// fournisseurs. Il travaille avec l'app mobile et a sa rangée à
+// l'agenda comme un technicien, mais ce n'est PAS un métier de la
+// construction : son salaire est un TAUX HORAIRE INDIVIDUEL (comme le
+// bureau), jamais une ligne de la grille des Tarifs.
+export const METIERS_HORS_GRILLE = ["Commissionnaire"];
+export const estCommissionnaire = (m) => m === "Commissionnaire";
+
+export const METIERS = [...METIERS_TERRAIN, ...METIERS_HORS_GRILLE, ...METIERS_BUREAU];
 
 export const estMetierBureau = (m) => METIERS_BUREAU.includes(m);
+// Le salaire se saisit en taux INDIVIDUEL (pas de niveau CCQ, pas de prime).
+export const estMetierTauxIndividuel = (m) => METIERS_BUREAU.includes(m) || METIERS_HORS_GRILLE.includes(m);
 // Métiers permis selon le type d'accès : « Administration bureau » choisit
 // un métier de bureau (sa sous-catégorie d'accès), « Technicien » un métier
 // de terrain ; les administrateurs peuvent porter n'importe quel métier.
@@ -721,8 +732,8 @@ export const metiersPourTypeAcces = (typeAcces, tauxMetiers) =>
   typeAcces === "Administration bureau"
     ? METIERS_BUREAU
     : typeAcces === "Technicien"
-      ? metiersTerrainDe(tauxMetiers)
-      : [...metiersTerrainDe(tauxMetiers), ...METIERS_BUREAU];
+      ? [...metiersTerrainDe(tauxMetiers), ...METIERS_HORS_GRILLE]
+      : [...metiersTerrainDe(tauxMetiers), ...METIERS_HORS_GRILLE, ...METIERS_BUREAU];
 
 // Accès par défaut selon le type d'accès + métier (la sous-catégorie
 // d'« Administration bureau » est le métier de bureau).
@@ -757,7 +768,7 @@ export const niveauxPourMetier = (m) => NIVEAUX_PAR_METIER[m] || NIVEAUX_CCQ_DEF
 // la grille des taux (Tarifs). Les métiers de bureau n'y sont jamais.
 export const metiersTerrainDe = (tauxMetiers, masques = []) =>
   [...new Set([...METIERS_TERRAIN, ...Object.keys(tauxMetiers || {})])].filter(
-    (m) => !estMetierBureau(m) && !(masques || []).includes(m)
+    (m) => !estMetierBureau(m) && !METIERS_HORS_GRILLE.includes(m) && !(masques || []).includes(m)
   );
 // Table centrale des taux horaires coûtants. Modifiée à un seul endroit
 // (onglet Utilisateurs) — appliquée automatiquement à chaque technicien

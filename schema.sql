@@ -6803,3 +6803,30 @@ on conflict do nothing;
 
 -- Verification : la table existe et contient la semaine du 6 septembre.
 select debut_semaine, payee_le, payee_par from semaines_paie order by debut_semaine;
+
+-- ============================================================
+-- 153 - COMMISSIONNAIRE : QUI RAMASSE, OÙ DÉPOSER, CHARGES (2026-09-21)
+-- ------------------------------------------------------------
+-- Demande du propriétaire : un employé « commissionnaire » va chercher
+-- le matériel chez les fournisseurs. Un bon de commande marqué
+-- « ramassage » porte désormais QUI le ramasse et OÙ déposer le
+-- matériel ; le JOUR de ramassage est la date déjà présente sur le bon
+-- (livraison_souhaitee, snippet 147). Fluxya en tire une « tournée de
+-- ramassage » par personne et par jour, à l'agenda et sur le téléphone.
+-- charges_employeur_pct : part des charges de l'employeur (RRQ, AE, RQAP,
+-- CNESST, vacances…) ajoutée au salaire dans le coût annuel d'un employé.
+-- ============================================================
+alter table achats_libres
+  add column if not exists ramasse_par text,
+  add column if not exists depot_a text,
+  add column if not exists ramassage_note text;
+alter table entreprises
+  add column if not exists charges_employeur_pct numeric;
+
+-- Verification : les quatre colonnes existent.
+select table_name, column_name
+  from information_schema.columns
+ where table_schema = 'public'
+   and ((table_name = 'achats_libres' and column_name in ('ramasse_par','depot_a','ramassage_note'))
+        or (table_name = 'entreprises' and column_name = 'charges_employeur_pct'))
+ order by table_name, column_name;

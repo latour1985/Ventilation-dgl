@@ -28,6 +28,8 @@ import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsH
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
+import { bonsARamasser, calculerTournees, tacheDeTournee, PREFIXE_TOURNEE } from "@/lib/tourneesRamassage";
+import { bcEstRamassage } from "./partage";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter } from "@/lib/supabase/devis";
@@ -58,7 +60,7 @@ import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBl
 import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes , accepterEntente } from "@/lib/supabase/entreprise";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
 import dynamic from "next/dynamic";
-import { HEURES, indexCaseHeure, dateISO, todayISO, ajouterJours, dimancheDeSemaineISO, joursDepuis, moisDepuis, STATUTS_PIECE, genererNumeroSecours, bornesPeriodeAnalyse, Button, DefilementHorizontal, ITEMS_PAR_PAGE, BarrePagination, SelecteurCibleAchat, PhotosInspection } from "./partage";
+import { descriptionAvecLivraison, estCommissionnaire, HEURES, indexCaseHeure, dateISO, todayISO, ajouterJours, dimancheDeSemaineISO, joursDepuis, moisDepuis, STATUTS_PIECE, genererNumeroSecours, bornesPeriodeAnalyse, Button, DefilementHorizontal, ITEMS_PAR_PAGE, BarrePagination, SelecteurCibleAchat, PhotosInspection } from "./partage";
 import { OngletPaies } from "./OngletPaies";
 import { OngletPieces } from "./OngletPieces";
 import { SEUIL_ENTRETIEN_KM, SEUIL_ENTRETIEN_MOIS, OngletInspectionsVehicules } from "./OngletInspectionsVehicules";
@@ -1594,7 +1596,7 @@ function AppAdmin() {
   };
   // BC LIBRE — numéro officiel ; projet choisi = coûts du projet
   // (mécanisme existant), sinon achat général (registre à part).
-  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId, tacheId, clientId, montantAttribue, livraisonEstimee = "" }) => {
+  const creerBcLibre = async ({ fournisseurNom, description, montantHT, projetId, tacheId, clientId, montantAttribue, livraisonEstimee = "", ramassePar = null, depotA = null }) => {
     // 📦 Date de livraison souhaitée — vraie donnée depuis le 2026-09-15.
     const livraisonSouhaitee = livraisonEstimee || null;
     const numero = await numeroBonCommande().catch(() => "BC-" + Date.now());
@@ -1612,6 +1614,8 @@ function AppAdmin() {
           montantHT,
           dateAchat: todayISO(),
           livraisonSouhaitee,
+          ramassePar,
+          depotA,
           clientId,
           clientNom: cl?.nom || "",
           montantAttribue: attribueClient,
@@ -1627,7 +1631,7 @@ function AppAdmin() {
       return numero;
     }
     if (projetId) {
-      const bc = { id: "bc-" + Date.now(), numeroBC: numero, fournisseur: fournisseurNom || "", montantHT: Number(montantHT) || 0, statut: "En attente", date: todayISO(), description: description || "", livraison: livraisonSouhaitee };
+      const bc = { id: "bc-" + Date.now(), numeroBC: numero, fournisseur: fournisseurNom || "", montantHT: Number(montantHT) || 0, statut: "En attente", date: todayISO(), description: description || "", livraison: livraisonSouhaitee, ...(ramassePar ? { ramassePar: String(ramassePar).toLowerCase() } : {}), ...(depotA ? { depotA } : {}) };
       setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] } : px)));
       const proj = projets.find((px) => px.id === projetId);
       ajouterJournal("🧾 BC " + numero + " créé et attribué au projet « " + (proj?.nom || projetId) + " » — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
@@ -1644,6 +1648,8 @@ function AppAdmin() {
           montantHT,
           dateAchat: todayISO(),
           livraisonSouhaitee,
+          ramassePar,
+          depotA,
           tacheId,
           tacheTitre: t?.titre || t?.clientNom || "",
           clientNom: t?.clientNom || "",
@@ -1658,7 +1664,7 @@ function AppAdmin() {
           (attribue < (Number(montantHT) || 0) ? " (le reste demeure un achat de stock)" : "")
       );
     } else {
-      await creerAchatLibre({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO(), livraisonSouhaitee }, session).catch(() => {});
+      await creerAchatLibre({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO(), livraisonSouhaitee, ramassePar, depotA }, session).catch(() => {});
       listerAchatsLibres().then(setAchatsLibres).catch(() => {});
       ajouterJournal("🧾 BC " + numero + " créé (achat général, sans projet) — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
     }
@@ -1678,6 +1684,125 @@ function AppAdmin() {
   // projet (JSON du projet). `adresses` = courriels, ou ["manuel"].
   // 📦 RÉCEPTION D'UN BC depuis l'agenda (2026-09-16) — achats libres
   // (recu_le, snippet 147) ou bons de commande d'un projet (statut Reçu).
+  // 🚚 CHANGER LE JOUR OU LA PERSONNE D'UN RAMASSAGE (2026-09-21) — depuis
+  // la tournée de l'agenda (clic, ou glisser la tournée sur un autre
+  // jour). Cherché par numéro : achat libre (snippet 153) ou bon de
+  // commande d'un projet. La LIGNE du texte du bon suit la date.
+  const majRamassageBc = async (numero, { date, ramassePar } = {}, silencieux = false) => {
+    if (!numero) return;
+    try {
+      const a = (achatsLibres || []).find((x) => x.numeroBc === numero);
+      if (a) {
+        const champs = {
+          ...(date !== undefined ? { livraisonSouhaitee: date || null, description: descriptionAvecLivraison(a.description || "", date || null) } : {}),
+          ...(ramassePar !== undefined ? { ramassePar: ramassePar || null } : {}),
+        };
+        await majAchatLibre(a.id, champs);
+        setAchatsLibres(await listerAchatsLibres());
+      } else {
+        const proj = (projets || []).find((px) => (px.bonsCommande || []).some((b) => b.numeroBC === numero));
+        if (!proj) return;
+        const maj = {
+          ...proj,
+          bonsCommande: (proj.bonsCommande || []).map((b) =>
+            b.numeroBC === numero
+              ? {
+                  ...b,
+                  ...(date !== undefined ? { livraison: date || null, description: descriptionAvecLivraison(b.description || "", date || null) } : {}),
+                  ...(ramassePar !== undefined ? { ramassePar: ramassePar ? String(ramassePar).toLowerCase() : null } : {}),
+                }
+              : b
+          ),
+        };
+        setProjets((prev) => prev.map((px) => (px.id === proj.id ? maj : px)));
+        await sauvegarderProjet(maj);
+      }
+      if (!silencieux) ajouterJournal(`🚚 Ramassage du BC ${numero} modifié${date !== undefined ? ` — jour : ${date || "à fixer"}` : ""}${ramassePar !== undefined ? ` — par : ${ramassePar || "personne"}` : ""}.`);
+    } catch (e) {
+      ajouterJournal(`⚠️ Ramassage du BC ${numero} NON modifié (${e?.message || "connexion impossible"}).`);
+    }
+  };
+  // ============================================================
+  // 🚚 SYNCHRONISATION DES TOURNÉES DE RAMASSAGE (2026-09-21)
+  // ------------------------------------------------------------
+  // Les bons « ramassage » (qui, quel jour) sont la vérité ; les tournées
+  // en sont la projection, écrites comme de vraies tâches assignées pour
+  // que l'agenda ET le téléphone du commissionnaire les voient. À chaque
+  // changement des bons : on écrit ce qui a changé (signature), on retire
+  // les tournées vides. Réservé au BUREAU (la RLS interdit l'écriture
+  // aux techniciens de toute façon) ; jamais avant que tout soit chargé.
+  // ============================================================
+  const signaturesTourneesRef = useRef({});
+  useEffect(() => {
+    if (!session || !repertoireCharge) return;
+    // Le rôle est calculé plus bas dans le composant (permissionsEffectives) —
+    // on le relit ici pour ne pas lire une variable avant sa déclaration.
+    const roleIci = permissionsEffectives(accesPerso, session)?.role;
+    if (!(roleIci === "Admin principal" || roleIci === "Admin régulier" || roleIci === "Administration bureau")) return;
+    const bons = bonsARamasser({ achatsLibres, projets, fournisseurs, bcEstRamassage });
+    const tournees = calculerTournees(bons);
+    // Les tournées déjà à l'agenda (planning reconstruit des assignations).
+    const existantes = {};
+    Object.values(planning || {}).forEach((cellule) =>
+      listeCellule(cellule).forEach((t) => {
+        if (t?.id && String(t.id).startsWith(PREFIXE_TOURNEE)) existantes[t.id] = t;
+      })
+    );
+    (async () => {
+      // À écrire : nouvelles ou modifiées.
+      for (const t of Object.values(tournees)) {
+        const emp = utilisateurs.find((u) => (u.courriel || "").toLowerCase() === t.courriel);
+        if (!emp) continue;
+        const dejaEcrite = signaturesTourneesRef.current[t.id] === t.signature || existantes[t.id]?.signatureTournee === t.signature;
+        if (dejaEcrite) continue;
+        const tache = tacheDeTournee(t);
+        try {
+          await assignerTacheSupabase({ ...tache, employeId: emp.id, statut: "planifiee" }, { courriel: emp.courriel, nom: emp.nom }, { date: t.jour, heureDebut: "07:00" });
+          signaturesTourneesRef.current[t.id] = t.signature;
+          setPlanning((prev) => {
+            const copie = { ...prev };
+            // Une case par heure prévue, à partir de 07:00.
+            const idx0 = Math.max(0, indexCaseHeure("07:00"));
+            Object.keys(copie).forEach((cle) => {
+              if (listeCellule(copie[cle]).some((x) => x.id === t.id)) {
+                const restants = listeCellule(copie[cle]).filter((x) => x.id !== t.id);
+                if (restants.length) copie[cle] = restants; else delete copie[cle];
+              }
+            });
+            HEURES.slice(idx0, idx0 + tache.heures).forEach((h) => {
+              const cle = `${t.jour}|${emp.id}|${h}`;
+              copie[cle] = [...listeCellule(copie[cle]), { ...tache, employeId: emp.id, statut: "planifiee" }];
+            });
+            return copie;
+          });
+        } catch {
+          // écriture impossible (connexion) — on réessaiera au prochain changement
+        }
+      }
+      // À retirer : tournées existantes sans plus aucun bon.
+      for (const [id, t] of Object.entries(existantes)) {
+        if (tournees[id]) continue;
+        const courriel = id.slice(PREFIXE_TOURNEE.length).replace(/-\d{4}-\d{2}-\d{2}$/, "");
+        try {
+          await retirerTacheSupabase(id, courriel);
+          delete signaturesTourneesRef.current[id];
+          setPlanning((prev) => {
+            const copie = { ...prev };
+            Object.keys(copie).forEach((cle) => {
+              const restants = listeCellule(copie[cle]).filter((x) => x.id !== id);
+              if (restants.length !== listeCellule(copie[cle]).length) {
+                if (restants.length) copie[cle] = restants; else delete copie[cle];
+              }
+            });
+            return copie;
+          });
+        } catch {}
+        void t;
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [achatsLibres, projets, fournisseurs, repertoireCharge, session, accesPerso]);
+
   const marquerBcRecu = async (numero) => {
     if (!numero) return;
     try {
@@ -3630,6 +3755,7 @@ function AppAdmin() {
       )}
       {vue === "agenda" && (
         <OngletAgenda
+          onMajRamassageBc={majRamassageBc}
           achatsLibres={achatsLibres}
           fournisseurs={fournisseurs}
           cible={cibleAgenda}
@@ -3690,6 +3816,8 @@ function AppAdmin() {
               courriel: u.courriel,
               transportQuotidien: u.transportQuotidien,
               estBureau: estMetierBureau(u.metier),
+              // 🚚 Le commissionnaire — proposé d'office pour les ramassages.
+              estCommissionnaire: estCommissionnaire(u.metier),
             }));
             const courrielSession = session.user?.email?.toLowerCase();
             if (courrielSession && !liste.some((e) => (e.courriel || "").toLowerCase() === courrielSession)) {
@@ -4081,6 +4209,11 @@ function AppAdmin() {
 
       {vue === "pieces" && (
         <OngletPieces
+          // 🚚 Qui peut ramasser : le commissionnaire d'abord, puis le terrain.
+          employesRamassage={utilisateursActifs
+            .filter((u) => u.courriel && !estMetierBureau(u.metier))
+            .map((u) => ({ courriel: String(u.courriel).toLowerCase(), nom: u.nom, commissionnaire: estCommissionnaire(u.metier) }))
+            .sort((a, b) => (b.commissionnaire ? 1 : 0) - (a.commissionnaire ? 1 : 0) || String(a.nom).localeCompare(String(b.nom), "fr"))}
           pieces={pieces}
           clients={clients}
           commandesCamion={commandesCamion}

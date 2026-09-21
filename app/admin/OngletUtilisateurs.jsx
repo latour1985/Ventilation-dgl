@@ -14,7 +14,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { supabase } from "@/lib/supabase/client";
 import { inviterEmploye } from "@/lib/comptesClient";
 import { ORDRE_SECTIONS, LIBELLES_SECTIONS, AUTORISATIONS, LIBELLES_AUTORISATIONS, AIDES_AUTORISATIONS, ROLES_AVEC_AUTORISATIONS } from "@/lib/permissions";
-import { Button, METIERS, TYPES_ACCES, COULEUR_TYPE_ACCES, accesParDefautPour, estMetierBureau, metiersPourTypeAcces, niveauxPourMetier } from "./partage";
+import { Button, METIERS, TYPES_ACCES, COULEUR_TYPE_ACCES, accesParDefautPour, estMetierTauxIndividuel, metiersPourTypeAcces, niveauxPourMetier } from "./partage";
 
 export function GrilleAcces({ sections, onBasculer, desactive }) {
   return (
@@ -252,7 +252,7 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
                 {metiersPourTypeAcces(typeAcces, tauxMetiers).map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
-            {estMetierBureau(metier) ? (
+            {estMetierTauxIndividuel(metier) ? (
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-500">Taux horaire ($/h)</label>
                 <InputNombreDecimal
@@ -271,7 +271,7 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
               </div>
             )}
           </div>
-          {!estMetierBureau(metier) && (
+          {!estMetierTauxIndividuel(metier) && (
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Prime horaire (+ $/h) — entente individuelle</label>
               <InputNombreDecimal
@@ -409,9 +409,9 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
                 niveau,
                 // Métier de bureau : taux individuel (pas de prime) ;
                 // métier de terrain : prime au-dessus de la grille CCQ.
-                tauxHoraire: estMetierBureau(metier) ? Number(tauxHoraire) || 0 : null,
-                primeHoraire: !estMetierBureau(metier) ? Number(primeHoraire) || 0 : null,
-                toujoursCommercial: !estMetierBureau(metier) && toujoursCommercial,
+                tauxHoraire: estMetierTauxIndividuel(metier) ? Number(tauxHoraire) || 0 : null,
+                primeHoraire: !estMetierTauxIndividuel(metier) ? Number(primeHoraire) || 0 : null,
+                toujoursCommercial: !estMetierTauxIndividuel(metier) && toujoursCommercial,
                 sectionsAcces,
                 poste,
                 dateEmbauche,
@@ -628,9 +628,9 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
       typeAcces,
       metier,
       niveau,
-      tauxHoraire: estMetierBureau(metier) ? Number(tauxHoraire) || 0 : null,
-      primeHoraire: !estMetierBureau(metier) ? Number(primeHoraire) || 0 : null,
-      toujoursCommercial: !estMetierBureau(metier) && toujoursCommercial,
+      tauxHoraire: estMetierTauxIndividuel(metier) ? Number(tauxHoraire) || 0 : null,
+      primeHoraire: !estMetierTauxIndividuel(metier) ? Number(primeHoraire) || 0 : null,
+      toujoursCommercial: !estMetierTauxIndividuel(metier) && toujoursCommercial,
       sectionsAcces,
       motDePasseCree: false,
     };
@@ -730,7 +730,7 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
                   ))}
                 </select>
               </div>
-              {estMetierBureau(metier) ? (
+              {estMetierTauxIndividuel(metier) ? (
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-500">Taux horaire ($/h)</label>
                   <InputNombreDecimal
@@ -754,7 +754,7 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
                 </div>
               )}
             </div>
-            {!estMetierBureau(metier) && (
+            {!estMetierTauxIndividuel(metier) && (
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-500">Prime horaire (+ $/h) — entente individuelle (0 = aucune)</label>
                 <InputNombreDecimal
