@@ -1175,6 +1175,20 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                 const pr = bcLibre.projetId ? (projets || []).find((x) => x.id === bcLibre.projetId) : null;
                 return (
                   <div className="flex flex-wrap items-center gap-1.5">
+                    {/* 🚚 RAMASSAGE = une CASE À COCHER (2026-09-22, demande du
+                        propriétaire : l'option cachée dans le menu « Livraison
+                        à » n'était pas intuitive). Cochée : on va chercher la
+                        commande au comptoir — le menu de livraison disparaît. */}
+                    <label className={`flex w-full cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold ${bcLibre.livraisonChoix === "ramassage" ? "border-sky-300 bg-sky-50 text-sky-900" : "border-slate-200 text-slate-600"}`}>
+                      <input
+                        type="checkbox"
+                        checked={bcLibre.livraisonChoix === "ramassage"}
+                        onChange={(e) => setBcLibre((f) => ({ ...f, livraisonChoix: e.target.checked ? "ramassage" : "atelier" }))}
+                        className="h-4 w-4 accent-[#FF6A13]"
+                      />
+                      🚚 On va le chercher nous-mêmes (ramassage chez le fournisseur — ne pas livrer)
+                    </label>
+                    {bcLibre.livraisonChoix !== "ramassage" && (<>
                     <span className="shrink-0 text-[10px] text-slate-400">📍 Livraison à</span>
                     <select
                       value={bcLibre.livraisonChoix}
@@ -1182,9 +1196,6 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                       className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
                     >
                       <option value="atelier">Atelier — {configEnt.adresse || "adresse de l'entreprise (Paramètres)"}</option>
-                      {/* 🚚 RAMASSAGE (2026-09-18) — on va chercher la commande
-                          au comptoir : le bon dit « ne pas livrer ». */}
-                      <option value="ramassage">🚚 Ramassage chez le fournisseur (pickup) — ne pas livrer</option>
                       {t?.adresse && <option value="tache">Chantier de la tâche — {t.adresse}</option>}
                       {(cl?.adresses || []).map((a) => (
                         <option key={a.id} value={`ca:${a.id}`}>{cl.nom} — {a.nom ? `${a.nom} · ` : ""}{libelleAdresse(a)}</option>
@@ -1195,6 +1206,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                       )}
                       <option value="autre">Autre adresse…</option>
                     </select>
+                    </>)}
                     {/* 🚚 RAMASSAGE : qui y va, où déposer (2026-09-21). Le JOUR
                         est la date « Prêt pour le » juste au-dessus. */}
                     {bcLibre.livraisonChoix === "ramassage" && (
