@@ -13,9 +13,10 @@ import { useLangue } from "@/lib/i18n";
 import { camionIndisponible } from "@/lib/supabase/camions";
 import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { BlocReponsesClients } from "./BlocReponsesClients";
-import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap } from "./partage";
+import { EncadreCoutEmploye } from "./EncadreCoutEmploye";
+import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap, estCommissionnaire } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, onCreerDevisPour = null, bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
   // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
   // commandées : cette semaine, et en retard (date passée, rien reçu).
   const livraisons = (() => {
@@ -156,6 +157,8 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         const items = [
           compteAlertes > 0 && { cle: "factures", texte: `${compteAlertes} facture${compteAlertes > 1 ? "s" : ""} à émettre / réviser`, onglet: "facturation", icone: "🧾" },
           compteAttente > 0 && { cle: "planifier", texte: `${compteAttente} tâche${compteAttente > 1 ? "s" : ""} à planifier`, onglet: "agenda", icone: "📅" },
+          // 🚚 Ramassages sans personne (2026-09-21) — à glisser dans l'agenda.
+          (() => { const nb = (ramassagesAttribuer || []).reduce((s, r) => s + r.bons.length, 0); return nb > 0 && { cle: "ramassages", texte: `${nb} ramassage${nb > 1 ? "s" : ""} à attribuer (${ramassagesAttribuer.map((r) => r.fournisseur).join(", ")})`, onglet: "agenda", icone: "🚚" }; })(),
           retoursAPlanifier > 0 && { cle: "retours", texte: `${retoursAPlanifier} retour${retoursAPlanifier > 1 ? "s" : ""} 🚧 à planifier (travaux non terminés)`, onglet: "facturation", icone: "🚧" },
           depotsQuiExpirent > 0 && { cle: "depots", texte: `${depotsQuiExpirent} dépôt${depotsQuiExpirent > 1 ? "s" : ""} qui expire${depotsQuiExpirent > 1 ? "nt" : ""} dans moins de 6 h`, onglet: "agenda", icone: "⏳" },
           reponsesATraiter > 0 && { cle: "reponses", texte: `${reponsesATraiter} réponse${reponsesATraiter > 1 ? "s" : ""} de client${reponsesATraiter > 1 ? "s" : ""} à traiter`, onglet: "devis", icone: "💬" },
@@ -342,6 +345,11 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
             s'éteint toute seule. Le rappel MONTE LE TON avec les jours :
             visible dès le premier, rouge après trois. Un client qui
             attend une semaine a souvent déjà appelé un concurrent. */}
+        {/* 🚚 COÛT DU COMMISSIONNAIRE (2026-09-21) — visible sur l'accueil pour
+            juger, mois après mois, si ça coûte moins cher que faire livrer. */}
+        {(utilisateurs || []).filter((u) => estCommissionnaire(u.metier) && u.actif !== false && u.courriel).map((u) => (
+          <EncadreCoutEmploye key={u.id} utilisateur={u} travaux={travaux} inspections={inspections} achatsLibres={achatsLibres} onOuvrirParametres={() => setOnglet("parametres")} />
+        ))}
         {(soumissionsSansDevis || []).length > 0 && (
           <div className="rounded-2xl border-2 border-indigo-300 bg-indigo-50 p-4">
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-indigo-700">

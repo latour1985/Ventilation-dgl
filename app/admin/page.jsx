@@ -28,7 +28,7 @@ import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsH
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
-import { bonsARamasser, calculerTournees, tacheDeTournee, PREFIXE_TOURNEE } from "@/lib/tourneesRamassage";
+import { bonsARamasser, calculerTournees, tacheDeTournee, ramassagesAAttribuer, PREFIXE_TOURNEE } from "@/lib/tourneesRamassage";
 import { bcEstRamassage } from "./partage";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
@@ -1699,6 +1699,15 @@ function AppAdmin() {
         };
         await majAchatLibre(a.id, champs);
         setAchatsLibres(await listerAchatsLibres());
+      } else if ((pieces || []).some((p) => p.numeroBc === numero)) {
+        // 🔧 Pièce commandée (snippet 154).
+        const p = (pieces || []).find((x) => x.numeroBc === numero);
+        await majPiece(p.id, {
+          ...(date !== undefined ? { date_reception_prevue: date || null } : {}),
+          ...(ramassePar !== undefined ? { ramasse_par: ramassePar ? String(ramassePar).toLowerCase() : null } : {}),
+          ramassage: true,
+        });
+        setPieces(await listerPieces());
       } else {
         const proj = (projets || []).find((px) => (px.bonsCommande || []).some((b) => b.numeroBC === numero));
         if (!proj) return;
@@ -1739,7 +1748,7 @@ function AppAdmin() {
     // on le relit ici pour ne pas lire une variable avant sa déclaration.
     const roleIci = permissionsEffectives(accesPerso, session)?.role;
     if (!(roleIci === "Admin principal" || roleIci === "Admin régulier" || roleIci === "Administration bureau")) return;
-    const bons = bonsARamasser({ achatsLibres, projets, fournisseurs, bcEstRamassage });
+    const bons = bonsARamasser({ achatsLibres, projets, pieces, fournisseurs, bcEstRamassage });
     const tournees = calculerTournees(bons);
     // Les tournées déjà à l'agenda (planning reconstruit des assignations).
     const existantes = {};
@@ -1801,7 +1810,13 @@ function AppAdmin() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [achatsLibres, projets, fournisseurs, repertoireCharge, session, accesPerso]);
+  }, [achatsLibres, projets, pieces, fournisseurs, repertoireCharge, session, accesPerso]);
+  // 🚚 Ramassages SANS personne ou sans jour — une carte par fournisseur
+  // dans « Tâches en attente » de l'agenda (2026-09-21).
+  const ramassagesAttribuer = useMemo(
+    () => ramassagesAAttribuer({ achatsLibres, projets, pieces, bcEstRamassage }),
+    [achatsLibres, projets, pieces]
+  );
 
   const marquerBcRecu = async (numero) => {
     if (!numero) return;
@@ -3558,6 +3573,7 @@ function AppAdmin() {
           clients={clients}
           compteAlertes={compteAlertes}
           compteAttente={tachesAttente.length}
+          ramassagesAttribuer={ramassagesAttribuer}
           soumissionsSansDevis={soumissionsSansDevis}
           onCreerDevisPour={(id) => { setClientPourNouveauDevis(id); setOnglet("devis"); }}
           journal={journal}
@@ -3755,6 +3771,7 @@ function AppAdmin() {
       )}
       {vue === "agenda" && (
         <OngletAgenda
+          ramassagesAttribuer={ramassagesAttribuer}
           onMajRamassageBc={majRamassageBc}
           achatsLibres={achatsLibres}
           fournisseurs={fournisseurs}
@@ -4360,6 +4377,9 @@ function AppAdmin() {
             </div>
           )}
           <OngletUtilisateurs
+            travaux={travaux}
+            inspections={inspections}
+            achatsLibres={achatsLibres}
             utilisateurs={utilisateurs}
             setUtilisateurs={setUtilisateurs}
             ajouterJournal={ajouterJournal}

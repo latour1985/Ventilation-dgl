@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Briefcase, ChevronDown, KeyRound, Lock, Mail, Pencil, Phone, Search, Send, ShieldCheck, Trash2, UserPlus, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
+import { EncadreCoutEmploye } from "./EncadreCoutEmploye";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { supabase } from "@/lib/supabase/client";
 import { inviterEmploye } from "@/lib/comptesClient";
@@ -86,7 +87,7 @@ export function ApercuCourrielConnexion({ utilisateur, onFermer }) {
 // FICHE PROFIL UTILISATEUR — ajout/modification des informations
 // personnelles et du profil de l'employé
 // ============================================================
-export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSupprimer, onDesactiver, onReactiver, estAdminPrincipal, tauxMetiers }) {
+export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, onSupprimer, onDesactiver, onReactiver, estAdminPrincipal, tauxMetiers, travaux = [], inspections = [], achatsLibres = [] }) {
   // Confirmation explicite avant suppression (2 clics).
   const [confirmeSuppression, setConfirmeSuppression] = useState(false);
   // ENCADRÉ DE CHOIX (demande du propriétaire, 2026-08-18) : tout le
@@ -271,6 +272,11 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
               </div>
             )}
           </div>
+          {/* 💵 COÛT ANNUEL (2026-09-21) — Admin principal seulement (c'est
+              un salaire), pour les métiers au taux individuel. */}
+          {estAdminPrincipal && estMetierTauxIndividuel(metier) && (
+            <EncadreCoutEmploye utilisateur={{ ...utilisateur, tauxHoraire }} travaux={travaux} inspections={inspections} achatsLibres={achatsLibres} compact />
+          )}
           {!estMetierTauxIndividuel(metier) && (
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Prime horaire (+ $/h) — entente individuelle</label>
@@ -507,7 +513,7 @@ export function ModalProfilUtilisateur({ utilisateur, onFermer, onEnregistrer, o
 }
 
 
-export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tauxMetiers, persisterUtilisateur, supprimerUtilisateur, estAdminPrincipal }) {
+export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJournal, tauxMetiers, persisterUtilisateur, supprimerUtilisateur, estAdminPrincipal, travaux = [], inspections = [], achatsLibres = [] }) {
   const [formulaireOuvert, setFormulaireOuvert] = useState(false);
   const [nom, setNom] = useState("");
   const [telephone, setTelephone] = useState("");
@@ -948,6 +954,9 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
       {utilisateurOuvertId && (
         <ModalProfilUtilisateur
           tauxMetiers={tauxMetiers}
+          travaux={travaux}
+          inspections={inspections}
+          achatsLibres={achatsLibres}
           utilisateur={utilisateurs.find((u) => u.id === utilisateurOuvertId)}
           estAdminPrincipal={estAdminPrincipal}
           onFermer={() => setUtilisateurOuvertId(null)}

@@ -816,6 +816,18 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               unite="h"
               aide="Du lundi au vendredi, si la 1re intervention démarre à cette heure ou plus tard, toute la journée est classée Nuit. Samedi/dimanche a toujours priorité."
             />
+            {/* 💼 CHARGES DE L'EMPLOYEUR (2026-09-21, demande du propriétaire)
+                — s'ajoutent au salaire dans le coût annuel d'un employé
+                (encadré « Coût du commissionnaire »). */}
+            <ChampParametre
+              {...propsChamp}
+              cle="chargesEmployeurPct"
+              libelle="Charges de l'employeur"
+              type="number"
+              pas="0.5"
+              unite="%"
+              aide="Part ajoutée au salaire pour le coût réel d'un employé : RRQ, assurance-emploi, RQAP, CNESST, vacances… Au Québec, souvent entre 15 et 20 %. Sert au coût annuel du commissionnaire ; 0 = non compté."
+            />
             <ChampParametre
               {...propsChamp}
               cle="seuilMargeAlerte"

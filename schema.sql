@@ -6830,3 +6830,22 @@ select table_name, column_name
    and ((table_name = 'achats_libres' and column_name in ('ramasse_par','depot_a','ramassage_note'))
         or (table_name = 'entreprises' and column_name = 'charges_employeur_pct'))
  order by table_name, column_name;
+
+-- ============================================================
+-- 154 - RAMASSAGE D'UNE PIÈCE COMMANDÉE (2026-09-21)
+-- ------------------------------------------------------------
+-- Une pièce commandée depuis le téléphone (« pièce à commander ») peut
+-- aussi être RAMASSÉE chez le fournisseur par le commissionnaire, comme
+-- un bon de commande de l'onglet Pièces : qui y va, où déposer. Le jour
+-- est la date de réception prévue déjà présente.
+-- ============================================================
+alter table pieces_commandees
+  add column if not exists ramassage boolean not null default false,
+  add column if not exists ramasse_par text,
+  add column if not exists depot_a text;
+
+-- Verification : les trois colonnes existent.
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'pieces_commandees'
+   and column_name in ('ramassage','ramasse_par','depot_a')
+ order by column_name;

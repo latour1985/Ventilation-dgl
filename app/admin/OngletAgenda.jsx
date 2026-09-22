@@ -396,7 +396,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null, onMajRamassageBc = null }) {
+export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null, onMajRamassageBc = null, ramassagesAttribuer = [] }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -1140,14 +1140,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // 🚚 `ramassage` : on va la chercher — la ligne le dit.
     (achatsLibres || [])
       .filter((a) => !a.recuLe && (a.livraisonSouhaitee || bcEstAsap(a.description)))
-      .forEach((a) => ajout(a.livraisonSouhaitee || "sans-date", { cle: `a-${a.id}`, numero: a.numeroBc || "", fournisseur: a.fournisseurNom || "", texte: `${a.fournisseurNom || "BC"} — ${a.numeroBc || ""}`, detail: a.clientNom || a.tacheTitre || "", description: a.description || "", date: a.livraisonSouhaitee || null, ramassage: bcEstRamassage(a.description), envoye: !!a.bcEnvoyeLe, telephone: (a.bcEnvoyeA || []).includes("manuel"), montantHT: a.montantHT, recevable: true }));
+      .forEach((a) => ajout(a.livraisonSouhaitee || "sans-date", { cle: `a-${a.id}`, numero: a.numeroBc || "", fournisseur: a.fournisseurNom || "", texte: `${a.fournisseurNom || "BC"} — ${a.numeroBc || ""}`, detail: a.clientNom || a.tacheTitre || "", description: a.description || "", date: a.livraisonSouhaitee || null, ramassage: bcEstRamassage(a.description), ramassePar: a.ramassePar || null, envoye: !!a.bcEnvoyeLe, telephone: (a.bcEnvoyeA || []).includes("manuel"), montantHT: a.montantHT, recevable: true }));
     (pieces || [])
       .filter((p) => p.statut === "commandee" && p.dateReceptionPrevue)
       .forEach((p) => ajout(p.dateReceptionPrevue, { cle: `p-${p.id}`, numero: p.numeroBc || "", texte: `${p.fournisseurNom || "pièce"} — ${p.numeroBc || ""}`, detail: p.clientNom || p.pieceRequise || "", description: p.pieceRequise || "", date: p.dateReceptionPrevue, envoye: !!p.bcEnvoyeLe, recevable: false }));
     (projets || []).forEach((pr) =>
       (pr.bonsCommande || [])
         .filter((bc) => (bc.livraison || bcEstAsap(bc.description)) && bc.statut !== "Reçu" && bc.statut !== "Annulé")
-        .forEach((bc) => ajout(bc.livraison || "sans-date", { cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "", fournisseur: bc.fournisseur || "", texte: `${bc.fournisseur || "BC"} — ${bc.numeroBC || ""}`, detail: `🏗️ ${pr.nom}`, description: bc.description || "", date: bc.livraison || null, ramassage: bcEstRamassage(bc.description), envoye: !!bc.envoyeLe, montantHT: bc.montantHT, recevable: true }))
+        .forEach((bc) => ajout(bc.livraison || "sans-date", { cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "", fournisseur: bc.fournisseur || "", texte: `${bc.fournisseur || "BC"} — ${bc.numeroBC || ""}`, detail: `🏗️ ${pr.nom}`, description: bc.description || "", date: bc.livraison || null, ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe, montantHT: bc.montantHT, recevable: true }))
     );
     return m;
   })();
@@ -2473,11 +2473,29 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     }
   };
 
+  // 🚚 CARTE « RAMASSAGE À ATTRIBUER » déposée sur une rangée (2026-09-21) :
+  // chaque bon du fournisseur reçoit la personne ET le jour ; la tournée
+  // se construit ensuite d'elle-même. Un bon « dès que possible » reçoit
+  // le jour du dépôt (le bureau tranche — c'est le geste).
+  const attribuerRamassages = (objet, employeId, dateCible) => {
+    if (lectureSeule) return true;
+    if (!objet?.ramassageAttribuer) return false;
+    const emp = employes.find((e) => e.id === employeId);
+    if (!emp?.courriel) {
+      ajouterJournal("⚠️ Ramassage non attribué — cette rangée n'a pas de courriel au répertoire.");
+      return true;
+    }
+    (objet.bons || []).forEach((b) => onMajRamassageBc?.(b.numero, { date: dateCible, ramassePar: emp.courriel }, true));
+    ajouterJournal(`🚚 ${(objet.bons || []).length} ramassage${(objet.bons || []).length > 1 ? "s" : ""} chez ${objet.fournisseur} attribué${(objet.bons || []).length > 1 ? "s" : ""} à ${emp.nom} le ${dateCible} — la tournée s'est créée.`);
+    return true;
+  };
+
   const onDropHeure = (e, employeId, heure) => {
     e.preventDefault();
     const data = e.dataTransfer.getData("text/plain");
     if (!data) return;
     const objet = JSON.parse(data);
+    if (attribuerRamassages(objet, employeId, dateISO(jourAffiche))) return;
     // Bloc déjà placé qu'on déplace — sinon, tâche en attente qu'on assigne.
     if (objet?.deplacement) {
       deplacerTache(objet.tacheId, objet.employeId, employeId, dateISO(jourAffiche), heure);
@@ -2491,6 +2509,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     const data = e.dataTransfer.getData("text/plain");
     if (!data) return;
     const objet = JSON.parse(data);
+    if (attribuerRamassages(objet, employeId, date)) return;
     if (objet?.deplacement) {
       // heure null = « garde l'heure actuelle de la tâche ».
       deplacerTache(objet.tacheId, objet.employeId, employeId, date, null);
@@ -2632,7 +2651,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         <div className="lg:w-80 lg:shrink-0">
           <div className="mb-2 flex items-center justify-between">
             <h3 className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
-              {tr("Tâches en attente")} ({tachesAttente.length})
+              {tr("Tâches en attente")} ({tachesAttente.length + (ramassagesAttribuer || []).length})
             </h3>
             {!lectureSeule && (
               <Button onClick={() => { setFormulaireOuvert((v) => !v); setEtapeTypeTache(false); }} className="min-h-0 gap-1 px-2 py-1 text-[11px]">
@@ -4136,6 +4155,26 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           )}
 
           <div className="space-y-2">
+            {/* 🚚 RAMASSAGES À ATTRIBUER (2026-09-21) — une carte par
+                fournisseur ; glisse-la sur la rangée de la personne, le
+                bon jour : tous ses bons reçoivent qui + quand. */}
+            {ongletAttente === "pretes" && (ramassagesAttribuer || []).map((r) => (
+              <div
+                key={r.id}
+                draggable={!lectureSeule}
+                onDragStart={(e) => !lectureSeule && e.dataTransfer.setData("text/plain", JSON.stringify({ ramassageAttribuer: true, fournisseur: r.fournisseur, bons: r.bons }))}
+                className={`rounded-xl border border-l-4 border-sky-400 bg-sky-50 p-3 ${lectureSeule ? "" : "cursor-grab active:cursor-grabbing"}`}
+              >
+                <p className="text-xs font-extrabold text-sky-900">🚚 Ramassage à attribuer — {r.fournisseur} ({r.bons.length})</p>
+                <p className="mt-0.5 text-[10px] text-sky-800">
+                  {r.bons.map((b) => `${b.numero}${b.pourJob ? ` (${b.pourJob})` : ""}${b.jour ? ` · prêt le ${b.jour}` : b.ramassePar ? "" : " · sans date"}`).join(" · ")}
+                </p>
+                <p className="mt-1 text-[10px] font-semibold text-sky-700">
+                  {r.bons.some((b) => b.ramassePar && !b.jour) ? "Personne choisie, mais pas de jour — " : "Personne n'y va encore — "}
+                  glisse cette carte sur la rangée de quelqu&apos;un, au jour voulu.
+                </p>
+              </div>
+            ))}
             {tachesAttenteAffichees.map((t) => (
               <div
                 key={t.id}
@@ -5400,7 +5439,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                         <div key={x.cle} className="flex items-center gap-2 px-2.5 py-2 text-[11px]">
                           <button type="button" onClick={() => setLivraisonOuverte(x)} className="min-w-0 flex-1 text-left hover:underline" title="Voir le contenu complet">
                             <span className="font-bold text-slate-800">{x.ramassage ? "🚚" : "📦"} {x.texte}</span>
-                            {x.ramassage ? <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-800">à ramasser</span> : null}
+                            {x.ramassage ? <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${x.ramassePar ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"}`}>{x.ramassePar ? "à ramasser" : "🚚 à attribuer"}</span> : null}
                             {x.detail ? <span className="ml-1.5 text-slate-500">{x.detail}</span> : null}
                             {x.description ? <span className="block truncate text-[10px] text-slate-400">{String(x.description).split("\n")[0]}</span> : null}
                           </button>

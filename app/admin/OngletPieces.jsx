@@ -589,7 +589,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
   // ne s'engagent sur rien, et forcer une date inventée serait pire
   // que pas de date du tout : on planifierait dessus.
   const [editionBc, setEditionBc] = useState(null);
-  const [formBc, setFormBc] = useState({ fournisseurNom: "", numeroBc: "", datePrevue: "", livraisonFixe: false });
+  const [formBc, setFormBc] = useState({ fournisseurNom: "", numeroBc: "", datePrevue: "", livraisonFixe: false, ramassage: false, ramassePar: "", depotA: "" });
 
   const ouvertes = (pieces || []).filter((p) => p.statut !== "recue" && p.statut !== "annulee");
   const affichees =
@@ -628,7 +628,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
               cible: a.tacheId ? `🔗 ${a.clientNom || a.tacheTitre || "job"}` : a.clientId ? `👤 ${a.clientNom || "client"}` : (a.description || "").includes("Pour l'inventaire courant") ? "📦 stock" : "achat général",
               description: (a.description || "").split("\n")[0],
               // ⚡/🚚 Lus dans le texte du bon (2026-09-18).
-              asap: bcEstAsap(a.description), ramassage: bcEstRamassage(a.description),
+              asap: bcEstAsap(a.description), ramassage: bcEstRamassage(a.description), ramassePar: a.ramassePar || null,
               envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a), telephone: (a.bcEnvoyeA || []).includes("manuel"),
               ouvrir: () => ouvrirBc(a),
               recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
@@ -637,7 +637,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
             .filter((p) => p.statut === "commandee")
             .map((p) => ({
               cle: `p-${p.id}`, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "", date: p.dateReceptionPrevue || null,
-              cible: `🔧 ${p.clientNom || "pièce"}`, description: p.pieceRequise || "", envoye: !!p.bcEnvoyeLe, nonEnvoye: false,
+              cible: `🔧 ${p.clientNom || "pièce"}`, description: p.pieceRequise || "", ramassage: !!p.ramassage, ramassePar: p.ramassePar || null, envoye: !!p.bcEnvoyeLe, nonEnvoye: false,
               ouvrir: null, recevoir: peutCommander && onRecue ? () => onRecue(p) : null,
             })),
           ...(projets || []).flatMap((pr) =>
@@ -645,7 +645,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
               .filter((bc) => bc.statut !== "Reçu" && bc.statut !== "Annulé")
               .map((bc) => ({
                 cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || null,
-                cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
+                cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
               }))
           ),
         ].sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
@@ -671,7 +671,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                     <span className={`w-[92px] shrink-0 rounded-md px-1.5 py-0.5 text-center text-[10px] font-extrabold tabular-nums ${retard ? "bg-red-100 text-red-700" : proche ? "bg-amber-100 text-amber-800" : l.date ? "bg-slate-100 text-slate-600" : "bg-slate-50 text-slate-400"}`}>
                       {l.date ? new Date(`${l.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" }) : l.asap ? "⚡ dès que poss." : "sans date"}
                     </span>
-                    {l.ramassage ? <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-800" title="À ramasser chez le fournisseur — ne sera pas livré">🚚 à ramasser</span> : null}
+                    {l.ramassage ? <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${l.ramassePar ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"}`} title={l.ramassePar ? "À ramasser chez le fournisseur — ne sera pas livré" : "Personne n'est encore désigné — glisse la carte dans l'agenda"}>{l.ramassePar ? "🚚 à ramasser" : "🚚 à attribuer"}</span> : null}
                     <button type="button" onClick={l.ouvrir || undefined} className={`min-w-0 flex-1 truncate text-left ${l.ouvrir ? "hover:underline" : "cursor-default"}`} title={l.description}>
                       <span className="font-bold text-slate-800">{l.numero}</span>
                       {l.fournisseur ? <span className="text-slate-600"> — {l.fournisseur}</span> : null}
@@ -1840,7 +1840,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                                   type="radio"
                                   name={`mode-livraison-${p.id}`}
                                   checked={!formBc.livraisonFixe}
-                                  onChange={() => setFormBc({ ...formBc, livraisonFixe: false })}
+                                  onChange={() => setFormBc({ ...formBc, livraisonFixe: false, ramassage: false })}
                                   className="mt-0.5"
                                 />
                                 <span><span className="font-bold">Souple</span> — livrer au plus tard cette date, avant si possible</span>
@@ -1850,11 +1850,41 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                                   type="radio"
                                   name={`mode-livraison-${p.id}`}
                                   checked={formBc.livraisonFixe}
-                                  onChange={() => setFormBc({ ...formBc, livraisonFixe: true })}
+                                  onChange={() => setFormBc({ ...formBc, livraisonFixe: true, ramassage: false })}
                                   className="mt-0.5"
                                 />
                                 <span><span className="font-bold">Date fixe</span> — livrer ce jour exactement : quelqu&apos;un sera présent à l&apos;entrepôt pour recevoir</span>
                               </label>
+                              {/* 🚚 RAMASSAGE (snippet 154, 2026-09-21) — on va la
+                                  chercher : qui, et où déposer. Le jour = la date
+                                  prévue ci-dessus. */}
+                              <label className="flex cursor-pointer items-start gap-2 text-[11px] text-slate-600">
+                                <input
+                                  type="radio"
+                                  name={`mode-livraison-${p.id}`}
+                                  checked={!!formBc.ramassage}
+                                  onChange={() => setFormBc({ ...formBc, ramassage: true, livraisonFixe: false })}
+                                  className="mt-0.5"
+                                />
+                                <span><span className="font-bold">🚚 Ramassage</span> — on va la chercher au comptoir du fournisseur (pas de livraison)</span>
+                              </label>
+                              {formBc.ramassage && (
+                                <div className="ml-5 space-y-1.5 rounded-lg border border-sky-200 bg-sky-50 p-2">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="shrink-0 text-[10px] font-bold text-sky-800">Ramassé par</span>
+                                    <select value={formBc.ramassePar} onChange={(e) => setFormBc({ ...formBc, ramassePar: e.target.value })} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs">
+                                      <option value="">— À attribuer plus tard (agenda) —</option>
+                                      {(employesRamassage || []).map((u) => (
+                                        <option key={u.courriel} value={u.courriel}>{u.commissionnaire ? "🚚 " : ""}{u.nom}{u.commissionnaire ? " (commissionnaire)" : ""}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="shrink-0 text-[10px] font-bold text-sky-800">📦 À déposer à</span>
+                                    <input value={formBc.depotA} onChange={(e) => setFormBc({ ...formBc, depotA: e.target.value })} placeholder="Atelier (défaut) — ou le chantier" className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1891,6 +1921,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                                 numero_bc: numero || null,
                                 date_reception_prevue: nouvelleDate,
                                 livraison_fixe: !!(nouvelleDate && formBc.livraisonFixe),
+                                // 🚚 Ramassage (snippet 154).
+                                ramassage: !!formBc.ramassage,
+                                ramasse_par: formBc.ramassage && formBc.ramassePar ? String(formBc.ramassePar).toLowerCase() : null,
+                                depot_a: formBc.ramassage ? (formBc.depotA || "").trim() || "Atelier" : null,
                                 ...(reportAjoute ? { reports_date: reportAjoute } : {}),
                                 statut: "commandee",
                               });
@@ -1932,6 +1966,9 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                                 numeroBc: p.numeroBc || "",
                                 datePrevue: p.dateReceptionPrevue || "",
                                 livraisonFixe: !!p.livraisonFixe,
+                                ramassage: !!p.ramassage,
+                                ramassePar: p.ramassePar || "",
+                                depotA: p.depotA || "",
                               });
                             }}
                             className="min-h-0 px-3 py-1.5 text-xs"
