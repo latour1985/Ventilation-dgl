@@ -6849,3 +6849,29 @@ select column_name from information_schema.columns
  where table_schema = 'public' and table_name = 'pieces_commandees'
    and column_name in ('ramassage','ramasse_par','depot_a')
  order by column_name;
+
+-- ============================================================
+-- 155 - RÉCEPTION PARTIELLE D'UN BON DE COMMANDE (2026-09-22)
+-- ------------------------------------------------------------
+-- « Il manque des items sur un bon livré » : le bon reste À RECEVOIR
+-- avec ce qui manque (texte libre), la date promise pour le reste et
+-- la trace de la réclamation envoyée au fournisseur. « Reçu » (complet)
+-- ferme le tout. Achats libres ET pièces commandées.
+-- ============================================================
+alter table achats_libres
+  add column if not exists manquant text,
+  add column if not exists reste_promis_le date,
+  add column if not exists partiel_le timestamptz,
+  add column if not exists reclame_le timestamptz;
+
+alter table pieces_commandees
+  add column if not exists manquant text,
+  add column if not exists reste_promis_le date,
+  add column if not exists partiel_le timestamptz,
+  add column if not exists reclame_le timestamptz;
+
+-- Verification : 4 colonnes sur chacune des deux tables (8 lignes).
+select table_name, column_name from information_schema.columns
+ where table_schema = 'public' and table_name in ('achats_libres','pieces_commandees')
+   and column_name in ('manquant','reste_promis_le','partiel_le','reclame_le')
+ order by table_name, column_name;

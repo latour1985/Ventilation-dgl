@@ -1421,8 +1421,15 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       } else if (!devis) {
         if (nouveauType === "devis" && devisAFaire) {
           nouvelle.devisAFaire = true; // 📄 devis à faire plus tard
+        } else if (nouveauType === "entretien_contrat") {
+          // 📄 SANS CONTRAT NI NUMÉRO (2026-09-09, demande №2) : la tâche se
+          // crée quand même — le prix passera par la révision manuelle.
+          // ⚠️ VÉCU 2026-09-22 (note du bureau : « je clique Créer la tâche,
+          // rien ne se passe ») : la validation laissait passer mais ce
+          // chemin sortait en silence. On continue, avec la fréquence.
+          nouvelle.frequenceFacturationAnnuelle = nouvelleFrequence;
         } else {
-          return; // un devis/contrat doit être sélectionné pour ces types
+          return; // un devis doit être sélectionné pour ce type
         }
       }
       if (devis) {
@@ -1468,7 +1475,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       nouveauType === "devis"
         ? (nouvelle.devisAFaire ? "Travaux avec devis — 📄 devis à faire plus tard" : `Travaux avec devis #${nouvelle.devisNumero}`)
         : nouveauType === "entretien_contrat"
-        ? `Entretien selon contrat #${nouvelle.devisNumero}, ${nouvelleFrequence} factures/an`
+        ? (nouvelle.devisNumero ? `Entretien selon contrat #${nouvelle.devisNumero}, ${nouvelleFrequence} factures/an` : `Entretien sans contrat (prix à réviser à la facturation), ${nouvelleFrequence} factures/an`)
         : TYPES_TACHE.find((t) => t.id === nouveauType).label;
 
     // 👥 Techniciens EN PLUS cochés SANS date (2026-08-17) : mémorisés

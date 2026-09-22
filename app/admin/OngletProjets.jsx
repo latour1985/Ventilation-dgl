@@ -729,7 +729,13 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
               <div className="min-w-0">
                 <p className="font-semibold text-slate-800">{bc.numeroBC} — {bc.fournisseur}</p>
                 {bc.description && <p className="mt-0.5 whitespace-pre-line text-[11px] text-slate-600">{bc.description}</p>}
-                <p className="text-[10px] text-slate-400">{bc.date} · {bc.statut}</p>
+                <p className="text-[10px] text-slate-400">{bc.date} · {bc.statut}{bc.recuLe ? ` le ${new Date(bc.recuLe).toLocaleDateString("fr-CA")}` : ""}</p>
+                {/* ⚠️ Réception partielle (2026-09-22) — notée depuis Pièces → À recevoir. */}
+                {bc.partielLe && bc.statut !== "Reçu" && (
+                  <p className="mt-0.5 rounded bg-orange-50 px-1.5 py-0.5 text-[10px] font-bold text-orange-800">
+                    ⚠️ Reçu partiellement le {new Date(bc.partielLe).toLocaleDateString("fr-CA")}{bc.manquant ? ` — manque : ${bc.manquant}` : ""}{bc.restePromisLe ? ` · reste promis le ${bc.restePromisLe}` : ""}{bc.reclameLe ? ` · réclamé le ${new Date(bc.reclameLe).toLocaleDateString("fr-CA")}` : ""}
+                  </p>
+                )}
                 {bc.courrielsEnvoi?.length > 0 && (
                   <p className="mt-0.5 text-[10px] font-semibold text-blue-600">📧 Envoyé à {bc.courrielsEnvoi.join(", ")}</p>
                 )}

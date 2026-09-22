@@ -56,7 +56,7 @@ import { ententePourStatut } from "@/lib/ententeTexte";
 import { etatQuickbooks, listerTransactionsQuickbooks, creerFactureDepot, annulerFactureDepot, creerFactureQbo, creerEstimateQbo, synchroniserClientsQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, sonderDepotsPayes, lireEstimateQbo, refleterReponsesDevisQbo, lireCreditsQbo, lireFraisPaiementQbo } from "@/lib/quickbooksClient";
 import { listerAttributionsQb, enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 import { inviterEmploye } from "@/lib/comptesClient";
-import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces } from "@/lib/supabase/piecesCommandees";
+import { listerPieces, creerPiece, majPiece, marquerRecue, annulerPiece, pieceBloqueLaTache, sAbonnerPieces, majReceptionPartiellePiece } from "@/lib/supabase/piecesCommandees";
 import { CONFIG_DEFAUT, chargerEntreprise, sauvegarderEntreprise, calculerTaxes , accepterEntente } from "@/lib/supabase/entreprise";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
 import dynamic from "next/dynamic";
@@ -1859,6 +1859,24 @@ function AppAdmin() {
       }
     } catch (e) {
       ajouterJournal(`⚠️ BC ${numero} : réception NON enregistrée (${e?.message || "connexion impossible"}).`);
+    }
+  };
+  // 🏗️ MISE À JOUR D'UN BC DE PROJET par son numéro (2026-09-22) — le bon
+  // vit dans le JSON du projet ; sert à « Reçu » et à la réception
+  // PARTIELLE depuis la page Pièces (À recevoir). Retourne true si écrit.
+  const majBcProjet = async (numero, champs, resume) => {
+    if (!numero) return false;
+    const proj = (projets || []).find((p) => (p.bonsCommande || []).some((b) => b.numeroBC === numero));
+    if (!proj) return false;
+    const maj = { ...proj, bonsCommande: (proj.bonsCommande || []).map((b) => (b.numeroBC === numero ? { ...b, ...champs } : b)) };
+    try {
+      setProjets((prev) => prev.map((p) => (p.id === proj.id ? maj : p)));
+      await sauvegarderProjet(maj);
+      ajouterJournal(`✏️ BC ${numero} du projet « ${proj.nom} » — ${resume || "mis à jour"}.`);
+      return true;
+    } catch (e) {
+      ajouterJournal(`⚠️ BC ${numero} du projet « ${proj.nom} » NON modifié (${e?.message || "connexion impossible"}).`);
+      return false;
     }
   };
   const marquerBcEnvoye = async (numero, adresses = []) => {
@@ -4311,6 +4329,7 @@ function AppAdmin() {
           transactionsQb={transactionsQb}
           onCreerBcLibre={creerBcLibre}
           onMajBcLibre={majBcLibre}
+          onMajBcProjet={majBcProjet}
           onMarquerBcEnvoye={marquerBcEnvoye}
           onSupprimerBcLibre={supprimerBcLibre}
           onDemenagerBcVersProjet={demenagerBcVersProjet}
@@ -4399,6 +4418,20 @@ function AppAdmin() {
                 }
               })
               .catch(() => ajouterJournal("⚠️ Mise à jour de la pièce non enregistrée — réessaie."));
+          }}
+          // ⚠️ RÉCEPTION PARTIELLE d'une pièce (snippet 155, 2026-09-22) — la
+          // pièce reste « commandée » ; on note ce qui manque / la date / la
+          // réclamation. Retourne true si enregistré.
+          onPartielPiece={async (p, champs, resume) => {
+            try {
+              await majReceptionPartiellePiece(p.id, champs);
+              setPieces((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...champs } : x)));
+              ajouterJournal(`⚠️ Pièce ${p.pieceRequise || ""} pour ${p.clientNom || "?"} — ${resume || "réception partielle notée"}.`);
+              return true;
+            } catch (e) {
+              ajouterJournal(`⚠️ Réception partielle NON enregistrée (${e?.message || "connexion impossible"}).`);
+              return false;
+            }
           }}
           onRecue={(id, parNom, sansCommande = false) => {
             const p = pieces.find((x) => x.id === id);

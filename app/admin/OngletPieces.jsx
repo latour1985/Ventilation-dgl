@@ -20,7 +20,7 @@ import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventa
 import { creerFactureQbo } from "@/lib/quickbooksClient";
 import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, AutocompleteAdresse, libelleAdresse, descriptionAvecLivraison, bcEstAsap, bcEstRamassage } from "./partage";
 
-export function OngletPieces({ employesRamassage = [], pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onMarquerBcEnvoye = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
+export function OngletPieces({ employesRamassage = [], pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onMarquerBcEnvoye = null, onPartielPiece = null, onMajBcProjet = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
@@ -129,6 +129,8 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
   // défaut) ET qui n'est pas du stock d'inventaire, une fenêtre demande
   // de confirmer : livrer à l'atelier, ou revenir choisir le chantier.
   const [rappelAdresseBc, setRappelAdresseBc] = useState(false);
+  // ⚠️ RÉCEPTION PARTIELLE (snippet 155, 2026-09-22) : { ligne, manquant, date, erreur, enCours }
+  const [partielPour, setPartielPour] = useState(null);
   // 🔗 RAMASSAGES COMBINÉS (2026-09-21, demande du propriétaire : « moins
   // de gestion ») — un bon « ramassage » chez un fournisseur qui a DÉJÀ un
   // ramassage prévu (pas encore fait) se range d'office le même jour,
@@ -331,7 +333,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
     setEnvoiBcLibreEnCours(true);
     const r = await envoyerCourriel({
       a: offreEnvoiBc.coches,
-      sujet: `Bon de commande ${offreEnvoiBc.numero} — ${configEnt.nomLegal}`,
+      sujet: `${offreEnvoiBc.reclamation ? "Réclamation — items manquants, bon de commande" : "Bon de commande"} ${offreEnvoiBc.numero} — ${configEnt.nomLegal}`,
       html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description, photos: offreEnvoiBc.photos || [], fichiers: offreEnvoiBc.fichiers || [] }),
       // 📎 Vraies pièces jointes (PDF, Excel…) — 2026-09-15.
       piecesJointes: offreEnvoiBc.fichiers || [],
@@ -345,8 +347,17 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
       setBcLibreMsg(`✓ ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})`);
       const nbPj = (offreEnvoiBc.photos || []).length + (offreEnvoiBc.fichiers || []).length;
       ajouterJournal?.(`📧 BC libre ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})${nbPj ? ` — ${(offreEnvoiBc.photos || []).length} photo(s), ${(offreEnvoiBc.fichiers || []).length} fichier(s)` : ""}`);
-      // ✉️ Trace « envoyé le … à … » sur le BC (snippet 146).
-      onMarquerBcEnvoye?.(offreEnvoiBc.numero, offreEnvoiBc.coches);
+      if (offreEnvoiBc.reclamation) {
+        // ⚠️ Réclamation du reste (155) : trace « réclamé le » — pas la trace d'envoi du BC.
+        const { type, objet } = offreEnvoiBc.reclamation;
+        const champs = { reclameLe: new Date().toISOString() };
+        if (type === "achat") onMajBcLibre?.(objet, champs, `⚠️ reste réclamé à ${offreEnvoiBc.fournisseur}`);
+        else if (type === "projet") onMajBcProjet?.(offreEnvoiBc.reclamation.numero, champs, `⚠️ reste réclamé à ${offreEnvoiBc.fournisseur}`);
+        else onPartielPiece?.(objet, champs, `reste réclamé à ${offreEnvoiBc.fournisseur}`);
+      } else {
+        // ✉️ Trace « envoyé le … à … » sur le BC (snippet 146).
+        onMarquerBcEnvoye?.(offreEnvoiBc.numero, offreEnvoiBc.coches);
+      }
       setOffreEnvoiBc(null);
     } else {
       setBcLibreMsg(
@@ -621,23 +632,35 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
             envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a), telephone: (a.bcEnvoyeA || []).includes("manuel"),
             ouvrir: () => ouvrirBc(a),
             recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
+            // ⚠️ Partiel (155) : ce qui manque, date promise du reste, réclamation.
+            manquant: a.manquant || "", restePromisLe: a.restePromisLe || null, reclameLe: a.reclameLe || null, partielLe: a.partielLe || null,
+            partiel: peutCommander ? (champs, resume) => onMajBcLibre?.(a, champs, resume) : null,
+            reclamer: peutCommander ? (texte) => setOffreEnvoiBc({ reclamation: { type: "achat", objet: a }, numero: a.numeroBc || "(sans nº)", fournisseur: a.fournisseurNom || "le fournisseur", description: texte, photos: [], fichiers: [], courriels: ficheFournisseurParNom(a.fournisseurNom)?.courriels || [], coches: (ficheFournisseurParNom(a.fournisseurNom)?.courriels || []).filter((c) => c.defaut).map((c) => c.email) }) : null,
           })),
         ...(pieces || [])
           .filter((p) => p.statut === "commandee")
           .map((p) => ({
             cle: `p-${p.id}`, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "", date: p.dateReceptionPrevue || null,
             cible: `🔧 ${p.clientNom || "pièce"}`, description: p.pieceRequise || "", ramassage: !!p.ramassage, ramassePar: p.ramassePar || null, envoye: !!p.bcEnvoyeLe, nonEnvoye: false,
-            ouvrir: null, recevoir: peutCommander && onRecue ? () => onRecue(p) : null,
+            ouvrir: null, recevoir: peutCommander && onRecue ? () => onRecue(p.id, nomUtilisateur) : null,
+            manquant: p.manquant || "", restePromisLe: p.restePromisLe || null, reclameLe: p.reclameLe || null, partielLe: p.partielLe || null,
+            partiel: peutCommander && onPartielPiece ? (champs, resume) => onPartielPiece(p, champs, resume) : null,
+            reclamer: peutCommander ? (texte) => setOffreEnvoiBc({ reclamation: { type: "piece", objet: p }, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "le fournisseur", description: texte, photos: [], fichiers: [], courriels: ficheFournisseurParNom(p.fournisseurNom)?.courriels || [], coches: (ficheFournisseurParNom(p.fournisseurNom)?.courriels || []).filter((c) => c.defaut).map((c) => c.email) }) : null,
           })),
         ...(projets || []).flatMap((pr) =>
           (pr.bonsCommande || [])
             .filter((bc) => bc.statut !== "Reçu" && bc.statut !== "Annulé")
             .map((bc) => ({
               cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || null,
-              cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
+              cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null,
+              // 🏗️ Reçu / partiel / réclamation aussi pour les BC de projets (2026-09-22) — le bon vit dans le JSON du projet.
+              recevoir: peutCommander && onMajBcProjet ? () => onMajBcProjet(bc.numeroBC, { statut: "Reçu", recuLe: new Date().toISOString() }, "📦 reçu") : null,
+              manquant: bc.manquant || "", restePromisLe: bc.restePromisLe || null, reclameLe: bc.reclameLe || null, partielLe: bc.partielLe || null,
+              partiel: peutCommander && onMajBcProjet && bc.numeroBC ? (champs, resume) => onMajBcProjet(bc.numeroBC, champs, resume) : null,
+              reclamer: peutCommander && bc.numeroBC ? (texte) => setOffreEnvoiBc({ reclamation: { type: "projet", numero: bc.numeroBC }, numero: bc.numeroBC, fournisseur: bc.fournisseur || "le fournisseur", description: texte, photos: [], fichiers: [], courriels: ficheFournisseurParNom(bc.fournisseur)?.courriels || [], coches: (ficheFournisseurParNom(bc.fournisseur)?.courriels || []).filter((c) => c.defaut).map((c) => c.email) }) : null,
             }))
         ),
-      ].sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
+      ].map((l) => (l.partielLe && l.restePromisLe ? { ...l, date: l.restePromisLe } : l)).sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
     // 📅 GROUPÉES PAR JOUR (2026-09-22) : en retard · aujourd'hui · demain ·
     // chaque jour · ⚡ dès que possible · sans date.
     const groupes = [];
@@ -734,6 +757,16 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                         ) : l.envoye ? (
                           <span className="shrink-0 text-[9px] font-bold text-emerald-600">✉️ envoyé</span>
                         ) : null}
+                        {l.partielLe && (
+                          <span className="shrink-0 rounded-full bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold text-orange-800" title={`Reçu partiellement le ${new Date(l.partielLe).toLocaleDateString("fr-CA")}${l.reclameLe ? ` · réclamé le ${new Date(l.reclameLe).toLocaleDateString("fr-CA")}` : ""}`}>
+                            ⚠️ partiel{l.manquant ? ` — manque : ${l.manquant}` : ""}{l.reclameLe ? " · réclamé" : ""}
+                          </span>
+                        )}
+                        {l.partiel && (
+                          <button type="button" onClick={() => setPartielPour({ ligne: l, manquant: l.manquant || "", date: l.restePromisLe || "", erreur: "", enCours: false })} title="Il manque des items — noter ce qui manque, la date promise, réclamer au fournisseur" className="shrink-0 rounded-lg border border-orange-200 px-1.5 py-1 text-[10px] font-bold text-orange-700 hover:border-orange-400">
+                            {l.partielLe ? "✏️ Partiel" : "⚠️ Partiel…"}
+                          </button>
+                        )}
                         {l.recevoir && (
                           <button type="button" onClick={l.recevoir} title="Commande reçue" className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] font-bold text-emerald-700 hover:border-emerald-400 active:scale-95">
                             📦 Reçu
@@ -904,6 +937,58 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           explicite et ce n'est pas du stock d'inventaire : on confirme
           avant d'envoyer, plutôt que de livrer au bureau par défaut une
           pièce destinée à un chantier. */}
+      {/* ⚠️ RÉCEPTION PARTIELLE (snippet 155, 2026-09-22) — « il manque des
+          items » : le bon RESTE à recevoir avec ce qui manque, la date
+          promise du reste et, au choix, une réclamation au fournisseur. */}
+      {partielPour && (() => {
+        const l = partielPour.ligne;
+        const enregistrer = async (puisReclamer) => {
+          if (!partielPour.manquant.trim()) { setPartielPour((p) => ({ ...p, erreur: "Écris ce qui manque." })); return; }
+          setPartielPour((p) => ({ ...p, enCours: true, erreur: "" }));
+          const champs = { manquant: partielPour.manquant.trim(), restePromisLe: partielPour.date || null, partielLe: l.partielLe || new Date().toISOString() };
+          const ok = await l.partiel(champs, `⚠️ reçu partiellement — manque : ${champs.manquant}${champs.restePromisLe ? ` (reste promis le ${champs.restePromisLe})` : ""}`);
+          if (ok === false) { setPartielPour((p) => ({ ...p, enCours: false, erreur: "Non enregistré — le snippet SQL 155 est-il passé ?" })); return; }
+          setPartielPour(null);
+          if (puisReclamer && l.reclamer) {
+            const quand = l.partielLe || new Date().toISOString();
+            l.reclamer(
+              `Bonjour,\n\nNous avons reçu partiellement le bon de commande ${l.numero} le ${new Date(quand).toLocaleDateString("fr-CA")}.\n\nIl manque : ${champs.manquant}\n\n${champs.restePromisLe ? `Date convenue pour le reste : ${champs.restePromisLe}.\n\n` : ""}Merci de confirmer la date de livraison des items manquants.`
+            );
+          }
+        };
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setPartielPour(null); }}>
+            <div className="w-full max-w-md rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">⚠️ Reçu partiellement — {l.numero}</h3>
+                  <p className="text-xs text-slate-500">{l.fournisseur}{l.description ? ` · ${l.description}` : ""}</p>
+                </div>
+                <button onClick={() => setPartielPour(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+              </div>
+              <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">Qu&apos;est-ce qui manque ?</label>
+              <textarea
+                autoFocus
+                rows={3}
+                value={partielPour.manquant}
+                onChange={(e) => setPartielPour((p) => ({ ...p, manquant: e.target.value, erreur: "" }))}
+                placeholder="Ex. : 2 grilles 12×12, le moteur du ventilateur…"
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
+              />
+              <label className="mt-2 mb-1 block text-[11px] font-bold text-slate-500">Reste promis pour le <span className="font-normal text-slate-400">(facultatif)</span></label>
+              <input type="date" value={partielPour.date} onChange={(e) => setPartielPour((p) => ({ ...p, date: e.target.value }))} className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+              <p className="mt-2 text-[11px] leading-snug text-slate-500">Le bon reste dans « À recevoir » avec l&apos;étiquette ⚠️ partiel, classé au jour promis. Quand tout est arrivé : « 📦 Reçu ».</p>
+              {partielPour.erreur && <p className="mt-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">⚠️ {partielPour.erreur}</p>}
+              <div className="mt-4 grid grid-cols-1 gap-2">
+                {l.reclamer && (
+                  <Button loading={partielPour.enCours} onClick={() => enregistrer(true)} className="min-h-0 py-2 text-xs">✉️ Enregistrer et réclamer le reste au fournisseur</Button>
+                )}
+                <Button variant={l.reclamer ? "outline" : undefined} loading={partielPour.enCours} onClick={() => enregistrer(false)} className="min-h-0 py-2 text-xs">Enregistrer seulement</Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {rappelAdresseBc && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setRappelAdresseBc(false); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5">
@@ -939,10 +1024,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-sm font-extrabold text-slate-900">
-                    {offreEnvoiBc.nouveau ? `✅ ${offreEnvoiBc.numero} créé` : `📧 ${offreEnvoiBc.numero}`}
+                    {offreEnvoiBc.reclamation ? `⚠️ Réclamation — ${offreEnvoiBc.numero}` : offreEnvoiBc.nouveau ? `✅ ${offreEnvoiBc.numero} créé` : `📧 ${offreEnvoiBc.numero}`}
                   </p>
                   <p className="text-xs font-bold text-blue-800">
-                    {offreEnvoiBc.nouveau ? "L'envoyer maintenant" : "Envoyer"} à {offreEnvoiBc.fournisseur} ?
+                    {offreEnvoiBc.reclamation ? "Réclamer le reste" : offreEnvoiBc.nouveau ? "L'envoyer maintenant" : "Envoyer"} à {offreEnvoiBc.fournisseur} ?
                   </p>
                 </div>
                 <button onClick={() => setOffreEnvoiBc(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
@@ -1004,7 +1089,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                   version corrigée qui part. */}
               <div className="mt-2 rounded-lg border border-blue-200 bg-white p-2">
                 <p className="text-[10px] font-bold text-slate-500">
-                  Objet : Bon de commande {offreEnvoiBc.numero} — {configEnt.nomLegal}
+                  Objet : {offreEnvoiBc.reclamation ? "Réclamation — items manquants, bon de commande" : "Bon de commande"} {offreEnvoiBc.numero} — {configEnt.nomLegal}
                 </p>
                 <textarea
                   rows={5}
