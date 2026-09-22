@@ -3687,7 +3687,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     );
     envoyerCopieInterne({ numero, clientNom, totalHT: total, destinataires, lignes, adresse: bonsDuGroupe[0]?.adresseTravaux || null });
     ajouterJournal(
-      `📅 Facture GROUPÉE ${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length} bons réunis, ${total.toFixed(2)} $ HT` +
+      // 📝 « GROUPÉE … N bons réunis » seulement s'il y en a plusieurs (2026-09-22).
+      `📅 Facture ${bonsDuGroupe.length > 1 ? "GROUPÉE " : ""}${numero} — ${clientNom}${groupe.projetNom ? ` · ${groupe.projetNom}` : ""} : ${bonsDuGroupe.length > 1 ? `${bonsDuGroupe.length} bons réunis` : "1 bon"}, ${total.toFixed(2)} $ HT` +
         (r?.envoiQb?.envoyee
           ? ` · envoyée à ${destinataires.map((c) => c.email).join(", ")}`
           : (r?.envoiQb?.ratees || []).length > 0
