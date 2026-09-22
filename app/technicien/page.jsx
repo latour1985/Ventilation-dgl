@@ -3759,6 +3759,116 @@ function ListeRamassage({ tache, session, enLigne, lectureSeule }) {
   );
 }
 
+// ============================================================
+// 🕘 DÉJÀ VENUS À CETTE ADRESSE (2026-09-22, demande du propriétaire :
+// « voir les anciennes notes ou photos reliées à l'adresse »). Section
+// repliée dans la fiche de la tâche ; à l'ouverture, la route
+// /api/taches/historique renvoie les bons de travail fermés à la même
+// adresse (sinon du même client) : date, technicien, titre, notes,
+// photos — jamais un montant. Demande le réseau.
+// ============================================================
+function HistoriqueAdresse({ tache, session, enLigne }) {
+  const { t } = useLangue();
+  const [ouvert, setOuvert] = useState(false);
+  const [etat, setEtat] = useState({ statut: "attente", visites: [], critere: null }); // attente | charge | ok | erreur
+  const [visiteOuverte, setVisiteOuverte] = useState(null);
+  const [photoOuverte, setPhotoOuverte] = useState(null);
+  const adresse = tache?.adresseIntervention || tache?.adresseTravaux || "";
+  const client = tache?.clientNom || "";
+  const cle = `${adresse}|${client}`;
+  useEffect(() => { setEtat({ statut: "attente", visites: [], critere: null }); setOuvert(false); setVisiteOuverte(null); }, [cle]);
+  const charger = async () => {
+    if (etat.statut === "ok" || etat.statut === "charge") return;
+    setEtat((p) => ({ ...p, statut: "charge" }));
+    try {
+      const jeton = session?.access_token || (await supabase.auth.getSession()).data?.session?.access_token;
+      const q = new URLSearchParams({ adresse, client, exclure: String(tache?.tacheOrigineId || tache?.id || "") });
+      const r = await fetch(`/api/taches/historique?${q.toString()}`, { headers: { Authorization: `Bearer ${jeton}` } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.erreur || "Historique indisponible.");
+      setEtat({ statut: "ok", visites: j.visites || [], critere: j.critere || null });
+    } catch {
+      setEtat({ statut: "erreur", visites: [], critere: null });
+    }
+  };
+  if (!adresse && !client) return null;
+  const dateLisible = (iso) => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString("fr-CA", { day: "numeric", month: "long", year: "numeric" }) : "");
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <button
+        type="button"
+        onClick={() => { setOuvert((v) => !v); if (!ouvert) charger(); }}
+        className="flex min-h-[44px] w-full items-center justify-between gap-2 text-left"
+      >
+        <span className="text-[13px] font-extrabold text-slate-800">
+          🕘 {t("Déjà venus à cette adresse")}
+          {etat.statut === "ok" && <span className="ml-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">{etat.visites.length}</span>}
+        </span>
+        <span className="text-[11px] font-bold text-[#FF6A13]">{ouvert ? t("Fermer") : t("Voir")}</span>
+      </button>
+      {ouvert && (
+        <div className="mt-2 space-y-2">
+          {etat.statut === "charge" && <p className="text-xs text-slate-400">{t("Recherche des visites précédentes…")}</p>}
+          {etat.statut === "erreur" && <p className="rounded-lg bg-amber-50 px-2.5 py-2 text-xs font-semibold text-amber-800">{enLigne === false ? t("Historique indisponible hors connexion.") : t("Historique indisponible pour l'instant — réessaie.")}</p>}
+          {etat.statut === "ok" && etat.visites.length === 0 && <p className="text-xs text-slate-400">{t("Aucune visite précédente enregistrée à cette adresse.")}</p>}
+          {etat.statut === "ok" && etat.visites.length > 0 && etat.critere === "client" && (
+            <p className="text-[10px] text-slate-400">{t("Aucun bon à cette adresse exacte — voici les visites chez ce client.")}</p>
+          )}
+          {etat.visites.map((v) => {
+            const nbPhotos = v.photosAvant.length + v.photosApres.length;
+            const ouverte = visiteOuverte === v.id;
+            return (
+              <div key={v.id} className="rounded-xl border border-slate-200">
+                <button type="button" onClick={() => setVisiteOuverte(ouverte ? null : v.id)} className="flex min-h-[48px] w-full items-center justify-between gap-2 px-3 py-2 text-left">
+                  <span className="min-w-0">
+                    <span className="block text-[12px] font-bold text-slate-800">{dateLisible(v.date)} · {v.technicien}</span>
+                    <span className="block truncate text-[11px] text-slate-500">{v.titre}{v.critere === "client" && v.adresse ? ` · ${v.adresse}` : ""}</span>
+                  </span>
+                  <span className="shrink-0 text-[10px] font-bold text-slate-400">{nbPhotos > 0 ? `📷 ${nbPhotos}` : ""} {ouverte ? "▴" : "▾"}</span>
+                </button>
+                {ouverte && (
+                  <div className="space-y-2 border-t border-slate-100 px-3 py-2">
+                    {v.adresse && etat.critere === "client" && <p className="text-[11px] text-slate-500">📍 {v.adresse}</p>}
+                    {v.notes ? (
+                      <p className="whitespace-pre-wrap text-[12px] leading-snug text-slate-700">{v.notes}</p>
+                    ) : (
+                      <p className="text-[11px] italic text-slate-400">{t("Aucune note.")}</p>
+                    )}
+                    {[["Avant", v.photosAvant], ["Après", v.photosApres]].map(([libelle, liste]) => liste.length > 0 && (
+                      <div key={libelle}>
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">{t(libelle)} ({liste.length})</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {liste.map((u) => (
+                            <button key={u} type="button" onClick={() => setPhotoOuverte(u)} className="h-20 w-20 overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+                              <img src={u} alt="" className="h-full w-full object-cover" loading="lazy" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {v.videos.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {v.videos.map((u, i) => (
+                          <a key={u} href={u} target="_blank" rel="noreferrer" className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-700">🎥 {t("Vidéo")} {i + 1}</a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {photoOuverte && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 p-3" onClick={() => setPhotoOuverte(null)}>
+          <img src={photoOuverte} alt="" className="max-h-full max-w-full rounded-lg object-contain" />
+          <button type="button" onClick={() => setPhotoOuverte(null)} aria-label="Fermer" className="absolute right-3 top-3 rounded-full bg-white/90 px-3 py-1.5 text-sm font-extrabold text-slate-900">✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
 function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile, onChargeHeures }) {
   // 🌎 Version anglaise (tranche « bon de travail », 2026-09-04) —
   // interface seulement : le bon envoyé au client et les données
@@ -4897,6 +5007,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             </button>
           </div>
         )}
+
+        {/* 🕘 Déjà venus à cette adresse (2026-09-22) — notes et photos des visites précédentes. */}
+        {tache.type !== "transport" && <HistoriqueAdresse tache={tache} session={session} enLigne={enLigne} />}
 
         {/* TÉLÉPHONE — QUI APPELER SUR PLACE
             ------------------------------------------------------------

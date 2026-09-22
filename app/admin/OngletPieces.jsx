@@ -1068,7 +1068,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           )}
           {bcLibreOuvert && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
                 <div className="mb-2 flex items-start justify-between gap-2">
                   <h3 className="text-sm font-extrabold text-slate-900">➕ Nouveau bon de commande</h3>
                   <button type="button" onClick={() => setBcLibreOuvert(false)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
@@ -1266,6 +1266,21 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                         est la date « Prêt pour le » juste au-dessus. */}
                     {bcLibre.livraisonChoix === "ramassage" && (
                       <div className="w-full space-y-1.5 rounded-lg border border-sky-200 bg-sky-50 p-2">
+                        {/* 📅 JOUR DU RAMASSAGE (2026-09-22, demande du propriétaire :
+                            « mettre une date de ramassage pour que ça aille à l'agenda
+                            directement ») — même champ que « Prêt pour le » : c'est ce
+                            jour-là que la tournée se crée dans l'agenda. */}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="shrink-0 text-[10px] font-bold text-sky-800">📅 Ramassage le</span>
+                          <input
+                            type="date"
+                            value={bcLibre.livraisonAsap ? "" : bcLibre.livraisonEstimee}
+                            disabled={bcLibre.livraisonAsap}
+                            onChange={(e) => setBcLibre((f) => ({ ...f, livraisonEstimee: e.target.value }))}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs disabled:bg-slate-100 disabled:text-slate-300"
+                          />
+                          {bcLibre.livraisonAsap ? <span className="text-[10px] text-slate-500">⚡ dès que possible — la tournée se fera quand tu poseras le jour</span> : <span className="text-[10px] text-slate-500">→ à l'agenda ce jour-là</span>}
+                        </div>
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="shrink-0 text-[10px] font-bold text-sky-800">🚚 Ramassé par</span>
                           <select
@@ -1301,7 +1316,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                           </p>
                         )}
                         {bcLibre.ramassePar && !bcLibre.livraisonEstimee && !bcLibre.livraisonAsap && (
-                          <p className="text-[10px] font-semibold text-amber-700">⚠️ Choisis le jour (« Prêt pour le ») — sans date, le bon n&apos;entre dans aucune tournée.</p>
+                          <p className="text-[10px] font-semibold text-amber-700">⚠️ Choisis le jour du ramassage — sans date, le bon n&apos;entre dans aucune tournée.</p>
                         )}
                       </div>
                     )}
