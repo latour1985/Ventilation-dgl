@@ -6875,3 +6875,130 @@ select table_name, column_name from information_schema.columns
  where table_schema = 'public' and table_name in ('achats_libres','pieces_commandees')
    and column_name in ('manquant','reste_promis_le','partiel_le','reclame_le')
  order by table_name, column_name;
+
+-- ============================================================
+-- 156 - REVUE COMPLÈTE : PAIE ET SÉCURITÉ (2026-09-22)
+-- ------------------------------------------------------------
+-- A. PAIE — une semaine marquée « paie faite » (snippet 152) ne reçoit
+--    plus d'heures en silence. Toute heure AJOUTÉE ou MODIFIÉE après coup
+--    dans une semaine payée (fermeture par le bureau, téléphone hors ligne
+--    resynchronisé, écran d'un poste périmé) est marquée « corrigée
+--    maintenant » : l'écart part en Report ± sur la semaine courante.
+--    Déplacer une ligne DANS ou HORS d'une semaine payée est refusé.
+-- B. BONS DE TRAVAIL — oubliés par la phase 4 (143) : un technicien
+--    pouvait, par l'API, modifier la facturation d'un bon ou supprimer
+--    celui d'un collègue. Désormais : lecture = l'entreprise ; écriture =
+--    le bureau, ou SA PROPRE ligne ; suppression = le bureau. Les
+--    colonnes de facturation (révision, factures, retrait, matériel)
+--    restent au bureau même sur sa propre ligne.
+-- C. HEURES — un technicien ne peut plus SUPPRIMER sa ligne d'heures
+--    (contournait le verrou « FERMÉE PAR LE BUREAU » du snippet 148).
+--    L'application ne supprime jamais de ligne d'heures.
+-- ============================================================
+
+-- ---- A. Report automatique dans une semaine payée ----
+create or replace function public.fn_semaine_payee(p_entreprise text, p_date date)
+returns boolean language sql stable security definer set search_path = public as $$
+  select p_date is not null and exists (
+    select 1 from semaines_paie s
+     where s.entreprise_id = p_entreprise
+       and s.debut_semaine = p_date - extract(dow from p_date)::int
+  );
+$$;
+revoke all on function public.fn_semaine_payee(text, date) from public, anon;
+grant execute on function public.fn_semaine_payee(text, date) to authenticated;
+
+create or replace function public.fn_report_semaine_payee()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.corrige_le is null and public.fn_semaine_payee(new.entreprise_id, new.date_travail) then
+      new.corrige_le := now();
+      new.heures_avant_correction := 0;   -- rien n'avait été versé pour cette ligne
+    end if;
+    return new;
+  end if;
+  -- UPDATE : déplacement de date
+  if new.date_travail is distinct from old.date_travail then
+    if public.fn_semaine_payee(old.entreprise_id, old.date_travail)
+       or public.fn_semaine_payee(new.entreprise_id, new.date_travail) then
+      raise exception 'Semaine de paie déjà faite — déplacement refusé (corrige plutôt les heures : l''écart partira en report).'
+        using errcode = 'P0001';
+    end if;
+    return new;
+  end if;
+  -- UPDATE : heures changées (ou journée débloquée) sans marque de correction
+  if old.corrige_le is null and new.corrige_le is null
+     and public.fn_semaine_payee(old.entreprise_id, old.date_travail)
+     and (new.heures is distinct from old.heures or (old.jour_bloque and not new.jour_bloque)) then
+    new.corrige_le := now();
+    new.heures_avant_correction := case when old.jour_bloque then 0 else old.heures end;
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_report_semaine_payee on travaux_effectues;
+create trigger trg_report_semaine_payee before insert or update on travaux_effectues
+  for each row execute function public.fn_report_semaine_payee();
+
+-- ---- B. Bons de travail : écriture au bureau ou sur SA ligne ----
+do $$
+declare p record;
+  moi text := $c$ ((select public.fn_est_bureau()) or lower(coalesce(employe_email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))) $c$;
+begin
+  for p in select policyname from pg_policies where schemaname = 'public' and tablename = 'bons_travail'
+  loop
+    execute format('drop policy %I on public.bons_travail', p.policyname);
+  end loop;
+  create policy iso_bons_travail_lecture on public.bons_travail for select to authenticated
+    using (entreprise_id = public.entreprise_du_jeton());
+  execute format('create policy iso_bons_travail_ins on public.bons_travail for insert to authenticated
+    with check (entreprise_id = public.entreprise_du_jeton() and %s)', moi);
+  execute format('create policy iso_bons_travail_upd on public.bons_travail for update to authenticated
+    using (entreprise_id = public.entreprise_du_jeton() and %s)
+    with check (entreprise_id = public.entreprise_du_jeton() and %s)', moi, moi);
+  create policy iso_bons_travail_del on public.bons_travail for delete to authenticated
+    using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()));
+end $$;
+
+-- Colonnes de FACTURATION : intouchables hors bureau (même sur sa ligne).
+-- Les routes serveur (clé service) et le bureau passent tels quels.
+create or replace function public.fn_proteger_facturation_bon()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if (select auth.uid()) is null or coalesce((select auth.role()), '') = 'service_role' then return new; end if;
+  if public.fn_est_bureau() then return new; end if;
+  new.revision            := old.revision;
+  new.factures_emises     := old.factures_emises;
+  new.materiel_stock      := old.materiel_stock;
+  new.retrait_statut      := old.retrait_statut;
+  new.retrait_raison      := old.retrait_raison;
+  new.retrait_note        := old.retrait_note;
+  new.retrait_demande_par := old.retrait_demande_par;
+  new.retrait_demande_le  := old.retrait_demande_le;
+  new.retrait_valide_par  := old.retrait_valide_par;
+  new.retrait_valide_le   := old.retrait_valide_le;
+  -- Un bon déjà FACTURÉ ou RETIRÉ ne redevient pas « à facturer » parce
+  -- qu'un technicien refait sa fermeture.
+  if old.statut_facturation in ('envoye', 'retire') then
+    new.statut_facturation := old.statut_facturation;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_proteger_facturation_bon on bons_travail;
+create trigger trg_proteger_facturation_bon before update on bons_travail
+  for each row execute function public.fn_proteger_facturation_bon();
+
+-- ---- C. Heures : suppression réservée au bureau ----
+drop policy if exists iso_travaux_effectues_del on travaux_effectues;
+create policy iso_travaux_effectues_del on travaux_effectues for delete to authenticated
+  using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()));
+
+-- Vérification : 4 politiques sur bons_travail, les 2 déclencheurs, et la
+-- politique de suppression des heures (7 lignes).
+select 'politique' as quoi, tablename || ' · ' || policyname as nom from pg_policies
+ where schemaname = 'public' and (tablename = 'bons_travail' or policyname = 'iso_travaux_effectues_del')
+union all
+select 'déclencheur', event_object_table || ' · ' || trigger_name from information_schema.triggers
+ where trigger_name in ('trg_report_semaine_payee', 'trg_proteger_facturation_bon') and event_manipulation = 'UPDATE'
+order by 1, 2;

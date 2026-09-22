@@ -436,7 +436,7 @@ export function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, on
 }
 
 
-export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris, onVenteDirecte = null }) {
+export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, onClientCiblePris = null, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris, onVenteDirecte = null }) {
   // 🌎 Traduction (tranche devis admin, 2026-09-14) — nommée `tr`.
   const { t: tr } = useLangue();
   // Liste de prix (289 items) — sert au sélecteur de lignes de devis.
@@ -473,8 +473,16 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // ARRIVÉE DEPUIS UNE FICHE CLIENT (bouton « + Créer un devis ») :
   // le client est déjà choisi, on ne le redemande pas. Même mécanisme
   // que la recherche rapide qui ouvre la bonne fiche.
+  // 🛡️ APPLIQUÉ UNE SEULE FOIS (revue 2026-09-22) : la cible restait posée
+  // et chaque rechargement de la liste de clients (temps réel, autre poste)
+  // remettait le client du devis EN COURS sur elle — un devis de Y pouvait
+  // repasser sur X. Le parent l'efface dès qu'elle est prise.
   useEffect(() => {
-    if (clientCible && clients.some((c) => c.id === clientCible)) setClientId(clientCible);
+    if (clientCible && clients.some((c) => c.id === clientCible)) {
+      setClientId(clientCible);
+      onClientCiblePris?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientCible, clients]);
   const [lignes, setLignes] = useState([]);
   // 🙈 COÛTS MASQUÉS (demande du propriétaire, 2026-08-22) : chez le
@@ -1176,11 +1184,14 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const cleDevisEnCours = `fluxya_devis_en_cours_${configEnt?.id || "dgl"}`;
   const [repriseDevis, setRepriseDevis] = useState(null); // sauvegarde trouvée au montage
   const autosavePretRef = useRef(false);
+  // 🛡️ Revue 2026-09-22 : l'effet de sauvegarde passait dans le même rendu
+  // (formulaire vide) et EFFAÇAIT la sauvegarde avant le clic « Reprendre ».
+  const repriseEnAttenteRef = useRef(false);
   useEffect(() => {
     try {
       const brut = window.localStorage.getItem(cleDevisEnCours);
       const s = brut ? JSON.parse(brut) : null;
-      if (s && Array.isArray(s.lignes) && s.lignes.length > 0) setRepriseDevis(s);
+      if (s && Array.isArray(s.lignes) && s.lignes.length > 0) { repriseEnAttenteRef.current = true; setRepriseDevis(s); }
     } catch {}
     autosavePretRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1189,7 +1200,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     if (!autosavePretRef.current || editionVersion) return;
     try {
       if (lignes.length === 0 && !clientId) {
-        window.localStorage.removeItem(cleDevisEnCours);
+        if (!repriseEnAttenteRef.current) window.localStorage.removeItem(cleDevisEnCours);
       } else {
         window.localStorage.setItem(
           cleDevisEnCours,
@@ -1211,10 +1222,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setLignes(Array.isArray(s.lignes) ? s.lignes : []);
     setEstContrat(!!s.estContrat);
     setFrequenceContrat(Number(s.frequenceContrat) || 4);
+    repriseEnAttenteRef.current = false;
     setRepriseDevis(null);
   };
   const jeterDevisEnCours = () => {
     try { window.localStorage.removeItem(cleDevisEnCours); } catch {}
+    repriseEnAttenteRef.current = false;
     setRepriseDevis(null);
   };
   // 🪟 L'édition d'une révision se fait dans une FENÊTRE par-dessus la
@@ -1482,25 +1495,32 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       titre: titreDevis.trim() || null,
     };
     setDevisListe((prev) => [nouveauDevis, ...prev]);
-    setLignes([]);
-    setAdresseTravauxDevis("");
-    setTitreDevis("");
-    setEstContrat(false);
-    setFrequenceContrat(4);
     setCourrielModalOuvert(false);
     // ON ATTEND la confirmation d'enregistrement AVANT tout envoi : un
     // devis qui n'est pas en base ne doit JAMAIS générer un courriel
     // (sinon le client reçoit un lien mort — vécu avec DEV-3509).
-    const enregistre = await persisterDevis?.(nouveauDevis);
+    // { nouveau: true } : SEULE la création d'un devis peut rattacher une
+    // tâche « devis à faire plus tard » (revue 2026-09-22).
+    const enregistre = await persisterDevis?.(nouveauDevis, { nouveau: true });
     if (enregistre === false) {
+      // Le formulaire est GARDÉ tel quel (revue 2026-09-22 : il était vidé
+      // avant la réponse — un échec obligeait à tout retaper).
       // ⚠️ RETRAIT DU FANTÔME (audit 2026-08-17) : le devis avait été
       // ajouté à la liste AVANT la confirmation — le laisser affiché
       // offrait encore « Envoyer au client »/« Copier le lien » sur un
       // devis inexistant en base (lien mort DEV-3509 en différé).
       setDevisListe((prev) => prev.filter((d) => d.id !== nouveauDevis.id));
-      ajouterJournal(`⛔ Devis ${numero} NON enregistré — retiré de la liste, AUCUN courriel envoyé (pas de lien mort). Vérifie la connexion et recrée le devis.`);
+      ajouterJournal(`⛔ Devis ${numero} NON enregistré — retiré de la liste, AUCUN courriel envoyé (pas de lien mort). Ton devis est resté dans le formulaire : vérifie la connexion et clique de nouveau « Créer ».`);
       return;
     }
+    // Enregistré : on peut vider le formulaire (et oublier tout vieux brouillon proposé).
+    setLignes([]);
+    setAdresseTravauxDevis("");
+    setTitreDevis("");
+    setEstContrat(false);
+    setFrequenceContrat(4);
+    repriseEnAttenteRef.current = false;
+    setRepriseDevis(null);
     // 📝 Devis créé à partir d'un BROUILLON : le brouillon a fait son
     // travail, il s'efface — seulement APRÈS l'enregistrement confirmé
     // du vrai devis (jamais avant : sinon une panne effacerait les deux).

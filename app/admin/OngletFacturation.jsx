@@ -669,11 +669,16 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   const empreinteDepartRef = useRef(empreinteDepart);
   const [brouillonTrouve, setBrouillonTrouve] = useState(null); // { items, quand } | null
   const brouillonPretRef = useRef(false);
+  // 🛡️ Posé TOUT DE SUITE quand un brouillon est trouvé (revue 2026-09-22) :
+  // l'effet de sauvegarde passe dans le même rendu, AVANT que l'état
+  // brouillonTrouve soit visible — il effaçait la sauvegarde aussitôt.
+  const brouillonEnAttenteRef = useRef(false);
   useEffect(() => {
     try {
       const s = JSON.parse(window.localStorage.getItem(cleBrouillon) || "null");
       const recent = s?.quand && Date.now() - s.quand < 30 * 24 * 60 * 60 * 1000;
       if (s && Array.isArray(s.items) && s.items.length > 0 && recent && empreinte(s.items) !== empreinteDepartRef.current) {
+        brouillonEnAttenteRef.current = true;
         setBrouillonTrouve(s);
       } else if (s) {
         window.localStorage.removeItem(cleBrouillon); // périmé ou identique
@@ -685,7 +690,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   useEffect(() => {
     // Rien n'est écrit tant qu'un brouillon trouvé attend la décision
     // (on l'écraserait), ni tant que rien n'a été modifié.
-    if (!brouillonPretRef.current || brouillonTrouve) return;
+    if (!brouillonPretRef.current || brouillonTrouve || brouillonEnAttenteRef.current) return;
     try {
       if (empreinte(items) === empreinteDepartRef.current) window.localStorage.removeItem(cleBrouillon);
       else window.localStorage.setItem(cleBrouillon, JSON.stringify({ items, quand: Date.now() }));
@@ -694,11 +699,13 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   }, [items, brouillonTrouve]);
   const reprendreBrouillon = () => {
     if (!brouillonTrouve) return;
+    brouillonEnAttenteRef.current = false;
     setItems(brouillonTrouve.items);
     setBrouillonTrouve(null);
   };
   const jeterBrouillon = () => {
     try { window.localStorage.removeItem(cleBrouillon); } catch {}
+    brouillonEnAttenteRef.current = false;
     setBrouillonTrouve(null);
   };
   const effacerBrouillon = () => {
@@ -1620,11 +1627,12 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
   const CLE_FACTURE_LIBRE = "fluxya_facture_libre_en_cours";
   const [repriseFacture, setRepriseFacture] = useState(null);
   const autosavePretRef = useRef(false);
+  const repriseEnAttenteRef = useRef(false); // voir brouillonEnAttenteRef (revue 2026-09-22)
   useEffect(() => {
     if (!prefill) {
       try {
         const s = JSON.parse(window.localStorage.getItem(CLE_FACTURE_LIBRE) || "null");
-        if (s && Array.isArray(s.lignes) && s.lignes.length > 0) setRepriseFacture(s);
+        if (s && Array.isArray(s.lignes) && s.lignes.length > 0) { repriseEnAttenteRef.current = true; setRepriseFacture(s); }
       } catch {}
     }
     autosavePretRef.current = true;
@@ -1634,7 +1642,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
   useEffect(() => {
     if (!autosavePretRef.current || prefill) return;
     try {
-      if (lignes.length === 0 && !clientId) window.localStorage.removeItem(CLE_FACTURE_LIBRE);
+      if (lignes.length === 0 && !clientId) { if (!repriseEnAttenteRef.current) window.localStorage.removeItem(CLE_FACTURE_LIBRE); }
       else window.localStorage.setItem(CLE_FACTURE_LIBRE, JSON.stringify({ clientId, projetId, reference, lignes, quand: Date.now() }));
     } catch {}
     poserGarde("facture-libre", lignes.length > 0 ? `🧾 Facture commencée (${lignes.length} ligne${lignes.length > 1 ? "s" : ""}) non envoyée.` : null);
@@ -1647,10 +1655,12 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
     setProjetId(s.projetId || "");
     setReference(s.reference || "");
     setLignes(Array.isArray(s.lignes) ? s.lignes : []);
+    repriseEnAttenteRef.current = false;
     setRepriseFacture(null);
   };
   const jeterFacture = () => {
     try { window.localStorage.removeItem(CLE_FACTURE_LIBRE); } catch {}
+    repriseEnAttenteRef.current = false;
     setRepriseFacture(null);
   };
 

@@ -2457,7 +2457,15 @@ function AppAdmin() {
   const [semainesPayees, setSemainesPayees] = useState([]);
   useEffect(() => {
     if (!session) return;
-    listerSemainesPayees().then(setSemainesPayees).catch(() => {});
+    // 🔄 Relue toutes les 2 min et au retour sur l'onglet (revue 2026-09-22) :
+    // un poste ouvert depuis le matin ignorait qu'un autre venait de marquer
+    // la semaine payée. (La base applique aussi le report d'elle-même — 156.)
+    const relire = () => listerSemainesPayees().then(setSemainesPayees).catch(() => {});
+    relire();
+    const minuterie = setInterval(relire, 120000);
+    const auFocus = () => { if (document.visibilityState === "visible") relire(); };
+    document.addEventListener("visibilitychange", auFocus);
+    return () => { clearInterval(minuterie); document.removeEventListener("visibilitychange", auFocus); };
   }, [session]);
   const estSemainePayee = (dateISOJour) => !!dateISOJour && semainesPayees.some((x) => x.debut === dimancheDeSemaineISO(dateISOJour));
 
@@ -3752,7 +3760,7 @@ function AppAdmin() {
           tauxMetiers={tauxMetiers}
           devisListe={devisListe}
           setDevisListe={setDevisListe}
-          persisterDevis={async (d) => {
+          persisterDevis={async (d, options = {}) => {
             // Retourne true si le devis est BEL ET BIEN en base, false
             // sinon. L'appelant s'en sert pour ne JAMAIS envoyer le
             // courriel d'un devis qui n'a pas été enregistré (sinon le
@@ -3781,7 +3789,10 @@ function AppAdmin() {
             // sans devis pour CE client se rattache toute seule au premier
             // devis créé pour lui (agenda + attente + base), et le dit.
             try {
-              const candidates = tachesDevisAFaire.filter((t) => (t.clientId && d.clientId ? t.clientId === d.clientId : (t.clientNom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase()));
+              // SEULEMENT à la CRÉATION d'un nouveau dossier de devis (revue 2026-09-22 :
+              // une relance ou un renvoi d'un VIEUX devis du même client rattachait
+              // la tâche au mauvais devis). Une nouvelle version n'y touche pas non plus.
+              const candidates = !options?.nouveau || (d.numeroBase && d.numeroBase !== d.numero) ? [] : tachesDevisAFaire.filter((t) => (t.clientId && d.clientId ? t.clientId === d.clientId : (t.clientNom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase()));
               if (candidates.length > 0 && d.numero) {
                 const ids = new Set(candidates.map((t) => String(t.id)));
                 const complement = (t) => ({ devisNumero: d.numero, devisAFaire: false, ...(/^Devis .+ — Intervention$/.test(t.titre || "") ? { titre: `Devis ${d.numero} — Intervention` } : {}) });
@@ -3822,6 +3833,7 @@ function AppAdmin() {
           setProjets={setProjets}
           onDevisTraite={(destination) => setOnglet(destination)}
           clientCible={clientPourNouveauDevis}
+          onClientCiblePris={() => setClientPourNouveauDevis(null)}
           peutModifierListePrix={peutModifierListePrix}
           onMajCoutCatalogue={async (item) => {
             const sauve = await sauvegarderItem(item);
@@ -4128,10 +4140,13 @@ function AppAdmin() {
               // (snippet 152) — sinon la correction s'applique à sa semaine.
               if (!t.date || !estSemainePayee(t.date) || dimancheDeSemaineISO(t.date) >= dimancheCourant) return a;
               const dejaCetteSemaine = t.corrigeLe && dimancheDeSemaineISO(t.corrigeLe) === dimancheCourant;
+              // Journée BLOQUÉE = exclue de la paie de sa semaine : rien n'a été
+              // versé (revue 2026-09-22 — avant : « payée 16 h » et report −8 h).
+              const journeeBloquee = joursBloques(travaux).has(cleJour(t.employeEmail, t.date));
               return {
                 ...a,
                 corrigeLe: new Date().toISOString(),
-                heuresAvantCorrection: dejaCetteSemaine && t.heuresAvantCorrection != null ? t.heuresAvantCorrection : Number(t.heures) || 0,
+                heuresAvantCorrection: journeeBloquee ? 0 : dejaCetteSemaine && t.heuresAvantCorrection != null ? t.heuresAvantCorrection : Number(t.heures) || 0,
               };
             };
             const resume = ajustements
@@ -4242,15 +4257,17 @@ function AppAdmin() {
             // La journée redevient comptable. Geste tracé au journal :
             // c'est une décision qui remet des heures dans une paie.
             const nom = (utilisateurs || []).find((u) => (u.courriel || "").toLowerCase() === email)?.nom || email;
+            const semainePayee = estSemainePayee(date);
+            const quand = new Date().toISOString();
             setTravaux((prev) =>
               prev.map((t) =>
                 (t.employeEmail || "").toLowerCase() === email && t.date === date
-                  ? { ...t, jourBloque: false, bloqueRaison: "" }
+                  ? { ...t, jourBloque: false, bloqueRaison: "", ...(semainePayee && !t.corrigeLe ? { corrigeLe: quand, heuresAvantCorrection: 0 } : {}) }
                   : t
               )
             );
-            debloquerJournee(email, date)
-              .then(() => ajouterJournal(`🔓 Journée DÉBLOQUÉE : ${nom} · ${date} — les heures comptent de nouveau dans la paie.`))
+            debloquerJournee(email, date, { semainePayee })
+              .then(() => ajouterJournal(`🔓 Journée DÉBLOQUÉE : ${nom} · ${date} — les heures comptent de nouveau dans la paie${semainePayee ? " (semaine déjà payée : elles partent en Report ± sur la semaine courante)" : ""}.`))
               .catch(() => ajouterJournal(`⚠️ Échec du déblocage de la journée (${nom} · ${date}) — réessaie.`));
           }}
         />

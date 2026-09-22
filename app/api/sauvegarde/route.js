@@ -36,6 +36,8 @@ const TABLES = [
   "permissions_utilisateurs", "compteurs", "journal_activite", "qb_attributions_manuelles",
   "achats_libres", "sous_traitants_app", "commandes_camion", "articles_fournisseurs",
   "photos_legendes", "push_abonnements",
+  // Oubliées jusqu'au 2026-09-22 (revue complète) :
+  "semaines_paie", "factures_maison", "factures_libres", "inventaire_articles", "modeles_etapes", "entreprises",
 ];
 
 const BUCKET = "sauvegardes";
