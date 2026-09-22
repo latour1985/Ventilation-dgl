@@ -1262,6 +1262,17 @@ export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
     }
     setEnEdition(null);
   };
+  // ☑️ COCHER DEPUIS LE BUREAU (2026-09-22, vécu : « on ne peut pas cocher
+  // les cases des tâches journalières faites » — le ⬜ n'était qu'un
+  // symbole). Même trace que sur le terrain : qui a coché, et quand.
+  const basculerFait = async (i) => {
+    let nomMoi = "";
+    try {
+      const { data } = await supabase.auth.getSession();
+      nomMoi = data?.session?.user?.user_metadata?.nom || data?.session?.user?.email || "";
+    } catch { /* hors ligne : on coche quand même, sans auteur */ }
+    onChange((etapes || []).map((e, j) => (j === i ? { ...e, fait: !e.fait, faitPar: !e.fait ? nomMoi : null, faitLe: !e.fait ? new Date().toISOString() : null } : e)));
+  };
   // ↑↓ RÉORDONNER — un rough avant les conduits, sans tout effacer.
   const deplacer = (i, delta) => {
     const liste = [...(etapes || [])];
@@ -1279,7 +1290,13 @@ export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
         <div className="mb-1.5 space-y-1">
           {(etapes || []).map((e, i) => (
             <div key={e.id || i} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] ${e.fait ? "bg-emerald-50 text-slate-400" : "bg-slate-50 text-slate-700"}`}>
-              <span className="shrink-0">{e.fait ? "✅" : "⬜"}</span>
+              <input
+                type="checkbox"
+                checked={!!e.fait}
+                onChange={() => basculerFait(i)}
+                title={e.fait ? "Décocher l'étape" : "Marquer l'étape comme faite"}
+                className="h-4 w-4 shrink-0 cursor-pointer accent-emerald-600"
+              />
               {enEdition === i ? (
                 <input
                   autoFocus

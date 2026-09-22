@@ -851,14 +851,16 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
       {rappelAdresseBc && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setRappelAdresseBc(false); }}>
           <div className="w-full max-w-sm rounded-2xl bg-white p-5">
-            <h3 className="text-sm font-extrabold text-slate-900">📍 Adresse de livraison ?</h3>
+            {/* Texte réécrit 2026-09-22 (« porte à confusion ») : une vraie
+                question, deux réponses claires — pas de « quand même ». */}
+            <h3 className="text-sm font-extrabold text-slate-900">📍 Où livrer ce bon ?</h3>
             <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-              Aucune adresse de livraison n&apos;a été choisie — le bon partirait <span className="font-bold">livré à l&apos;atelier</span>
-              {configEnt.adresse ? ` (${configEnt.adresse})` : ""}. Si cette pièce s&apos;en va sur un chantier, reviens choisir l&apos;adresse.
+              Tu n&apos;as pas choisi d&apos;adresse de livraison. Le fournisseur livrera donc <span className="font-bold">à l&apos;atelier</span>
+              {configEnt.adresse ? ` (${configEnt.adresse})` : ""}.
             </p>
             <div className="mt-4 grid grid-cols-1 gap-2">
-              <Button onClick={() => setRappelAdresseBc(false)} className="min-h-0 py-2 text-xs">← Retour choisir l&apos;adresse</Button>
-              <Button variant="outline" onClick={executerCreationBc} className="min-h-0 py-2 text-xs">Livrer à l&apos;atelier quand même</Button>
+              <Button onClick={executerCreationBc} className="min-h-0 py-2 text-xs">🏭 À l&apos;atelier, c&apos;est bon — envoyer le bon</Button>
+              <Button variant="outline" onClick={() => setRappelAdresseBc(false)} className="min-h-0 py-2 text-xs">🏗️ Non, c&apos;est pour un chantier — choisir l&apos;adresse</Button>
             </div>
           </div>
         </div>
