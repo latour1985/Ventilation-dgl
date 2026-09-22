@@ -123,8 +123,8 @@ export async function POST(request) {
       montant: Number(l?.montant) || 0,
       quantite: Number(l?.quantite) > 0 ? Number(l.quantite) : null,
       prixUnitaire: Number(l?.prixUnitaire) > 0 ? Number(l.prixUnitaire) : null,
-      itemId: /^d+$/.test(String(l?.itemId || "").trim()) ? String(l.itemId).trim() : null,
-      categorie: l?.categorie === "appel" || l?.categorie === "heures" ? l.categorie : null,
+      itemId: /^\d+$/.test(String(l?.itemId || "").trim()) ? String(l.itemId).trim() : null,
+      categorie: ["appel", "heures", "depot"].includes(l?.categorie) ? l.categorie : null,
     }))
     .filter((l) => l.description);
   const total = lignes.reduce((s, l) => s + l.montant, 0);
@@ -143,7 +143,7 @@ export async function POST(request) {
   try {
     const admin = clientSupabaseService();
     const [customerId, itemId, codeTaxe] = await Promise.all([
-      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
+      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom, entrepriseId }),
       articleServiceQboPour(acces),
       // 🍁 Code de taxe du fichier (TPS/TVQ) — OBLIGATOIRE au Canada,
       // absent d'un fichier américain type Sandbox (voir quickbooksServeur).
@@ -213,7 +213,9 @@ export async function POST(request) {
         Number(l.prixUnitaire) > 0 ? Number(l.prixUnitaire) : Math.round(((Number(l.montant) || 0) / qte) * 10000) / 10000;
       // QuickBooks refuse une ligne dont Qté × prix ≠ montant : au moindre
       // écart (montant retouché à la main, plafond…), 1 × montant.
-      if (Math.abs(qte * prixUnitaire - l.montant) > 0.011) {
+      // Comparaison AU CENT (revue 2026-09-22 : la tolérance 0,011 laissait
+      // passer un écart d'un cent, que QuickBooks refuse).
+      if (Math.round(qte * prixUnitaire * 100) !== Math.round((Number(l.montant) || 0) * 100)) {
         qte = 1;
         prixUnitaire = l.montant;
       }

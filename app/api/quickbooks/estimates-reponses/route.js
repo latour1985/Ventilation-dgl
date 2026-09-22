@@ -129,7 +129,7 @@ export async function POST(request) {
           .filter((l) => l.description && l.prixUnitaire !== 0);
         if (lignesQbo.length > 0) {
           const [customerId, itemId, codeTaxe] = await Promise.all([
-            clientQboPour(acces, admin, { clientId: d.client_id || null, clientNom: d.client_nom || "" }),
+            clientQboPour(acces, admin, { clientId: d.client_id || null, clientNom: d.client_nom || "", entrepriseId }),
             articleServiceQboPour(acces),
             codeTaxeVente(acces),
           ]);

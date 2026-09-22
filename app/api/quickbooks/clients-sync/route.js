@@ -218,6 +218,7 @@ export async function POST(request) {
       .from("clients_app")
       .select("id, nom, quickbooks_customer_id")
       .eq("id", corps.clientId)
+      .eq("entreprise_id", entrepriseId) // 🔐 revue 2026-09-22
       .maybeSingle();
     if (data) aTraiter = [data];
   }
@@ -232,7 +233,7 @@ export async function POST(request) {
       // téléphone, adresse) — appelé quand la fiche change dans l'app.
       if (corps?.forcer === true) {
         try {
-          await mettreAJourClientQbo(acces, admin, c.id);
+          await mettreAJourClientQbo(acces, admin, c.id, entrepriseId);
           fait++;
         } catch (e) {
           erreurs.push(`${c.nom} : ${e?.message || "erreur"}`);
@@ -249,7 +250,7 @@ export async function POST(request) {
     try {
       // clientQboPour relie par nom si le client existe déjà chez QBO,
       // sinon le crée — et mémorise l'id sur la fiche dans les deux cas.
-      await clientQboPour(acces, admin, { clientId: c.id, clientNom: c.nom });
+      await clientQboPour(acces, admin, { clientId: c.id, clientNom: c.nom, entrepriseId });
       fait++;
     } catch (e) {
       erreurs.push(`${c.nom} : ${e?.message || "erreur"}`);

@@ -101,7 +101,7 @@ export async function POST(request) {
   try {
     const admin = clientSupabaseService();
     const [customerId, itemId, entreprise, codeTaxe] = await Promise.all([
-      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
+      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom, entrepriseId }),
       articleServiceQboPour(acces),
       // Scopé à L'ENTREPRISE DU DEMANDEUR (multi-QuickBooks 2026-09-08).
       admin.from("entreprises").select("paiement_carte_appels, paiement_virement_appels, seuil_carte_appels, note_facture").eq("id", entrepriseId).maybeSingle(),

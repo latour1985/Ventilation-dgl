@@ -162,7 +162,7 @@ export async function POST(request) {
       quantite: Number(l?.quantite) || 1,
       prixUnitaire: Number(l?.prixUnitaire) || 0,
       // 🏷️ L'article QuickBooks du produit (catalogue lié) — 2026-09-18.
-      itemId: /^d+$/.test(String(l?.itemId || "").trim()) ? String(l.itemId).trim() : null,
+      itemId: /^\d+$/.test(String(l?.itemId || "").trim()) ? String(l.itemId).trim() : null,
     }))
     .filter((l) => l.description && l.prixUnitaire !== 0);
   if (!clientNom || !numero || lignes.length === 0) {
@@ -180,7 +180,7 @@ export async function POST(request) {
   try {
     const admin = clientSupabaseService();
     const [customerId, itemId, codeTaxe] = await Promise.all([
-      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom }),
+      clientQboPour(acces, admin, { clientId: corps?.clientId || null, clientNom, entrepriseId }),
       articleServiceQboPour(acces),
       // 🍁 Code de taxe du fichier — un fichier canadien exige un code
       // sur chaque ligne, devis compris (2026-09-09).

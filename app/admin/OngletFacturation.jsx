@@ -630,6 +630,9 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
         id: `depot-${Date.now()}`,
         description: `Dépôt perçu d'avance${depotPaye.payeLe ? ` le ${new Date(depotPaye.payeLe).toLocaleDateString("fr-CA")}` : ""} — appel de service payé d'avance`,
         prix: -(Number(depotPaye.montantHT) || 0),
+        // Même article « Dépôt » que la facture de dépôt (revue 2026-09-22) :
+        // l'entrée et la déduction se soldent dans le même compte.
+        categorie: "depot",
       });
     }
     // BLOC 3 — pièce déjà payée par le client (option « payer avant la
@@ -1356,7 +1359,8 @@ export function ApercuFactureClient({ bon, onFermer }) {
   const fiche = (useClients() || []).find((c) => c.nom === bon.client);
   // Devis d'origine — c'est lui qui porte le détail que le client a
   // accepté. Sans ça, la facture ne montrait qu'un montant global.
-  const devisFacture = (useDevis() || []).find((d) => d.numero === bon.devisNumero);
+  // Version ACTIVE du dossier (revue 2026-09-22) — pas le numéro exact d'une vieille version.
+  const devisFacture = devisAJourPourNumero(useDevis() || [], bon.devisNumero);
   const derniereFacture = (bon.facturesEmises || [])[bon.facturesEmises?.length - 1];
   const montant = derniereFacture?.montant ?? bon.montant;
   const numero = derniereFacture?.numeroFactureQb || "À émettre";
@@ -2456,7 +2460,17 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     if (duDevis.length === 0) return null;
     const totalRev = tous.reduce((s, it) => s + (parseFloat(it.prix) || 0), 0);
     const fraction = totalRev > 0 && montantFacture != null ? Math.min(1, Math.max(0, Number(montantFacture) / totalRev)) : 1;
-    return duDevis.map((it) => ({ index: it.devisIndex, montant: Math.round((parseFloat(it.prix) || 0) * fraction * 100) / 100 }));
+    const lignes = duDevis.map((it) => ({ index: it.devisIndex, montant: Math.round((parseFloat(it.prix) || 0) * fraction * 100) / 100 }));
+    // 🧮 La déduction « Déjà facturé sur ce devis » (factures d'avant le
+    // suivi par ligne) a ÉPONGÉ ce montant non attribué : on le note, sinon
+    // la révision suivante le déduirait une 2e fois (revue 2026-09-22 :
+    // devis 1 000 $, ancienne facture 300 $, révision 700 $ → Fluxya
+    // croyait 1 300 $ facturés et sous-facturait le bon suivant).
+    const eponge = tous
+      .filter((it) => String(it.id).startsWith("dejafact-"))
+      .reduce((s, it) => s + Math.max(0, -(parseFloat(it.prix) || 0)), 0);
+    if (eponge > 0) lignes.push({ index: null, absorbe: Math.round(eponge * fraction * 100) / 100 });
+    return lignes;
   };
   // Ce qui a DÉJÀ été facturé contre le devis d'un bon — tous bons du
   // même dossier confondus, factures annulées exclues :
@@ -2484,8 +2498,12 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             const m = Number(f.montant) || 0;
             if (f.numeroFactureQb) numeros.push(f.numeroFactureQb);
             if (Array.isArray(f.lignesDevis) && f.lignesDevis.length > 0) {
-              f.lignesDevis.forEach((l) => { parIndex[l.index] = (parIndex[l.index] || 0) + (Number(l.montant) || 0); });
-              totalDeja += f.lignesDevis.reduce((s, l) => s + (Number(l.montant) || 0), 0);
+              f.lignesDevis.forEach((l) => {
+                // Part du « non attribué » épongée par cette facture (voir lignesDevisFacturees).
+                if (l.absorbe) { nonAttribue -= Number(l.absorbe) || 0; totalDeja -= Number(l.absorbe) || 0; return; }
+                parIndex[l.index] = (parIndex[l.index] || 0) + (Number(l.montant) || 0);
+                totalDeja += Number(l.montant) || 0;
+              });
             } else if ((f.type === "pourcentage" || f.type === "echeance") && Number(totalDevis) > 0) {
               fractionGlobale += m / Number(totalDevis);
               totalDeja += m;
@@ -2495,7 +2513,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
             }
           })
       );
-    return { parIndex, fractionGlobale: Math.min(1, fractionGlobale), nonAttribue: Math.round(nonAttribue * 100) / 100, totalDeja: Math.round(totalDeja * 100) / 100, numeros: [...new Set(numeros)] };
+    return { parIndex, fractionGlobale: Math.min(1, fractionGlobale), nonAttribue: Math.max(0, Math.round(nonAttribue * 100) / 100), totalDeja: Math.round(totalDeja * 100) / 100, numeros: [...new Set(numeros)] };
   };
   const rouvrirRevision = (b) => {
     if (!revisionModifiable(b)) return;
@@ -2574,7 +2592,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       }
       // Le montant d'un devis accepté est déjà connu — on le reprend.
       if (!enrichi.devisNumero || !enrichi.prixNonListe) return enrichi;
-      const devis = (devisListe || []).find((d) => d.numero === enrichi.devisNumero);
+      // Version ACTIVE du dossier (revue 2026-09-22) : un bon qui porte DEV-3542
+      // reprend le total de DEV-3542-1 si c'est elle qui est en vigueur.
+      const devis = devisAJourPourNumero(devisListe, enrichi.devisNumero);
       if (!devis) return enrichi;
       return { ...enrichi, montant: Number(devis.totalVendant) || 0, prixNonListe: false };
     });
@@ -2591,15 +2611,22 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // est classé « Déjà facturés », peu importe qui a porté les factures.
   const devisSansSolde = (() => {
     const cumulParDevis = {};
+    // Cumul PAR DOSSIER (toutes versions), comparé au total de la version
+    // ACTIVE (revue 2026-09-22 — avant : numéro exact, donc une facture
+    // partielle sur l'ancienne version sortait le bon de la pile).
+    const baseDe = (n) => { const dd = devisAJourPourNumero(devisListe, n); return dd?.numeroBase || dd?.numero || n; };
+    const numerosParBase = {};
     bonsGroupes.forEach((b) => {
       if (!b.devisNumero) return;
-      cumulParDevis[b.devisNumero] =
-        (cumulParDevis[b.devisNumero] || 0) + (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+      const base = baseDe(b.devisNumero);
+      (numerosParBase[base] = numerosParBase[base] || new Set()).add(b.devisNumero);
+      cumulParDevis[base] =
+        (cumulParDevis[base] || 0) + (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
     });
     const sansSolde = new Set();
-    Object.entries(cumulParDevis).forEach(([numero, cumul]) => {
-      const d = (devisListe || []).find((x) => x.numero === numero);
-      if (d && cumul >= (Number(d.totalVendant) || 0) - 0.01 && (Number(d.totalVendant) || 0) > 0) sansSolde.add(numero);
+    Object.entries(cumulParDevis).forEach(([base, cumul]) => {
+      const d = devisAJourPourNumero(devisListe, [...numerosParBase[base]][0]);
+      if (d && cumul >= (Number(d.totalVendant) || 0) - 0.01 && (Number(d.totalVendant) || 0) > 0) numerosParBase[base].forEach((n) => sansSolde.add(n));
     });
     return sansSolde;
   })();
@@ -2699,7 +2726,16 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const resteAFacturerDe = (b) => {
     // Une facture annulée (VOID QuickBooks) libère son montant.
     const cumule = (b.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
-    return Math.max(0, (Number(b.montant) || 0) - cumule);
+    let reste = Math.max(0, (Number(b.montant) || 0) - cumule);
+    // 🧾 Montant repris du DEVIS (pas de révision) : ce qu'un AUTRE bon du
+    // même dossier a déjà facturé réduit aussi le reste (revue 2026-09-22 :
+    // un 2e bon d'un devis déjà facturé en partie proposait le devis complet).
+    if (b.devisNumero && !(b.lignesNonListees || []).length) {
+      const total = Number(devisAJourPourNumero(devisListe, b.devisNumero)?.totalVendant) || 0;
+      const f = total > 0 ? facturationDuDevis(b, total) : null;
+      if (f) reste = Math.min(reste, Math.max(0, total - f.totalDeja));
+    }
+    return Math.round(reste * 100) / 100;
   };
   const groupesAFacturer = useMemo(() => {
     // Tout ce qui n'est ni retiré ni déjà soldé. ⚠️ On garde les bons
@@ -2742,7 +2778,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // Le plus gros montant en haut : ce qu'on ne veut surtout pas oublier.
       .sort((a, b) => b.total - a.total);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bonsGroupes, projets]);
+  }, [bonsGroupes, projets, devisListe, bons]);
   const [groupesOuverts, setGroupesOuverts] = useState({});
   const totalAFacturer = groupesAFacturer.reduce((s, g) => s + g.total, 0);
   const nbBonsAFacturer = groupesAFacturer.reduce((s, g) => s + g.nbBons, 0);
@@ -3089,7 +3125,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // QuickBooks (4 000 caractères par description).
   const descriptifDevis = (b) => {
     if (!b?.devisNumero) return null;
-    const d = (devisListe || []).find((x) => x.numero === b.devisNumero);
+    const d = devisAJourPourNumero(devisListe, b.devisNumero); // version ACTIVE (revue 2026-09-22)
     const lignesD = (d?.lignes || []).filter((l) => !l.estRabais && ((l.nom || "").trim() || (l.description || "").trim()));
     if (lignesD.length === 0) return null;
     const texte = [
