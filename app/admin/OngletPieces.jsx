@@ -595,6 +595,71 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
   const affichees =
     filtre === "ouvertes" ? ouvertes : filtre === "toutes" ? pieces || [] : (pieces || []).filter((p) => p.statut === filtre);
 
+  // ============================================================
+  // 🗂️ PAGE À ONGLETS (2026-09-22, demande du propriétaire : « la page
+  // Pièces en commande est lourde »). Une chose à la fois : À recevoir ·
+  // Bons de commande · Matériel camion · Inventaire · Fournisseurs. Le
+  // « ➕ Nouveau BC » vit dans l'entête et ouvre une fenêtre. Les
+  // fenêtres (fiche BC, envoi, réception…) restent hors des onglets.
+  // ============================================================
+  const [onglet, setOnglet] = useState("recevoir");
+  const livraisonsAttendues = (() => {
+    const aujourdhui = new Date(); aujourdhui.setHours(0, 0, 0, 0);
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const ajd = iso(aujourdhui);
+    const demain = iso(new Date(aujourdhui.getTime() + 86400000));
+    const dans7 = iso(new Date(aujourdhui.getTime() + 7 * 86400000));
+    const lignes = [
+        ...(achatsLibres || [])
+          .filter((a) => !a.recuLe)
+          .map((a) => ({
+            cle: `a-${a.id}`, numero: a.numeroBc || "(sans nº)", fournisseur: a.fournisseurNom || "", date: a.livraisonSouhaitee || null,
+            cible: a.tacheId ? `🔗 ${a.clientNom || a.tacheTitre || "job"}` : a.clientId ? `👤 ${a.clientNom || "client"}` : (a.description || "").includes("Pour l'inventaire courant") ? "📦 stock" : "achat général",
+            description: (a.description || "").split("\n")[0],
+            // ⚡/🚚 Lus dans le texte du bon (2026-09-18).
+            asap: bcEstAsap(a.description), ramassage: bcEstRamassage(a.description), ramassePar: a.ramassePar || null,
+            envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a), telephone: (a.bcEnvoyeA || []).includes("manuel"),
+            ouvrir: () => ouvrirBc(a),
+            recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
+          })),
+        ...(pieces || [])
+          .filter((p) => p.statut === "commandee")
+          .map((p) => ({
+            cle: `p-${p.id}`, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "", date: p.dateReceptionPrevue || null,
+            cible: `🔧 ${p.clientNom || "pièce"}`, description: p.pieceRequise || "", ramassage: !!p.ramassage, ramassePar: p.ramassePar || null, envoye: !!p.bcEnvoyeLe, nonEnvoye: false,
+            ouvrir: null, recevoir: peutCommander && onRecue ? () => onRecue(p) : null,
+          })),
+        ...(projets || []).flatMap((pr) =>
+          (pr.bonsCommande || [])
+            .filter((bc) => bc.statut !== "Reçu" && bc.statut !== "Annulé")
+            .map((bc) => ({
+              cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || null,
+              cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
+            }))
+        ),
+      ].sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
+    // 📅 GROUPÉES PAR JOUR (2026-09-22) : en retard · aujourd'hui · demain ·
+    // chaque jour · ⚡ dès que possible · sans date.
+    const groupes = [];
+    const dans = (cle, titre, ton) => { let g = groupes.find((x) => x.cle === cle); if (!g) { g = { cle, titre, ton, lignes: [] }; groupes.push(g); } return g; };
+    lignes.forEach((l) => {
+      if (l.date && l.date < ajd) dans("retard", "⚠️ En retard", "retard").lignes.push(l);
+      else if (l.date === ajd) dans(ajd, "Aujourd'hui", "proche").lignes.push(l);
+      else if (l.date === demain) dans(demain, "Demain", "proche").lignes.push(l);
+      else if (l.date) dans(l.date, new Date(`${l.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" }), l.date <= dans7 ? "proche" : "normal").lignes.push(l);
+      else if (l.asap) dans("asap", "⚡ Dès que possible", "asap").lignes.push(l);
+      else dans("sans", "Sans date de livraison", "sans").lignes.push(l);
+    });
+    return { lignes, groupes, enRetard: lignes.filter((l) => l.date && l.date < ajd).length, cetteSemaine: lignes.filter((l) => l.date && l.date >= ajd && l.date <= dans7).length };
+  })();
+  const ONGLETS = [
+    { cle: "recevoir", label: "📦 À recevoir", nb: livraisonsAttendues.lignes.length, alerte: livraisonsAttendues.enRetard > 0 },
+    { cle: "bons", label: "🧾 Bons de commande", nb: ouvertes.length },
+    { cle: "camion", label: "🧰 Matériel camion", nb: camionEnAttente.length, alerte: camionEnAttente.length > 0 },
+    { cle: "inventaire", label: "📦 Inventaire", nb: null },
+    { cle: "fournisseurs", label: "🏭 Fournisseurs", nb: (fournisseurs || []).length },
+  ];
+
   return (
     <div className="mx-auto max-w-4xl space-y-3 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -604,95 +669,81 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
             {ouvertes.length} pièce{ouvertes.length > 1 ? "s" : ""} en attente · la tâche de retour se débloque à la réception
           </p>
         </div>
-        {!peutCommander && (
+        {peutCommander ? (
+          <Button onClick={() => { setBcLibreOuvert(true); setBcLibreMsg(""); }} className="min-h-0 px-3 py-2 text-xs">
+            ➕ Nouveau BC
+          </Button>
+        ) : (
           <span className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700">
             <Lock size={12} /> Consultation seulement — pour tes suivis clients
           </span>
         )}
       </div>
 
-      {/* 📦 LIVRAISONS ATTENDUES (2026-09-15, demande du propriétaire :
-          « voir les bons de commande avec leur client et leur date de
-          livraison ») — une ligne par bon (libre, pièce, projet), triée
-          par date : en retard en rouge, cette semaine en ambre. */}
-      {(() => {
-        const aujourdhui = new Date(); aujourdhui.setHours(0, 0, 0, 0);
-        const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        const ajd = iso(aujourdhui);
-        const dans7 = iso(new Date(aujourdhui.getTime() + 7 * 86400000));
-        const lignes = [
-          ...(achatsLibres || [])
-            .filter((a) => !a.recuLe)
-            .map((a) => ({
-              cle: `a-${a.id}`, numero: a.numeroBc || "(sans nº)", fournisseur: a.fournisseurNom || "", date: a.livraisonSouhaitee || null,
-              cible: a.tacheId ? `🔗 ${a.clientNom || a.tacheTitre || "job"}` : a.clientId ? `👤 ${a.clientNom || "client"}` : (a.description || "").includes("Pour l'inventaire courant") ? "📦 stock" : "achat général",
-              description: (a.description || "").split("\n")[0],
-              // ⚡/🚚 Lus dans le texte du bon (2026-09-18).
-              asap: bcEstAsap(a.description), ramassage: bcEstRamassage(a.description), ramassePar: a.ramassePar || null,
-              envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a), telephone: (a.bcEnvoyeA || []).includes("manuel"),
-              ouvrir: () => ouvrirBc(a),
-              recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
-            })),
-          ...(pieces || [])
-            .filter((p) => p.statut === "commandee")
-            .map((p) => ({
-              cle: `p-${p.id}`, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "", date: p.dateReceptionPrevue || null,
-              cible: `🔧 ${p.clientNom || "pièce"}`, description: p.pieceRequise || "", ramassage: !!p.ramassage, ramassePar: p.ramassePar || null, envoye: !!p.bcEnvoyeLe, nonEnvoye: false,
-              ouvrir: null, recevoir: peutCommander && onRecue ? () => onRecue(p) : null,
-            })),
-          ...(projets || []).flatMap((pr) =>
-            (pr.bonsCommande || [])
-              .filter((bc) => bc.statut !== "Reçu" && bc.statut !== "Annulé")
-              .map((bc) => ({
-                cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || null,
-                cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null, recevoir: null,
-              }))
-          ),
-        ].sort((x, y) => (x.date || "9999").localeCompare(y.date || "9999"));
-        if (lignes.length === 0) return null;
-        const enRetard = lignes.filter((l) => l.date && l.date < ajd).length;
-        const cetteSemaine = lignes.filter((l) => l.date && l.date >= ajd && l.date <= dans7).length;
+      {/* 🗂️ ONGLETS — un seul bloc visible à la fois. */}
+      <div className="flex flex-wrap gap-1.5">
+        {ONGLETS.map((o) => (
+          <button
+            key={o.cle}
+            type="button"
+            onClick={() => setOnglet(o.cle)}
+            className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${onglet === o.cle ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            {o.label}
+            {o.nb != null && o.nb > 0 && (
+              <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[9px] tabular-nums ${onglet === o.cle ? "bg-white/20 text-white" : o.alerte ? "bg-red-100 text-red-700" : "bg-white text-slate-600"}`}>{o.nb}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* 📦 À RECEVOIR (2026-09-15, puis groupé par jour 2026-09-22) — une
+          ligne par bon (libre, pièce, projet) pas encore reçu. */}
+      {onglet === "recevoir" && (() => {
+        const { lignes, groupes, enRetard, cetteSemaine } = livraisonsAttendues;
+        if (lignes.length === 0) return <p className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">Rien à recevoir — tous les bons sont rentrés. 🎉</p>;
+        const tons = { retard: "bg-red-100 text-red-700", proche: "bg-amber-100 text-amber-800", normal: "bg-slate-100 text-slate-600", asap: "bg-orange-100 text-orange-800", sans: "bg-slate-50 text-slate-400" };
         return (
           <div className={`rounded-2xl border bg-white p-3 ${enRetard > 0 ? "border-red-200" : "border-slate-200"}`}>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
-                📦 Livraisons attendues ({lignes.length})
+                📦 À recevoir ({lignes.length})
                 {enRetard > 0 && <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case text-red-700">{enRetard} en retard</span>}
                 {cetteSemaine > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold normal-case text-amber-700">{cetteSemaine} cette semaine</span>}
               </p>
-              <p className="text-[10px] text-slate-400">Bons de commande pas encore reçus — triés par date de livraison. « 📦 Reçu » retire la ligne.</p>
+              <p className="text-[10px] text-slate-400">« 📦 Reçu » retire la ligne · clic sur un bon libre = sa fiche.</p>
             </div>
-            <div className="mt-2 divide-y divide-slate-100">
-              {lignes.map((l) => {
-                const retard = l.date && l.date < ajd;
-                const proche = l.date && l.date >= ajd && l.date <= dans7;
-                return (
-                  <div key={l.cle} className="flex items-center gap-2 py-1.5 text-[11px]">
-                    <span className={`w-[92px] shrink-0 rounded-md px-1.5 py-0.5 text-center text-[10px] font-extrabold tabular-nums ${retard ? "bg-red-100 text-red-700" : proche ? "bg-amber-100 text-amber-800" : l.date ? "bg-slate-100 text-slate-600" : "bg-slate-50 text-slate-400"}`}>
-                      {l.date ? new Date(`${l.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" }) : l.asap ? "⚡ dès que poss." : "sans date"}
-                    </span>
-                    {l.ramassage ? <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${l.ramassePar ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"}`} title={l.ramassePar ? "À ramasser chez le fournisseur — ne sera pas livré" : "Personne n'est encore désigné — glisse la carte dans l'agenda"}>{l.ramassePar ? "🚚 à ramasser" : "🚚 à attribuer"}</span> : null}
-                    <button type="button" onClick={l.ouvrir || undefined} className={`min-w-0 flex-1 truncate text-left ${l.ouvrir ? "hover:underline" : "cursor-default"}`} title={l.description}>
-                      <span className="font-bold text-slate-800">{l.numero}</span>
-                      {l.fournisseur ? <span className="text-slate-600"> — {l.fournisseur}</span> : null}
-                      <span className="ml-1.5 text-slate-500">{l.cible}</span>
-                      {l.description ? <span className="ml-1.5 text-slate-400">· {l.description}</span> : null}
-                    </button>
-                    {l.nonEnvoye ? (
-                      <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700">⚠️ non envoyé</span>
-                    ) : l.telephone ? (
-                      <span className="shrink-0 text-[9px] font-bold text-sky-700" title="Commande passée par téléphone — aucun courriel envoyé par Fluxya">📞 par téléphone</span>
-                    ) : l.envoye ? (
-                      <span className="shrink-0 text-[9px] font-bold text-emerald-600">✉️ envoyé</span>
-                    ) : null}
-                    {l.recevoir && (
-                      <button type="button" onClick={l.recevoir} title="Commande reçue" className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] font-bold text-emerald-700 hover:border-emerald-400 active:scale-95">
-                        📦 Reçu
-                      </button>
-                    )}
+            <div className="mt-2 space-y-3">
+              {groupes.map((g) => (
+                <div key={g.cle}>
+                  <p className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-extrabold capitalize ${tons[g.ton]}`}>{g.titre} <span className="font-semibold opacity-70">· {g.lignes.length}</span></p>
+                  <div className="mt-1 divide-y divide-slate-100">
+                    {g.lignes.map((l) => (
+                      <div key={l.cle} className="flex items-center gap-2 py-1.5 text-[11px]">
+                        {l.ramassage ? <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${l.ramassePar ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"}`} title={l.ramassePar ? "À ramasser chez le fournisseur — ne sera pas livré" : "Personne n'est encore désigné — glisse la carte dans l'agenda"}>{l.ramassePar ? "🚚 à ramasser" : "🚚 à attribuer"}</span> : null}
+                        <button type="button" onClick={l.ouvrir || undefined} className={`min-w-0 flex-1 truncate text-left ${l.ouvrir ? "hover:underline" : "cursor-default"}`} title={l.description}>
+                          <span className="font-bold text-slate-800">{l.numero}</span>
+                          {l.fournisseur ? <span className="text-slate-600"> — {l.fournisseur}</span> : null}
+                          <span className="ml-1.5 text-slate-500">{l.cible}</span>
+                          {l.description ? <span className="ml-1.5 text-slate-400">· {l.description}</span> : null}
+                        </button>
+                        {l.nonEnvoye ? (
+                          <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700">⚠️ non envoyé</span>
+                        ) : l.telephone ? (
+                          <span className="shrink-0 text-[9px] font-bold text-sky-700" title="Commande passée par téléphone — aucun courriel envoyé par Fluxya">📞 par téléphone</span>
+                        ) : l.envoye ? (
+                          <span className="shrink-0 text-[9px] font-bold text-emerald-600">✉️ envoyé</span>
+                        ) : null}
+                        {l.recevoir && (
+                          <button type="button" onClick={l.recevoir} title="Commande reçue" className="shrink-0 rounded-lg border border-emerald-200 bg-emerald-50 px-1.5 py-1 text-[10px] font-bold text-emerald-700 hover:border-emerald-400 active:scale-95">
+                            📦 Reçu
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -702,6 +753,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           personne des achats commande et clique « Commande passée »
           (+ note facultative, visible sur son téléphone). Boucle courte
           voulue : pas d'étape « reçue ». */}
+      {onglet === "camion" && (
       <div className="rounded-2xl border border-slate-200 bg-white p-3">
         <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
           🧰 Matériel camion (techniciens)
@@ -818,21 +870,25 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           </div>
         )}
       </div>
+      )}
 
       {/* 🏭 RÉPERTOIRE DES FOURNISSEURS (2026-08-30, demande du
           propriétaire) — LE endroit pour gérer les fournisseurs et leurs
           courriels : le même répertoire sert aux BC de projet, aux BC
           libres, aux pièces et aux commandes de camion. */}
+      {onglet === "fournisseurs" && (
       <SectionFournisseurs
         fournisseurs={fournisseurs}
         setFournisseurs={setFournisseurs}
         ajouterJournal={ajouterJournal}
         peutModifier={peutCommander}
+        toujoursOuvert
       />
+      )}
 
       {/* 📦 INVENTAIRE COURANT (2026-09-04, demande du propriétaire) —
           la liste vivante de l'atelier, à côté des bons de commande. */}
-      <SectionInventaire key={invVersion} ajouterJournal={ajouterJournal} peutModifier={peutCommander} nomUtilisateur={nomUtilisateur} />
+      {onglet === "inventaire" && <SectionInventaire key={invVersion} ajouterJournal={ajouterJournal} peutModifier={peutCommander} nomUtilisateur={nomUtilisateur} toujoursOuvert />}
       {receptionBc && (
         <ModalReceptionInventaire
           bc={receptionBc}
@@ -870,16 +926,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           pas de pièce client. Attribué à un PROJET = entre dans ses coûts
           matériaux (mécanisme existant) ; sinon achat général. */}
       {peutCommander && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">🧾 Bon de commande libre</p>
-            {!bcLibreOuvert && (
-              <Button variant="outline" onClick={() => { setBcLibreOuvert(true); setBcLibreMsg(""); }} className="min-h-0 px-3 py-1.5 text-xs">
-                ➕ Nouveau BC (sans tâche)
-              </Button>
-            )}
-          </div>
-          {bcLibreMsg && <p className="mt-1 text-[11px] font-semibold text-emerald-700">{bcLibreMsg}</p>}
+        <>
           {/* 📧 Envoi du BC libre au fournisseur — offert quand la fiche
               du répertoire a des courriels ; coche, envoie, terminé. */}
           {/* 📧 FENÊTRE D'ENVOI (2026-09-15) — au premier plan, impossible
@@ -1020,7 +1067,13 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
             </div>
           )}
           {bcLibreOuvert && (
-            <div className="mt-2 space-y-1.5 rounded-xl bg-slate-50 p-2.5">
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+              <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <h3 className="text-sm font-extrabold text-slate-900">➕ Nouveau bon de commande</h3>
+                  <button type="button" onClick={() => setBcLibreOuvert(false)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+                </div>
+            <div className="space-y-1.5">
               {/* 🏭 VRAIE LISTE DÉROULANTE (2026-08-28) : c'était un champ
                   « datalist » — le navigateur n'affichait la liste qu'en
                   tapant, jamais au clic, et on croyait le répertoire vide
@@ -1324,8 +1377,16 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                 <Button variant="outline" onClick={() => setBcLibreOuvert(false)} className="min-h-0 py-1.5 text-xs">Annuler</Button>
               </div>
             </div>
+              </div>
+            </div>
           )}
-          {(achatsLibres || []).length > 0 && (
+          {onglet === "bons" && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">🧾 Bons de commande libres <span className="text-slate-400">({(achatsLibres || []).length})</span></p>
+              {bcLibreMsg && <p className="mt-1 text-[11px] font-semibold text-emerald-700">{bcLibreMsg}</p>}
+              {(achatsLibres || []).length === 0 ? (
+                <p className="mt-1 text-xs text-slate-400">Aucun bon libre — « ➕ Nouveau BC » en haut de la page.</p>
+              ) : (
             <div className="mt-2 space-y-1">
               {/* ✏️ Chaque ligne S'OUVRE au clic (2026-08-26) — la liste
                   était en lecture seule : impossible de corriger un
@@ -1436,8 +1497,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                 <BarrePagination total={(achatsLibres || []).length} page={pageBc} onPage={setPageBc} refHaut={refListeBc} libelle="bons de commande" />
               </div>
             </div>
+              )}
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {/* ✏️ FICHE D'UN BON DE COMMANDE (2026-08-26) — modification,
@@ -1669,6 +1732,11 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
         </div>
       )}
 
+      {/* 🔧 PIÈCES POUR LES JOBS — sous l'onglet Bons de commande (2026-09-22). */}
+      {onglet === "bons" && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-3">
+          <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-500">🔧 Pièces pour les jobs <span className="text-slate-400">({ouvertes.length} en attente)</span></p>
+          <div className="space-y-2">
       <div ref={refListePieces} className="flex flex-wrap gap-1.5">
         {[["ouvertes", "En attente"], ["a_commander", "À commander"], ["commandee", "Commandées"], ["recue", "Reçues"], ["toutes", "Toutes"]].map(
           ([val, label]) => (
@@ -2202,6 +2270,9 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
         </div>
       )}
       <BarrePagination total={affichees.length} page={pagePieces} onPage={setPagePieces} refHaut={refListePieces} libelle="pièces" />
+          </div>
+        </div>
+      )}
 
       {/* FENÊTRE — DEMANDE DE PAIEMENT AU CLIENT */}
       {demandePour && (
@@ -2478,8 +2549,9 @@ function ModalReceptionInventaire({ bc, onFermer, onFait, ajouterJournal, nomUti
   );
 }
 
-function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
-  const [ouvert, setOuvert] = useState(false);
+function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur, toujoursOuvert = false }) {
+  // 🗂️ Dans son onglet (2026-09-22), la section est ouverte d'office.
+  const [ouvert, setOuvert] = useState(!!toujoursOuvert);
   const [articles, setArticles] = useState([]);
   const [charge, setCharge] = useState(false);
   const [filtre, setFiltre] = useState("");
@@ -2513,7 +2585,7 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
   const visibles = articles.filter((a) => (!f || `${a.nom} ${a.emplacement}`.toLowerCase().includes(f)) && (!filtreSeuil || aCommander(a)));
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3">
-      <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
+      <button onClick={() => !toujoursOuvert && setOuvert(!ouvert)} className={`flex w-full items-center justify-between text-left ${toujoursOuvert ? "cursor-default" : ""}`}>
         <div>
           <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
             📦 Inventaire courant <span className="text-slate-400">({articles.length})</span>
@@ -2525,7 +2597,7 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
           </p>
           <p className="mt-0.5 text-[11px] text-slate-400">Ce qui dort à l&apos;atelier — quantités ajustables, chaque mouvement au journal</p>
         </div>
-        <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${ouvert ? "rotate-180" : ""}`} />
+        {!toujoursOuvert && <ChevronDown size={16} className={`shrink-0 text-slate-400 transition-transform ${ouvert ? "rotate-180" : ""}`} />}
       </button>
       {ouvert && (
         <div className="mt-2 space-y-1.5">
@@ -2643,8 +2715,8 @@ function SectionInventaire({ ajouterJournal, peutModifier, nomUtilisateur }) {
   );
 }
 
-function SectionFournisseurs({ fournisseurs, setFournisseurs, ajouterJournal, peutModifier }) {
-  const [ouvert, setOuvert] = useState(false);
+function SectionFournisseurs({ fournisseurs, setFournisseurs, ajouterJournal, peutModifier, toujoursOuvert = false }) {
+  const [ouvert, setOuvert] = useState(!!toujoursOuvert);
   const [recherche, setRecherche] = useState("");
   const [ficheOuverte, setFicheOuverte] = useState(null); // null | {} (nouveau) | fournisseur
 
@@ -2682,7 +2754,7 @@ function SectionFournisseurs({ fournisseurs, setFournisseurs, ajouterJournal, pe
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3">
-      <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
+      <button onClick={() => !toujoursOuvert && setOuvert(!ouvert)} className={`flex w-full items-center justify-between text-left ${toujoursOuvert ? "cursor-default" : ""}`}>
         <div>
           <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
             🏭 Fournisseurs <span className="text-slate-400">({(fournisseurs || []).length})</span>
@@ -2691,7 +2763,7 @@ function SectionFournisseurs({ fournisseurs, setFournisseurs, ajouterJournal, pe
             Le répertoire des bons de commande — courriels, téléphone, notes
           </p>
         </div>
-        {ouvert ? <ChevronUp size={16} className="shrink-0 text-slate-400" /> : <ChevronDown size={16} className="shrink-0 text-slate-400" />}
+        {!toujoursOuvert && (ouvert ? <ChevronUp size={16} className="shrink-0 text-slate-400" /> : <ChevronDown size={16} className="shrink-0 text-slate-400" />)}
       </button>
 
       {ouvert && (
