@@ -113,7 +113,7 @@ export async function POST(request) {
   // le « .limit(1) » prenait la PREMIÈRE compagnie de la table, et les
   // courriels de Miroir partaient signés « Ventilation DGL inc. »).
   // Même règle que les routes QuickBooks : l'entreprise vient du JETON.
-  const entrepriseId = String(utilisateur.app_metadata?.entreprise_id || "dgl");
+  const entrepriseId = String(utilisateur.app_metadata?.entreprise_id || "__aucune__"); // plus de repli DGL (revue 2026-09-22)
   let nomEntreprise = "";
   let repondreEntreprise = "";
   let expediteurVerifie = "";

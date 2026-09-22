@@ -1621,14 +1621,25 @@ function AppAdmin() {
     // 📦 Date de livraison souhaitée — vraie donnée depuis le 2026-09-15.
     const livraisonSouhaitee = livraisonEstimee || null;
     const numero = await numeroBonCommande().catch(() => "BC-" + Date.now());
+    // 🛡️ Un BC qui n'est PAS en base ne doit jamais partir chez le
+    // fournisseur (revue 2026-09-22 : l'erreur était avalée, l'écran disait
+    // « créé » et la fenêtre d'envoi s'ouvrait). null = rien n'est créé.
+    const enregistrer = async (charge) => {
+      try {
+        await creerAchatLibre(charge, session);
+        return true;
+      } catch (e) {
+        ajouterJournal(`⛔ BC ${numero} NON enregistré (${e?.message || "connexion impossible"}) — rien n'a été envoyé au fournisseur. Vérifie la connexion et recrée-le.`);
+        return false;
+      }
+    };
     // 👤 ACHAT POUR UN CLIENT sans tâche ni projet (2026-08-26) : l'unité
     // commandée avant que la job soit à l'horaire. Le coût remonte dans
     // « par client » et QuickBooks suivra par le numéro de BC.
     if (!projetId && !tacheId && clientId) {
       const cl = (clients || []).find((c) => c.id === clientId);
       const attribueClient = Math.min(Number(montantAttribue ?? montantHT) || 0, Number(montantHT) || 0);
-      await creerAchatLibre(
-        {
+      if (!(await enregistrer({
           numeroBc: numero,
           fournisseurNom,
           description,
@@ -1640,9 +1651,7 @@ function AppAdmin() {
           clientId,
           clientNom: cl?.nom || "",
           montantAttribue: attribueClient,
-        },
-        session
-      ).catch(() => {});
+        }))) return null;
       listerAchatsLibres().then(setAchatsLibres).catch(() => {});
       ajouterJournal(
         "🧾 BC " + numero + " créé et rattaché au client « " + (cl?.nom || clientId) + " » — " +
@@ -1661,8 +1670,7 @@ function AppAdmin() {
       // recopiés sur l'achat — le coût suivra le client, projet ou pas.
       const t = tacheParId(tacheId);
       const attribue = Math.min(Number(montantAttribue ?? montantHT) || 0, Number(montantHT) || 0);
-      await creerAchatLibre(
-        {
+      if (!(await enregistrer({
           numeroBc: numero,
           fournisseurNom,
           description,
@@ -1675,9 +1683,7 @@ function AppAdmin() {
           tacheTitre: t?.titre || t?.clientNom || "",
           clientNom: t?.clientNom || "",
           montantAttribue: attribue,
-        },
-        session
-      ).catch(() => {});
+        }))) return null;
       listerAchatsLibres().then(setAchatsLibres).catch(() => {});
       ajouterJournal(
         "🧾 BC " + numero + " créé et rattaché à « " + (t?.titre || tacheId) + " »" + (t?.clientNom ? ` (${t.clientNom})` : "") +
@@ -1685,7 +1691,7 @@ function AppAdmin() {
           (attribue < (Number(montantHT) || 0) ? " (le reste demeure un achat de stock)" : "")
       );
     } else {
-      await creerAchatLibre({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO(), livraisonSouhaitee, ramassePar, depotA }, session).catch(() => {});
+      if (!(await enregistrer({ numeroBc: numero, fournisseurNom, description, montantHT, dateAchat: todayISO(), livraisonSouhaitee, ramassePar, depotA }))) return null;
       listerAchatsLibres().then(setAchatsLibres).catch(() => {});
       ajouterJournal("🧾 BC " + numero + " créé (achat général, sans projet) — " + (Number(montantHT) || 0).toFixed(2) + " $ HT");
     }

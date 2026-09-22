@@ -61,7 +61,10 @@ async function roleAppelant(admin, utilisateur) {
 // texte. Contient la marche à suivre d'INSTALLATION Android/iPhone en 3
 // étapes : constat terrain du 2026-08-18, une astuce d'une ligne ne
 // suffit pas à un technicien peu à l'aise avec son téléphone.
-function gabaritInvitation({ nom, lien, nouveau, urlApp }) {
+function gabaritInvitation({ nom, lien, nouveau, urlApp, nomEntreprise = "" }) {
+  // 🏢 Le nom de l'entreprise de l'INVITEUR (revue 2026-09-22 — c'était
+  // « Ventilation DGL inc. » en dur pour toutes les entreprises).
+  const ent = nomEntreprise || "ton entreprise";
   const hoteAffiche = String(urlApp || "").replace(/^https?:\/\//, "");
   const etapeInstallation = `
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 16px;background:#f0fdfa;border-radius:10px;">
@@ -90,14 +93,14 @@ function gabaritInvitation({ nom, lien, nouveau, urlApp }) {
     <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
       <tr><td style="background:#134e4a;padding:18px 24px;">
         <span style="color:#ffffff;font-size:20px;font-weight:bold;">Fluxya</span>
-        <span style="color:#99f6e4;font-size:12px;"> · l'application de Ventilation DGL inc.</span>
+        <span style="color:#99f6e4;font-size:12px;"> · l'application de ${ent}</span>
       </td></tr>
       <tr><td style="padding:24px;">
         <p style="margin:0 0 12px;color:#0f172a;font-size:15px;">Bonjour${nom ? ` ${nom}` : ""},</p>
         <p style="margin:0 0 16px;color:#334155;font-size:14px;line-height:1.5;">
           ${nouveau
-            ? "Ton accès à Fluxya, l'application de gestion de Ventilation DGL inc., est prêt. Voici les 3 étapes pour commencer :"
-            : "Voici ton lien pour réinitialiser ton mot de passe de l'application Fluxya (Ventilation DGL inc.) :"}
+            ? `Ton accès à Fluxya, l'application de gestion de ${ent}, est prêt. Voici les 3 étapes pour commencer :`
+            : `Voici ton lien pour réinitialiser ton mot de passe de l'application Fluxya (${ent}) :`}
         </p>
         <p style="margin:0 0 8px;color:#134e4a;font-size:13px;font-weight:bold;">${nouveau ? "1️⃣ Choisis ton mot de passe" : ""}</p>
         <p style="margin:0 0 16px;text-align:center;">
@@ -276,7 +279,8 @@ export async function POST(request) {
     const { data: ent } = await clientSupabaseService()
       .from("entreprises")
       .select("nom_commercial, nom_legal, courriel_facturation, courriel")
-      .order("created_at")
+      // L'entreprise DE L'INVITEUR — plus « la première créée » (= DGL).
+      .eq("id", entrepriseDuCompte(utilisateur))
       .limit(1);
     nomEntreprise = ent?.[0]?.nom_commercial || ent?.[0]?.nom_legal || "";
     repondreEntreprise = ent?.[0]?.courriel_facturation || ent?.[0]?.courriel || "";
@@ -289,7 +293,7 @@ export async function POST(request) {
     "info@ventilationdgl.com";
   const expediteur = nomEntreprise
     ? `"${nomEntreprise.replace(/"/g, "'")}" <${adresseExpedition}>`
-    : process.env.COURRIEL_EXPEDITEUR || `Ventilation DGL inc. <${adresseExpedition}>`;
+    : `Fluxya <${adresseExpedition}>`;
   try {
     const reponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -300,7 +304,7 @@ export async function POST(request) {
         subject: nouveau
           ? `Ton accès à l'application Fluxya${nomEntreprise ? ` (${nomEntreprise})` : ""} — choisis ton mot de passe`
           : `Réinitialisation de ton mot de passe — Fluxya${nomEntreprise ? ` (${nomEntreprise})` : ""}`,
-        html: gabaritInvitation({ nom, lien, nouveau, urlApp: `${origine}/technicien` }),
+        html: gabaritInvitation({ nom, lien, nouveau, urlApp: `${origine}/technicien`, nomEntreprise }),
         reply_to: repondreEntreprise || process.env.COURRIEL_REPONSE || "info@ventilationdgl.com",
       }),
     });

@@ -200,6 +200,11 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
       depotA: ramassageBc ? bcLibre.depotA.trim() || "Atelier" : null,
     });
     setBcLibreEnCours(false);
+    // BC non enregistré (revue 2026-09-22) : le formulaire reste ouvert, rien ne part.
+    if (!numero) {
+      setBcLibreMsg("⛔ Bon de commande NON enregistré — rien n'a été envoyé. Vérifie la connexion et réessaie.");
+      return;
+    }
     setBcLibreMsg("✓ " + numero + " créé" + (bcLibre.tacheId ? " et rattaché à la tâche." : bcLibre.clientId ? " et rattaché au client." : bcLibre.projetId ? " et attribué au projet." : " (achat général)."));
     const fiche = ficheFournisseurParNom(bcLibre.fournisseurNom);
     const courrielTape = bcLibre.courrielFournisseur.trim();
