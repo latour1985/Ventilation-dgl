@@ -919,6 +919,11 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               )}
 
               <label className="mt-3 mb-1 block text-[11px] font-bold text-slate-500">📄 Devis lié</label>
+              {tache.devisAFaire && !tache.devisNumero && !(devisSaisiMain.trim() || devisLie) && (
+                <p className="mb-1.5 rounded-lg border border-orange-300 bg-orange-50 px-2.5 py-1.5 text-[11px] font-bold text-orange-900">
+                  📄 Devis à faire — cette tâche a été créée sans devis (travaux acceptés). Choisis-le ci-dessous dès qu&apos;il existe : la facturation en dépend.
+                </p>
+              )}
               <select
                 value={devisSaisiMain.trim() ? "" : devisLie}
                 onChange={(e) => { setDevisLie(e.target.value); setDevisSaisiMain(""); }}

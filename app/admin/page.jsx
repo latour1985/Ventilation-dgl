@@ -24,7 +24,7 @@ import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
-import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA, deplacerLigneHeures } from "@/lib/supabase/travauxEffectues";
+import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA, deplacerLigneHeures, rattacherTacheLot } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
@@ -1349,6 +1349,27 @@ function AppAdmin() {
       .filter((v, i, arr) => arr.findIndex((x) => x.clientNom === v.clientNom && x.date === v.date) === i)
       .sort((a, b) => b.jours - a.jours);
   }, [travaux, devisListe, planning, tachesAttente, clients]);
+  // 📄 TRAVAUX CRÉÉS « DEVIS À FAIRE PLUS TARD » (2026-09-22) — tâches de
+  // type Travaux avec devis créées sans devis (travaux acceptés, urgence),
+  // pas encore rattachées. Une ligne par tâche (première date à l'agenda).
+  const tachesDevisAFaire = useMemo(() => {
+    const parId = new Map();
+    Object.entries(planning || {}).forEach(([cle, cellule]) => {
+      const jour = cle.split("|")[0];
+      listeCellule(cellule).forEach((t) => {
+        if (!t?.devisAFaire || t.devisNumero) return;
+        const deja = parId.get(String(t.id));
+        if (!deja || jour < deja.date) parId.set(String(t.id), { tache: t, date: jour });
+      });
+    });
+    (tachesAttente || []).forEach((t) => {
+      if (!t?.devisAFaire || t.devisNumero || parId.has(String(t.id))) return;
+      parId.set(String(t.id), { tache: t, date: t.datePrevue || null });
+    });
+    return [...parId.values()]
+      .map(({ tache: t, date }) => ({ id: t.id, clientId: t.clientId || null, clientNom: t.clientNom || "", titre: t.titre || t.clientNom || "Tâche", adresse: t.adresseTravaux || t.adresseIntervention || null, date }))
+      .sort((a, b) => String(a.date || "9999").localeCompare(String(b.date || "9999")));
+  }, [planning, tachesAttente]);
   const [bons, setBons] = useState(BONS_TRAVAIL_COMPLETES_INIT);
   // Répertoire des fournisseurs (matériaux, location, sous-traitance) —
   // sert à envoyer le bon de commande directement depuis l'app.
@@ -3575,6 +3596,7 @@ function AppAdmin() {
           compteAttente={tachesAttente.length}
           ramassagesAttribuer={ramassagesAttribuer}
           soumissionsSansDevis={soumissionsSansDevis}
+          tachesDevisAFaire={tachesDevisAFaire}
           onCreerDevisPour={(id) => { setClientPourNouveauDevis(id); setOnglet("devis"); }}
           journal={journal}
           setOnglet={setOnglet}
@@ -3737,6 +3759,42 @@ function AppAdmin() {
             // travail. Le miroir se fera à la vraie création.
             if (d.statut === "brouillon") return true;
             mirroirEstimateDevis(d);
+            // 📄 « DEVIS À FAIRE PLUS TARD » (2026-09-22) : une tâche créée
+            // sans devis pour CE client se rattache toute seule au premier
+            // devis créé pour lui (agenda + attente + base), et le dit.
+            try {
+              const candidates = tachesDevisAFaire.filter((t) => (t.clientId && d.clientId ? t.clientId === d.clientId : (t.clientNom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase()));
+              if (candidates.length > 0 && d.numero) {
+                const ids = new Set(candidates.map((t) => String(t.id)));
+                const complement = (t) => ({ devisNumero: d.numero, devisAFaire: false, ...(/^Devis .+ — Intervention$/.test(t.titre || "") ? { titre: `Devis ${d.numero} — Intervention` } : {}) });
+                setPlanning((prev) => {
+                  const copie = { ...prev };
+                  Object.keys(copie).forEach((cle) => {
+                    const liste = listeCellule(copie[cle]);
+                    if (liste.some((t) => ids.has(String(t.id)))) copie[cle] = liste.map((t) => (ids.has(String(t.id)) ? { ...t, ...complement(t) } : t));
+                  });
+                  return copie;
+                });
+                setTachesAttente((prev) => prev.map((t) => (ids.has(String(t.id)) ? { ...t, ...complement(t) } : t)));
+                // Le bon de travail déjà créé (job finie avant le devis) et ses heures suivent aussi.
+                candidates.forEach((t) => rattacherTacheLot(t.id, { majDevis: true, devisNumero: d.numero }).catch(() => {}));
+                setBons((prev) => prev.map((b) => (ids.has(String(b.tacheId)) && !b.devisNumero ? { ...b, devisNumero: d.numero } : b)));
+                // En base : chaque assignation (un technicien = une ligne) reçoit le complément.
+                const faits = new Set();
+                Object.entries(planning || {}).forEach(([cle, cellule]) => {
+                  const empId = cle.split("|")[1];
+                  const courriel = (utilisateurs || []).find((u) => String(u.id) === String(empId))?.courriel;
+                  listeCellule(cellule).forEach((t) => {
+                    if (!ids.has(String(t.id)) || !courriel) return;
+                    const k = `${t.id}|${courriel}`;
+                    if (faits.has(k)) return;
+                    faits.add(k);
+                    majDonneesAssignation(t.id, courriel, complement(t)).catch(() => {});
+                  });
+                });
+                ajouterJournal(`📄 Devis ${d.numero} rattaché automatiquement à ${candidates.length > 1 ? `${candidates.length} tâches créées` : `la tâche « ${candidates[0].titre} » créée`} en attendant le devis — la facturation en tiendra compte.`);
+              }
+            } catch { /* le rattachement auto ne bloque jamais la sauvegarde du devis */ }
             // Le devis est enregistré — le miroir QuickBooks ci-dessus
             // tourne en arrière-plan sans bloquer ce retour.
             return true;

@@ -16,7 +16,7 @@ import { BlocReponsesClients } from "./BlocReponsesClients";
 import { EncadreCoutEmploye } from "./EncadreCoutEmploye";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap, estCommissionnaire } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, tachesDevisAFaire = [], onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
   // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
   // commandées : cette semaine, et en retard (date passée, rien reçu).
   const livraisons = (() => {
@@ -397,6 +397,36 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
             </div>
             <p className="mt-2 text-[10px] leading-snug text-indigo-700">
               {t("Ces visites disparaîtront d'ici dès qu'un devis sera créé pour le client.")}
+            </p>
+          </div>
+        )}
+
+        {/* 📄 TRAVAUX PLANIFIÉS SANS DEVIS (2026-09-22) — créés « devis à
+            faire plus tard » ; disparaissent dès qu'un devis est rattaché. */}
+        {(tachesDevisAFaire || []).length > 0 && (
+          <div className="rounded-2xl border-2 border-orange-300 bg-orange-50 p-4">
+            <h3 className="mb-2 flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-orange-800">
+              <FileText size={13} /> {tachesDevisAFaire.length} {tachesDevisAFaire.length > 1 ? "travaux planifiés sans devis — devis à faire" : "travail planifié sans devis — devis à faire"}
+            </h3>
+            <div className="space-y-1.5">
+              {tachesDevisAFaire.map((v) => (
+                <div key={v.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-200 bg-white px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-bold text-slate-800">{v.clientNom || v.titre}</p>
+                    <p className="text-[10px] text-slate-500">
+                      {v.titre}{v.date ? ` · à l'agenda le ${v.date}` : " · en attente (pas encore à l'agenda)"}{v.adresse ? ` · 📍 ${v.adresse}` : ""}
+                    </p>
+                  </div>
+                  {onCreerDevisPour && v.clientId && (
+                    <button type="button" onClick={() => onCreerDevisPour(v.clientId)} className="shrink-0 rounded-lg bg-[#131B2E] px-2.5 py-1 text-[10px] font-extrabold text-white active:scale-95">
+                      📄 Créer le devis
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[10px] leading-snug text-orange-800">
+              Le devis créé pour ce client se rattachera tout seul à la tâche. Sinon : fiche de la tâche → « Devis lié ».
             </p>
           </div>
         )}

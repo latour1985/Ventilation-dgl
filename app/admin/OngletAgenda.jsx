@@ -987,6 +987,12 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // à attacher à la tâche — il suit jusqu'au bon de travail et à la
   // facturation.
   const [numeroDevisExistant, setNumeroDevisExistant] = useState("");
+  // 📄 « DEVIS À FAIRE PLUS TARD » (2026-09-22, vécu : client qui dit oui au
+  // téléphone, travaux urgents, devis pas encore monté — la porte était
+  // fermée). Cochée : la tâche « Travaux avec devis » se crée SANS devis,
+  // porte le drapeau devisAFaire, et reste signalée (agenda, fiche,
+  // tableau de bord) jusqu'à ce qu'un devis lui soit rattaché.
+  const [devisAFaire, setDevisAFaire] = useState(false);
   // 🔎 Vérification du numéro tapé, DANS QuickBooks, au moment de la
   // création (2026-08-25) : une faute de frappe découverte à la
   // facturation, trois semaines plus tard, est dix fois plus chère
@@ -1413,7 +1419,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
           nouvelle.frequenceFacturationAnnuelle = nouvelleFrequence;
         }
       } else if (!devis) {
-        return; // un devis/contrat doit être sélectionné pour ces types
+        if (nouveauType === "devis" && devisAFaire) {
+          nouvelle.devisAFaire = true; // 📄 devis à faire plus tard
+        } else {
+          return; // un devis/contrat doit être sélectionné pour ces types
+        }
       }
       if (devis) {
         nouvelle.devisNumero = devis.numero;
@@ -1456,7 +1466,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     const suffixeProjet = projetLie ? ` — lié au projet "${projetLie.nom}"` : "";
     const libelleType =
       nouveauType === "devis"
-        ? `Travaux avec devis #${nouvelle.devisNumero}`
+        ? (nouvelle.devisAFaire ? "Travaux avec devis — 📄 devis à faire plus tard" : `Travaux avec devis #${nouvelle.devisNumero}`)
         : nouveauType === "entretien_contrat"
         ? `Entretien selon contrat #${nouvelle.devisNumero}, ${nouvelleFrequence} factures/an`
         : TYPES_TACHE.find((t) => t.id === nouveauType).label;
@@ -1649,6 +1659,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setContactRole("");
     setContactTel("");
     setNumeroDevisExistant("");
+    setDevisAFaire(false);
     setVerifDevisQbo(null);
     setUnitesChoisies([]);
     setFiltreClientTache("");
@@ -2165,6 +2176,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // rien à changer (voir la modale : elles ne partent que modifiées).
       ...(champs.projetId !== undefined ? { projetId: champs.projetId } : {}),
       ...(champs.devisNumero !== undefined ? { devisNumero: champs.devisNumero } : {}),
+      ...(champs.devisNumero ? { devisAFaire: false } : {}), // 📄 devis rattaché = plus « à faire »
       // 📄 Le titre auto « Devis X — Intervention » suit le nouveau devis.
       ...(champs.devisNumero !== undefined && champs.devisNumero && /^Devis .+ — Intervention$/.test(tache.titre || "")
         ? { titre: `Devis ${champs.devisNumero} — Intervention` }
@@ -2223,6 +2235,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // 🏗️/📄 Rattachements modifiés dans la fiche — clé absente = inchangé.
       ...(projetId !== undefined ? { projetId } : {}),
       ...(devisNumero !== undefined ? { devisNumero } : {}),
+      ...(devisNumero ? { devisAFaire: false } : {}), // 📄 devis rattaché = plus « à faire »
       // 📄 Le TITRE auto « Devis X — Intervention » suit le nouveau devis
       // (2026-09-17, vécu : devis changé pour DEV-3542, mais le titre — donc
       // le libellé partout, ex. rattachement d'un BC — montrait encore 3541).
@@ -3355,6 +3368,19 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       📄 Sans contrat ni numéro : la tâche se crée quand même — à la facturation, le prix passera par la révision manuelle (comme un prix non listé).
                     </p>
                   )}
+                  {/* 📄 DEVIS À FAIRE PLUS TARD (2026-09-22) — travaux acceptés
+                      verbalement, urgence : la tâche part à l'agenda tout de suite,
+                      le devis se rattache après (fiche de la tâche, ou tout seul
+                      quand un devis est créé pour ce client). */}
+                  {nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim() && (
+                    <label className={`mt-1.5 flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-[11px] ${devisAFaire ? "border-orange-300 bg-orange-50 text-orange-900" : "border-slate-200 bg-white text-slate-600"}`}>
+                      <input type="checkbox" checked={devisAFaire} onChange={(e) => setDevisAFaire(e.target.checked)} className="mt-0.5 h-4 w-4 accent-orange-500" />
+                      <span>
+                        <span className="font-bold">📄 Le devis sera fait plus tard</span> (travaux acceptés, urgence).
+                        <span className="block text-[10px] opacity-80">La tâche se crée sans devis et reste marquée « devis à faire » dans l&apos;agenda et au tableau de bord. Rattache-le ensuite dans sa fiche — ou il se rattachera tout seul au premier devis créé pour ce client.</span>
+                      </span>
+                    </label>
+                  )}
                   {devisListe.length === 0 && (
                     <p className="mt-1 text-[10px] text-red-500">Aucun devis disponible — crée-en un dans l'onglet Devis.</p>
                   )}
@@ -4098,7 +4124,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       // ou sans dépôt : c'est elle qui dit à la comptabilité
                       // le prix de base et la règle du temps inclus.
                       if (nouveauType === "appel_service" && !zoneAppelChoix) raisons.push("la zone de tarification de l'appel");
-                      if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim()) raisons.push("un devis (de la liste, ou un numéro tapé à la main)");
+                      if (nouveauType === "devis" && !nouveauDevisId && !numeroDevisExistant.trim() && !devisAFaire) raisons.push("un devis (de la liste, ou un numéro tapé à la main — ou coche « devis à faire plus tard »)");
                       // 📄 CONTRAT FACULTATIF (2026-09-09, demande №2 du
                       // propriétaire : « je ne peux pas créer la tâche si
                       // je n'ai pas de numéro de contrat ») — un entretien
@@ -5010,6 +5036,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                             )}
                             {!emp.estSousTraitant && estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
                             {pasFermee(seg.tache, emp, jourKey) && <span title="Pas fermée sur le téléphone — aucune heure enregistrée. Ouvre la fiche : « Fermer la tâche pour l'équipe »." className="shrink-0 text-[9px] font-extrabold text-amber-700">⏳</span>}
+                            {seg.tache.devisAFaire && !seg.tache.devisNumero && <span title="Devis à faire — la tâche a été créée sans devis (travaux acceptés). Rattache-le dans sa fiche." className="shrink-0 rounded bg-orange-200 px-1 text-[8px] font-extrabold text-orange-900">📄 devis</span>}
                             {!emp.estSousTraitant && estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
