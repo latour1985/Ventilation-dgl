@@ -2115,14 +2115,23 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
 
   // 📌 Une adresse tapée dans la FICHE de tâche rejoint le dossier du
   // client (2026-09-02) — même règle anti-doublon qu'à la création.
+  const adressesPoseesRef = useRef(new Set());
   const poserAdresseAuDossier = (tache, entree) => {
     if (!entree?.ligne1) return;
     const client = clients.find((c) => c.id === tache.clientId) || clients.find((c) => c.nom === tache.clientNom);
     if (!client) return;
-    const deja = (client.adresses || []).some((a) => (a.ligne1 || "").trim().toLowerCase() === entree.ligne1.trim().toLowerCase());
-    if (deja) return;
+    const memeAdresse = (a) => (a.ligne1 || "").trim().toLowerCase() === entree.ligne1.trim().toLowerCase();
+    if ((client.adresses || []).some(memeAdresse)) return;
+    // 🛡️ ANTI-DOUBLON RÉEL (2026-09-22, vécu Groupe general construction :
+    // « 2130 Rue de la Montagne » deux fois, à 13 ms d'écart). Une tâche à
+    // plusieurs techniciens s'enregistre UNE FOIS PAR TECHNICIEN : chaque
+    // passage voyait la fiche d'avant le premier ajout. On mémorise ce qui
+    // vient d'être posé, et on revérifie sur l'état le plus frais.
+    const cleAjout = `${client.id}|${entree.ligne1.trim().toLowerCase()}`;
+    if (adressesPoseesRef.current.has(cleAjout)) return;
+    adressesPoseesRef.current.add(cleAjout);
     const fiche = { id: `adr-${Date.now()}`, nom: "Chantier", ligne1: entree.ligne1, ...(entree.appartement ? { appartement: entree.appartement } : {}) };
-    setClients((prev) => prev.map((x) => (x.id === client.id ? { ...x, adresses: [...(x.adresses || []), fiche] } : x)));
+    setClients((prev) => prev.map((x) => (x.id === client.id && !(x.adresses || []).some(memeAdresse) ? { ...x, adresses: [...(x.adresses || []), fiche] } : x)));
     ajouterJournal(`📌 Adresse « ${entree.ligne1} » enregistrée au dossier de ${client.nom}`);
   };
 
