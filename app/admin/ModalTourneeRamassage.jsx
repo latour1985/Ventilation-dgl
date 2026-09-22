@@ -22,7 +22,8 @@ export function ModalTourneeRamassage({ tache, date, employe, employes, onFermer
     if (!a) { a = { fournisseur: b.fournisseur || "Fournisseur", adresse: b.adresse || "", telephone: b.telephone || "", bons: [] }; arrets.push(a); }
     a.bons.push(b);
   });
-  const candidats = (employes || []).filter((e) => e.courriel && !e.estSousTraitant && !e.estBureau);
+  // Tout employé peut ramasser (2026-09-21) — sauf les sous-traitants (pas d'app).
+  const candidats = (employes || []).filter((e) => e.courriel && !e.estSousTraitant).sort((x, y) => (y.estCommissionnaire ? 1 : 0) - (x.estCommissionnaire ? 1 : 0));
   const appliquer = (b) => {
     if (!edition) return;
     const champs = {};

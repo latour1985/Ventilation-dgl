@@ -4228,7 +4228,9 @@ function AppAdmin() {
         <OngletPieces
           // 🚚 Qui peut ramasser : le commissionnaire d'abord, puis le terrain.
           employesRamassage={utilisateursActifs
-            .filter((u) => u.courriel && !estMetierBureau(u.metier))
+            // 🚚 TOUT LE MONDE peut aller chercher du matériel (2026-09-21,
+            // demande du propriétaire) — le commissionnaire reste en tête.
+            .filter((u) => u.courriel)
             .map((u) => ({ courriel: String(u.courriel).toLowerCase(), nom: u.nom, commissionnaire: estCommissionnaire(u.metier) }))
             .sort((a, b) => (b.commissionnaire ? 1 : 0) - (a.commissionnaire ? 1 : 0) || String(a.nom).localeCompare(String(b.nom), "fr"))}
           pieces={pieces}
