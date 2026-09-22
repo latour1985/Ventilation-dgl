@@ -18,7 +18,7 @@ import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
 import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
-import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, libelleAdresse, descriptionAvecLivraison, bcEstAsap, bcEstRamassage } from "./partage";
+import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, AutocompleteAdresse, libelleAdresse, descriptionAvecLivraison, bcEstAsap, bcEstRamassage } from "./partage";
 
 export function OngletPieces({ employesRamassage = [], pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onMarquerBcEnvoye = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
@@ -2869,8 +2869,17 @@ function FicheFournisseur({ fournisseur, onFermer, onSauvegarder, onRetirer }) {
             </div>
             <div>
               <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse</label>
-              <input value={f.adresse} onChange={(e) => setF((p) => ({ ...p, adresse: e.target.value }))}
-                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
+              {/* 📍 AUTOCOMPLÉTION GOOGLE (2026-09-21, demande du propriétaire) —
+                  la même que partout : une adresse propre fait un vrai lien
+                  « Y aller » sur le téléphone du commissionnaire. */}
+              {f.adresse ? (
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-300 bg-slate-50 px-2.5 py-2">
+                  <span className="min-w-0 truncate text-sm text-slate-800">📍 {f.adresse}</span>
+                  <button type="button" onClick={() => setF((p) => ({ ...p, adresse: "" }))} className="shrink-0 text-[10px] font-bold text-slate-400 underline underline-offset-2">changer</button>
+                </div>
+              ) : (
+                <AutocompleteAdresse onSelection={(place) => setF((p) => ({ ...p, adresse: place.label }))} />
+              )}
             </div>
           </div>
 
