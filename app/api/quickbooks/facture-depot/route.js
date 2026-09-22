@@ -185,7 +185,9 @@ export async function POST(request) {
           SalesItemLineDetail: {
             // 🏷️ Un dépôt, c'est un APPEL DE SERVICE (2026-09-18) — classé
             // comme tel dans QuickBooks ; repli : l'article général.
-            ItemRef: { value: (await articleQboParNom(acces, "Appel de service")).id || itemId },
+            // Article « Dépôt » du fichier (DGL en a un), sinon l'article
+            // d'appel de service, sinon l'article général.
+            ItemRef: { value: (await articleQboParNom(acces, ["Dépôt", "Depot", "Appel de service taux horaire", "Appel de service"])).id || itemId },
             Qty: 1,
             UnitPrice: montantHT,
             ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
