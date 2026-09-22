@@ -2644,6 +2644,10 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     <th className="pb-1.5 text-center font-semibold">Qté</th>
                     {coutsVisibles && <th className="pb-1.5 text-right font-semibold">Coûtant</th>}
                     <th className="pb-1.5 text-right font-semibold">Vendant</th>
+                    {/* 🧮 TOTAL DE LA LIGNE (2026-09-22, vécu : « j'ai mis 6 filtres
+                        et le montant est resté à 1 » — le sous-total était bon,
+                        mais rien ne montrait Qté × Vendant). */}
+                    <th className="pb-1.5 text-right font-semibold">Total</th>
                     <th className="pb-1.5"></th>
                   </tr>
                 </thead>
@@ -2738,6 +2742,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                               : "border-slate-300"
                           }`}
                         />
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums font-bold text-slate-900" title={`${Number(l.quantite) || 0} × ${(Number(l.prix_vendant) || 0).toFixed(2)} $`}>
+                        {((Number(l.prix_vendant) || 0) * (Number(l.quantite) || 0)).toFixed(2)} $
                       </td>
                       <td className="py-1.5 text-right">
                         <button onClick={() => supprimerLigne(l.uid)} className="text-slate-300 hover:text-red-500">
