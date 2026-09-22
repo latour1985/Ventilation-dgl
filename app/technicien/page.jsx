@@ -138,6 +138,16 @@ function isoLocal(d) {
   const j = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${j}`;
 }
+// 📅 DATE RÉELLE d'une ligne d'heures (2026-09-22, vécu Charles : une job
+// planifiée mercredi, partie mardi → ses heures tombaient MERCREDI, dans
+// le futur et dans la mauvaise paie). La date d'une ligne = le jour où le
+// chrono a été parti, jamais la date planifiée à l'agenda. Sans chrono
+// (coéquipier qui n'a pas pointé) : le repli fourni, sinon aujourd'hui.
+function dateReelleDe(t, repli = null) {
+  const d = Number(t?.debutReel || t?.tempsDebutSegment) || 0;
+  if (d > 0) return isoLocal(new Date(d));
+  return repli || isoLocal(new Date());
+}
 function dateDepuisIso(iso) {
   return new Date(`${iso}T00:00:00`);
 }
@@ -4439,7 +4449,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         titre: tache.titre || tache.clientNom || "Travail complété",
         clientNom: tache.clientNom || null,
         description: notesTerrain || tache.description || "",
-        date: tache.date || isoLocal(new Date()),
+        // 📅 Date RÉELLE des travaux (2026-09-22) — c'est elle qui devient la date de la facture.
+        date: dateReelleDe(tache),
         heures,
         typeTache: tache.typeTache || null,
         secteur: tache.secteur || "commercial",
@@ -6534,7 +6545,7 @@ function AppTechnicien() {
       secteur: t.secteur || "commercial",
       titre: t.titre || (t.type === "transport" ? "Transport" : undefined),
       clientNom: t.clientNom || clientDemo?.nom || null,
-      date: t.date || isoLocal(new Date()),
+      date: dateReelleDe(t),
       heures,
       estTransport: t.type === "transport",
       // Où ces heures atterrissent dans les coûts : projet,
@@ -6639,7 +6650,7 @@ function AppTechnicien() {
     const heuresPlafond = seuilPourTache(t, HEURES_AVANT_PLAFOND, HEURES_AVANT_PLAFOND_TRANSPORT);
     const debut = t.debutReel || t.tempsDebutSegment;
     const titreOriginal = t.titre || (t.type === "transport" ? "Transport" : "Tâche");
-    const dateTache = t.date || isoLocal(new Date());
+    const dateTache = dateReelleDe(t);
     enregistrerTravailEffectue(
       {
         tacheId: t.cleHeures || t.tacheOrigineId || t.id,
@@ -6708,7 +6719,7 @@ function AppTechnicien() {
         secteur: tache.secteur || "commercial",
           titre: tache.titre || (tache.type === "transport" ? "Transport" : undefined),
           clientNom: tache.clientNom || null,
-          date: tache.date || isoLocal(new Date()),
+          date: dateReelleDe(tache),
           heures: h,
           estTransport: tache.type === "transport",
           kilometres: tache.type === "transport" ? tache.kilometres || 0 : null,
@@ -6782,7 +6793,7 @@ function AppTechnicien() {
     secteur: t.secteur || "commercial",
     titre: t.titre || undefined,
     clientNom: t.clientNom || null,
-    date: t.date || isoLocal(new Date()),
+    date: dateReelleDe(t, t.date),
     estTransport: false,
     categorieHeures: t.categorieHeures || "projet",
     kilometres: null,
@@ -6984,10 +6995,10 @@ function AppTechnicien() {
     if (reponse === "lunch") {
       enregistrerTravailEffectue(
         {
-          tacheId: `lunch-${t.date || isoLocal(new Date())}`,
+          tacheId: `lunch-${dateReelleDe(t)}`,
           titre: `Dîner (${minutesDiner} min non payées)`,
           clientNom: null,
-          date: t.date || isoLocal(new Date()),
+          date: dateReelleDe(t),
           heures: -(minutesDiner / 60),
           estTransport: false,
           kilometres: null,

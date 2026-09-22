@@ -22,7 +22,7 @@ import { dateISO, ajouterJours, dimancheDeSemaineISO, Button, DefilementHorizont
 // enregistrées par les techniciens au bouton « Terminer »).
 // Heures seulement — AUCUN montant de salaire ici.
 // ============================================================
-export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets, ajouterJournal, nomAdmin, semainesPayees = [], onMarquerSemainePayee = null, onAnnulerSemainePayee = null }) {
+export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets, ajouterJournal, nomAdmin, semainesPayees = [], onMarquerSemainePayee = null, onAnnulerSemainePayee = null, onDeplacerLigne = null }) {
   // 💵 SEMAINES DE PAIE FAITES (snippet 152, 2026-09-21) — voir
   // lib/supabase/semainesPaie.js. Une correction ne devient un report que
   // si la semaine de la ligne est marquée payée.
@@ -47,6 +47,8 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   // fin } au format HH:MM. Admins = effet immédiat, répartiteur =
   // proposition groupée à valider.
   const [editionLigne, setEditionLigne] = useState(null);
+  // 📅 Déplacer une ligne à une autre date (2026-09-22) : { id, date }.
+  const [deplacementLigne, setDeplacementLigne] = useState(null);
   const [erreurEdition, setErreurEdition] = useState("");
   // ✏️ CORRECTION D'UNE PROPOSITION par l'admin (bannière du haut) :
   // { groupe, valeurs: { [idLigne]: { debut, fin } } } — les champs
@@ -1208,6 +1210,46 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                                         >
                                           <Pencil size={11} />
                                         </button>
+                                      )}
+                                      {/* 📅 DÉPLACER À UNE AUTRE DATE (2026-09-22, vécu Charles :
+                                          job partie un jour d'avance, heures tombées sur la date
+                                          planifiée). Admins seulement ; seule la date bouge. */}
+                                      {droitHeures === "direct" && onDeplacerLigne && t.supabase && !estLunch(t) && deplacementLigne?.id !== t.id && (
+                                        <button
+                                          onClick={() => { setDeplacementLigne({ id: t.id, date: t.date, erreur: "", enCours: false }); setErreurEdition(""); }}
+                                          title="Déplacer cette ligne à une autre date (heures inchangées)"
+                                          className="rounded-md border border-slate-200 px-1.5 py-1 text-[10px] text-slate-400 hover:text-slate-700"
+                                        >
+                                          📅
+                                        </button>
+                                      )}
+                                      {deplacementLigne?.id === t.id && (
+                                        <div className="flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 p-1.5">
+                                          <span className="text-[10px] font-bold text-blue-800">📅 Déplacer au</span>
+                                          <input
+                                            type="date"
+                                            value={deplacementLigne.date}
+                                            onChange={(ev) => setDeplacementLigne((p) => ({ ...p, date: ev.target.value, erreur: "" }))}
+                                            className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-[11px]"
+                                          />
+                                          <button
+                                            disabled={deplacementLigne.enCours || !deplacementLigne.date || deplacementLigne.date === t.date}
+                                            onClick={async () => {
+                                              setDeplacementLigne((p) => ({ ...p, enCours: true, erreur: "" }));
+                                              try {
+                                                await onDeplacerLigne(t, deplacementLigne.date);
+                                                setDeplacementLigne(null);
+                                              } catch (e2) {
+                                                setDeplacementLigne((p) => ({ ...p, enCours: false, erreur: e2?.message || "Déplacement impossible — réessaie." }));
+                                              }
+                                            }}
+                                            className="rounded-md bg-[#131B2E] px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
+                                          >
+                                            {deplacementLigne.enCours ? "…" : "Déplacer"}
+                                          </button>
+                                          <button onClick={() => setDeplacementLigne(null)} aria-label="Annuler" className="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-bold text-slate-500">✗</button>
+                                          {deplacementLigne.erreur && <span className="w-full text-[10px] font-bold text-red-600">⚠️ {deplacementLigne.erreur}</span>}
+                                        </div>
                                       )}
                                     </>
                                   )}

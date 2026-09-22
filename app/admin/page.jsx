@@ -24,7 +24,7 @@ import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
-import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA } from "@/lib/supabase/travauxEffectues";
+import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA, deplacerLigneHeures } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
@@ -4026,6 +4026,18 @@ function AppAdmin() {
               ? "proposer"
               : null
           }
+          // 📅 DÉPLACER une ligne d'heures à une autre date (2026-09-22, vécu
+          // Charles). Admins seulement. Refusé si l'une des deux semaines est
+          // marquée « paie faite » — ce cas-là passe par un report ±.
+          onDeplacerLigne={async (travail, nouvelleDate) => {
+            if (!(role === "Admin principal" || role === "Admin régulier")) throw new Error("Réservé aux administrateurs.");
+            if (estSemainePayee(travail.date)) throw new Error(`La semaine du ${dimancheDeSemaineISO(travail.date)} est déjà payée — corrige plutôt les heures (l'écart partira en report).`);
+            if (estSemainePayee(nouvelleDate)) throw new Error(`La semaine du ${dimancheDeSemaineISO(nouvelleDate)} est déjà payée — impossible d'y ajouter des heures après coup.`);
+            const r = await deplacerLigneHeures(travail, nouvelleDate);
+            setTravaux((prev) => prev.map((t) => (t.id === travail.id ? { ...t, date: nouvelleDate, tacheId: r.tacheId, debutReel: r.debutReel, finReelle: r.finReelle } : t)));
+            if (r.bonDeplace) setBons((prev) => prev.map((b) => (String(b.tacheId || "") === String(travail.tacheId || "").split("::")[0] && b.date === travail.date ? { ...b, date: nouvelleDate } : b)));
+            ajouterJournal(`📅 Ligne d'heures déplacée : « ${travail.titre} » de ${travail.employeNom || travail.employeEmail} — du ${travail.date} au ${nouvelleDate} (${(Number(travail.heures) || 0).toFixed(2)} h, inchangées)${r.bonDeplace ? " · le bon de travail suit à la même date" : ""}.`);
+          }}
           onAjusterPlan={(ajustements) => {
             // `ajustements` = la ligne éditée + ses voisins réalloués
             // (calculés dans OngletPaies). Un seul geste, tout cohérent.
