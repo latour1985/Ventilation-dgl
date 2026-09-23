@@ -56,8 +56,8 @@ export function ModalTourneeRamassage({ tache, date, employe, employes, onFermer
               <p className="text-xs font-extrabold text-slate-800">🏭 {a.fournisseur}</p>
               {a.adresse ? <p className="text-[11px] text-slate-500">📍 {a.adresse}</p> : <p className="text-[11px] italic text-amber-600">Fiche fournisseur sans adresse — à compléter dans Pièces → Fournisseurs.</p>}
               <div className="mt-1.5 space-y-1.5">
-                {a.bons.map((b) => (
-                  <div key={b.numero} className="rounded-lg bg-slate-50 px-2.5 py-2 text-[11px]">
+                {a.bons.map((b, i) => (
+                  <div key={`${b.numero}-${i}`}className="rounded-lg bg-slate-50 px-2.5 py-2 text-[11px]">
                     <div className="flex flex-wrap items-center justify-between gap-1.5">
                       <span className="font-bold text-slate-800">🧾 {b.numero}{b.pourJob ? <span className="ml-1.5 font-normal text-slate-500">pour {b.pourJob}</span> : null}</span>
                       {!lectureSeule && onMajRamassageBc && (

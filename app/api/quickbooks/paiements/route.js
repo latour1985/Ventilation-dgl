@@ -164,20 +164,24 @@ export async function POST(request) {
       const estCarte = (m) => /carte|credit|crédit|visa|master|amex|discover/i.test(m);
       const estDebit = (m) => /debit|débit|interac|ach|virement|bank|prélèv|prelev/i.test(m);
       const frais = [];
+      let lus = 0;
       for (let position = 1; position <= 901; position += 100) {
         const reponse = await requeteQbo(
           acces,
           `select * from Payment where TxnDate >= '${dateDepuis}' startposition ${position} maxresults 100`
         );
         const page = reponse?.Payment || [];
+        lus += page.length;
         for (const p of page) {
           const methode = String(p?.PaymentMethodRef?.name || "").trim();
           const montant = Number(p?.TotalAmt) || 0;
           if (montant <= 0) continue;
           let f = 0;
           let type = "autre";
-          if (estCarte(methode)) { f = montant * 0.029 + 0.25; type = "carte"; }
-          else if (estDebit(methode)) { f = montant * 0.01; type = "debit"; }
+          // DÉBIT testé AVANT carte (revue 2026-09-22 : « Carte de débit » contient
+          // « carte » et était comptée à 2,9 % + 0,25 $ comme une carte de crédit).
+          if (estDebit(methode)) { f = montant * 0.01; type = "debit"; }
+          else if (estCarte(methode)) { f = montant * 0.029 + 0.25; type = "carte"; }
           else continue; // comptant / chèque / inconnu : aucun frais
           frais.push({
             id: p?.Id,
@@ -191,7 +195,8 @@ export async function POST(request) {
         }
         if (page.length < 100) break;
       }
-      return Response.json({ frais, tronque: frais.length >= 900 });
+      // Tronqué = la LECTURE a atteint son plafond (1 000 paiements), pas le nombre de frais retenus.
+      return Response.json({ frais, tronque: lus >= 1000 });
     }
 
     // ⏱️ { action: "delais" } — TEMPS DE PAIEMENT MOYEN PAR CLIENT

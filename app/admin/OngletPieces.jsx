@@ -235,18 +235,29 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
         courriels: [],
         coches: [],
       });
-    } else if (!fiche && courrielTapeValide) {
-      const nomF = bcLibre.fournisseurNom.trim();
+    } else if (courrielTapeValide) {
+      // Fiche connue (autre casse, ex. « descair ») mais SANS courriel : le
+      // courriel tapé la complète au lieu d'être ignoré (revue 2026-09-22 —
+      // aucune fenêtre ne s'ouvrait dans ce cas).
+      const nomF = fiche?.nom || bcLibre.fournisseurNom.trim();
       if (bcLibre.enregistrerFournisseur && nomF) {
         const nouveauF = {
-          id: `f-${Date.now()}`,
+          ...(fiche || {}),
+          id: fiche?.id || `f-${Date.now()}`,
           nom: nomF,
-          courriels: [{ id: `fc-${Date.now()}`, label: "Commande", email: courrielTape, defaut: true }],
+          courriels: [...((fiche?.courriels) || []), { id: `fc-${Date.now()}`, label: "Commande", email: courrielTape, defaut: true }],
         };
-        setFournisseurs?.((prev) => [...(prev || []), nouveauF]);
-        sauvegarderFournisseur(nouveauF)
-          .then(() => ajouterJournal?.(`🏭 Fournisseur « ${nomF} » ajouté au répertoire (${courrielTape}).`))
-          .catch(() => ajouterJournal?.(`⚠️ Fournisseur « ${nomF} » affiché mais NON enregistré au répertoire — réessaie.`));
+        if (fiche) {
+          setFournisseurs?.((prev) => (prev || []).map((f) => (f.id === fiche.id ? nouveauF : f)));
+          sauvegarderFournisseur(nouveauF)
+            .then(() => ajouterJournal?.(`🏭 Courriel ${courrielTape} ajouté à la fiche « ${nomF} ».`))
+            .catch(() => ajouterJournal?.(`⚠️ Courriel de « ${nomF} » NON enregistré au répertoire — réessaie.`));
+        } else {
+          setFournisseurs?.((prev) => [...(prev || []), nouveauF]);
+          sauvegarderFournisseur(nouveauF)
+            .then(() => ajouterJournal?.(`🏭 Fournisseur « ${nomF} » ajouté au répertoire (${courrielTape}).`))
+            .catch(() => ajouterJournal?.(`⚠️ Fournisseur « ${nomF} » affiché mais NON enregistré au répertoire — réessaie.`));
+        }
       }
       setOffreEnvoiBc({
         nouveau: true,
@@ -650,7 +661,9 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           .map((p) => ({
             cle: `p-${p.id}`, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "", date: p.dateReceptionPrevue || null,
             cible: `🔧 ${p.clientNom || "pièce"}`, description: p.pieceRequise || "", ramassage: !!p.ramassage, ramassePar: p.ramassePar || null, envoye: !!p.bcEnvoyeLe, nonEnvoye: false,
-            ouvrir: null, recevoir: peutCommander && onRecue ? () => onRecue(p.id, nomUtilisateur) : null,
+            // Confirmation, comme sur la carte de la pièce (revue 2026-09-22) :
+            // « Reçu » débloque la tâche de retour — un clic de trop coûte cher.
+            ouvrir: null, recevoir: peutCommander && onRecue ? () => { if (window.confirm(`Pièce « ${p.pieceRequise || "?"} » pour ${p.clientNom || "?"} : bien REÇUE en main ?\nLa tâche de retour pourra être planifiée.`)) onRecue(p.id, nomUtilisateur); } : null,
             manquant: p.manquant || "", restePromisLe: p.restePromisLe || null, reclameLe: p.reclameLe || null, partielLe: p.partielLe || null,
             partiel: peutCommander && onPartielPiece ? (champs, resume) => onPartielPiece(p, champs, resume) : null,
             reclamer: peutCommander ? (texte) => setOffreEnvoiBc({ reclamation: { type: "piece", objet: p }, numero: p.numeroBc || "(sans nº)", fournisseur: p.fournisseurNom || "le fournisseur", description: texte, photos: [], fichiers: [], courriels: ficheFournisseurParNom(p.fournisseurNom)?.courriels || [], coches: (ficheFournisseurParNom(p.fournisseurNom)?.courriels || []).filter((c) => c.defaut).map((c) => c.email) }) : null,
@@ -1215,8 +1228,11 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                 <>
                   <input
                     autoFocus
-                    value={bcLibre.fournisseurNom.trim()}
-                    onChange={(e) => setBcLibre((f) => ({ ...f, fournisseurNom: e.target.value }))}
+                    // " " = marqueur « Autre, rien tapé encore ». Plus de .trim() à
+                    // l'affichage : il mangeait l'espace tapé (« Les Entreprises »
+                    // devenait « LesEntreprises ») — revue 2026-09-22.
+                    value={bcLibre.fournisseurNom === " " ? "" : bcLibre.fournisseurNom}
+                    onChange={(e) => setBcLibre((f) => ({ ...f, fournisseurNom: e.target.value || " " }))}
                     placeholder="Nom du fournisseur"
                     className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                   />
@@ -1272,8 +1288,11 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                     propriétaire) : notée sur le bon ET écrite dans le
                     courriel au fournisseur — plus besoin de la taper
                     dans la description. */}
+                {/* En ramassage, la date vit dans l'encadré bleu (« 📅 Ramassage
+                    le ») — plus deux champs pour la même date (revue 2026-09-22). */}
+                {bcLibre.livraisonChoix !== "ramassage" && (
                 <span className="flex items-center gap-1 text-[10px] text-slate-400">
-                  {bcLibre.livraisonChoix === "ramassage" ? "Prêt pour le" : "Livraison souhaitée"}
+                  Livraison souhaitée
                   <input
                     type="date"
                     value={bcLibre.livraisonAsap ? "" : bcLibre.livraisonEstimee}
@@ -1282,6 +1301,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                     className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs disabled:bg-slate-100 disabled:text-slate-300"
                   />
                 </span>
+                )}
                 {/* ⚡ DÈS QUE POSSIBLE (2026-09-18) — commande spéciale : le
                     fournisseur n'a pas de date. Le bon le dit, et la
                     commande reste suivie « sans date — à confirmer ». */}

@@ -47,7 +47,10 @@ export async function GET(request) {
   const civique = (adresse.match(/\d+/) || [])[0];
   const filtres = [];
   if (civique) filtres.push(`adresse_travaux.ilike.%${civique}%`);
-  if (client) filtres.push(`client_nom.ilike.%${client.replace(/[%,]/g, "")}%`);
+  // Seulement lettres/chiffres/espaces dans le filtre PostgREST (revue
+  // 2026-09-22 : « Syndicat (phase 2) » ou un guillemet cassait la requête).
+  const clientPropre = client.replace(/[^\p{L}\p{N} '-]/gu, " ").replace(/'/g, " ").replace(/\s+/g, " ").trim();
+  if (clientPropre) filtres.push(`client_nom.ilike.%${clientPropre}%`);
   if (filtres.length > 0) requete = requete.or(filtres.join(","));
   const { data, error } = await requete;
   if (error) return Response.json({ erreur: error.message }, { status: 502 });

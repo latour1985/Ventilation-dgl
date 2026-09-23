@@ -1327,8 +1327,9 @@ function AppAdmin() {
       .filter((v) => {
         const o = origine(v);
         if (o?.devisNumero) return false; // devis rattaché à la tâche = fait
+        // Un BROUILLON (BR-…) n'est pas un devis fait (revue 2026-09-22).
         const devisApres = (devisListe || []).some(
-          (d) => (o?.clientId && d.clientId ? d.clientId === o.clientId : (d.clientNom || "") === (v.clientNom || "")) && d.date >= v.date
+          (d) => d.statut !== "brouillon" && (o?.clientId && d.clientId ? d.clientId === o.clientId : (d.clientNom || "") === (v.clientNom || "")) && d.date >= v.date
         );
         return !devisApres;
       })
@@ -4133,7 +4134,8 @@ function AppAdmin() {
           onAnnulerSemainePayee={async (debut) => {
             await annulerSemainePayee(debut);
             setSemainesPayees(await listerSemainesPayees());
-            ajouterJournal(`↩️ Paie de la semaine du ${debut} remise à « pas encore faite » — les corrections s'appliqueront de nouveau directement à cette semaine.`);
+            // Honnête sur ce qui ne se défait PAS (revue 2026-09-22).
+            ajouterJournal(`↩️ Paie de la semaine du ${debut} remise à « pas encore faite » — les PROCHAINES corrections s'appliqueront directement à cette semaine. ⚠️ Les reports ± déjà créés pendant qu'elle était marquée payée restent tels quels : vérifie la colonne Report ± de la semaine courante.`);
           }}
           travaux={travaux}
           utilisateurs={utilisateursActifs}
@@ -4441,6 +4443,10 @@ function AppAdmin() {
                       ...(champs.demande_paiement_le !== undefined ? { demandePaiementLe: champs.demande_paiement_le } : {}),
                       ...(champs.livraison_fixe !== undefined ? { livraisonFixe: !!champs.livraison_fixe } : {}),
                       ...(champs.reports_date !== undefined ? { reportsDate: champs.reports_date || [] } : {}),
+                      // 🚚 Ramassage (snippet 154) — manquait au miroir (revue 2026-09-22).
+                      ...(champs.ramassage !== undefined ? { ramassage: !!champs.ramassage } : {}),
+                      ...(champs.ramasse_par !== undefined ? { ramassePar: champs.ramasse_par || null } : {}),
+                      ...(champs.depot_a !== undefined ? { depotA: champs.depot_a || "" } : {}),
                     }
                   : x
               )

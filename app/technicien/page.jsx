@@ -4565,7 +4565,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         clientNom: tache.clientNom || null,
         description: notesTerrain || tache.description || "",
         // 📅 Date RÉELLE des travaux (2026-09-22) — c'est elle qui devient la date de la facture.
-        date: dateReelleDe(tache),
+        // Sans chrono (dernier à fermer n'a rien pointé) : la date prévue, pas aujourd'hui.
+        date: dateReelleDe(tache, tache.date),
         heures,
         typeTache: tache.typeTache || null,
         secteur: tache.secteur || "commercial",
@@ -6992,6 +6993,8 @@ function AppTechnicien() {
     enregistrerTravailEffectue(
       {
         ...champsFermetureEquipe(t),
+        // La date suit l'heure de DÉBUT déclarée (revue 2026-09-22).
+        date: isoLocal(new Date(debutTs)),
         heures,
         noteInterne:
           `${t.notesInternes ? t.notesInternes + "\n" : ""}` +

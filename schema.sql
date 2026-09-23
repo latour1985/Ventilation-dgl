@@ -6894,6 +6894,9 @@ select table_name, column_name from information_schema.columns
 -- C. HEURES — un technicien ne peut plus SUPPRIMER sa ligne d'heures
 --    (contournait le verrou « FERMÉE PAR LE BUREAU » du snippet 148).
 --    L'application ne supprime jamais de ligne d'heures.
+-- D. « Paie faite » : marquer/annuler réservé à la section Paies.
+-- E. Cinq anciennes tables VIDES d'avant Fluxya : fermées (elles étaient
+--    ouvertes en écriture à tout compte connecté).
 -- ============================================================
 
 -- ---- A. Report automatique dans une semaine payée ----
@@ -6993,6 +6996,35 @@ create trigger trg_proteger_facturation_bon before update on bons_travail
 drop policy if exists iso_travaux_effectues_del on travaux_effectues;
 create policy iso_travaux_effectues_del on travaux_effectues for delete to authenticated
   using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()));
+
+-- ---- D. « Paie faite » : réservé à qui a la section Paies ----
+drop policy if exists "semaines_paie_ins" on semaines_paie;
+create policy "semaines_paie_ins" on semaines_paie
+  for insert to authenticated
+  with check (entreprise_id = coalesce(public.entreprise_du_jeton(), '') and public.fn_a_section('paies'));
+drop policy if exists "semaines_paie_del" on semaines_paie;
+create policy "semaines_paie_del" on semaines_paie
+  for delete to authenticated
+  using (entreprise_id = coalesce(public.entreprise_du_jeton(), '') and public.fn_a_section('paies'));
+
+-- ---- E. Anciennes tables d'avant Fluxya (VIDES) : fermées ----
+-- Elles gardaient une politique « Authentifies - acces complet » : tout
+-- compte connecté, de n'importe quelle entreprise, pouvait y écrire.
+-- Vérifié 2026-09-22 : 0 ligne dans chacune. RLS active, aucune politique
+-- = plus personne (sauf la clé service).
+do $$
+declare t text; p record;
+begin
+  foreach t in array array['taches_planifiees','factures_progressives','transactions_quickbooks','clients','bons_travail_facturation']
+  loop
+    if not exists (select 1 from pg_tables where schemaname = 'public' and tablename = t) then continue; end if;
+    execute format('alter table public.%I enable row level security', t);
+    for p in select policyname from pg_policies where schemaname = 'public' and tablename = t
+    loop
+      execute format('drop policy %I on public.%I', p.policyname, t);
+    end loop;
+  end loop;
+end $$;
 
 -- Vérification : 4 politiques sur bons_travail, les 2 déclencheurs, et la
 -- politique de suppression des heures (7 lignes).

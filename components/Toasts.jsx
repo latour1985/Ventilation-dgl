@@ -20,7 +20,14 @@ export default function Toasts() {
 
   useEffect(() => {
     return sAbonnerToasts((b) => {
-      setBulles((prev) => [...prev, b].slice(-MAX_VISIBLES));
+      // Une bulle ⚠️ n'est JAMAIS chassée par les suivantes (revue 2026-09-22 :
+      // trois confirmations rapides effaçaient l'erreur avant qu'on la lise).
+      setBulles((prev) => {
+        const tous = [...prev, b];
+        const problemes = tous.filter((x) => x.ton === "probleme");
+        const autres = tous.filter((x) => x.ton !== "probleme").slice(-Math.max(1, MAX_VISIBLES - problemes.length));
+        return tous.filter((x) => problemes.includes(x) || autres.includes(x)).slice(-6);
+      });
       if (b.ton !== "probleme") {
         setTimeout(() => setBulles((prev) => prev.filter((x) => x.id !== b.id)), DUREE_MS);
       }

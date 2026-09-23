@@ -156,7 +156,11 @@ export async function POST(request) {
     // `include=invoiceLink` : QuickBooks retourne le lien « voir et
     // payer » quand QuickBooks Payments est actif sur le compte — c'est
     // ce lien que notre courriel offre au client comme bouton.
-    const cree = await ecrireQbo(acces, "invoice?include=invoiceLink", {
+    // 🏷️ Article « Dépôt » résolu d'avance ; si QuickBooks le REFUSE, on
+    // réessaie une fois avec l'article général (revue 2026-09-22 — c'est
+    // exactement ce qui a fait échouer la facture de Giacomo Valzania).
+    const articleDepot = (await articleQboParNom(acces, ["Dépôt", "Depot", "Appel de service taux horaire", "Appel de service"])).id || itemId;
+    const payloadDepot = (refArticle) => ({
       CustomerRef: { value: customerId },
       DueDate: dateLocale,
       // 🍁 Le dépôt est HORS TAXES — QuickBooks ajoute TPS/TVQ dessus,
@@ -187,7 +191,7 @@ export async function POST(request) {
             // comme tel dans QuickBooks ; repli : l'article général.
             // Article « Dépôt » du fichier (DGL en a un), sinon l'article
             // d'appel de service, sinon l'article général.
-            ItemRef: { value: (await articleQboParNom(acces, ["Dépôt", "Depot", "Appel de service taux horaire", "Appel de service"])).id || itemId },
+            ItemRef: { value: refArticle },
             Qty: 1,
             UnitPrice: montantHT,
             ...(codeTaxe ? { TaxCodeRef: { value: codeTaxe } } : {}),
@@ -195,6 +199,13 @@ export async function POST(request) {
         },
       ],
     });
+    let cree;
+    try {
+      cree = await ecrireQbo(acces, "invoice?include=invoiceLink", payloadDepot(articleDepot));
+    } catch (e) {
+      if (articleDepot === itemId) throw e;
+      cree = await ecrireQbo(acces, "invoice?include=invoiceLink", payloadDepot(itemId));
+    }
     const facture = cree?.Invoice;
 
     // ENVOI PAR QUICKBOOKS + PREUVE — seulement si l'entreprise a activé
