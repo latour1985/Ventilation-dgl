@@ -1422,6 +1422,38 @@ function AppAdmin() {
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
+  // 🔐 SURVEILLANCE DE LA CONNEXION (2026-09-23, vécu Louise : la session
+  // s'est perdue page ouverte — l'écran continuait comme si de rien n'était,
+  // les listes se vidaient et CHAQUE enregistrement était refusé en silence
+  // (« new row violates row-level security »). Des tâches d'entretien créées
+  // à ce moment n'ont jamais existé en base.) Vérifiée chaque minute, au
+  // retour sur l'onglet et dès qu'une erreur de sécurité passe au journal.
+  // Perdue → fenêtre bloquante « reconnecte-toi » + sauvegarde auto en pause.
+  const [sessionPerdue, setSessionPerdue] = useState(false);
+  const verifierSessionRef = useRef(null);
+  useEffect(() => {
+    if (!session) return;
+    let actif = true;
+    const verifier = async () => {
+      try {
+        const { data, error } = await supabase.auth.getUser();
+        if (!actif) return;
+        if (data?.user) { setSessionPerdue(false); return; }
+        // Hors ligne (réseau) ≠ session perdue : on ne crie pas au loup.
+        const reseau = error && (error.status === 0 || /fetch|network|réseau/i.test(String(error.message || "")) || (typeof navigator !== "undefined" && navigator.onLine === false));
+        if (!reseau) setSessionPerdue(true);
+      } catch {
+        // erreur réseau : rien à conclure
+      }
+    };
+    verifierSessionRef.current = verifier;
+    verifier();
+    const minuterie = setInterval(verifier, 60000);
+    const auRetour = () => { if (document.visibilityState === "visible") verifier(); };
+    document.addEventListener("visibilitychange", auRetour);
+    window.addEventListener("online", verifier);
+    return () => { actif = false; clearInterval(minuterie); document.removeEventListener("visibilitychange", auRetour); window.removeEventListener("online", verifier); };
+  }, [session]);
 
   // Accès personnalisés (table permissions_utilisateurs) — chargés à la
   // connexion ; sans entrée (ou table absente), on retombe sur les
@@ -2558,6 +2590,10 @@ function AppAdmin() {
     // parfaitement en base. On sème donc la mémoire de la sauvegarde
     // avec la signature exacte de ce qui vient d'être lu.
     const semer = (cle, liste) => {
+      // Tâches en attente : la mémoire REPART de ce que le serveur rend
+      // (revue 2026-09-23). Une lecture vide faite sans connexion valide ne
+      // peut plus mener la sauvegarde auto à « retirer » des tâches réelles.
+      if (cle === "taches") dejaEnregistre.current.taches = {};
       const memoire = dejaEnregistre.current[cle];
       liste.forEach((el) => {
         memoire[el.id] = JSON.stringify(el);
@@ -2621,7 +2657,7 @@ function AppAdmin() {
   }, [session]);
 
   useEffect(() => {
-    if (!session || !persistanceActive) return;
+    if (!session || !persistanceActive || sessionPerdue) return;
     const t = setTimeout(() => {
       const memoire = dejaEnregistre.current;
       const synchroniser = (liste, cle, sauvegarder, etiquette) => {
@@ -2646,7 +2682,7 @@ function AppAdmin() {
       });
     }, 600); // regroupe les modifications rapprochées en une seule écriture
     return () => clearTimeout(t);
-  }, [clients, projets, tachesAttente, session, persistanceActive]);
+  }, [clients, projets, tachesAttente, session, persistanceActive, sessionPerdue]);
 
   // 📋 RATTRAPAGE DU MIROIR DES DEVIS (2026-08-31, vécu : « le devis
   // arrive par courriel mais n'est pas dans QuickBooks » — DEV-3526
@@ -2868,6 +2904,7 @@ function AppAdmin() {
 
   const compteurJournal = useRef(0);
   const ajouterJournal = (texte) => {
+    if (/row-level security|JWT|Auth session missing/i.test(String(texte || ""))) verifierSessionRef.current?.();
     const maintenant = new Date();
     const heure = maintenant.toLocaleTimeString("fr-CA", { hour: "2-digit", minute: "2-digit" });
     const date = dateISO(maintenant);
@@ -3455,6 +3492,22 @@ function AppAdmin() {
         {/* 🔔 Bulles de confirmation + ⌨️ Échap / Ctrl+Entrée (2026-09-14). */}
         <Toasts />
         <RaccourcisClavier />
+        {sessionPerdue && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center">
+              <p className="text-3xl">🔒</p>
+              <h3 className="mt-1 text-base font-extrabold text-slate-900">Ta connexion a expiré</h3>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                Fluxya ne peut plus rien enregistrer tant que tu n&apos;es pas reconnecté·e — ce que tu ferais maintenant serait perdu.
+                Reconnecte-toi, puis refais la dernière action si elle n&apos;apparaît pas.
+              </p>
+              <div className="mt-4 grid gap-2">
+                <Button onClick={() => { supabase.auth.signOut().finally(() => window.location.reload()); }} className="min-h-0 py-2 text-xs">Me reconnecter</Button>
+                <Button variant="outline" onClick={() => verifierSessionRef.current?.()} className="min-h-0 py-2 text-xs">Réessayer (problème de réseau ?)</Button>
+              </div>
+            </div>
+          </div>
+        )}
         {retourAPlanifier && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setRetourAPlanifier(null); }}>
             <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
