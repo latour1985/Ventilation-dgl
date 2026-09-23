@@ -29,7 +29,7 @@ import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetr
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
 import { bonsARamasser, calculerTournees, tacheDeTournee, ramassagesAAttribuer, PREFIXE_TOURNEE } from "@/lib/tourneesRamassage";
-import { bcEstRamassage } from "./partage";
+import { bcEstRamassage, reglerChargesEmployeur } from "./partage";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter } from "@/lib/supabase/devis";
@@ -2152,6 +2152,8 @@ function AppAdmin() {
   // le contexte, plus bas dans le rendu. Si la table n'existe pas encore
   // (SQL 23 non lancé), on reste sur CONFIG_DEFAUT — rien ne casse.
   const [configEntreprise, setConfigEntreprise] = useState(CONFIG_DEFAUT);
+  // 💼 Charges de l'employeur (hors CCQ) pour tous les calculs de coût.
+  reglerChargesEmployeur(configEntreprise?.chargesEmployeurPct);
   useEffect(() => {
     if (!session) return;
     chargerEntreprise()

@@ -826,7 +826,7 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               type="number"
               pas="0.5"
               unite="%"
-              aide="Part ajoutée au salaire pour le coût réel d'un employé : RRQ, assurance-emploi, RQAP, CNESST, vacances… Au Québec, souvent entre 15 et 20 %. Sert au coût annuel du commissionnaire ; 0 = non compté."
+              aide="Part ajoutée au salaire des employés HORS CCQ (bureau, commissionnaire, taux individuel) : RRQ, assurance-emploi, RQAP, CNESST, vacances… Au Québec, souvent entre 15 et 20 %. S'applique au coût des jobs, à la rentabilité et au coût annuel du commissionnaire. La grille CCQ n'est jamais touchée (elle est déjà le coût réel). La paie ne change pas. 0 = non compté."
             />
             <ChampParametre
               {...propsChamp}

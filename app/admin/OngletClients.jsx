@@ -34,7 +34,7 @@ import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ModalDetailProjet } from "./OngletProjets";
 import { ModalDoublonsClients } from "./ModalDoublonsClients";
-import { Button, BarrePagination, ITEMS_PAR_PAGE, ModalSelectionCourriel, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
+import { facteurChargesEmploye, employeDeLigne, Button, BarrePagination, ITEMS_PAR_PAGE, ModalSelectionCourriel, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
 
 export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, onNouvelleVersion }) {
   const [dossierOuvert, setDossierOuvert] = useState(null);
@@ -2125,7 +2125,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                         lignesHeures.forEach((t) => {
                           const h = Number(t.heures) || 0;
                           cumul.heures += h;
-                          cumul.cout += h * (Number(t.tauxCoutantFige) || 0);
+                          cumul.cout += h * (Number(t.tauxCoutantFige) || 0) * facteurChargesEmploye(employeDeLigne(t, utilisateurs)); // + charges hors CCQ (2026-09-22)
                           const insp = (inspections || []).find(
                             (i) =>
                               i.date === t.date &&

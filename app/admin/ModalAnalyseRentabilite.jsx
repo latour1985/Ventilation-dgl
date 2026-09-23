@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
-import { bornesPeriodeAnalyse, dateISO } from "./partage";
+import { bornesPeriodeAnalyse, dateISO, facteurChargesEmploye, employeDeLigne } from "./partage";
 
 export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, inspections, achatsLibres = [], transactionsQb = [], clients = [], depots = {}, utilisateurs = [], tauxMetiers = {}, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], onFermer }) {
   // 🧾 DÉPENSES QUICKBOOKS RATTACHÉES (2026-08-26) — l'écran ne les
@@ -105,7 +105,8 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
     const baseFinale = base > 0 ? base : Number(tauxMetiers?.[emp.metier]?.[emp.niveau]) || 0;
     return baseFinale > 0 ? baseFinale + (Number(emp.primeHoraire) || 0) : 0;
   };
-  const coutMoDe = (t) => (Number(t.heures) || 0) * tauxDeLigne(t);
+  // + charges de l'employeur pour les employés HORS CCQ (2026-09-22).
+  const coutMoDe = (t) => (Number(t.heures) || 0) * tauxDeLigne(t) * facteurChargesEmploye(employeDeLigne(t, utilisateurs));
 
   // ---- CALCULS D'UNE PÉRIODE (réutilisés pour la tendance) ----
   const calculerPeriode = (bornes) => {

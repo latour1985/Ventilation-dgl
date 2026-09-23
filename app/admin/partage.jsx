@@ -723,6 +723,18 @@ export const METIERS = [...METIERS_TERRAIN, ...METIERS_HORS_GRILLE, ...METIERS_B
 export const estMetierBureau = (m) => METIERS_BUREAU.includes(m);
 // Le salaire se saisit en taux INDIVIDUEL (pas de niveau CCQ, pas de prime).
 export const estMetierTauxIndividuel = (m) => METIERS_BUREAU.includes(m) || METIERS_HORS_GRILLE.includes(m);
+// 💼 CHARGES DE L'EMPLOYEUR SUR LE COÛT DES HEURES (2026-09-22, décision du
+// propriétaire) : la grille CCQ est DÉJÀ le coût réel (avantages inclus) →
+// rien d'ajouté. Les employés HORS CCQ (bureau, commissionnaire) n'ont pas
+// d'avantages, mais leurs charges (RRQ, AE, RQAP, CNESST, vacances) s'ajoutent
+// à leur salaire dans le COÛT des jobs et la rentabilité. Le taux figé sur
+// les heures, lui, reste le salaire (la paie ne change pas).
+// Réglé une fois par l'écran principal au chargement de l'entreprise.
+let chargesEmployeurPct = 0;
+export const reglerChargesEmployeur = (pct) => { chargesEmployeurPct = Number(pct) || 0; };
+export const facteurChargesEmploye = (emp) => (emp && estMetierTauxIndividuel(emp.metier) ? 1 + chargesEmployeurPct / 100 : 1);
+export const employeDeLigne = (t, utilisateurs = []) =>
+  (utilisateurs || []).find((u) => (t.employeId && u.id === t.employeId) || (t.employeEmail && (u.courriel || "").toLowerCase() === String(t.employeEmail).toLowerCase())) || null;
 // Métiers permis selon le type d'accès : « Administration bureau » choisit
 // un métier de bureau (sa sous-catégorie d'accès), « Technicien » un métier
 // de terrain ; les administrateurs peuvent porter n'importe quel métier.
@@ -1041,11 +1053,13 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
   // + niveau de celui qui a pointé les heures, lu dans la table centrale).
   // Tant qu'un « travail » ne porte pas d'employeId (avant l'app technicien
   // + Supabase), on retombe sur le taux unique du projet.
-  const tauxDeEmploye = (t) => {
+  // Coût = taux (ci-dessous) × charges de l'employeur si hors CCQ.
+  const tauxDeEmploye = (t) => tauxSalaireDe(t) * facteurChargesEmploye(employeDeLigne(t, utilisateurs));
+  const tauxSalaireDe = (t) => {
     // Priorité 1 : le taux FIGÉ à la saisie (spec contrôle de gestion) —
     // stocké sur la ligne quand le technicien a terminé la tâche.
     if (Number(t.tauxCoutantFige) > 0) return Number(t.tauxCoutantFige);
-    const emp = utilisateurs.find((u) => u.id === t.employeId);
+    const emp = employeDeLigne(t, utilisateurs);
     // Priorité 2 : taux horaire INDIVIDUEL de la fiche (métiers de bureau).
     if (Number(emp?.tauxHoraire) > 0) return Number(emp.tauxHoraire);
     // Priorité 3 : grille CCQ (métier × niveau) + prime individuelle.
