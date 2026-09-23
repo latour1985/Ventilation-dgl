@@ -33,6 +33,7 @@ function nomCompta(config) {
 import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ModalDetailProjet } from "./OngletProjets";
+import { ModalDoublonsClients } from "./ModalDoublonsClients";
 import { Button, BarrePagination, ITEMS_PAR_PAGE, ModalSelectionCourriel, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
 
 export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, onNouvelleVersion }) {
@@ -612,6 +613,7 @@ export const LigneProjetClient = React.memo(function LigneProjetClient({ p, trav
 // (Fusion des deux postes, 2026-09-09 : `cibleCoup` — recherche qui
 // rouvre le même dossier — ET `planning` — rendez-vous à venir.)
 export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, cibleCoup = null, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], piecesCommandees = [], qbConnecte = null, planning = {} }) {
+  const [doublonsOuverts, setDoublonsOuverts] = useState(false); // 🔍 fusion validée (2026-09-22)
   // 📅 RENDEZ-VOUS À VENIR (2026-09-08, demande du propriétaire :
   // « ce client est cédulé pour le 9 septembre et je ne peux pas le
   // voir ») — le dossier montre les tâches PLANIFIÉES du client, sans
@@ -1214,6 +1216,16 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
     <div className="mx-auto max-w-2xl space-y-3 p-4 md:p-6">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Clients</h2>
+        {/* 🔍 Doublons possibles → fusion VALIDÉE une à une (2026-09-22). */}
+        <button
+          type="button"
+          onClick={() => setDoublonsOuverts(true)}
+          className="ml-auto mr-2 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+          title="Trouver les fiches en double (même nom, téléphone ou courriel) et les fusionner après validation"
+        >
+          🔍 Doublons possibles
+        </button>
+        {doublonsOuverts && <ModalDoublonsClients clients={clients} onFermer={() => setDoublonsOuverts(false)} ajouterJournal={ajouterJournal} />}
         {/* 🔐 Règle du propriétaire (2026-08-30) : les synchronisations
             de CLIENTS sont ouvertes aux Admin principal ET régulier —
             seul ce qui touche les PRIX reste à l'Admin principal.

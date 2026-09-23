@@ -1163,7 +1163,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // 📦 PANNEAU DES COMMANDES À RECEVOIR (2026-09-17, demande du
   // propriétaire : la bande dans la grille était coupée et lourde). Un
   // seul bouton près de la date ; le panneau liste les jours demandés.
-  const [panneauLivraisons, setPanneauLivraisons] = useState(null); // [dateISO, …] | null
+  const [panneauLivraisons, setPanneauLivraisons] = useState(null);
+  const [reassignation, setReassignation] = useState(null); // 🤒 { employeId, date, cible } // [dateISO, …] | null
   const joursLivraisonsAffiches = vue === "jour" ? [dateISO(jourAffiche)] : joursAffiches.map((d) => dateISO(d));
   const resumeLivraisons = (() => {
     const lignes = joursLivraisonsAffiches.flatMap((j) => (livraisonsParJour[j] || []).map((x) => ({ ...x, jour: j })));
@@ -2634,6 +2635,110 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
               📦 {resumeLivraisons.total} livraison{resumeLivraisons.total > 1 ? "s" : ""} à recevoir{resumeLivraisons.retard > 0 ? ` · ${resumeLivraisons.retard} en retard` : ""}{resumeLivraisons.sansDate > 0 ? ` · ⏳ ${resumeLivraisons.sansDate} sans date` : ""}
             </button>
           )}
+          {/* 🤒 RÉASSIGNER LA JOURNÉE D'UN ABSENT (2026-09-22, idée retenue par
+              le propriétaire) — toutes ses tâches du jour vers un autre
+              technicien ou en attente, en un geste confirmé. */}
+          {!lectureSeule && (
+            <button
+              type="button"
+              onClick={() => setReassignation({ employeId: "", date: dateISO(jourAffiche), cible: "", enCours: false })}
+              className="ml-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+              title="Un technicien est absent : déplacer toutes ses tâches d'une journée"
+            >
+              🤒 Réassigner une journée
+            </button>
+          )}
+          {reassignation && (() => {
+            const r = reassignation;
+            const empAbsent = employes.find((e) => String(e.id) === String(r.employeId));
+            // Ses tâches de ce jour (une ligne par tâche, à sa 1re heure).
+            const parId = new Map();
+            Object.entries(planning || {}).forEach(([cle, cellule]) => {
+              const [jour, empId, heure] = cle.split("|");
+              if (jour !== r.date || String(empId) !== String(r.employeId)) return;
+              listeCellule(cellule).forEach((t) => {
+                if (!t?.id || t.est_tache_systeme) return;
+                const deja = parId.get(t.id);
+                if (!deja || heure < deja.heure) parId.set(t.id, { tache: t, heure });
+              });
+            });
+            const liste = [...parId.values()].sort((a, b) => a.heure.localeCompare(b.heure));
+            const bloquee = (x) =>
+              (String(x.tache.id).startsWith("ramassage-") ? "tournée de ramassage — glisse-la vers la bonne personne" : null) ||
+              (Number(x.tache.jours) > 1 ? "chantier de plusieurs jours — ajuste-le dans sa fiche" : null) ||
+              (empAbsent && travailTermine(x.tache, empAbsent) ? "déjà des heures pointées" : null);
+            const aDeplacer = liste.filter((x) => !bloquee(x));
+            const candidats = employes.filter((e) => String(e.id) !== String(r.employeId) && e.courriel && !e.estSousTraitant);
+            const executer = () => {
+              if (!r.cible || aDeplacer.length === 0) return;
+              const cibleEmp = r.cible === "attente" ? null : employes.find((e) => String(e.id) === String(r.cible));
+              aDeplacer.forEach(({ tache: t, heure }) => {
+                if (r.cible === "attente") {
+                  modifierTachePlanifiee(t, r.employeId, { heures: t.heures, jours: t.jours, sauterWeekend: t.sauterWeekend, sauterFeries: t.sauterFeries, description: t.description, employeId: null, date: r.date, heureDebut: heure });
+                } else {
+                  deplacerTache(t.id, r.employeId, r.cible, r.date, heure);
+                }
+              });
+              ajouterJournal(`🤒 Journée du ${r.date} de ${empAbsent?.nom || "?"} réassignée : ${aDeplacer.length} tâche${aDeplacer.length > 1 ? "s" : ""} ${r.cible === "attente" ? "remise(s) EN ATTENTE" : `confiée(s) à ${cibleEmp?.nom || "?"}`}${liste.length > aDeplacer.length ? ` · ${liste.length - aDeplacer.length} laissée(s) à la main` : ""}.`);
+              setReassignation(null);
+            };
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setReassignation(null); }}>
+                <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <h3 className="text-sm font-extrabold text-slate-900">🤒 Réassigner la journée d&apos;un absent</h3>
+                    <button onClick={() => setReassignation(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-[11px] font-bold text-slate-500">
+                      Qui est absent ?
+                      <select value={r.employeId} onChange={(e) => setReassignation((p) => ({ ...p, employeId: e.target.value, cible: "" }))} className="mt-0.5 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-normal text-slate-800">
+                        <option value="">— Choisir —</option>
+                        {employes.filter((e) => !e.estSousTraitant).map((e) => <option key={e.id} value={e.id}>{e.nom}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-[11px] font-bold text-slate-500">
+                      Quel jour ?
+                      <input type="date" value={r.date} onChange={(e) => setReassignation((p) => ({ ...p, date: e.target.value }))} className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-normal text-slate-800" />
+                    </label>
+                  </div>
+                  {r.employeId && (
+                    <div className="mt-3">
+                      <p className="mb-1 text-[11px] font-bold text-slate-500">Ses tâches ce jour-là ({liste.length})</p>
+                      {liste.length === 0 ? (
+                        <p className="rounded-lg bg-slate-50 px-2.5 py-2 text-xs text-slate-400">Aucune tâche à l&apos;horaire ce jour-là.</p>
+                      ) : (
+                        <div className="space-y-1">
+                          {liste.map((x) => (
+                            <div key={x.tache.id} className={`rounded-lg px-2.5 py-1.5 text-[11px] ${bloquee(x) ? "bg-slate-50 text-slate-400" : "bg-sky-50 text-slate-700"}`}>
+                              <span className="font-bold">{x.heure}</span> · {x.tache.titre || x.tache.clientNom}
+                              {bloquee(x) && <span className="block text-[10px] italic">⤷ laissée à la main : {bloquee(x)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {aDeplacer.length > 0 && (
+                        <>
+                          <label className="mt-3 block text-[11px] font-bold text-slate-500">
+                            Où vont-elles ?
+                            <select value={r.cible} onChange={(e) => setReassignation((p) => ({ ...p, cible: e.target.value }))} className="mt-0.5 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-normal text-slate-800">
+                              <option value="">— Choisir —</option>
+                              <option value="attente">↩️ Remettre en attente (à replanifier)</option>
+                              {candidats.map((e) => <option key={e.id} value={e.id}>→ {e.nom} (même jour, mêmes heures)</option>)}
+                            </select>
+                          </label>
+                          <Button onClick={executer} disabled={!r.cible} className="mt-3 w-full min-h-0 py-2 text-xs">
+                            Réassigner {aDeplacer.length} tâche{aDeplacer.length > 1 ? "s" : ""}
+                          </Button>
+                          <p className="mt-1.5 text-[10px] text-slate-400">Chaque téléphone est mis à jour ; tout est inscrit au journal.</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
         <div className="flex rounded-lg border border-slate-200 p-0.5">
           {[["jour", "Jour"], ["semaine", "Semaine"], ["mois", "Mois"]].map(([id, labelVue]) => (

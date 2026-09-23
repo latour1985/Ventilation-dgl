@@ -14,9 +14,11 @@ import { camionIndisponible } from "@/lib/supabase/camions";
 import { ModalAnalyseRentabilite } from "./ModalAnalyseRentabilite";
 import { BlocReponsesClients } from "./BlocReponsesClients";
 import { EncadreCoutEmploye } from "./EncadreCoutEmploye";
+import { EncadreTauxFacturable } from "./EncadreTauxFacturable";
+import { FileDuMatin } from "./FileDuMatin";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap, estCommissionnaire } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, tachesDevisAFaire = [], onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, tachesDevisAFaire = [], tachesAttente = [], facturablesAssignations = {}, onPlanifierRetour = null, onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
   // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
   // commandées : cette semaine, et en retard (date passée, rien reçu).
   const livraisons = (() => {
@@ -89,6 +91,23 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         onOuvrirDevis={() => setOnglet("devis")}
         onNouvelleVersion={() => setOnglet("devis")}
         onTraiterDevis={() => setOnglet("devis")}
+      />
+
+      {/* ☀️ MA FILE DU MATIN (2026-09-22) — ce qui demande une action aujourd'hui. */}
+      <FileDuMatin
+        bons={bons}
+        devisListe={devisListe}
+        pieces={pieces}
+        tachesAttente={tachesAttente}
+        achatsLibres={achatsLibres}
+        travaux={travaux}
+        planning={planning}
+        utilisateurs={utilisateurs}
+        soumissionsSansDevis={soumissionsSansDevis}
+        tachesDevisAFaire={tachesDevisAFaire}
+        ramassagesAttribuer={ramassagesAttribuer}
+        setOnglet={setOnglet}
+        onPlanifierRetour={onPlanifierRetour}
       />
 
       {/* 🚀 CHECKLIST DE BIENVENUE (2026-09-09, GO du propriétaire) —
@@ -338,7 +357,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         />
       )}
 
-      <div className="grid gap-4 md:grid-cols-[1.5fr_1fr]">
+      <div id="encadres-devis-a-faire" className="grid gap-4 md:grid-cols-[1.5fr_1fr]">
         {/* VISITES DE SOUMISSION SANS DEVIS
             ------------------------------------------------------------
             Une visite faite mais jamais chiffrée, c'est une vente qui
@@ -350,6 +369,8 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         {(utilisateurs || []).filter((u) => estCommissionnaire(u.metier) && u.actif !== false && u.courriel).map((u) => (
           <EncadreCoutEmploye key={u.id} utilisateur={u} travaux={travaux} inspections={inspections} achatsLibres={achatsLibres} onOuvrirParametres={() => setOnglet("parametres")} />
         ))}
+        {/* 📊 Taux d'heures facturables par technicien (2026-09-22). */}
+        <EncadreTauxFacturable travaux={travaux} planning={planning} tachesAttente={tachesAttente} facturables={facturablesAssignations} />
         {(soumissionsSansDevis || []).length > 0 && (
           <div className="rounded-2xl border-2 border-indigo-300 bg-indigo-50 p-4">
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-indigo-700">

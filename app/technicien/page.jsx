@@ -5564,6 +5564,29 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               placeholder="Observations, travaux effectués, recommandations..."
               className="w-full rounded-xl border border-slate-300 bg-white p-3 text-sm disabled:bg-slate-100 disabled:text-slate-500"
             />
+            {/* ✍️ NOTE DE FIN PRÉPARÉE (2026-09-22, idée retenue par le
+                propriétaire) : les étapes cochées deviennent la base de la
+                note — le technicien complète au lieu de tout retaper. Un
+                tap, jamais automatique : la note reste la sienne. */}
+            {!lectureSeule && (() => {
+              const faites = etapesJob.filter((e) => e.fait && !notesTerrain.includes(String(e.texte || "").trim()));
+              if (faites.length === 0) return null;
+              const ajouter = () => {
+                const bloc = `Travaux effectués :\n${faites.map((e) => `✓ ${String(e.texte || "").trim()}`).join("\n")}`;
+                const nouveau = notesTerrain.trim() ? `${notesTerrain.trim()}\n\n${bloc}` : `${bloc}\n\n`;
+                setNotesTerrain(nouveau);
+                onMajTache(tache.id, { notesTerrain: nouveau });
+              };
+              return (
+                <button
+                  type="button"
+                  onClick={ajouter}
+                  className="mt-1.5 w-full rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-left text-xs font-bold text-emerald-800 active:scale-[0.99]"
+                >
+                  ✍️ {notesTerrain.trim() ? "Ajouter" : "Partir des"} {faites.length} étape{faites.length > 1 ? "s" : ""} faite{faites.length > 1 ? "s" : ""} — tu complètes ensuite
+                </button>
+              );
+            })()}
           </div>
 
           <div>

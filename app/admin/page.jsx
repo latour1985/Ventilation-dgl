@@ -1281,6 +1281,19 @@ function AppAdmin() {
   // 🔎 Cible AGENDA venue de la recherche : { tacheId, date, employeId,
   // heure, coup } — l'agenda saute à la journée et ouvre la fiche.
   const [cibleAgenda, setCibleAgenda] = useState(null);
+  // 📅 « PLANIFIER LE RETOUR » (2026-09-22, idée retenue par le propriétaire) :
+  // dès qu'une pièce client est reçue, on propose d'ouvrir la fiche de la
+  // visite de retour, le technicien de la 1re visite pré-coché.
+  const [retourAPlanifier, setRetourAPlanifier] = useState(null); // { tacheId, clientNom, piece, origineEmail }
+  // Ouvre l'agenda sur la fiche de la visite de retour, le technicien de la
+  // 1re visite pré-coché (fenêtre après « Reçu » ET « Ma file du matin »).
+  const planifierRetour = (tacheId, origineEmail) => {
+    const emp = (utilisateurs || []).find((u) => (u.courriel || "").toLowerCase() === String(origineEmail || "").toLowerCase());
+    if (emp) setTachesAttente((prev) => prev.map((t) => (t.id === tacheId && !t.technicienPrevu ? { ...t, technicienPrevu: emp.id } : t)));
+    setOnglet("agenda");
+    setCibleAgenda({ tacheId, coup: Date.now() });
+  };
+  const emailOrigineDePiece = (p) => (bons || []).find((b) => String(b.tacheId || "").split("::")[0] === p?.tacheOrigineId)?.employeEmail || "";
   // 🛒 Vente directe : devis accepté passé de l'onglet Devis à la
   // Facturation (fenêtre « Nouvelle facture » pré-remplie).
   const [venteDirecte, setVenteDirecte] = useState(null);
@@ -3440,6 +3453,30 @@ function AppAdmin() {
         {/* 🔔 Bulles de confirmation + ⌨️ Échap / Ctrl+Entrée (2026-09-14). */}
         <Toasts />
         <RaccourcisClavier />
+        {retourAPlanifier && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setRetourAPlanifier(null); }}>
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-extrabold text-slate-900">📦 Pièce reçue — planifier le retour ?</h3>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                « {retourAPlanifier.piece} » pour <span className="font-bold">{retourAPlanifier.clientNom}</span>. La visite de retour attend dans la file.
+                {retourAPlanifier.origineNom ? <> Le technicien de la 1re visite (<span className="font-bold">{retourAPlanifier.origineNom}</span>) sera déjà coché.</> : null}
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-2">
+                <Button
+                  onClick={() => {
+                    const r = retourAPlanifier;
+                    setRetourAPlanifier(null);
+                    planifierRetour(r.tacheId, r.origineEmail);
+                  }}
+                  className="min-h-0 py-2 text-xs"
+                >
+                  📅 Planifier maintenant (choisir la date)
+                </Button>
+                <Button variant="outline" onClick={() => setRetourAPlanifier(null)} className="min-h-0 py-2 text-xs">Plus tard — elle reste dans « Prêtes »</Button>
+              </div>
+            </div>
+          </div>
+        )}
         {/* 🔍 RECHERCHE GLOBALE — accessible de partout, comme demandé
             par le propriétaire : la recherche est une PORTE D'ENTRÉE,
             pas une destination. Première frappe = la page Recherche
@@ -3658,6 +3695,9 @@ function AppAdmin() {
           ramassagesAttribuer={ramassagesAttribuer}
           soumissionsSansDevis={soumissionsSansDevis}
           tachesDevisAFaire={tachesDevisAFaire}
+          tachesAttente={tachesAttente}
+          facturablesAssignations={facturablesAssignations}
+          onPlanifierRetour={(p) => planifierRetour(p.tacheRetourId, emailOrigineDePiece(p))}
           onCreerDevisPour={(id) => { setClientPourNouveauDevis(id); setOnglet("devis"); }}
           journal={journal}
           setOnglet={setOnglet}
@@ -4494,11 +4534,16 @@ function AppAdmin() {
             const p = pieces.find((x) => x.id === id);
             setPieces((prev) => prev.map((x) => (x.id === id ? { ...x, statut: "recue", recuParNom: parNom, recuVia: "manuel", recuLe: new Date().toISOString() } : x)));
             marquerRecue(id, parNom, "manuel")
-              .then(() =>
+              .then(() => {
                 ajouterJournal(
                   `📦 Pièce REÇUE${sansCommande ? " ⚠️ SANS commande préalable (prise au comptoir ?)" : ""} : ${p?.pieceRequise} pour ${p?.clientNom} — la tâche de retour peut être planifiée.`
-                )
-              )
+                );
+                // La visite de retour attend dans la file ? On propose de la planifier tout de suite.
+                if (p?.tacheRetourId && (tachesAttente || []).some((t) => t.id === p.tacheRetourId)) {
+                  const bonOrigine = (bons || []).find((b) => String(b.tacheId || "").split("::")[0] === p.tacheOrigineId);
+                  setRetourAPlanifier({ tacheId: p.tacheRetourId, clientNom: p.clientNom, piece: p.pieceRequise, origineEmail: bonOrigine?.employeEmail || "", origineNom: bonOrigine?.employeNom || "" });
+                }
+              })
               .catch(() => ajouterJournal("⚠️ Réception non enregistrée — réessaie."));
           }}
           onAnnuler={(id, raison) => {
