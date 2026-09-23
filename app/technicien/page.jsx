@@ -1414,8 +1414,13 @@ function MesHeures({ courriel, onRetour }) {
 
   const totaux = { chantier: 0, transport: 0, ccq: 0, diner: 0, nuit: 0, weekend: 0, report: 0, total: 0 };
   const parDate = {};
+  // 🧾 « Tel que payé », comme au bureau (revue 2026-09-22) : une ligne
+  // corrigée APRÈS la paie de sa semaine compte ici pour ce qui a été
+  // versé ; l'écart est dans le Report ± de la semaine de la correction.
+  // Avant, la correction était comptée deux fois sur le téléphone.
+  const payeeAvant = (t) => t.corrigeLe && t.heuresAvantCorrection != null && dimancheISOde(t.corrigeLe) > dimancheISOde(t.date);
   lignesSemaine.forEach((t) => {
-    const h = Number(t.heures) || 0;
+    const h = payeeAvant(t) ? Number(t.heuresAvantCorrection) || 0 : Number(t.heures) || 0;
     (parDate[t.date] = parDate[t.date] || []).push(t);
     if (estLunch(t)) totaux.diner += h;
     else if (estCcq(t)) totaux.ccq += h;
@@ -6175,6 +6180,22 @@ function AppTechnicien() {
                   fermetureBureau: d.fermetureBureau,
                   date: d.date,
                   heure: d.heure,
+                  // 🔄 Suivent AUSSI le bureau (revue 2026-09-22 : une étape cochée
+                  // au bureau, un bon ajouté à la tournée ou un type corrigé
+                  // n'atteignaient jamais un téléphone qui avait la tâche).
+                  typeTache: d.typeTache ?? locale.typeTache,
+                  nonFacturable: d.nonFacturable ?? locale.nonFacturable,
+                  categorieHeures: d.categorieHeures ?? locale.categorieHeures,
+                  unites: d.unites ?? locale.unites,
+                  ramassages: d.ramassages ?? locale.ramassages,
+                  // Étapes : la liste du bureau fait foi ; une case cochée ici
+                  // (pas encore partie) reste cochée.
+                  etapes: Array.isArray(d.etapes)
+                    ? d.etapes.map((e) => {
+                        const l = (locale.etapes || []).find((x) => x.id === e.id);
+                        return l?.fait && !e.fait ? { ...e, fait: true, faitPar: l.faitPar, faitLe: l.faitLe } : e;
+                      })
+                    : locale.etapes,
                 }
               : d;
           });

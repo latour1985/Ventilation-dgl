@@ -1172,9 +1172,20 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // ⏳ PAS FERMÉE (2026-09-15) : journée passée, tâche de travail, aucune
   // heure du technicien — le bloc se hachure au lieu de rester bleu en
   // silence (vécu « Faire sous-dalle » : Dominic jamais fermé, aucun bon).
+  // Chantier de PLUSIEURS JOURS : chaque journée a sa clé « id::jour » —
+  // on regarde CETTE journée-là (revue 2026-09-22 : le jour 1 fermé
+  // cachait un jour 3 oublié).
+  const clesBrutesHeures = new Set(
+    (travaux || []).filter((t) => t.supabase && t.tacheId && t.employeEmail).map((t) => `${t.tacheId}|${t.employeEmail.toLowerCase()}`)
+  );
+  const journeeFermee = (tache, emp, jourISO) => {
+    const courriel = (emp?.courriel || "").toLowerCase();
+    if (!(Number(tache.jours) > 1)) return !!travailTermine(tache, emp);
+    return clesBrutesHeures.has(`${tache.id}::${jourISO}|${courriel}`) || clesBrutesHeures.has(`${tache.id}|${courriel}`);
+  };
   const pasFermee = (tache, emp, jourISO) =>
     !!tache && !tache.est_tache_systeme && !tache.sansHeures && !emp?.estSousTraitant &&
-    (tache.typeTache || tache.type) !== "conge" && jourISO < aujourdhuiISO && !travailTermine(tache, emp);
+    (tache.typeTache || tache.type) !== "conge" && jourISO < aujourdhuiISO && !journeeFermee(tache, emp, jourISO);
 
   // 📅 EN VUE SEMAINE, LE CURSEUR ATTERRIT SUR LE LUNDI (2026-09-04,
   // retour du propriétaire : « quand on bouge les semaines on arrive au
@@ -2137,6 +2148,25 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
 
   // 📇 Un contact sur place saisi dans la fiche rejoint le carnet du
   // client (2026-09-17) — anti-doublon par nom + téléphone.
+  // 🏷️ CHANGER LE TYPE D'UNE TÂCHE (revue 2026-09-22) : seul typeTache
+  // changeait — une visite passée en appel de service restait « non
+  // facturable » et en heures administratives. Mêmes règles qu'à la création.
+  const champsDuType = (type, tache) => ({
+    typeTache: type,
+    nonFacturable: estTypeNonFacturable(type),
+    sansHeures: estTypeSansHeures(type),
+    categorieHeures: estTypeSansHeures(type)
+      ? "aucune"
+      : type === "shop"
+      ? (tache?.projetId ? "projet" : "divers")
+      : type === "divers" || type === "course"
+      ? "divers"
+      : estTypeAdministratif(type)
+      ? "administratif"
+      : "projet",
+    ...(type !== "devis" ? { devisAFaire: false } : {}),
+  });
+  const contactsPosesRef = useRef(new Set());
   const ajouterContactAuCarnet = (tache, contact) => {
     if (!contact?.nom) return;
     const client = clients.find((c) => c.id === tache.clientId) || clients.find((c) => c.nom === tache.clientNom);
@@ -2145,7 +2175,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       (c) => (c.nom || "").trim().toLowerCase() === contact.nom.trim().toLowerCase() && (c.telephone || "") === (contact.telephone || "")
     );
     if (deja) return;
-    setClients((prev) => prev.map((x) => (x.id === client.id ? { ...x, contacts: [...(x.contacts || []), contact] } : x)));
+    // 🛡️ Appelé une fois PAR TECHNICIEN à l'enregistrement (revue 2026-09-22 :
+    // 3 techniciens = 3 fois le même contact). Mémoire + revérification fraîche.
+    const cleContact = `${client.id}|${contact.nom.trim().toLowerCase()}|${contact.telephone || ""}`;
+    if (contactsPosesRef.current.has(cleContact)) return;
+    contactsPosesRef.current.add(cleContact);
+    const memeContact = (c) => (c.nom || "").trim().toLowerCase() === contact.nom.trim().toLowerCase() && (c.telephone || "") === (contact.telephone || "");
+    setClients((prev) => prev.map((x) => (x.id === client.id && !(x.contacts || []).some(memeContact) ? { ...x, contacts: [...(x.contacts || []), contact] } : x)));
     ajouterJournal(`📇 Contact « ${contact.nom} »${contact.telephone ? ` (${contact.telephone})` : ""} ajouté au carnet de ${client.nom}.`);
   };
 
@@ -2184,7 +2220,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         : {}),
       description: champs.description,
       // 🏷️ Type de tâche corrigé dans la fiche — clé absente = inchangé.
-      ...(champs.typeTache !== undefined ? { typeTache: champs.typeTache } : {}),
+      ...(champs.typeTache !== undefined ? champsDuType(champs.typeTache, tache) : {}),
       // Contact sur place : suit la modification (null = retiré) ; si la
       // modale ne l'a pas touché (undefined), l'existant est conservé.
       contactSurPlace: champs.contactSurPlace !== undefined ? champs.contactSurPlace : tache.contactSurPlace || null,
@@ -2240,7 +2276,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(adresseIntervention !== undefined ? { adresseTravaux, adresseIntervention, adresseUnite: adresseUnite || null } : {}),
       description: description ?? tache.description,
       // 🏷️ Type de tâche corrigé dans la fiche — clé absente = inchangé.
-      ...(typeTache !== undefined ? { typeTache } : {}),
+      ...(typeTache !== undefined ? champsDuType(typeTache, tache) : {}),
       contactSurPlace: contactSurPlace !== undefined ? contactSurPlace : tache.contactSurPlace || null,
       // 🛡️ Retour sous garantie — clé absente = marque inchangée.
       ...(garantie !== undefined ? { garantie } : {}),
@@ -2324,10 +2360,11 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // toute seule (page.jsx), sous la bonne rangée et le bon jour.
     if (Array.isArray(tache.ramassages) && tache.ramassages.length > 0) {
       const cibleEmp = employes.find((e) => e.id === employeCibleId);
-      if (!cibleEmp?.courriel) {
-        ajouterJournal("⚠️ Tournée non déplacée — la personne visée n'a pas de courriel au répertoire.");
+      if (!cibleEmp?.courriel || cibleEmp.estSousTraitant || String(cibleEmp.courriel).startsWith("st::")) {
+        ajouterJournal("⚠️ Tournée non déplacée — choisis un employé qui a l'application (pas un sous-traitant).");
         return;
       }
+      if (dateCible instanceof Date) dateCible = dateISO(dateCible); // vue Semaine/Mois (revue 2026-09-22)
       const memePersonne = String(employeCibleId) === String(ancienEmployeId);
       tache.ramassages.forEach((r) =>
         onMajRamassageBc?.(r.numero, { date: dateCible, ...(memePersonne ? {} : { ramassePar: cibleEmp.courriel }) }, true)
@@ -2510,10 +2547,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     if (lectureSeule) return true;
     if (!objet?.ramassageAttribuer) return false;
     const emp = employes.find((e) => e.id === employeId);
-    if (!emp?.courriel) {
-      ajouterJournal("⚠️ Ramassage non attribué — cette rangée n'a pas de courriel au répertoire.");
+    // Sous-traitant : pas d'app, pas de tournée possible (revue 2026-09-22 —
+    // le bon quittait « à attribuer » et disparaissait de partout).
+    if (!emp?.courriel || emp.estSousTraitant || String(emp.courriel).startsWith("st::")) {
+      ajouterJournal("⚠️ Ramassage non attribué — choisis un employé qui a l'application (pas un sous-traitant).");
       return true;
     }
+    if (dateCible instanceof Date) dateCible = dateISO(dateCible); // vue Semaine/Mois
     (objet.bons || []).forEach((b) => onMajRamassageBc?.(b.numero, { date: dateCible, ramassePar: emp.courriel }, true));
     ajouterJournal(`🚚 ${(objet.bons || []).length} ramassage${(objet.bons || []).length > 1 ? "s" : ""} chez ${objet.fournisseur} attribué${(objet.bons || []).length > 1 ? "s" : ""} à ${emp.nom} le ${dateCible} — la tournée s'est créée.`);
     return true;

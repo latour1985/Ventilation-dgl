@@ -793,6 +793,44 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       objet: `Rappel — Devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
     }));
   };
+  // 📎 PIÈCES JOINTES D'UN DEVIS — le PDF du devis, puis les dépliants des
+  // unités vendues (snippet 149), puis les fichiers ajoutés à la main.
+  // Partagé par l'envoi depuis la carte ET le premier envoi à la création
+  // (revue 2026-09-22 : « Créer et envoyer » ne joignait ni PDF ni dépliant).
+  // Plafond de la route : 5 pièces — le PDF passe en premier, il survit.
+  const piecesJointesDevis = async (devisCourant, piecesAdHoc = []) => {
+    let pdfJoint = null;
+    try {
+      const [{ pdf }, { DevisPDF }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/pdf/DocumentsPDF")]);
+      const ficheP = ficheClientDe(devisCourant);
+      const blob = await pdf(
+        <DevisPDF devis={{ ...devisCourant, adresseFacturation: devisCourant.adresseFacturation || adresseFacturationClient(ficheP) }} config={configEnt} />
+      ).toBlob();
+      const nomPdf = `Devis-${String(devisCourant.numero || "").replace(/[^a-zA-Z0-9-]+/g, "-")}.pdf`;
+      const url = await televerserPieceJointeTache(new File([blob], nomPdf, { type: "application/pdf" }));
+      pdfJoint = { nom: nomPdf, url };
+    } catch {
+      ajouterJournal(`⚠️ Devis ${devisCourant.numero} : le PDF n'a pas pu être joint — le courriel part avec le lien seulement.`);
+    }
+    // Dépliant relu au catalogue (frais) : un dépliant RETIRÉ du catalogue
+    // n'est plus joint (revue 2026-09-22) ; la copie de la ligne ne sert
+    // que si l'item n'est plus au catalogue du tout.
+    const depliantsAuto = [];
+    const urlsVues = new Set();
+    for (const l of devisCourant.lignes || []) {
+      const item = (catalogue || []).find((c) => c.id === l.id);
+      const urlDep = item ? item.depliantUrl || null : l.depliantUrl || null;
+      if (urlDep && !urlsVues.has(urlDep)) {
+        urlsVues.add(urlDep);
+        depliantsAuto.push({ nom: item?.depliantNom || l.depliantNom || "Dépliant", url: urlDep });
+      }
+    }
+    const toutes = [...(pdfJoint ? [pdfJoint] : []), ...depliantsAuto, ...piecesAdHoc];
+    if (toutes.length > 5) {
+      ajouterJournal(`⚠️ Devis ${devisCourant.numero} : ${toutes.length} pièces jointes — seules les 5 premières partent (le PDF d'abord). Les autres : ${toutes.slice(5).map((f) => f.nom).join(", ")}.`);
+    }
+    return { piecesJointes: toutes.slice(0, 5), pdfJoint };
+  };
   const envoyerDevisParCourriel = async (devis) => {
     const extra = (envoiDevis?.extra || "").trim();
     const adresses = [...new Set([...(envoiDevis?.choisis || []), ...(extra ? [extra] : [])])];
@@ -851,40 +889,10 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     // du bureau, généré ici dans le navigateur puis déposé au stockage.
     // Un échec n'empêche jamais l'envoi (le lien part comme avant) — il
     // est dit au journal.
-    let pdfJoint = null;
-    try {
-      const [{ pdf }, { DevisPDF }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/pdf/DocumentsPDF")]);
-      const ficheP = ficheClientDe(devisCourant);
-      const blob = await pdf(
-        <DevisPDF devis={{ ...devisCourant, adresseFacturation: devisCourant.adresseFacturation || adresseFacturationClient(ficheP) }} config={configEnt} />
-      ).toBlob();
-      const nomPdf = `Devis-${String(devisCourant.numero || "").replace(/[^a-zA-Z0-9-]+/g, "-")}.pdf`;
-      const url = await televerserPieceJointeTache(new File([blob], nomPdf, { type: "application/pdf" }));
-      pdfJoint = { nom: nomPdf, url };
-    } catch {
-      ajouterJournal(`⚠️ Devis ${devis.numero} : le PDF n'a pas pu être joint — le courriel part avec le lien seulement.`);
-    }
-    // 📎 DÉPLIANTS DES UNITÉS VENDUES (snippet 149, demande du propriétaire) —
-    // joints AUTOMATIQUEMENT : chaque item du devis qui a un dépliant au
-    // catalogue ajoute sa fiche. Le dépliant est relu au catalogue (frais)
-    // avec repli sur la copie figée dans la ligne. Dédoublonné par URL —
-    // deux unités identiques ne joignent qu'une fois le même dépliant.
-    const depliantsAuto = [];
-    const urlsVues = new Set();
-    for (const l of devisCourant.lignes || []) {
-      const item = (catalogue || []).find((c) => c.id === l.id);
-      const urlDep = item?.depliantUrl || l.depliantUrl || null;
-      if (urlDep && !urlsVues.has(urlDep)) {
-        urlsVues.add(urlDep);
-        depliantsAuto.push({ nom: item?.depliantNom || l.depliantNom || "Dépliant", url: urlDep });
-      }
-    }
     // 📎 Fichiers ajoutés à la main pour cet envoi (1A) — dépliants
     // ponctuels que le bureau choisit au moment d'envoyer.
     const piecesAdHoc = (envoiDevis?.piecesAdHoc || []).map((f) => ({ nom: f.nom, url: f.url }));
-    // Le PDF du devis EN PREMIER : si le total dépasse le plafond de la
-    // route (5 pièces), c'est lui qui survit à coup sûr.
-    const piecesJointes = [...(pdfJoint ? [pdfJoint] : []), ...depliantsAuto, ...piecesAdHoc];
+    const { piecesJointes, pdfJoint } = await piecesJointesDevis(devisCourant, piecesAdHoc);
     const r = await envoyerCourriel({
       piecesJointes,
       a: adresses,
@@ -1335,6 +1343,10 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       reponduParNom: null,
       messageClient: null,
       reponseTraiteeLe: null,
+      // …ni les relances ni la consultation de l'ancienne (revue 2026-09-22 :
+      // la nouvelle version affichait « Relancé N fois » / « consulté »).
+      relances: [],
+      consulteLe: null,
       annuleLe: null,
       annuleRaison: "",
       // Une révision fraîche n'est pas offerte à la comparaison — le
@@ -1364,6 +1376,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEditionVersion(null);
     setEditionEnFenetre(false);
     setLignes([]);
+    // Le titre et l'adresse ne débordent plus sur le devis suivant (revue 2026-09-22).
+    setTitreDevis("");
+    setAdresseTravauxDevis("");
     setEstContrat(false);
     setFrequenceContrat(4);
     setDossierOuvert(base);
@@ -1421,6 +1436,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       date: todayISO(),
       estContrat,
       frequenceFacturationAnnuelle: estContrat ? frequenceContrat : null,
+      // Gardés avec le brouillon (revue 2026-09-22 — ils se perdaient).
+      adresseTravaux: adresseTravauxDevis || null,
+      titre: titreDevis.trim() || null,
     };
     // id/numero/numeroBase doivent être IDENTIQUES entre eux — recalcule
     // une seule fois si nouveau.
@@ -1432,6 +1450,8 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     await persisterDevis?.(brouillon);
     ajouterJournal(`📝 Brouillon de devis gardé pour ${client?.nom || "?"} (${totaux.vendant.toFixed(2)} $, ${lignes.length} ligne${lignes.length > 1 ? "s" : ""}) — aucun numéro consommé.`);
     setLignes([]);
+    setTitreDevis("");
+    setAdresseTravauxDevis("");
     setEstContrat(false);
     setFrequenceContrat(4);
     setClientId("");
@@ -1440,6 +1460,8 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const reprendreBrouillon = (b) => {
     setClientId(b.clientId || "");
     setLignes(Array.isArray(b.lignes) ? b.lignes : []);
+    setTitreDevis(b.titre || "");
+    setAdresseTravauxDevis(b.adresseTravaux || "");
     setEstContrat(!!b.estContrat);
     setFrequenceContrat(b.frequenceFacturationAnnuelle || 4);
     setReprisBrouillonId(b.id);
@@ -1537,7 +1559,10 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     }
     // Le journal ne dit « envoyé » QUE si c'est vrai — plus jamais de
     // « créé et envoyé » fictif.
+    // 📎 PDF + dépliants aussi au PREMIER envoi (revue 2026-09-22).
+    const { piecesJointes: piecesCreation } = await piecesJointesDevis(nouveauDevis);
     const r = await envoyerCourriel({
+      piecesJointes: piecesCreation,
       a: destinataires.map((c) => c.email),
       sujet: `Devis ${numero}${(adresseTravauxDevis || titreDevis.trim()) ? ` — ${adresseTravauxDevis || titreDevis.trim()}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
       html: gabaritDevis({

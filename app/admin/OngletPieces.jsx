@@ -15,7 +15,7 @@ import { sauvegarderFournisseur, supprimerFournisseur } from "@/lib/supabase/fou
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { ZONES_DEPOTS } from "@/lib/supabase/prixDepots";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
-import { listerMemoireFournisseurs, memoriserFournisseursArticles } from "@/lib/supabase/materiel";
+import { listerMemoireFournisseurs, memoriserFournisseursArticles, livraisonDepuisTexte } from "@/lib/supabase/materiel";
 import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventaire } from "@/lib/supabase/inventaire";
 import { creerFactureQbo } from "@/lib/quickbooksClient";
 import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, AutocompleteAdresse, libelleAdresse, descriptionAvecLivraison, bcEstAsap, bcEstRamassage } from "./partage";
@@ -339,7 +339,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
     const r = await envoyerCourriel({
       a: offreEnvoiBc.coches,
       sujet: `${offreEnvoiBc.reclamation ? "Réclamation — items manquants, bon de commande" : "Bon de commande"} ${offreEnvoiBc.numero} — ${configEnt.nomLegal}`,
-      html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description, photos: offreEnvoiBc.photos || [], fichiers: offreEnvoiBc.fichiers || [] }),
+      html: gabaritBcSimple({ config: configEnt, numeroBc: offreEnvoiBc.numero, description: offreEnvoiBc.description, photos: offreEnvoiBc.photos || [], fichiers: offreEnvoiBc.fichiers || [], reclamation: !!offreEnvoiBc.reclamation }),
       // 📎 Vraies pièces jointes (PDF, Excel…) — 2026-09-15.
       piecesJointes: offreEnvoiBc.fichiers || [],
       // La réponse du fournisseur revient à celui qui a commandé.
@@ -351,7 +351,9 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
     if (r.envoye) {
       setBcLibreMsg(`✓ ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})`);
       const nbPj = (offreEnvoiBc.photos || []).length + (offreEnvoiBc.fichiers || []).length;
-      ajouterJournal?.(`📧 BC libre ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})${nbPj ? ` — ${(offreEnvoiBc.photos || []).length} photo(s), ${(offreEnvoiBc.fichiers || []).length} fichier(s)` : ""}`);
+      ajouterJournal?.(offreEnvoiBc.reclamation
+        ? `⚠️ Réclamation des items manquants du BC ${offreEnvoiBc.numero} envoyée à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")}).`
+        : `📧 BC libre ${offreEnvoiBc.numero} envoyé à ${offreEnvoiBc.fournisseur} (${offreEnvoiBc.coches.join(", ")})${nbPj ? ` — ${(offreEnvoiBc.photos || []).length} photo(s), ${(offreEnvoiBc.fichiers || []).length} fichier(s)` : ""}`);
       if (offreEnvoiBc.reclamation) {
         // ⚠️ Réclamation du reste (155) : trace « réclamé le » — pas la trace d'envoi du BC.
         const { type, objet } = offreEnvoiBc.reclamation;
@@ -365,12 +367,13 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
       }
       setOffreEnvoiBc(null);
     } else {
-      setBcLibreMsg(
-        r.simule
-          ? "⚠️ Service d'envoi pas encore configuré (clé Resend absente) — le BC est créé, envoie-le à la main."
-          : `⚠️ Envoi refusé (${r.erreur || "réessaie"}) — le BC est créé.`
-      );
-      setOffreEnvoiBc(null);
+      const texteErreur = r.simule
+        ? "⚠️ Service d'envoi pas encore configuré (clé Resend absente) — envoie-le à la main."
+        : `⚠️ Envoi refusé (${r.erreur || "réessaie"}) — rien n'est parti.`;
+      setBcLibreMsg(texteErreur);
+      // La fenêtre RESTE ouverte avec l'erreur (revue 2026-09-22 : elle se
+      // fermait en silence quand on envoyait depuis « À recevoir »).
+      setOffreEnvoiBc((p) => (p ? { ...p, erreur: texteErreur } : p));
     }
   };
   const [filtre, setFiltre] = useState("ouvertes");
@@ -635,7 +638,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
             // ⚡/🚚 Lus dans le texte du bon (2026-09-18).
             asap: bcEstAsap(a.description), ramassage: bcEstRamassage(a.description), ramassePar: a.ramassePar || null,
             envoye: !!a.bcEnvoyeLe, nonEnvoye: bcNonEnvoye(a), telephone: (a.bcEnvoyeA || []).includes("manuel"),
-            ouvrir: () => ouvrirBc(a),
+            ouvrir: peutCommander ? () => ouvrirBc(a) : null, // fiche = modifier/supprimer : bureau seulement (revue 2026-09-22)
             recevoir: peutCommander ? () => onMajBcLibre?.(a, { recuLe: new Date().toISOString() }, "📦 reçu") : null,
             // ⚠️ Partiel (155) : ce qui manque, date promise du reste, réclamation.
             manquant: a.manquant || "", restePromisLe: a.restePromisLe || null, reclameLe: a.reclameLe || null, partielLe: a.partielLe || null,
@@ -656,8 +659,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           (pr.bonsCommande || [])
             .filter((bc) => bc.statut !== "Reçu" && bc.statut !== "Annulé")
             .map((bc) => ({
-              cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || null,
-              cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe, nonEnvoye: false, ouvrir: null,
+              // Date : le champ, sinon la ligne « Livraison souhaitée » du texte ; envoyé : la trace
+              // posée par Pièces OU la liste d'envoi de l'onglet Projets (revue 2026-09-22).
+              cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || livraisonDepuisTexte(bc.description) || null,
+              cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe || (bc.courrielsEnvoi || []).length > 0, telephone: (bc.envoyeA || []).includes("manuel"), nonEnvoye: false, ouvrir: null,
               // 🏗️ Reçu / partiel / réclamation aussi pour les BC de projets (2026-09-22) — le bon vit dans le JSON du projet.
               recevoir: peutCommander && onMajBcProjet ? () => onMajBcProjet(bc.numeroBC, { statut: "Reçu", recuLe: new Date().toISOString() }, "📦 reçu") : null,
               manquant: bc.manquant || "", restePromisLe: bc.restePromisLe || null, reclameLe: bc.reclameLe || null, partielLe: bc.partielLe || null,
@@ -1145,11 +1150,27 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                   quand le fournisseur n'a pas de courriel ou qu'on appelle. */}
               <button
                 type="button"
-                onClick={() => { onMarquerBcEnvoye?.(offreEnvoiBc.numero, ["manuel"]); setOffreEnvoiBc(null); }}
+                onClick={() => {
+                  if (offreEnvoiBc.reclamation) {
+                    // Réclamé par téléphone : trace « réclamé le », JAMAIS la trace
+                    // d'envoi du BC (revue 2026-09-22 — elle écrasait l'envoi d'origine).
+                    const { type, objet, numero } = offreEnvoiBc.reclamation;
+                    const champs = { reclameLe: new Date().toISOString() };
+                    if (type === "achat") onMajBcLibre?.(objet, champs, "⚠️ reste réclamé par téléphone");
+                    else if (type === "projet") onMajBcProjet?.(numero, champs, "⚠️ reste réclamé par téléphone");
+                    else onPartielPiece?.(objet, champs, "reste réclamé par téléphone");
+                  } else {
+                    onMarquerBcEnvoye?.(offreEnvoiBc.numero, ["manuel"]);
+                  }
+                  setOffreEnvoiBc(null);
+                }}
                 className="mt-1.5 w-full rounded-lg border border-sky-300 bg-sky-50 py-2 text-xs font-bold text-sky-700 active:scale-[0.99]"
               >
-                📞 Commande passée par téléphone (aucun courriel)
+                {offreEnvoiBc.reclamation ? "📞 Réclamé par téléphone (aucun courriel)" : "📞 Commande passée par téléphone (aucun courriel)"}
               </button>
+              {offreEnvoiBc.erreur && (
+                <p className="mt-1.5 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-bold text-red-700">{offreEnvoiBc.erreur}</p>
+              )}
               {offreEnvoiBc.nouveau && (
                 <p className="mt-1.5 text-[10px] text-slate-400">« Plus tard » : le bon restera marqué <span className="font-bold text-red-600">Non envoyé</span> dans la liste, avec un bouton pour l&apos;envoyer.</p>
               )}

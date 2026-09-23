@@ -68,6 +68,32 @@ export async function POST(request) {
     return Response.json({ ok: true, source: "achat" });
   }
 
+  // 1 bis. PIÈCE CLIENT commandée en ramassage (snippet 154) — oubliée
+  // jusqu'au 2026-09-22 : la tournée l'affichait, mais « Ramassé »
+  // répondait « introuvable ». Ramassée = REÇUE (la tâche de retour se
+  // débloque) ; « pas prêt » = au journal seulement.
+  const { data: pieces } = await admin
+    .from("pieces_commandees")
+    .select("id, numero_bc, ramasse_par, statut, piece_requise, client_nom, fournisseur_nom")
+    .eq("entreprise_id", entrepriseId)
+    .eq("numero_bc", numero)
+    .limit(5);
+  const piece = (pieces || []).find((p) => p.statut !== "annulee") || null;
+  if (piece) {
+    if (String(piece.ramasse_par || "").toLowerCase() !== moi) {
+      return Response.json({ erreur: "Ce bon n'est pas dans ta tournée." }, { status: 403 });
+    }
+    if (geste === "ramasse" && piece.statut !== "recue") {
+      const { error } = await admin
+        .from("pieces_commandees")
+        .update({ statut: "recue", recu_le: quand, recu_par_nom: nomMoi, recu_via: "manuel" }) // contrainte : manuel | quickbooks
+        .eq("id", piece.id);
+      if (error) return Response.json({ erreur: error.message }, { status: 502 });
+    }
+    await journal(admin, entrepriseId, geste, numero, piece.fournisseur_nom, `🔧 ${piece.piece_requise || "pièce"}${piece.client_nom ? ` — ${piece.client_nom}` : ""}`, nomMoi, `${note}${photo ? ` 📷 ${photo}` : ""}`.trim());
+    return Response.json({ ok: true, source: "piece" });
+  }
+
   // 2. Bon de commande d'un projet (JSON).
   const { data: projets } = await admin
     .from("projets_app")

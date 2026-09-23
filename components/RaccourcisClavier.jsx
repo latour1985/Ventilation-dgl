@@ -20,7 +20,11 @@
 
 import { useEffect } from "react";
 
-const DEBUT_VALIDATION = /^(✅\s*)?(enregistrer|créer|creer|continuer|confirmer|facturer|valider|envoyer|convertir|ouvrir la facture|marquer|appliquer)/i;
+// Revue 2026-09-22 : (1) un emoji en tête (« 🔔 Envoyer la relance »)
+// empêchait de reconnaître le bouton ; (2) « Marquer … » est RETIRÉ — dans
+// la fenêtre du dossier, Ctrl+Entrée cliquait « Marquer accepté » au lieu
+// d'envoyer la relance. Un changement d'état ne part plus au clavier.
+const DEBUT_VALIDATION = /^[^\p{L}]*(enregistrer|créer|creer|continuer|confirmer|facturer|valider|envoyer|convertir|ouvrir la facture|appliquer)/iu;
 
 function voileLePlusHaut() {
   const voiles = Array.from(document.querySelectorAll("div.fixed.inset-0")).filter((el) => {
@@ -46,6 +50,14 @@ export default function RaccourcisClavier() {
         // déjà Échap : on ne double pas.
         const actif = document.activeElement;
         if (actif && actif.tagName === "SELECT") return;
+        // Dans un champ rempli : Échap SORT du champ (ferme une liste de
+        // suggestions) sans fermer la fenêtre ni perdre la saisie — un 2e
+        // Échap ferme (revue 2026-09-22).
+        if (actif && (actif.tagName === "INPUT" || actif.tagName === "TEXTAREA") && String(actif.value || "").trim() && voile.contains(actif)) {
+          e.preventDefault();
+          actif.blur();
+          return;
+        }
         const fermer = voile.querySelector('button[aria-label="Fermer"]');
         e.preventDefault();
         if (fermer) {
@@ -59,7 +71,7 @@ export default function RaccourcisClavier() {
       }
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         const boutons = Array.from(voile.querySelectorAll("button")).filter(
-          (b) => estVisible(b) && DEBUT_VALIDATION.test((b.textContent || "").trim())
+          (b) => estVisible(b) && !b.dataset.pasRaccourci && DEBUT_VALIDATION.test((b.textContent || "").trim())
         );
         // Le DERNIER bouton d'action est en général celui du bas de la
         // fenêtre (le vrai « Enregistrer »), les autres sont des sous-étapes.

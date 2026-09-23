@@ -102,7 +102,9 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [employeIds, setEmployeIds] = useState(() =>
     dejaPlanifiee
       ? []
-      : [...new Set([tache?.employeId, ...(Array.isArray(tache?.equipePrevue) ? tache.equipePrevue.map((m) => m.employeId) : [])].filter(Boolean))]
+      // technicienPrevu = le principal choisi à la création (revue 2026-09-22 :
+      // seul employeId était lu — le principal n'était jamais coché).
+      : [...new Set([tache?.employeId, tache?.technicienPrevu, ...(Array.isArray(tache?.equipePrevue) ? tache.equipePrevue.map((m) => m.employeId) : [])].filter(Boolean))]
   );
   const basculerEmploye = (id) =>
     setEmployeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -296,7 +298,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
         : null;
     const contactChoisi =
       contactTacheId === "nouveau"
-        ? nouveauContact
+        ? nouveauContact || tache.contactSurPlace || null // nom laissé vide : on garde l'existant (revue 2026-09-22)
         : contactTacheId === ""
         ? null
         : contactTacheId === "actuel"

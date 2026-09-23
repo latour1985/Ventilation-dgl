@@ -1593,11 +1593,12 @@ function AppAdmin() {
   // libres (BC sans projet). Voir lib/supabase/materiel.js.
   const [commandesCamion, setCommandesCamion] = useState([]);
   const [achatsLibres, setAchatsLibres] = useState([]);
+  const achatsChargesRef = useRef(false); // vrai une fois la 1re lecture RÉUSSIE (revue 2026-09-22)
   useEffect(() => {
     if (!session) return;
     const charger = () => listerCommandesCamion().then(setCommandesCamion).catch(() => {});
     charger();
-    listerAchatsLibres().then(setAchatsLibres).catch(() => {});
+    listerAchatsLibres().then((l) => { setAchatsLibres(l); achatsChargesRef.current = true; }).catch(() => {});
     return sAbonnerCommandesCamion(charger);
   }, [session]);
   // « ✓ Commande passée » — le seul geste du bureau ; la note (facultative)
@@ -1715,8 +1716,30 @@ function AppAdmin() {
   // la tournée de l'agenda (clic, ou glisser la tournée sur un autre
   // jour). Cherché par numéro : achat libre (snippet 153) ou bon de
   // commande d'un projet. La LIGNE du texte du bon suit la date.
-  const majRamassageBc = async (numero, { date, ramassePar } = {}, silencieux = false) => {
+  // 🏗️ ÉCRITURE D'UN BC DE PROJET, EN FILE (revue 2026-09-22) : glisser une
+  // tournée de 2 bons d'un même projet lançait 2 écritures sur la MÊME copie
+  // du projet — seule la dernière restait. Chaque écriture part maintenant
+  // de la version la plus récente (projetsRef), l'une après l'autre.
+  // (projetsRef, le miroir à jour de projets, est déclaré plus bas — lu seulement à l'exécution.)
+  const fileProjetsRef = useRef(Promise.resolve());
+  const ecrireBcProjet = (numero, transformer) => {
+    const tache = fileProjetsRef.current.then(async () => {
+      const proj = (projetsRef.current || []).find((px) => (px.bonsCommande || []).some((b) => b.numeroBC === numero));
+      if (!proj) return false;
+      const maj = { ...proj, bonsCommande: (proj.bonsCommande || []).map((b) => (b.numeroBC === numero ? transformer(b) : b)) };
+      projetsRef.current = (projetsRef.current || []).map((px) => (px.id === proj.id ? maj : px));
+      setProjets((prev) => prev.map((px) => (px.id === proj.id ? maj : px)));
+      await sauvegarderProjet(maj);
+      return true;
+    });
+    fileProjetsRef.current = tache.catch(() => {});
+    return tache;
+  };
+  const majRamassageBc = async (numero, { date: dateBrute, ramassePar } = {}, silencieux = false) => {
     if (!numero) return;
+    // 📅 Toujours « AAAA-MM-JJ » (revue 2026-09-22 : glisser en vue Semaine/
+    // Mois passait un objet Date — texte du bon abîmé, tournée fantôme).
+    const date = dateBrute instanceof Date ? dateISO(dateBrute) : dateBrute;
     try {
       const a = (achatsLibres || []).find((x) => x.numeroBc === numero);
       if (a) {
@@ -1736,22 +1759,12 @@ function AppAdmin() {
         });
         setPieces(await listerPieces());
       } else {
-        const proj = (projets || []).find((px) => (px.bonsCommande || []).some((b) => b.numeroBC === numero));
-        if (!proj) return;
-        const maj = {
-          ...proj,
-          bonsCommande: (proj.bonsCommande || []).map((b) =>
-            b.numeroBC === numero
-              ? {
-                  ...b,
-                  ...(date !== undefined ? { livraison: date || null, description: descriptionAvecLivraison(b.description || "", date || null) } : {}),
-                  ...(ramassePar !== undefined ? { ramassePar: ramassePar ? String(ramassePar).toLowerCase() : null } : {}),
-                }
-              : b
-          ),
-        };
-        setProjets((prev) => prev.map((px) => (px.id === proj.id ? maj : px)));
-        await sauvegarderProjet(maj);
+        const ok = await ecrireBcProjet(numero, (b) => ({
+          ...b,
+          ...(date !== undefined ? { livraison: date || null, description: descriptionAvecLivraison(b.description || "", date || null) } : {}),
+          ...(ramassePar !== undefined ? { ramassePar: ramassePar ? String(ramassePar).toLowerCase() : null } : {}),
+        }));
+        if (!ok) return;
       }
       if (!silencieux) ajouterJournal(`🚚 Ramassage du BC ${numero} modifié${date !== undefined ? ` — jour : ${date || "à fixer"}` : ""}${ramassePar !== undefined ? ` — par : ${ramassePar || "personne"}` : ""}.`);
     } catch (e) {
@@ -1770,7 +1783,10 @@ function AppAdmin() {
   // ============================================================
   const signaturesTourneesRef = useRef({});
   useEffect(() => {
-    if (!session || !repertoireCharge) return;
+    // 🛡️ Rien tant que les bons de commande ne sont pas VRAIMENT chargés
+    // (revue 2026-09-22 : une liste vide au démarrage — ou un échec de
+    // lecture avalé — faisait retirer toutes les tournées).
+    if (!session || !repertoireCharge || !achatsChargesRef.current) return;
     // Le rôle est calculé plus bas dans le composant (permissionsEffectives) —
     // on le relit ici pour ne pas lire une variable avant sa déclaration.
     const roleIci = permissionsEffectives(accesPerso, session)?.role;
@@ -1818,6 +1834,11 @@ function AppAdmin() {
       // À retirer : tournées existantes sans plus aucun bon.
       for (const [id, t] of Object.entries(existantes)) {
         if (tournees[id]) continue;
+        // Une tournée d'AUJOURD'HUI ou passée reste (revue 2026-09-22) : ses
+        // bons ramassés la vidaient et elle disparaissait du téléphone en
+        // pleine route — et de l'historique de l'agenda.
+        const jourTournee = (id.match(/(\d{4}-\d{2}-\d{2})$/) || [])[1];
+        if (jourTournee && jourTournee <= todayISO()) continue;
         const courriel = id.slice(PREFIXE_TOURNEE.length).replace(/-\d{4}-\d{2}-\d{2}$/, "");
         try {
           await retirerTacheSupabase(id, courriel);
@@ -1872,14 +1893,12 @@ function AppAdmin() {
   // PARTIELLE depuis la page Pièces (À recevoir). Retourne true si écrit.
   const majBcProjet = async (numero, champs, resume) => {
     if (!numero) return false;
-    const proj = (projets || []).find((p) => (p.bonsCommande || []).some((b) => b.numeroBC === numero));
+    const proj = (projetsRef.current || []).find((p) => (p.bonsCommande || []).some((b) => b.numeroBC === numero));
     if (!proj) return false;
-    const maj = { ...proj, bonsCommande: (proj.bonsCommande || []).map((b) => (b.numeroBC === numero ? { ...b, ...champs } : b)) };
     try {
-      setProjets((prev) => prev.map((p) => (p.id === proj.id ? maj : p)));
-      await sauvegarderProjet(maj);
-      ajouterJournal(`✏️ BC ${numero} du projet « ${proj.nom} » — ${resume || "mis à jour"}.`);
-      return true;
+      const ok = await ecrireBcProjet(numero, (b) => ({ ...b, ...champs }));
+      if (ok) ajouterJournal(`✏️ BC ${numero} du projet « ${proj.nom} » — ${resume || "mis à jour"}.`);
+      return ok;
     } catch (e) {
       ajouterJournal(`⚠️ BC ${numero} du projet « ${proj.nom} » NON modifié (${e?.message || "connexion impossible"}).`);
       return false;
@@ -1940,9 +1959,18 @@ function AppAdmin() {
       numeroBC: achat.numeroBc,
       fournisseur: achat.fournisseurNom || "",
       montantHT: Number(achat.montantHT) || 0,
-      statut: "En attente",
+      // Tout ce que le bon savait SUIT (revue 2026-09-22 : livraison,
+      // ramassage, envoi, réception et réception partielle se perdaient —
+      // un bon déjà reçu revenait « à recevoir », sans date).
+      statut: achat.recuLe ? "Reçu" : achat.bcEnvoyeLe ? "Envoyé au fournisseur" : "En attente",
       date: achat.dateAchat || todayISO(),
       description: achat.description || "",
+      ...(achat.livraisonSouhaitee ? { livraison: achat.livraisonSouhaitee } : {}),
+      ...(achat.ramassePar ? { ramassePar: String(achat.ramassePar).toLowerCase() } : {}),
+      ...(achat.depotA ? { depotA: achat.depotA } : {}),
+      ...(achat.bcEnvoyeLe ? { envoyeLe: achat.bcEnvoyeLe, envoyeA: achat.bcEnvoyeA || [] } : {}),
+      ...(achat.recuLe ? { recuLe: achat.recuLe } : {}),
+      ...(achat.partielLe ? { partielLe: achat.partielLe, manquant: achat.manquant || "", restePromisLe: achat.restePromisLe || null, reclameLe: achat.reclameLe || null } : {}),
     };
     setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] } : px)));
     try {
@@ -4129,7 +4157,7 @@ function AppAdmin() {
             if (estSemainePayee(nouvelleDate)) throw new Error(`La semaine du ${dimancheDeSemaineISO(nouvelleDate)} est déjà payée — impossible d'y ajouter des heures après coup.`);
             const r = await deplacerLigneHeures(travail, nouvelleDate);
             setTravaux((prev) => prev.map((t) => (t.id === travail.id ? { ...t, date: nouvelleDate, tacheId: r.tacheId, debutReel: r.debutReel, finReelle: r.finReelle } : t)));
-            if (r.bonDeplace) setBons((prev) => prev.map((b) => (String(b.tacheId || "") === String(travail.tacheId || "").split("::")[0] && b.date === travail.date ? { ...b, date: nouvelleDate } : b)));
+            // (Le bon déplacé — celui de CE technicien seulement — revient par le temps réel des bons.)
             ajouterJournal(`📅 Ligne d'heures déplacée : « ${travail.titre} » de ${travail.employeNom || travail.employeEmail} — du ${travail.date} au ${nouvelleDate} (${(Number(travail.heures) || 0).toFixed(2)} h, inchangées)${r.bonDeplace ? " · le bon de travail suit à la même date" : ""}.`);
           }}
           onAjusterPlan={(ajustements) => {
