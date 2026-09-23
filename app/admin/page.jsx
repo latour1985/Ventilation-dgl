@@ -1438,7 +1438,13 @@ function AppAdmin() {
       try {
         const { data, error } = await supabase.auth.getUser();
         if (!actif) return;
-        if (data?.user) { setSessionPerdue(false); return; }
+        if (data?.user) {
+          // Une AUTRE personne s'est connectée sur ce navigateur (une seule
+          // session Fluxya par navigateur) : cet écran agirait sous son nom.
+          const autre = String(data.user.email || "").toLowerCase() !== String(session?.user?.email || "").toLowerCase();
+          setSessionPerdue(autre ? "autre" : false);
+          return;
+        }
         // Hors ligne (réseau) ≠ session perdue : on ne crie pas au loup.
         const reseau = error && (error.status === 0 || /fetch|network|réseau/i.test(String(error.message || "")) || (typeof navigator !== "undefined" && navigator.onLine === false));
         if (!reseau) setSessionPerdue(true);
@@ -3496,10 +3502,12 @@ function AppAdmin() {
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center">
               <p className="text-3xl">🔒</p>
-              <h3 className="mt-1 text-base font-extrabold text-slate-900">Ta connexion a expiré</h3>
+              <h3 className="mt-1 text-base font-extrabold text-slate-900">{sessionPerdue === "autre" ? "Quelqu'un d'autre s'est connecté ici" : "Ta connexion a expiré"}</h3>
               <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-                Fluxya ne peut plus rien enregistrer tant que tu n&apos;es pas reconnecté·e — ce que tu ferais maintenant serait perdu.
-                Reconnecte-toi, puis refais la dernière action si elle n&apos;apparaît pas.
+                {sessionPerdue === "autre"
+                  ? "Une autre personne s'est connectée à Fluxya dans ce même navigateur (un seul compte à la fois par navigateur). Pour éviter d'enregistrer sous le mauvais nom, reconnecte-toi."
+                  : "Fluxya ne peut plus rien enregistrer tant que tu n'es pas reconnecté·e — ce que tu ferais maintenant serait perdu."}{" "}
+                Refais ensuite la dernière action si elle n&apos;apparaît pas.
               </p>
               <div className="mt-4 grid gap-2">
                 <Button onClick={() => { supabase.auth.signOut().finally(() => window.location.reload()); }} className="min-h-0 py-2 text-xs">Me reconnecter</Button>
