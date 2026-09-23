@@ -4959,6 +4959,15 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           </div>
         )}
 
+        {/* 🔒 NOTE DU BUREAU (2026-09-22) — interne : jamais sur le bon, la
+            facture ni l'écran de signature que le client voit. */}
+        {String(tache.noteBureau || "").trim() && (
+          <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-amber-800">🔒 Note du bureau — ne pas montrer au client</p>
+            <p className="mt-1 whitespace-pre-wrap text-[13px] font-semibold leading-snug text-amber-950">{tache.noteBureau}</p>
+          </div>
+        )}
+
         {/* ADRESSE DE L'INTERVENTION + NAVIGATION
             ------------------------------------------------------------
             Elle n'était affichée nulle part : le technicien ouvrait sa
@@ -6196,6 +6205,7 @@ function AppTechnicien() {
                   clientTelephone: d.clientTelephone,
                   contactSurPlace: d.contactSurPlace,
                   piecesJointes: d.piecesJointes,
+                  noteBureau: d.noteBureau, // 🔒 suit le bureau (2026-09-22)
                   // Fermeture d'équipe déclarée par un coéquipier — doit
                   // atteindre un téléphone qui avait déjà la tâche en
                   // mémoire, sinon la question ne se pose jamais.

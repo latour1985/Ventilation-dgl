@@ -56,6 +56,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // celui qui attribue les étapes n'est souvent pas celui qui a créé
   // la tâche). Une étape déjà cochée sur le terrain s'affiche ✓.
   const [etapesTache, setEtapesTache] = useState(() => (Array.isArray(tache.etapes) ? tache.etapes : []));
+  const [noteBureau, setNoteBureau] = useState(tache.noteBureau || ""); // 🔒 note interne pour le technicien
   const [pjTelevers, setPjTelevers] = useState(false);
   const ajouterPjEdition = async (fichiers) => {
     setPjTelevers(true);
@@ -335,6 +336,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       ...(JSON.stringify(pjTache) !== JSON.stringify(tache.piecesJointes || []) ? { piecesJointes: pjTache } : {}),
       // ✅ Étapes de la job — transmises seulement si elles ont changé.
       ...(JSON.stringify(etapesTache) !== JSON.stringify(tache.etapes || []) ? { etapes: etapesTache } : {}),
+      ...(noteBureau.trim() !== (tache.noteBureau || "").trim() ? { noteBureau: noteBureau.trim() } : {}),
       // 🏗️/📄 Rattachements — transmis SEULEMENT s'ils ont changé : une
       // clé absente laisse l'existant tranquille (les heures déjà
       // pointées ne sont alors jamais réécrites pour rien).
@@ -798,6 +800,20 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
           {/* ✅ ÉTAPES DE LA JOB — ajoutables/retirables ici en tout
               temps ; le technicien les coche sur le terrain. */}
           {!estConge && <EditeurEtapesJob etapes={etapesTache} onChange={setEtapesTache} />}
+          {!estConge && (
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">
+                🔒 Note pour le technicien <span className="font-normal text-amber-700">(interne — jamais vue par le client, ni sur le bon ni sur la facture)</span>
+              </label>
+              <textarea
+                value={noteBureau}
+                onChange={(e) => setNoteBureau(e.target.value)}
+                rows={2}
+                placeholder="Code de porte, consigne particulière, mise en garde…"
+                className="w-full rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-sm"
+              />
+            </div>
+          )}
 
           {/* 🛡️ RETOUR SOUS GARANTIE — corrigeable ici après coup : pas de
               demande d'avis Google dans le courriel de fin de travaux. */}

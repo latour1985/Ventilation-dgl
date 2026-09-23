@@ -1046,6 +1046,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // Description des travaux — saisissable dès la création (avant, il
   // fallait rouvrir la fenêtre d'édition pour en écrire une).
   const [nouvelleDescription, setNouvelleDescription] = useState("");
+  // 🔒 NOTE DU BUREAU POUR LE TECHNICIEN (2026-09-22, demande du propriétaire) :
+  // visible sur son téléphone seulement — jamais sur le bon, la facture,
+  // le PDF, les courriels ni la page que le client signe.
+  const [nouvelleNoteBureau, setNouvelleNoteBureau] = useState("");
   // 📝 Le texte de devis INJECTÉ dans la description (2026-08-29 — retour
   // du propriétaire : « je sélectionne un devis et la description ne suit
   // pas »). Mémorisé pour qu'un changement de devis REMPLACE les lignes de
@@ -1309,6 +1313,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       datePrevue: nouvelleDate || null,
       heurePrevue: nouvelleHeureDebut || null,
       description: nouvelleDescription.trim(),
+      ...(nouvelleNoteBureau.trim() ? { noteBureau: nouvelleNoteBureau.trim() } : {}),
       // 📎 Photos et plans joints par le bureau — le technicien les
       // ouvre sur son téléphone, sans rappeler pour « c'est où déjà ? ».
       piecesJointes: nouvellesPiecesJointes,
@@ -1651,6 +1656,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setNouveauTitre("");
     setNouvellesPiecesJointes([]);
     setNouvelleDescription("");
+    setNouvelleNoteBureau("");
     setNouveauDevisId("");
     dernierTexteDevisRef.current = "";
     setNouvelleFrequence(4);
@@ -2240,6 +2246,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(champs.piecesJointes !== undefined ? { piecesJointes: champs.piecesJointes } : {}),
       // ✅ Étapes de la job — clé absente = inchangées.
       ...(champs.etapes !== undefined ? { etapes: champs.etapes } : {}),
+      ...(champs.noteBureau !== undefined ? { noteBureau: champs.noteBureau } : {}),
     };
     if (champs.employeId) {
       // « conserver » : une modification/un déplacement ne repose jamais
@@ -2262,7 +2269,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2285,6 +2292,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(piecesJointes !== undefined ? { piecesJointes } : {}),
       // ✅ Étapes de la job — clé absente = inchangées.
       ...(etapes !== undefined ? { etapes } : {}),
+      ...(noteBureau !== undefined ? { noteBureau } : {}),
       // 🏗️/📄 Rattachements modifiés dans la fiche — clé absente = inchangé.
       ...(projetId !== undefined ? { projetId } : {}),
       ...(devisNumero !== undefined ? { devisNumero } : {}),
@@ -3664,6 +3672,21 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                   </p>
                 )}
               </div>
+
+              {nouveauType !== "conge" && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                    🔒 Note pour le technicien <span className="font-normal text-amber-700">(interne — jamais vue par le client, ni sur le bon ni sur la facture)</span>
+                  </label>
+                  <textarea
+                    value={nouvelleNoteBureau}
+                    onChange={(e) => setNouvelleNoteBureau(e.target.value)}
+                    rows={2}
+                    placeholder="Ex. : code de porte 4521 · client pointilleux sur la propreté · ne pas parler du prix, JF s'en occupe…"
+                    className="w-full rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs"
+                  />
+                </div>
+              )}
 
               {/* ✅ ÉTAPES DE LA JOB — facultatives ici : elles s'ajoutent
                   aussi APRÈS coup dans la fiche ✏️ (celui qui les attribue
@@ -5197,7 +5220,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                             )}
                             {!emp.estSousTraitant && estTerminee(seg.tache, emp) && <Check size={10} className="mt-px shrink-0 text-emerald-600" />}
                             {pasFermee(seg.tache, emp, jourKey) && <span title="Pas fermée sur le téléphone — aucune heure enregistrée. Ouvre la fiche : « Fermer la tâche pour l'équipe »." className="shrink-0 text-[9px] font-extrabold text-amber-700">⏳</span>}
-                            {seg.tache.devisAFaire && !seg.tache.devisNumero && <span title="Devis à faire — la tâche a été créée sans devis (travaux acceptés). Rattache-le dans sa fiche." className="shrink-0 rounded bg-orange-200 px-1 text-[8px] font-extrabold text-orange-900">📄 devis</span>}
+                            {(() => {
+                              // 🔒 Note INTERNE écrite par le technicien (2026-09-22) — les lignes
+                              // automatiques du système (fermeture d'équipe, chrono oublié…) écartées.
+                              const brute = String(travailTermine(seg.tache, emp)?.noteInterne || "");
+                              const sienne = brute.split("\n").filter((l) => l.trim() && !/^\s*(🤝|🔒|🏢|⏱|✍️|🕐|🔓)/u.test(l)).join("\n").trim();
+                              return sienne ? <span title={`Note interne de ${emp.nom} : ${sienne}`} className="shrink-0 text-[9px]">🔒</span> : null;
+                            })()}
+                            {seg.tache.devisAFaire && !seg.tache.devisNumero &&<span title="Devis à faire — la tâche a été créée sans devis (travaux acceptés). Rattache-le dans sa fiche." className="shrink-0 rounded bg-orange-200 px-1 text-[8px] font-extrabold text-orange-900">📄 devis</span>}
                             {!emp.estSousTraitant && estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
