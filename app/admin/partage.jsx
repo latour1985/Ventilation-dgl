@@ -1171,6 +1171,27 @@ export function BadgeConsultation({ consulteLe, consultations = 0, derniereLe = 
   );
 }
 
+// 📇 COMPLÉTER UNE TÂCHE DEPUIS LA FICHE DU CLIENT (2026-09-24, vécu
+// DEV-3549 : tâche créée par « Traiter le devis » sans adresse, téléphone
+// ni courriel — le bureau voyait l'adresse (lue dans la fiche), le
+// téléphone du technicien, rien, et « En route » était impossible). Ne
+// REMPLACE jamais ce que la tâche porte déjà : ajoute seulement ce qui
+// manque. Adresse : celle des travaux, sinon l'adresse de facturation.
+export function completerTacheDepuisFiche(tache, clients = []) {
+  if (!tache) return tache;
+  const fiche = (clients || []).find((c) => tache.clientId && c.id === tache.clientId) || (clients || []).find((c) => tache.clientNom && c.nom === tache.clientNom);
+  if (!fiche) return tache;
+  const adresse = tache.adresseIntervention || tache.adresseTravaux || adresseFacturationClient(fiche) || null;
+  return {
+    ...tache,
+    ...(!(tache.adresseIntervention || tache.adresseTravaux) && adresse ? { adresseIntervention: adresse } : {}),
+    ...(!tache.clientTelephone && fiche.telephone ? { clientTelephone: fiche.telephone } : {}),
+    ...(!(tache.clientCourriels || []).length && (fiche.courriels || []).length
+      ? { clientCourriels: fiche.courriels.map((c) => ({ id: c.id, email: c.email, label: c.label, defaut: !!c.defaut })) }
+      : {}),
+  };
+}
+
 export function adresseFacturationClient(client) {
   if (client?.adresseFacturation) return client.adresseFacturation;
   const principale = client?.adresses?.[0];

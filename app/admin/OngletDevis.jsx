@@ -23,7 +23,7 @@ import { BlocReponsesClients } from "./BlocReponsesClients";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { margePourcent } from "@/lib/supabase/catalogue";
 import { ModalNouveauClient } from "./OngletClients";
-import { ApercuDevisClient, BarrePagination, Button, ChampFichiersBc, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurAdresseTravaux, SelecteurItem, adresseFacturationClient, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
+import { completerTacheDepuisFiche, ApercuDevisClient, BarrePagination, Button, ChampFichiersBc, FREQUENCES_CONTRAT, ModalSelectionCourriel, SelecteurAdresseTravaux, SelecteurItem, adresseFacturationClient, genererNumeroSecours, hauteurDescription, libelleAdresse, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, todayISO, useCatalogue } from "./partage";
 
 // Taux coûtant moyen de l'équipe, lu dans la GRILLE CCQ de l'entreprise
 // (2026-08-28) : le champ « taux prévu » se pré-remplit avec un chiffre
@@ -1631,7 +1631,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     // l'humain l'envoie lui-même. Le journal ne ment jamais.
     ajouterJournal(`📄 Bon de commande ${numeroBc} généré (PDF, sans prix de vente) — aucun envoi automatique : télécharge le PDF et transmets-le toi-même.`);
 
-    ajouterTacheAgenda({
+    ajouterTacheAgenda(completerTacheDepuisFiche({
       id: `tache-${devis.id}`,
       clientId: devis.clientId,
       clientNom: devis.clientNom,
@@ -1654,7 +1654,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       typeTache: "devis",
       devisNumero: devis.numero,
       adresseTravaux: adresseTravaux || null,
-    });
+    }, clients));
 
     setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? { ...d, traite: true, modeTraitement: "bon_travail" } : d)));
     persisterDevis?.({ ...devis, traite: true, modeTraitement: "bon_travail" });

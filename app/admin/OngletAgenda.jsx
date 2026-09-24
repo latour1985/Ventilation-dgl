@@ -27,7 +27,7 @@ import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/q
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalTourneeRamassage } from "./ModalTourneeRamassage";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour, bcEstAsap, bcEstRamassage } from "./partage";
+import { completerTacheDepuisFiche, AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour, bcEstAsap, bcEstRamassage } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -1730,7 +1730,10 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     // déplacement futur ré-assignerait les coéquipiers). Elle sert UNE
     // fois, à la fin de cette assignation, pour placer le reste de
     // l'équipe d'un coup avec leurs choix 💰/🤝.
-    const { equipePrevue, ...tache } = tacheParam || {};
+    const { equipePrevue, ...tacheBrute } = tacheParam || {};
+    // 📇 Ce qui manque (adresse, téléphone, courriels) est repris de la fiche
+    // du client avant l'envoi aux téléphones (2026-09-24, vécu DEV-3549).
+    const tache = completerTacheDepuisFiche(tacheBrute, clients);
     // Blocage strict : impossible d'assigner tant que le dépôt requis
     // n'est pas payé (ou si le délai de 24 h l'a annulé).
     if (depotBloque(tache.id)) {
