@@ -1327,7 +1327,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                   taches={tachesPourAchat || []}
                   clients={clients || []}
                   projets={projets || []}
-                  className="min-w-0 flex-1"
+                  // Sa PROPRE ligne, pleine largeur (2026-09-24 : coincé au bout de
+                  // la ligne Montant/Date, les noms étaient coupés).
+                  className="w-full basis-full"
+                  placeholder="🔗 Achat général — ou rattache-le à une tâche, un client, un projet (tape un nom ou clique pour la liste)"
                 />
               </div>
               {/* 📦 INVENTAIRE COURANT (2026-09-06, demande du

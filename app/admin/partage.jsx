@@ -546,10 +546,10 @@ export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = 
             onClick={() => { onChoisir(`${prefixe}:${x.id}`); setOuvert(false); setFiltre(""); }}
             className="block w-full px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-orange-50"
           >
-            <span className="block truncate">{rendu(x)}</span>
+            <span className="block whitespace-normal break-words leading-snug">{rendu(x)}</span>
             {/* 📍 L'adresse du chantier sous la tâche — repère visuel. */}
             {prefixe === "t" && x.adresse ? (
-              <span className="block truncate text-[10px] text-slate-400">📍 {x.adresse}</span>
+              <span className="block whitespace-normal break-words text-[10px] leading-snug text-slate-400">📍 {x.adresse}</span>
             ) : null}
           </button>
         ))}
@@ -565,7 +565,7 @@ export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = 
         className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
       />
       {ouvert && (
-        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
+        <div className="absolute left-0 z-30 mt-1 max-h-80 w-full min-w-[18rem] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
           {tachesVisibles.length === 0 && clientsVisibles.length === 0 && projetsVisibles.length === 0 ? (
             <p className="px-2 py-2 text-center text-[11px] text-slate-400">{texteVide}</p>
           ) : (
