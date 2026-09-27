@@ -1193,7 +1193,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                     readOnly={!!it.devisVerrou}
                     onChange={(q) => {
                       const pu = parseFloat(it.prixUnitaire) || 0;
-                      majItem(it.id, { quantite: q, ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100 } : {}) });
+                      majItem(it.id, { quantite: q, ...(pu !== 0 ? { prix: Math.round(q * pu * 100) / 100 } : {}) });
                     }}
                     className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
                   />
@@ -1205,18 +1205,19 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
                     readOnly={!!it.devisVerrou}
                     onChange={(pu) => {
                       const q = Number(it.quantite) > 0 ? Number(it.quantite) : 1;
+                      // Négatif permis (rabais : 1 × -250) — 2026-09-27 ; 0 = case vidée.
                       // 0 = case vidée : retour au mode simple (Prix tapé à la main).
-                      majItem(it.id, { prixUnitaire: pu > 0 ? pu : "", ...(pu > 0 ? { prix: Math.round(q * pu * 100) / 100, quantite: q } : {}) });
+                      majItem(it.id, { prixUnitaire: pu !== 0 ? pu : "", ...(pu !== 0 ? { prix: Math.round(q * pu * 100) / 100, quantite: q } : {}) });
                     }}
                     className="w-24 rounded-lg border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
                   />
                   <span className="text-[11px] text-slate-400">= Prix ($)</span>
                   <InputNombreDecimal
                     valeur={it.prix}
-                    readOnly={parseFloat(it.prixUnitaire) > 0 || !!it.devisVerrou}
-                    title={it.devisVerrou ? "Déjà facturé à 100 % — montant verrouillé" : parseFloat(it.prixUnitaire) > 0 ? "Calculé : quantité × prix unitaire (vide le prix unitaire pour taper le total à la main)" : ""}
+                    readOnly={(parseFloat(it.prixUnitaire) || 0) !== 0 || !!it.devisVerrou}
+                    title={it.devisVerrou ? "Déjà facturé à 100 % — montant verrouillé" : (parseFloat(it.prixUnitaire) || 0) !== 0 ? "Calculé : quantité × prix unitaire (vide le prix unitaire pour taper le total à la main)" : ""}
                     onChange={(v) => majItem(it.id, { prix: v })}
-                    className={`w-28 rounded-lg border px-2 py-1 text-right text-sm font-bold tabular-nums ${parseFloat(it.prixUnitaire) > 0 || it.devisVerrou ? "border-slate-200 bg-slate-50 text-slate-600" : "border-slate-300"}`}
+                    className={`w-28 rounded-lg border px-2 py-1 text-right text-sm font-bold tabular-nums ${(parseFloat(it.prixUnitaire) || 0) !== 0 || it.devisVerrou ? "border-slate-200 bg-slate-50 text-slate-600" : "border-slate-300"}`}
                   />
                 </div>
                 {/* 📋 Ligne venue du devis : verrou (100 % facturé) ou plafond (solde). */}
