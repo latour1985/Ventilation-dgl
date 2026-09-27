@@ -800,7 +800,12 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
         : [];
     // Les déductions existantes (dépôt, pièce payée d'avance) restent en bas.
     const estDeduction = (it) => /^(depot|piece)-/.test(String(it.id));
-    const suivants = [...items.filter((it) => !estDeduction(it)), ...duDevis, ...deduction, ...items.filter(estDeduction)];
+    // Bon prêt DIRECTEMENT à partir du devis (sans révision) : la ligne de
+    // départ porte déjà le total du devis — elle devient une ligne de texte
+    // à 0 $, sinon le devis serait compté deux fois (2026-09-27).
+    const departDuDevis = !bon.lignesNonListees?.length && !bon.prixNonListe;
+    const existants = items.filter((it) => !estDeduction(it)).map((it) => (departDuDevis && String(it.id).startsWith("item-") ? { ...it, prix: 0 } : it));
+    const suivants = [...existants, ...duDevis, ...deduction, ...items.filter(estDeduction)];
     empreinteDepartRef.current = empreinte(suivants); // l'état « de départ » inclut le pré-remplissage
     setItems(suivants);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2437,10 +2442,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // déjà validées (rien n'est recalculé). Après une facture — même
   // partielle — c'est verrouillé : la correction se fait dans QuickBooks
   // (crédit / annulation), sinon les deux systèmes divergeraient.
+  // + un bon PRÊT DIRECTEMENT À PARTIR DU DEVIS (sans révision) se modifie
+  // aussi avant l'envoi (2026-09-27, demande du propriétaire) : la fenêtre
+  // part des lignes du devis.
   const revisionModifiable = (b) =>
     !!b &&
     !b.prixNonListe &&
-    (b.lignesNonListees || []).length > 0 &&
+    ((b.lignesNonListees || []).length > 0 || !!b.devisNumero) &&
     b.statutQb !== "envoye" &&
     b.statutQb !== "retire" &&
     (b.facturesEmises || []).filter((f) => !f.annuleeQb).length === 0;
