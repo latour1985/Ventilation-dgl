@@ -1439,6 +1439,30 @@ export function EditeurEtapesJob({ etapes = [], onChange, compact = false }) {
   );
 }
 
+// ✍️ CHAMP TEXTE À ÉTAT LOCAL (2026-09-28, vécu JF : le petit nom de
+// l'adresse se faisait « reprendre » pendant la frappe — la fiche client
+// revenait du serveur avec l'ancienne valeur, la case perdait ses lettres
+// puis la page sautait). Pendant la frappe, c'est CE QUI EST TAPÉ qui
+// s'affiche ; chaque lettre part quand même au parent. La valeur du parent
+// ne revient qu'une fois le champ quitté.
+function ChampTexteLocal({ valeur, onValeur, ...props }) {
+  const [texte, setTexte] = useState(valeur || "");
+  const [focus, setFocus] = useState(false);
+  if (!focus && texte !== (valeur || "")) setTexte(valeur || "");
+  return (
+    <input
+      {...props}
+      value={texte}
+      onFocus={() => setFocus(true)}
+      onBlur={() => setFocus(false)}
+      onChange={(e) => {
+        setTexte(e.target.value);
+        onValeur(e.target.value);
+      }}
+    />
+  );
+}
+
 // 🏠 SÉLECTEUR D'ADRESSE DES TRAVAUX — UN SEUL CHAMP (2026-09-14, demande
 // du propriétaire : « pourquoi il faut la resélectionner plus bas ? »).
 // Clic = les adresses DU DOSSIER du client ; taper = dossier filtré en
@@ -1463,15 +1487,15 @@ export function SelecteurAdresseTravaux({ client, choisie, onChoisirDossier, onN
         </div>
         {choisie.type === "dossier" && onModifierChoisie && (
           <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            <input
-              value={choisie.adresse.nom && choisie.adresse.nom !== choisie.adresse.ligne1 ? choisie.adresse.nom : ""}
-              onChange={(e) => onModifierChoisie({ nom: e.target.value })}
+            <ChampTexteLocal
+              valeur={choisie.adresse.nom && choisie.adresse.nom !== choisie.adresse.ligne1 ? choisie.adresse.nom : ""}
+              onValeur={(v) => onModifierChoisie({ nom: v })}
               placeholder="Petit nom (facultatif — ex. Chantier Sud)"
               className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
             />
-            <input
-              value={choisie.adresse.appartement || ""}
-              onChange={(e) => onModifierChoisie({ appartement: e.target.value })}
+            <ChampTexteLocal
+              valeur={choisie.adresse.appartement || ""}
+              onValeur={(v) => onModifierChoisie({ appartement: v })}
               placeholder="App. / bureau (facultatif)"
               className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
             />

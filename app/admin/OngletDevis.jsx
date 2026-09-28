@@ -1001,8 +1001,21 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   };
   // ✏️ Petit nom / app. de l'adresse choisie — modifiés au dossier ET le
   // libellé du devis suit (sinon l'effet « adresse invalide » le viderait).
+  // 🔑 L'adresse en cours de retouche est suivie par son ID (2026-09-28,
+  // vécu JF : taper le petit nom change le libellé à chaque lettre — si la
+  // fiche client revenait du serveur entre deux lettres, plus rien ne
+  // correspondait, la case disparaissait et la page sautait). Repli
+  // utilisé SEULEMENT quand le libellé est celui qu'on vient d'écrire.
+  const adresseRetoucheeRef = useRef(null); // { id, libelle }
+  const adresseChoisieDuDevis = () => {
+    const liste = client?.adresses || [];
+    const parLibelle = liste.find((a) => libelleDevis(a) === adresseTravauxDevis);
+    if (parLibelle) return parLibelle;
+    const r = adresseRetoucheeRef.current;
+    return r && r.libelle === adresseTravauxDevis ? liste.find((a) => a.id === r.id) || null : null;
+  };
   const modifierAdresseChoisie = (champs) => {
-    const actuelle = (client?.adresses || []).find((a) => libelleDevis(a) === adresseTravauxDevis);
+    const actuelle = adresseChoisieDuDevis();
     if (!actuelle) return;
     const maj = { ...actuelle };
     if (champs.nom !== undefined) maj.nom = champs.nom.trim() ? champs.nom : actuelle.ligne1;
@@ -1013,6 +1026,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setClients((prev) =>
       prev.map((c) => (c.id === clientId ? { ...c, adresses: (c.adresses || []).map((a) => (a.id === actuelle.id ? maj : a)) } : c))
     );
+    adresseRetoucheeRef.current = { id: actuelle.id, libelle: libelleDevis(maj) };
     setAdresseTravauxDevis(libelleDevis(maj));
   };
 
@@ -2512,7 +2526,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
               <SelecteurAdresseTravaux
                 client={client}
                 choisie={(() => {
-                  const a = (client.adresses || []).find((x) => libelleDevis(x) === adresseTravauxDevis);
+                  const a = adresseChoisieDuDevis();
                   return a ? { type: "dossier", adresse: a } : null;
                 })()}
                 onChoisirDossier={(a) => setAdresseTravauxDevis(libelleDevis(a))}
