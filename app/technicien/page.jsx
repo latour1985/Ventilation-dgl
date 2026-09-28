@@ -6979,6 +6979,41 @@ function AppTechnicien() {
   // « Oui, j'avais terminé » : les heures POINTÉES (arrêtées à l'heure
   // de la fermeture du bon, jamais à « maintenant ») partent au bureau
   // et se cumulent automatiquement — aucune validation d'administrateur.
+  // 🤝→🚚 FERMETURE D'ÉQUIPE ET TRANSPORT JOURNALIER (2026-09-28, vécu
+  // Raphaël le 23 : ses deux tâches fermées « pour l'équipe » par Charles,
+  // 1 h 26 sans aucune heure entre les deux — le transport journalier ne
+  // démarre que sur « Terminer », jamais sur une fermeture d'équipe).
+  // Même règle que terminerTache, avec l'heure de la FERMETURE :
+  //  1) un transport journalier qui roulait VERS cette tâche s'arrête à
+  //     son début réel ;
+  //  2) si la tâche suivante n'est pas commencée, son transport part à
+  //     l'heure où le coéquipier a fermé (pas à l'heure de la réponse).
+  const enchainerTransportApresFermetureEquipe = (t, finTs, debutTs) => {
+    if (!t || t.type !== "travail") return;
+    const entrant = taches.find(
+      (x) => x.momentTransport === "ccq" && x.tacheSuivanteId === t.id && (x.etat === "en_cours" || x.etat === "en_pause")
+    );
+    if (entrant) {
+      const fin = Number(debutTs) || finTs;
+      const ecoule = entrant.tempsDebutSegment ? Math.max(0, (fin - entrant.tempsDebutSegment) / 1000) : 0;
+      const heures = Math.max(0, ((entrant.tempsAccumuleSec || 0) + ecoule) / 3600);
+      const charge = { ...chargeHeuresDepuisTache({ ...entrant, tempsDebutSegment: null }), heures, finReelle: fin };
+      enregistrerTravailEffectue(charge, session).catch(() => {
+        setFileAttente((prev) => [...prev, { id: `sync-travail-${Date.now()}`, type: "travail", charge, horodatage: Date.now() }]);
+      });
+      majTache(entrant.id, { etat: "complete", tempsAccumuleSec: heures * 3600, tempsDebutSegment: null });
+    }
+    const travauxJour = taches
+      .filter((x) => x.type === "travail" && x.date === t.date)
+      .sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
+    const idx = travauxJour.findIndex((x) => x.id === t.id);
+    const suivante = idx >= 0 ? travauxJour[idx + 1] : null;
+    if (!suivante || suivante.etat !== "a_faire") return;
+    if (taches.some((x) => x.id !== t.id && x.id !== entrant?.id && x.etat === "en_cours")) return;
+    const ccq = taches.find((x) => x.momentTransport === "ccq" && x.tacheSuivanteId === suivante.id && x.etat === "a_faire");
+    if (ccq && finTs <= Date.now()) majTache(ccq.id, { etat: "en_cours", tempsDebutSegment: finTs, debutReel: ccq.debutReel || finTs });
+  };
+
   const confirmerFermetureEquipe = (id) => {
     const t = taches.find((x) => x.id === id);
     setFermetureEquipePour(null);
@@ -7018,6 +7053,7 @@ function AppTechnicien() {
           : x
       )
     );
+    enchainerTransportApresFermetureEquipe(t, fermeTs, t.debutReel);
   };
 
   // « Non, j'ajuste » : heures DÉCLARÉES par le technicien — partent au
@@ -7064,6 +7100,7 @@ function AppTechnicien() {
           : x
       )
     );
+    enchainerTransportApresFermetureEquipe(t, finTs, debutTs);
   };
 
   // 🤝 FERMETURE D'ÉQUIPE — détection côté coéquipier (2026-08-17).

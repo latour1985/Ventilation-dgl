@@ -2047,6 +2047,18 @@ function AppAdmin() {
     }
     return (tachesAttente || []).find((t) => t.id === id) || null;
   };
+  // 🚗 Ids des tâches d'agenda de type COURSE — Heures de la semaine les
+  // range dans leur propre colonne (2026-09-28).
+  const idsCoursesAgenda = useMemo(() => {
+    const ids = new Set();
+    for (const valeur of Object.values(planning || {})) {
+      for (const t of listeCellule(valeur)) if (t?.typeTache === "course" && t.id) ids.add(t.id);
+    }
+    (tachesAttente || []).forEach((t) => {
+      if (t?.typeTache === "course" && t.id) ids.add(t.id);
+    });
+    return ids;
+  }, [planning, tachesAttente]);
   // 🔎 TÂCHES DANS LA RECHERCHE (2026-09-14, vécu : « 395 » ne trouvait
   // pas la job de C.R.S.D — l'adresse était SUR LA TÂCHE, pas au
   // dossier du client). Grille + file d'attente ; titre, client,
@@ -4227,6 +4239,7 @@ function AppAdmin() {
       )}
       {vue === "paies" && (
         <OngletPaies
+          idsCourses={idsCoursesAgenda}
           semainesPayees={semainesPayees}
           onMarquerSemainePayee={async (debut) => {
             const par = session?.user?.user_metadata?.nom || session?.user?.email || "";

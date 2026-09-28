@@ -22,7 +22,7 @@ import { dateISO, ajouterJours, dimancheDeSemaineISO, Button, DefilementHorizont
 // enregistrées par les techniciens au bouton « Terminer »).
 // Heures seulement — AUCUN montant de salaire ici.
 // ============================================================
-export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets, ajouterJournal, nomAdmin, semainesPayees = [], onMarquerSemainePayee = null, onAnnulerSemainePayee = null, onDeplacerLigne = null }) {
+export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan, onValiderGroupe, onRefuserGroupe, onDebloquerJournee, projets, ajouterJournal, nomAdmin, semainesPayees = [], onMarquerSemainePayee = null, onAnnulerSemainePayee = null, onDeplacerLigne = null, idsCourses = null }) {
   // 💵 SEMAINES DE PAIE FAITES (snippet 152, 2026-09-21) — voir
   // lib/supabase/semainesPaie.js. Une correction ne devient un report que
   // si la semaine de la ligne est marquée payée.
@@ -49,6 +49,30 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   const [editionLigne, setEditionLigne] = useState(null);
   // 📅 Déplacer une ligne à une autre date (2026-09-22) : { id, date }.
   const [deplacementLigne, setDeplacementLigne] = useState(null);
+  // Action en un clic sur une ligne (« Ramener au … », trou comblé) :
+  // { id, enCours, erreur } — l'erreur s'affiche collée à la ligne.
+  const [actionLigne, setActionLigne] = useState(null);
+  // 🚚 Les transports qui SUIVENT un déplacement (2026-09-28, vécu
+  // Charles : sa journée ramenée au 22, son transport du matin resté au
+  // 23). Transports de la même journée d'origine chronométrés à la date
+  // cible — cochés par défaut, décochables. Clé : id de ligne → booléen.
+  const compagnonsDeplacement = (t, cible) =>
+    (travaux || []).filter(
+      (l) =>
+        l.id !== t.id &&
+        l.supabase &&
+        l.estTransport &&
+        (l.employeEmail || "").toLowerCase() === (t.employeEmail || "").toLowerCase() &&
+        l.date === t.date &&
+        !!cible &&
+        jourLocalDe(l.debutReel) === cible
+    );
+  // Déplace une ligne (et, au besoin, ses transports) — les erreurs
+  // remontent à l'appelant, qui les affiche près de la ligne.
+  const deplacerAvecCompagnons = async (t, cible, compagnons = []) => {
+    await onDeplacerLigne(t, cible);
+    for (const c of compagnons) await onDeplacerLigne(c, cible);
+  };
   const [erreurEdition, setErreurEdition] = useState("");
   // ✏️ CORRECTION D'UNE PROPOSITION par l'admin (bannière du haut) :
   // { groupe, valeurs: { [idLigne]: { debut, fin } } } — les champs
@@ -66,8 +90,10 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   const [ajoutHeures, setAjoutHeures] = useState(null); // null | { titre, categorie, projetId, secteur, debut, fin, note }
   const [ajoutEnCours, setAjoutEnCours] = useState(false);
   const [ajoutErreur, setAjoutErreur] = useState("");
-  const enregistrerAjoutHeures = async (e, iso) => {
-    const f = ajoutHeures;
+  // 2026-09-28 : le formulaire peut aussi venir d'un bouton (trou comblé
+  // en « Transport journalier ») — `form` remplace alors ajoutHeures.
+  const enregistrerAjoutHeures = async (e, iso, form = null) => {
+    const f = form || ajoutHeures;
     if (!f?.debut || !f?.fin) {
       setAjoutErreur("Heure de début et de fin requises.");
       return;
@@ -87,31 +113,45 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     // la semaine payée n'est jamais rouverte.
     const dimancheCourant = dimancheDeSemaineISO(new Date());
     const tardive = dimancheDeSemaineISO(iso) < dimancheCourant && !!semainePayeeDe(iso);
+    // 🚚 TRANSPORT / TRANSPORT JOURNALIER / 🚗 COURSE (2026-09-28) : le
+    // bureau peut compléter un transport manquant ou une course. Ils
+    // s'écrivent comme ceux du téléphone — transport = est_transport
+    // (titre « Transport journalier » pour la colonne du même nom), course
+    // = clé « course-… » rangée en divers.
+    const estTr = f.categorie === "transport" || f.categorie === "ccq";
+    const titreSaisi = (f.titre || "").trim();
+    const titreFinal =
+      f.categorie === "ccq"
+        ? `Transport journalier${titreSaisi ? ` — ${titreSaisi}` : ""}`
+        : f.categorie === "transport"
+        ? titreSaisi || "Transport"
+        : f.categorie === "course"
+        ? `🚗 ${titreSaisi || "Course"}`
+        : titreSaisi || (f.categorie === "administratif" ? "Heures administratives" : f.categorie === "divers" ? "Heures diverses" : "Heures de chantier");
+    const categorieBase = estTr ? "projet" : f.categorie === "course" ? "divers" : f.categorie;
+    const libelleCat = { projet: "chantier", transport: "transport", ccq: "transport journalier", course: "course", administratif: "administratif", divers: "divers" }[f.categorie] || "chantier";
     try {
       await enregistrerTravailPourEmploye(
         {
-          tacheId: `saisie-bureau-${Date.now()}`,
-          titre:
-            f.titre.trim() ||
-            (f.categorie === "administratif" ? "Heures administratives" : f.categorie === "divers" ? "Heures diverses" : "Heures de chantier"),
+          tacheId: f.categorie === "course" ? `course-bureau-${Date.now()}` : `saisie-bureau-${Date.now()}`,
+          titre: titreFinal,
           clientNom: null,
           date: iso,
           heures: h,
+          estTransport: estTr,
           debutReel: d0.toISOString(),
           finReelle: f0.toISOString(),
-          projetId: f.categorie === "projet" ? f.projetId || null : null,
-          categorieHeures: f.categorie,
+          projetId: categorieBase === "projet" ? f.projetId || null : null,
+          categorieHeures: categorieBase,
           secteur: f.secteur,
           noteInterne: `Saisie par le bureau (${nomAdmin || "admin"})${f.note.trim() ? ` — ${f.note.trim()}` : ""}`,
           ...(tardive ? { corrigeLe: new Date().toISOString(), heuresAvantCorrection: 0 } : {}),
         },
         { courriel: e.email, nom: e.nom }
       );
-      const nomProjet = f.categorie === "projet" && f.projetId ? (projets || []).find((p) => p.id === f.projetId)?.nom : null;
+      const nomProjet = categorieBase === "projet" && f.projetId ? (projets || []).find((p) => p.id === f.projetId)?.nom : null;
       ajouterJournal?.(
-        `➕ ${h.toFixed(2)} h AJOUTÉES PAR LE BUREAU à ${e.nom} le ${iso} (${f.debut} → ${f.fin}, ${
-          f.categorie === "administratif" ? "administratif" : f.categorie === "divers" ? "divers" : "chantier"
-        }${nomProjet ? ` — projet « ${nomProjet} »` : ""}) par ${nomAdmin || "un administrateur"}.${
+        `➕ ${h.toFixed(2)} h AJOUTÉES PAR LE BUREAU à ${e.nom} le ${iso} (${f.debut} → ${f.fin}, ${libelleCat}${nomProjet ? ` — projet « ${nomProjet} »` : ""}) par ${nomAdmin || "un administrateur"}.${
           tardive ? " Semaine de paie déjà passée → la différence est REPORTÉE sur la semaine courante (colonne Report ±)." : ""
         }`
       );
@@ -173,6 +213,24 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   // Dîner non payé : ligne de −30 min envoyée quand le technicien coche
   // « Lunch » avant son transport de fin de journée.
   const estLunch = (t) => !t.estTransport && /dîner|diner|lunch/i.test(t.titre || "");
+  // 🚗 COURSE INTERNE — colonne À PART (2026-09-28, demande du
+  // propriétaire : certains employés ont un autre taux pour les courses).
+  // Reconnue par sa clé : « course-… » (course lancée du téléphone ou
+  // saisie par le bureau) ou une tâche d'agenda de type Course
+  // (`idsCourses`). La ligne reste « divers » en base — rien ne change
+  // pour les coûts de projets.
+  const estCourse = (t) => {
+    if (t.estTransport) return false;
+    const id = String(t.tacheId || "").split("::")[0];
+    return id.startsWith("course-") || (idsCourses instanceof Set && idsCourses.has(id));
+  };
+  // Heure locale d'un horodatage → jour « AAAA-MM-JJ » (date du chrono).
+  const jourLocalDe = (ts) => {
+    if (!ts) return null;
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
 
   const heureLocaleDe = (ts) => {
     if (!ts) return null;
@@ -251,7 +309,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   const parEmploye = {};
   lignesSemaine.forEach((t) => {
     const cle = t.employeEmail.toLowerCase();
-    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, residentielChantier: 0, residentielTransport: 0, details: [] });
+    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, course: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, residentielChantier: 0, residentielTransport: 0, details: [] });
     // 🧾 SEMAINE PAYÉE = AFFICHÉE TELLE QUE PAYÉE (2026-09-21) : une ligne
     // corrigée après la paie de sa semaine compte ICI pour ses heures
     // D'AVANT (ce que la paie a versé) ; l'écart est dans le Report ± de
@@ -267,6 +325,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     // serait comptée comme du chantier et gonflerait un coût de projet.
     const cat = t.categorieHeures || "projet";
     if (estLunch(t)) e.diner += h;
+    else if (estCourse(t)) e.course += h;
     else if (cat === "administratif") e.administratif += h;
     else if (cat === "divers") e.divers += h;
     else if (estCcq(t)) e.transportCcq += h;
@@ -291,7 +350,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   (utilisateurs || []).forEach((u) => {
     const cle = (u.courriel || "").toLowerCase();
     if (!cle || parEmploye[cle]) return;
-    parEmploye[cle] = { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, residentielChantier: 0, residentielTransport: 0, details: [] };
+    parEmploye[cle] = { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, course: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, residentiel: 0, residentielChantier: 0, residentielTransport: 0, details: [] };
   });
   // REPORT ± : corrections TARDIVES validées PENDANT la semaine affichée
   // mais portant sur des lignes de semaines ANTÉRIEURES — la différence
@@ -304,7 +363,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     const delta = Math.round(((Number(t.heures) || 0) - (Number(t.heuresAvantCorrection) || 0)) * 100) / 100;
     if (Math.abs(delta) < 0.005) return;
     const cle = t.employeEmail.toLowerCase();
-    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, details: [] });
+    const e = (parEmploye[cle] = parEmploye[cle] || { email: cle, parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, course: 0, diner: 0, nuit: 0, weekend: 0, report: 0, reportDetails: [], total: 0, details: [] });
     e.report += delta;
     e.reportDetails.push({ titre: t.titre, date: t.date, delta });
   });
@@ -350,6 +409,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       acc.transportCcq += e.transportCcq;
       acc.administratif += e.administratif;
       acc.divers += e.divers;
+      acc.course += e.course;
       acc.diner += e.diner;
       acc.nuit += e.nuit;
       acc.weekend += e.weekend;
@@ -357,7 +417,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       acc.total += e.total;
       return acc;
     },
-    { parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, diner: 0, nuit: 0, weekend: 0, report: 0, total: 0 }
+    { parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, course: 0, diner: 0, nuit: 0, weekend: 0, report: 0, total: 0 }
   );
 
   // 🕐 HORLOGE STANDARD (demande du propriétaire, 2026-08-19) : à
@@ -376,6 +436,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     ccq: Math.abs(totauxEquipe.transportCcq) > 0.004,
     admin: Math.abs(totauxEquipe.administratif) > 0.004,
     divers: Math.abs(totauxEquipe.divers) > 0.004,
+    course: Math.abs(totauxEquipe.course) > 0.004,
     diner: Math.abs(totauxEquipe.diner) > 0.004,
     nuit: Math.abs(totauxEquipe.nuit) > 0.004,
     weekend: Math.abs(totauxEquipe.weekend) > 0.004,
@@ -394,7 +455,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       setAvertissementPaieOuvert(true);
       return;
     }
-    const enTete = ["Technicien", ...jours.map((j) => j.toLocaleDateString("fr-CA", { weekday: "short", day: "numeric" })), "Chantier", "dont Résidentiel", "Transport", "Transport journalier", "Administratif", "Divers", "Dîner", "Nuit", "Sam/Dim", "Report ±", "Régulières", `Supplémentaires (>${seuilSupp} h)`, "TOTAL À PAYER"].join("\t");
+    const enTete = ["Technicien", ...jours.map((j) => j.toLocaleDateString("fr-CA", { weekday: "short", day: "numeric" })), "Chantier", "dont Résidentiel", "Transport", "Transport journalier", "Administratif", "Divers", "Course", "Dîner", "Nuit", "Sam/Dim", "Report ±", "Régulières", `Supplémentaires (>${seuilSupp} h)`, "TOTAL À PAYER"].join("\t");
     const corps = employesSemaine
       .map((e) =>
         [
@@ -406,6 +467,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
           e.transportCcq.toFixed(2),
           e.administratif.toFixed(2),
           e.divers.toFixed(2),
+          e.course.toFixed(2),
           e.diner !== 0 ? e.diner.toFixed(2) : "",
           e.nuit !== 0 ? e.nuit.toFixed(2) : "",
           e.weekend !== 0 ? e.weekend.toFixed(2) : "",
@@ -425,6 +487,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       totauxEquipe.transportCcq.toFixed(2),
       totauxEquipe.administratif.toFixed(2),
       totauxEquipe.divers.toFixed(2),
+      totauxEquipe.course.toFixed(2),
       totauxEquipe.diner !== 0 ? totauxEquipe.diner.toFixed(2) : "",
       totauxEquipe.nuit !== 0 ? totauxEquipe.nuit.toFixed(2) : "",
       totauxEquipe.weekend !== 0 ? totauxEquipe.weekend.toFixed(2) : "",
@@ -759,6 +822,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                   {colVisibles.ccq && <th className="px-2 py-2 text-right font-bold text-slate-500">Transport journalier</th>}
                   {colVisibles.admin && <th className="px-2 py-2 text-right font-bold text-sky-600">Administratif</th>}
                   {colVisibles.divers && <th className="px-2 py-2 text-right font-bold text-stone-500">Divers</th>}
+                  {colVisibles.course && <th className="px-2 py-2 text-right font-bold text-violet-600">🚗 Course</th>}
                   {colVisibles.diner && <th className="px-2 py-2 text-right font-bold text-rose-500">Dîner</th>}
                   {colVisibles.nuit && <th className="px-2 py-2 text-right font-bold text-indigo-500">🌙 Nuit</th>}
                   {colVisibles.weekend && <th className="px-2 py-2 text-right font-bold text-sky-600">Sam/Dim</th>}
@@ -866,6 +930,9 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                       )}
                       {colVisibles.divers && (
                         <td className={`px-2 py-2.5 text-right tabular-nums ${e.divers > 0 ? "font-bold text-stone-600" : "text-slate-200"}`}>{e.divers > 0 ? hM(e.divers) : "—"}</td>
+                      )}
+                      {colVisibles.course && (
+                        <td className={`px-2 py-2.5 text-right tabular-nums ${e.course > 0 ? "font-bold text-violet-700" : "text-slate-200"}`}>{e.course > 0 ? hM(e.course) : "—"}</td>
                       )}
                       {colVisibles.diner && (
                       <td className={`px-2 py-2.5 text-right tabular-nums ${e.diner < 0 ? "font-bold text-rose-600" : "text-slate-200"}`}>
@@ -989,6 +1056,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                   {colVisibles.ccq && <td className="px-2 py-2.5 text-right font-bold tabular-nums text-slate-700">{hM(totauxEquipe.transportCcq)}</td>}
                   {colVisibles.admin && <td className="px-2 py-2.5 text-right font-bold tabular-nums text-sky-700">{hM(totauxEquipe.administratif)}</td>}
                   {colVisibles.divers && <td className="px-2 py-2.5 text-right font-bold tabular-nums text-stone-600">{hM(totauxEquipe.divers)}</td>}
+                  {colVisibles.course && <td className="px-2 py-2.5 text-right font-bold tabular-nums text-violet-700">{hM(totauxEquipe.course)}</td>}
                   {colVisibles.diner && (
                   <td className={`px-2 py-2.5 text-right font-bold tabular-nums ${totauxEquipe.diner < 0 ? "text-rose-600" : "text-slate-400"}`}>
                     {totauxEquipe.diner < 0 ? hM(totauxEquipe.diner) : "—"}
@@ -1051,9 +1119,17 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                     if (tb != null) return 1;
                     return rang(a) - rang(b);
                   });
+                  // Étiquette = MÊME classement que le grand tableau (2026-09-28 :
+                  // une course ou une heure administrative s'affichait « CHANTIER »).
                   const catDe = (t) =>
                     estLunch(t)
                       ? { label: "DÎNER", cls: "bg-rose-100 text-rose-700" }
+                      : estCourse(t)
+                      ? { label: "🚗 COURSE", cls: "bg-violet-100 text-violet-700" }
+                      : !t.estTransport && t.categorieHeures === "administratif"
+                      ? { label: "ADMINISTRATIF", cls: "bg-sky-100 text-sky-700" }
+                      : !t.estTransport && t.categorieHeures === "divers"
+                      ? { label: "DIVERS", cls: "bg-stone-100 text-stone-600" }
                       : estCcq(t)
                       ? { label: "TRANSP. JOURNALIER", cls: "bg-amber-100 text-amber-700" }
                       : t.estTransport
@@ -1064,14 +1140,43 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                   const tj = lignesJour.reduce(
                     (acc, t) => {
                       const h = Number(t.heures) || 0;
+                      const cat = t.categorieHeures || "projet";
                       if (estLunch(t)) acc.diner += h;
+                      else if (estCourse(t)) acc.course += h;
+                      else if (cat === "administratif") acc.administratif += h;
+                      else if (cat === "divers") acc.divers += h;
                       else if (estCcq(t)) acc.ccq += h;
                       else if (t.estTransport) acc.transport += h;
                       else acc.chantier += h;
                       acc.total += h;
                       return acc;
                     },
-                    { chantier: 0, transport: 0, ccq: 0, diner: 0, total: 0 }
+                    { chantier: 0, transport: 0, ccq: 0, diner: 0, course: 0, administratif: 0, divers: 0, total: 0 }
+                  );
+                  // ⏳ TROUS entre deux lignes (2026-09-28, vécu Raphaël le 23 :
+                  // 1 h 26 sans rien entre deux chantiers — tâches fermées « pour
+                  // l'équipe » par un coéquipier, son transport journalier n'est
+                  // jamais parti). Affichés à titre d'info avec un bouton ; rien
+                  // ne s'ajoute tout seul. Pas de trou après le transport de fin
+                  // de journée (le technicien est rentré).
+                  const trousApres = {};
+                  if (!jourBloqueIci) {
+                    const chrono = ordonnees.filter((l) => l.debutReel && l.finReelle && !estLunch(l));
+                    for (let i = 0; i < chrono.length - 1; i++) {
+                      const a = chrono[i];
+                      const b = chrono[i + 1];
+                      if (a.estTransport && /fin de journée/i.test(a.titre || "")) continue;
+                      const ecartMin = Math.round((new Date(b.debutReel) - new Date(a.finReelle)) / 60000);
+                      if (ecartMin >= 10) trousApres[a.id] = { de: a.finReelle, a: b.debutReel, min: ecartMin, suivante: b };
+                    }
+                  }
+                  // 📅 LIGNES MAL DATÉES : chronométrées un AUTRE jour que celui où
+                  // elles sont classées (vécu Charles : son transport du matin du
+                  // 22 rangé au 23). Ici : celles de ce jour qui viennent d'ailleurs,
+                  // et celles d'autres jours chronométrées aujourd'hui.
+                  const jourDuChrono = (l) => jourLocalDe(l.debutReel);
+                  const classeesAilleurs = (travaux || []).filter(
+                    (l) => l.supabase && (l.employeEmail || "").toLowerCase() === e.email && l.date !== iso && jourDuChrono(l) === iso && !estLunch(l)
                   );
                   const labelJour = new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
                   return (
@@ -1097,12 +1202,21 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                         <div className="space-y-1.5">
                           {ordonnees.map((t) => {
                             const cat = catDe(t);
+                            const jourChrono = jourDuChrono(t);
+                            const malDatee = !!jourChrono && jourChrono !== t.date;
+                            const trou = trousApres[t.id];
                             return (
-                              <div key={t.id} className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-white px-3 py-1.5">
+                              <React.Fragment key={t.id}>
+                              <div className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-1.5 ${malDatee ? "border-amber-300 bg-amber-50" : "border-blue-100 bg-white"}`}>
                                 <p className="min-w-0 flex-1 truncate text-[11px] text-slate-700">
                                   <span className={`mr-2 rounded-full px-2 py-0.5 text-[9px] font-extrabold ${cat.cls}`}>{cat.label}</span>
                                   {t.titre || "Travail"}
                                   {t.clientNom ? ` — ${t.clientNom}` : ""}
+                                  {malDatee && (
+                                    <span className="ml-2 rounded-full bg-amber-200 px-2 py-0.5 text-[9px] font-extrabold text-amber-800" title="Le chrono de cette ligne a démarré un autre jour que celui où elle est classée.">
+                                      ⚠️ chronométrée le {new Date(`${jourChrono}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" })}
+                                    </span>
+                                  )}
                                 </p>
                                 <div className="flex shrink-0 items-center gap-1.5">
                                   {editionLigne?.id === t.id ? (
@@ -1214,6 +1328,27 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                                       {/* 📅 DÉPLACER À UNE AUTRE DATE (2026-09-22, vécu Charles :
                                           job partie un jour d'avance, heures tombées sur la date
                                           planifiée). Admins seulement ; seule la date bouge. */}
+                                      {malDatee && droitHeures === "direct" && onDeplacerLigne && t.supabase && !estLunch(t) && deplacementLigne?.id !== t.id && (
+                                        <button
+                                          disabled={actionLigne?.id === t.id && actionLigne.enCours}
+                                          onClick={async () => {
+                                            setActionLigne({ id: t.id, enCours: true, erreur: "" });
+                                            try {
+                                              await onDeplacerLigne(t, jourChrono);
+                                              setActionLigne(null);
+                                            } catch (e2) {
+                                              setActionLigne({ id: t.id, enCours: false, erreur: e2?.message || "Déplacement impossible — réessaie." });
+                                            }
+                                          }}
+                                          title="Classer cette ligne à la date où son chrono a vraiment roulé (heures inchangées)"
+                                          className="rounded-md bg-amber-500 px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
+                                        >
+                                          {actionLigne?.id === t.id && actionLigne.enCours ? "…" : `Ramener au ${Number(jourChrono.slice(8, 10))}`}
+                                        </button>
+                                      )}
+                                      {actionLigne?.id === t.id && actionLigne.erreur && (
+                                        <span className="w-full text-[10px] font-bold text-red-600">⚠️ {actionLigne.erreur}</span>
+                                      )}
                                       {droitHeures === "direct" && onDeplacerLigne && t.supabase && !estLunch(t) && deplacementLigne?.id !== t.id && (
                                         <button
                                           onClick={() => { setDeplacementLigne({ id: t.id, date: t.date, erreur: "", enCours: false }); setErreurEdition(""); }}
@@ -1232,12 +1367,32 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                                             onChange={(ev) => setDeplacementLigne((p) => ({ ...p, date: ev.target.value, erreur: "" }))}
                                             className="rounded-md border border-slate-300 bg-white px-1.5 py-1 text-[11px]"
                                           />
+                                          {(() => {
+                                            const compagnons = deplacementLigne.date !== t.date ? compagnonsDeplacement(t, deplacementLigne.date) : [];
+                                            if (compagnons.length === 0) return null;
+                                            return (
+                                              <div className="w-full space-y-0.5">
+                                                <p className="text-[10px] font-bold text-blue-800">🚚 Chronométrés ce jour-là — déplacer aussi :</p>
+                                                {compagnons.map((c) => (
+                                                  <label key={c.id} className="flex items-center gap-1.5 text-[10px] text-slate-700">
+                                                    <input
+                                                      type="checkbox"
+                                                      checked={deplacementLigne.sans?.[c.id] !== true}
+                                                      onChange={(ev) => setDeplacementLigne((p) => ({ ...p, sans: { ...(p.sans || {}), [c.id]: !ev.target.checked } }))}
+                                                    />
+                                                    {c.titre || "Transport"} ({heureLocaleDe(c.debutReel)} → {heureLocaleDe(c.finReelle) || "?"}, {hM(c.heures)})
+                                                  </label>
+                                                ))}
+                                              </div>
+                                            );
+                                          })()}
                                           <button
                                             disabled={deplacementLigne.enCours || !deplacementLigne.date || deplacementLigne.date === t.date}
                                             onClick={async () => {
                                               setDeplacementLigne((p) => ({ ...p, enCours: true, erreur: "" }));
                                               try {
-                                                await onDeplacerLigne(t, deplacementLigne.date);
+                                                const suivent = compagnonsDeplacement(t, deplacementLigne.date).filter((c) => deplacementLigne.sans?.[c.id] !== true);
+                                                await deplacerAvecCompagnons(t, deplacementLigne.date, suivent);
                                                 setDeplacementLigne(null);
                                               } catch (e2) {
                                                 setDeplacementLigne((p) => ({ ...p, enCours: false, erreur: e2?.message || "Déplacement impossible — réessaie." }));
@@ -1255,9 +1410,70 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                                   )}
                                 </div>
                               </div>
+                              {trou && (
+                                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-amber-300 bg-amber-50/60 px-3 py-1">
+                                  <span className="text-[10px] font-bold text-amber-800">
+                                    ⏳ Trou de {hM(trou.min / 60)} ({heureLocaleDe(trou.de)} → {heureLocaleDe(trou.a)}) — aucune heure pointée
+                                  </span>
+                                  {droitHeures === "direct" && (
+                                    <button
+                                      disabled={ajoutEnCours}
+                                      onClick={() =>
+                                        enregistrerAjoutHeures(e, iso, {
+                                          titre: "",
+                                          categorie: "ccq",
+                                          projetId: trou.suivante.projetId || "",
+                                          secteur: trou.suivante.secteur === "residentiel" ? "residentiel" : "commercial",
+                                          debut: heureLocaleDe(trou.de),
+                                          fin: heureLocaleDe(trou.a),
+                                          note: "trou entre deux lignes comblé en transport journalier",
+                                        })
+                                      }
+                                      className="rounded-md bg-amber-500 px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
+                                    >
+                                      {ajoutEnCours ? "…" : "➕ Ajouter en transport journalier"}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                              </React.Fragment>
                             );
                           })}
                         </div>
+                        {!ajoutHeures && ajoutErreur && (
+                          <p className="mt-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] font-bold text-red-600">⚠️ {ajoutErreur}</p>
+                        )}
+                        {classeesAilleurs.length > 0 && (
+                          <div className="mt-2 space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-2">
+                            <p className="text-[10px] font-extrabold text-amber-800">⚠️ Chronométré CE jour-là, mais classé à une autre date :</p>
+                            {classeesAilleurs.map((l) => (
+                              <div key={l.id} className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-700">
+                                <span className="min-w-0 truncate">
+                                  {l.titre || "Travail"} — {heureLocaleDe(l.debutReel)} → {heureLocaleDe(l.finReelle) || "?"} ({hM(l.heures)}) · classé au{" "}
+                                  {new Date(`${l.date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" })}
+                                </span>
+                                {droitHeures === "direct" && onDeplacerLigne && (
+                                  <button
+                                    disabled={actionLigne?.id === l.id && actionLigne.enCours}
+                                    onClick={async () => {
+                                      setActionLigne({ id: l.id, enCours: true, erreur: "" });
+                                      try {
+                                        await onDeplacerLigne(l, iso);
+                                        setActionLigne(null);
+                                      } catch (e2) {
+                                        setActionLigne({ id: l.id, enCours: false, erreur: e2?.message || "Déplacement impossible — réessaie." });
+                                      }
+                                    }}
+                                    className="rounded-md bg-amber-500 px-2 py-1 text-[10px] font-bold text-white disabled:opacity-40"
+                                  >
+                                    {actionLigne?.id === l.id && actionLigne.enCours ? "…" : "Ramener ici"}
+                                  </button>
+                                )}
+                                {actionLigne?.id === l.id && actionLigne.erreur && <span className="w-full text-[10px] font-bold text-red-600">⚠️ {actionLigne.erreur}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {erreurEdition && (
                           <p className="mt-1.5 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] font-bold text-red-600">
                             ⚠️ {erreurEdition}
@@ -1270,6 +1486,9 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                           )}
                           <span>⚪ Transport : <span className="tabular-nums">{hM(tj.transport)}</span></span>
                           <span>🟡 Transport journalier : <span className="tabular-nums">{hM(tj.ccq)}</span></span>
+                          {tj.course > 0.004 && <span className="text-violet-700">🚗 Course : <span className="tabular-nums">{hM(tj.course)}</span></span>}
+                          {tj.administratif > 0.004 && <span className="text-sky-700">🔵 Administratif : <span className="tabular-nums">{hM(tj.administratif)}</span></span>}
+                          {tj.divers > 0.004 && <span className="text-stone-600">⚪ Divers : <span className="tabular-nums">{hM(tj.divers)}</span></span>}
                           {tj.diner < 0 && (
                             <span className="text-rose-600">🍴 Dîner (non payé) : <span className="tabular-nums">{hM(tj.diner)}</span></span>
                           )}
@@ -1306,17 +1525,20 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                                     className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold"
                                   >
                                     <option value="projet">🟢 Chantier</option>
+                                    <option value="transport">⚪ Transport (début / fin de journée)</option>
+                                    <option value="ccq">🟡 Transport journalier (entre deux clients)</option>
+                                    <option value="course">🚗 Course</option>
                                     <option value="administratif">🔵 Administratif</option>
                                     <option value="divers">⚪ Divers</option>
                                   </select>
-                                  {ajoutHeures.categorie === "projet" && (
+                                  {["projet", "transport", "ccq"].includes(ajoutHeures.categorie) && (
                                     <>
                                       <select
                                         value={ajoutHeures.projetId}
                                         onChange={(ev) => setAjoutHeures((p) => ({ ...p, projetId: ev.target.value }))}
                                         className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
                                       >
-                                        <option value="">Aucun projet (chantier hors projet)</option>
+                                        <option value="">{ajoutHeures.categorie === "projet" ? "Aucun projet (chantier hors projet)" : "Aucun projet"}</option>
                                         {(projets || []).filter((p) => p.statut !== "Terminé" && p.statut !== "Annulé").map((p) => (
                                           <option key={p.id} value={p.id}>🏗️ {p.nom}</option>
                                         ))}
