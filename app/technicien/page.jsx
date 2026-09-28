@@ -6220,7 +6220,12 @@ function AppTechnicien() {
                   typeTache: d.typeTache ?? locale.typeTache,
                   nonFacturable: d.nonFacturable ?? locale.nonFacturable,
                   categorieHeures: d.categorieHeures ?? locale.categorieHeures,
-                  unites: d.unites ?? locale.unites,
+                  // 🔧 Unités : ce que le TECHNICIEN a tapé (modèle, série,
+                  // emplacement) prime — la liste du bureau n'est reprise que
+                  // si la carte locale est encore vierge (2026-09-28, vécu :
+                  // `d.unites` vaut toujours [] et effaçait les Nº de série
+                  // à chaque rafraîchissement ; aucun bon n'en avait depuis le 22).
+                  unites: (locale.unites || []).some((u) => u && (u.modele || u.serie || u.emplacement)) ? locale.unites : d.unites,
                   ramassages: d.ramassages ?? locale.ramassages,
                   // Étapes : la liste du bureau fait foi ; une case cochée ici
                   // (pas encore partie) reste cochée.
