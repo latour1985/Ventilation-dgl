@@ -5,7 +5,7 @@
 // 🔐 DÉCONNEXION APRÈS INACTIVITÉ — BUREAU SEULEMENT (2026-09-29, demande
 // du propriétaire : « j'avais laissé ma session ouverte hier, ce matin elle
 // l'était encore »). Aucun clic, touche, défilement ni toucher pendant le
-// délai des Paramètres (2 h par défaut) → déconnexion. 2 minutes avant,
+// délai des Paramètres (30 min par défaut) → déconnexion. 2 minutes avant,
 // une fenêtre « Es-tu toujours là ? » avec « Je suis là ».
 //
 // L'activité est PARTAGÉE entre les onglets Fluxya du navigateur
@@ -28,7 +28,7 @@ const lireActivitePartagee = () => {
   }
 };
 
-export default function DeconnexionInactivite({ delaiMin = 120 }) {
+export default function DeconnexionInactivite({ delaiMin = 30 }) {
   const delaiMs = Math.max(0, Number(delaiMin) || 0) * 60 * 1000;
   const derniereRef = useRef(Date.now());
   const [resteMs, setResteMs] = useState(null); // null = pas d'avertissement

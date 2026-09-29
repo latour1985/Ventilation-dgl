@@ -845,7 +845,7 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               type="number"
               pas="15"
               unite="min"
-              aide="Sans clic ni touche pendant ce délai, le bureau se déconnecte tout seul (avertissement 2 minutes avant, avec « Je suis là »). Protège une session laissée ouverte la nuit. L'app des techniciens n'est jamais déconnectée (leurs chronos roulent). 0 = jamais. Par défaut : 120 (2 h)."
+              aide="Sans clic ni touche pendant ce délai, le bureau se déconnecte tout seul (avertissement 2 minutes avant, avec « Je suis là »). Protège une session laissée ouverte la nuit. L'app des techniciens n'est jamais déconnectée (leurs chronos roulent). 0 = jamais. Par défaut : 30."
             />
             {/* 📸 ENVOI AUTOMATIQUE DU BON AU CLIENT — quand le
                 technicien ferme la tâche, le descriptif public (photos,

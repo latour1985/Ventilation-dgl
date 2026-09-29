@@ -7048,3 +7048,17 @@ alter table public.entreprises add constraint entreprises_delai_inactivite_chk
 
 -- Vérification : une ligne par entreprise, 120 partout.
 select id, delai_inactivite_min from public.entreprises order by id;
+
+-- ============================================================
+-- 158 - DÉCONNEXION APRÈS INACTIVITÉ : 30 MIN PAR DÉFAUT (2026-09-29)
+-- ------------------------------------------------------------
+-- Règle de sécurité du propriétaire : toutes les entreprises à 30 min
+-- (déjà appliqué aux 4 fiches existantes le 2026-09-29) ; une NOUVELLE
+-- entreprise créée dans la console part aussi à 30.
+-- ============================================================
+alter table public.entreprises alter column delai_inactivite_min set default 30;
+
+-- Vérification : défaut 30, et 30 sur chaque fiche.
+select column_default from information_schema.columns
+ where table_schema = 'public' and table_name = 'entreprises' and column_name = 'delai_inactivite_min';
+select id, delai_inactivite_min from public.entreprises order by id;
