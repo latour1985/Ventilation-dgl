@@ -79,6 +79,7 @@ import { OngletDevis, ApercuBonCommande, ModalReportCatalogue, ModalTraiterDevis
 import { OngletFacturation, ModalFacturationDevis, ModalReviserPrixNonListe, ApercuFactureClient, FacturesEmisesListe, ModalChoixPaiementFacture, ModalRetraitFacturation } from "./OngletFacturation";
 import TourGuide, { tourDejaFait } from "./TourGuide";
 import Toasts from "@/components/Toasts";
+import DeconnexionInactivite from "@/components/DeconnexionInactivite";
 import RaccourcisClavier from "@/components/RaccourcisClavier";
 import { notifier } from "@/lib/toasts";
 import { navigationPermise } from "@/lib/gardeNonEnregistre";
@@ -3510,6 +3511,8 @@ function AppAdmin() {
         {/* 🔔 Bulles de confirmation + ⌨️ Échap / Ctrl+Entrée (2026-09-14). */}
         <Toasts />
         <RaccourcisClavier />
+        {/* 🔐 Déconnexion après inactivité (Paramètres, snippet 157). */}
+        <DeconnexionInactivite delaiMin={configEntreprise?.delaiInactiviteMin ?? 120} />
         {sessionPerdue && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center">

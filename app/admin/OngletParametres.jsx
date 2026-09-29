@@ -837,6 +837,16 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               unite="%"
               aide="Dans l'analyse de rentabilité (tuile « Marge moyenne » du tableau de bord), toute marge SOUS ce pourcentage s'affiche en rouge — jobs, clients, devis. Mets-y ta marge minimum acceptable."
             />
+            {/* 🔐 DÉCONNEXION APRÈS INACTIVITÉ (snippet 157, 2026-09-29). */}
+            <ChampParametre
+              {...propsChamp}
+              cle="delaiInactiviteMin"
+              libelle="Déconnexion après inactivité (bureau)"
+              type="number"
+              pas="15"
+              unite="min"
+              aide="Sans clic ni touche pendant ce délai, le bureau se déconnecte tout seul (avertissement 2 minutes avant, avec « Je suis là »). Protège une session laissée ouverte la nuit. L'app des techniciens n'est jamais déconnectée (leurs chronos roulent). 0 = jamais. Par défaut : 120 (2 h)."
+            />
             {/* 📸 ENVOI AUTOMATIQUE DU BON AU CLIENT — quand le
                 technicien ferme la tâche, le descriptif public (photos,
                 jamais de prix) part tout seul aux courriels cochés. */}

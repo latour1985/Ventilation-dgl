@@ -7034,3 +7034,17 @@ union all
 select 'déclencheur', event_object_table || ' · ' || trigger_name from information_schema.triggers
  where trigger_name in ('trg_report_semaine_payee', 'trg_proteger_facturation_bon') and event_manipulation = 'UPDATE'
 order by 1, 2;
+
+-- ============================================================
+-- 157 - DÉCONNEXION DU BUREAU APRÈS INACTIVITÉ (2026-09-29)
+-- ------------------------------------------------------------
+-- Délai en minutes, réglé dans Paramètres (par entreprise). 0 = jamais.
+-- Défaut : 120 (2 h). L'app technicien n'est jamais déconnectée.
+-- ============================================================
+alter table public.entreprises add column if not exists delai_inactivite_min integer not null default 120;
+alter table public.entreprises drop constraint if exists entreprises_delai_inactivite_chk;
+alter table public.entreprises add constraint entreprises_delai_inactivite_chk
+  check (delai_inactivite_min between 0 and 1440);
+
+-- Vérification : une ligne par entreprise, 120 partout.
+select id, delai_inactivite_min from public.entreprises order by id;
