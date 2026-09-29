@@ -3085,7 +3085,7 @@ function AppAdmin() {
     // les badges s'allument d'eux-mêmes dans Pièces en commande).
     const bcsAvecDepense = new Map();
     enrichies.forEach((t) => {
-      if (t.type !== "EXPENSE") return;
+      if (t.type !== "EXPENSE" || t.estCredit) return;
       const num = String(t.cible?.bc || t.poNumber || "").trim().toUpperCase();
       if (num) bcsAvecDepense.set(num, Number(t.amountHT) || 0);
     });

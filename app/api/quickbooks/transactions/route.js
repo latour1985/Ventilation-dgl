@@ -107,10 +107,13 @@ export async function GET(request) {
   const aujourdhui = dateLocale(new Date());
 
   try {
-    const [factures, achats, facturesFournisseurs] = await Promise.all([
+    const [factures, achats, facturesFournisseurs, creditsFournisseurs] = await Promise.all([
       requeteQbo(acces, `select * from Invoice where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`),
       requeteQbo(acces, `select * from Purchase where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`),
       requeteQbo(acces, `select * from Bill where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`),
+      // Notes de crédit fournisseurs : un échec ne doit jamais priver
+      // l'écran des factures et des dépenses.
+      requeteQbo(acces, `select * from VendorCredit where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`).catch(() => ({})),
     ]);
 
     const transactions = [
@@ -159,6 +162,25 @@ export async function GET(request) {
         amountTTC: Number(b.TotalAmt) || 0,
         status: statutDepuisSolde(b, aujourdhui),
         date: b.TxnDate || null,
+      })),
+      // 🧾 NOTES DE CRÉDIT FOURNISSEURS (VendorCredit, 2026-09-29, demande
+      // du propriétaire : items jamais livrés, crédités par le fournisseur).
+      // Une dépense NÉGATIVE : le même numéro de BC dans le mémo ou une
+      // description la rattache à la même job, et elle SOUSTRAIT du coût.
+      // `estCredit` : jamais prise pour « la facture réelle » d'un BC.
+      ...(creditsFournisseurs.VendorCredit || []).map((c) => ({
+        quickbooksId: `QBO-VCR-${c.Id}`,
+        type: "EXPENSE",
+        estCredit: true,
+        customerRefId: null,
+        fournisseurNomQb: c.VendorRef?.name || null,
+        qbProjectRef: null,
+        poNumber: null, // son « Nº de référence » est celui du crédit, pas notre BC
+        referenceTexte: texteCherchable(c),
+        amountHT: -montantHT(c),
+        amountTTC: -(Number(c.TotalAmt) || 0),
+        status: "PAID",
+        date: c.TxnDate || null,
       })),
     ];
 

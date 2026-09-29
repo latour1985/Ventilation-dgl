@@ -300,7 +300,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
     if (!n) return null;
     return (
       (transactionsQb || []).find(
-        (t) => t.type === "EXPENSE" && (String(t.cible?.bc || "").trim().toUpperCase() === n || String(t.poNumber || "").trim().toUpperCase() === n)
+        (t) => t.type === "EXPENSE" && !t.estCredit && (String(t.cible?.bc || "").trim().toUpperCase() === n || String(t.poNumber || "").trim().toUpperCase() === n)
       ) || null
     );
   };

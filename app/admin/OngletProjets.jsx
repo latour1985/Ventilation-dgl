@@ -584,7 +584,7 @@ export function OngletBonsCommandeProjet({ projet, onAjouterBC, onMajMateriel, r
   // de QuickBooks fait alors foi, jamais additionné au montant saisi).
   const depensesParBc = new Map(
     (transactionsQb || [])
-      .filter((t) => t.projectId === projet.id && t.type === "EXPENSE" && (t.poNumber || t.cible?.bc))
+      .filter((t) => t.projectId === projet.id && t.type === "EXPENSE" && !t.estCredit && (t.poNumber || t.cible?.bc))
       .map((t) => [String(t.cible?.bc || t.poNumber).trim().toUpperCase(), t])
   );
   const [bcFournisseurId, setBcFournisseurId] = useState("");
@@ -1786,10 +1786,10 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
                         {(t.type === "INVOICE" ? t.clientNomQb : t.fournisseurNomQb) || t.quickbooksId}
                       </span>
                       <span className="shrink-0 text-[10px] font-normal text-slate-400">
-                        · {t.type === "INVOICE" ? "Vente" : "Dépense"}{t.date ? ` · ${t.date}` : ""}
+                        · {t.type === "INVOICE" ? "Vente" : t.estCredit ? "Note de crédit fournisseur" : "Dépense"}{t.date ? ` · ${t.date}` : ""}
                       </span>
                     </span>
-                    <span className="shrink-0 font-bold tabular-nums text-slate-700">{t.amountHT.toFixed(2)} $ HT</span>
+                    <span className={`shrink-0 font-bold tabular-nums ${t.estCredit ? "text-emerald-700" : "text-slate-700"}`}>{t.amountHT.toFixed(2)} $ HT</span>
                   </div>
                   {((t.type === "INVOICE" ? t.clientNomQb : t.fournisseurNomQb) || t.poNumber || t.referenceTexte) && (
                     <p className="mt-0.5 truncate text-[10px] text-slate-400">

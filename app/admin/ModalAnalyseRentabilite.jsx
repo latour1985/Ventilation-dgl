@@ -25,7 +25,8 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
   const bcsFacturesQb = useMemo(() => {
     const set = new Set();
     (transactionsQb || []).forEach((t) => {
-      if (t.type !== "EXPENSE" || !t.cible) return;
+      // Une note de crédit seule ne remplace pas l'estimation du BC (2026-09-29).
+      if (t.type !== "EXPENSE" || !t.cible || t.estCredit) return;
       const num = t.cible.bc || t.poNumber;
       if (num) set.add(String(num).trim().toUpperCase());
     });

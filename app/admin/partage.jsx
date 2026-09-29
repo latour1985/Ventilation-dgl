@@ -1023,6 +1023,9 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
   const numeroBcNormalise = (v) => String(v || "").trim().toUpperCase();
   const depensesParNumeroBc = new Map();
   depensesQb.forEach((d) => {
+    // Une NOTE DE CRÉDIT fournisseur n'est jamais « la facture réelle » du
+    // BC : elle reste hors appariement et se SOUSTRAIT (2026-09-29).
+    if (d.estCredit) return;
     const num = numeroBcNormalise(d.poNumber);
     if (num) depensesParNumeroBc.set(num, d);
     // Le numéro était NOYÉ dans le mémo (factures fournisseurs) : la
