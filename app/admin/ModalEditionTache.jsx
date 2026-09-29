@@ -949,8 +949,10 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               >
                 <option value="">Aucun</option>
                 {devisProposes.map((d) => (
-                  <option key={d.id || d.numero} value={d.numero}>
-                    {d.numero}{d.clientNom ? ` — ${d.clientNom}` : ""}
+                  // 📄 Contrat pas encore signé : grisé (2026-09-29) — sauf
+                  // s'il est DÉJÀ celui de la tâche (on ne le fait pas disparaître).
+                  <option key={d.id || d.numero} value={d.numero} disabled={d.estContrat && d.statut !== "accepte" && d.numero !== tache.devisNumero}>
+                    {d.numero}{d.clientNom ? ` — ${d.clientNom}` : ""}{d.estContrat && d.statut !== "accepte" ? " — 📄 contrat en attente de signature" : ""}
                   </option>
                 ))}
               </select>

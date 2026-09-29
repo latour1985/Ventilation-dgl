@@ -1614,10 +1614,21 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // devis accepté doit être converti (bon de travail direct ou
   // nouveau projet d'envergure). `traite` distingue un devis accepté
   // mais pas encore converti d'un devis déjà traité.
-  const accepterDevis = (devis) => {
+  // 📄 Un CONTRAT marqué accepté au bureau = signature reçue hors ligne
+  // (papier ou autre) : on le demande en toutes lettres (2026-09-29).
+  const [contratAConfirmer, setContratAConfirmer] = useState(null);
+  const accepterDevis = (devis, signatureConfirmee = false) => {
+    if (devis.estContrat && !signatureConfirmee) {
+      setContratAConfirmer(devis);
+      return;
+    }
     setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? { ...d, statut: "accepte", traite: false } : d)));
     persisterDevis?.({ ...devis, statut: "accepte", traite: false });
-    ajouterJournal(`✅ Devis ${devis.numero} marqué accepté — prêt à être traité ("Traiter le devis")`);
+    ajouterJournal(
+      devis.estContrat
+        ? `📄 Contrat ${devis.numero} (${devis.clientNom || "client"}) marqué SIGNÉ par le bureau — signature reçue hors ligne (papier ou autre) ; en vigueur à compter d'aujourd'hui. Prêt à être traité.`
+        : `✅ Devis ${devis.numero} marqué accepté — prêt à être traité ("Traiter le devis")`
+    );
   };
 
   // OPTION A — Intervention directe : le devis devient un bon de
@@ -1937,6 +1948,21 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                         </span>
                       )}
                     </p>
+                    {/* 📄 CONTRAT : EN VIGUEUR SEULEMENT UNE FOIS SIGNÉ (2026-09-29,
+                        demande du propriétaire). Avant la signature, aucune
+                        tâche d'entretien ne peut s'y rattacher (agenda). */}
+                    {affichee.estContrat && (
+                      affichee.statut === "accepte" ? (
+                        <p className="mt-0.5 text-[11px] font-bold text-emerald-700">
+                          ✅ Contrat en vigueur
+                          {affichee.reponseClient === "accepte" && affichee.reponduLe
+                            ? ` depuis le ${String(affichee.reponduLe).slice(0, 10)}${affichee.reponduParNom ? ` — signé par ${affichee.reponduParNom}` : ""}`
+                            : " — signé hors ligne (marqué par le bureau)"}
+                        </p>
+                      ) : (
+                        <p className="mt-0.5 text-[11px] font-bold text-amber-700">⏳ Contrat en attente de signature — pas encore en vigueur</p>
+                      )
+                    )}
                     <p className="text-xs text-slate-500">{affichee.clientNom}</p>
                     {/* 🏠 L'adresse des travaux — l'identifiant le plus
                         parlant quand elle est là. */}
@@ -3237,6 +3263,34 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         </div>
       )}
 
+      {/* 📄 CONTRAT SIGNÉ HORS LIGNE — confirmation explicite (2026-09-29). */}
+      {contratAConfirmer && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setContratAConfirmer(null); }}>
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <h3 className="text-sm font-extrabold text-slate-900">📄 Contrat {contratAConfirmer.numero} signé ?</h3>
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+              Un contrat d&apos;entretien n&apos;est en vigueur qu&apos;une fois <strong>signé par le client</strong>. Normalement, il le signe
+              lui-même par le lien du courriel. Confirme seulement si tu as reçu sa signature <strong>autrement</strong> (papier, courriel,
+              etc.) : le contrat sera en vigueur à compter d&apos;aujourd&apos;hui, et c&apos;est noté au journal.
+            </p>
+            <div className="mt-4 grid gap-2">
+              <Button
+                onClick={() => {
+                  const d = contratAConfirmer;
+                  setContratAConfirmer(null);
+                  accepterDevis(d, true);
+                }}
+                className="min-h-0 py-2 text-xs"
+              >
+                ✅ Oui — contrat signé reçu (papier ou autre)
+              </Button>
+              <Button variant="outline" onClick={() => setContratAConfirmer(null)} className="min-h-0 py-2 text-xs">
+                Non — j&apos;attends sa signature en ligne
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {devisATraiter && (
         <ModalTraiterDevis
           devis={devisATraiter}

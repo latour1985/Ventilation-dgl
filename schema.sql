@@ -7062,3 +7062,83 @@ alter table public.entreprises alter column delai_inactivite_min set default 30;
 select column_default from information_schema.columns
  where table_schema = 'public' and table_name = 'entreprises' and column_name = 'delai_inactivite_min';
 select id, delai_inactivite_min from public.entreprises order by id;
+
+-- ============================================================
+-- 159 - CONTRAT D'ENTRETIEN : LA PAGE DU CLIENT LE SAIT (2026-09-29)
+-- ------------------------------------------------------------
+-- La page publique affichait « Devis » / « Accepter ce devis » même pour
+-- un contrat d'entretien périodique. On lui donne est_contrat et la
+-- fréquence de facturation : titre « Contrat », bouton « Signer le
+-- contrat », entrée en vigueur à la signature. Même définition que la
+-- version précédente (jeton = dossier, version active) + 2 colonnes à
+-- la FIN. Toujours aucun coûtant.
+-- ============================================================
+drop function if exists devis_public(text);
+create function devis_public(p_jeton text)
+returns table (
+  numero text, client_nom text, date_emission date,
+  lignes jsonb, total_vendant numeric,
+  statut text, reponse_client text, repondu_le timestamptz, expire boolean,
+  entreprise_id text,
+  entreprise_nom text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_taux_tps numeric,
+  entreprise_taux_tvq numeric,
+  entreprise_logo text,
+  entreprise_rbq text,
+  entreprise_associations jsonb,
+  entreprise_adresse text,
+  entreprise_site_web text,
+  entreprise_numero_tps text,
+  entreprise_numero_tvq text,
+  entreprise_neq text,
+  est_contrat boolean,
+  frequence_facturation integer
+)
+language sql security definer set search_path = public as $$
+  select
+    d.numero, d.client_nom, d.date_emission,
+    (select coalesce(jsonb_agg(jsonb_build_object(
+        'uid', l->>'uid', 'nom', l->>'nom', 'description', l->>'description',
+        'quantite', l->'quantite', 'prix_vendant', l->'prix_vendant')), '[]'::jsonb)
+     from jsonb_array_elements(d.lignes) l),
+    d.total_vendant, d.statut, d.reponse_client, d.repondu_le,
+    (porteur.jeton_expire_le is not null and porteur.jeton_expire_le < now()),
+    d.entreprise_id,
+    coalesce(e.nom_commercial, e.nom_legal),
+    e.telephone,
+    e.courriel,
+    e.taux_tps,
+    e.taux_tvq,
+    e.logo_donnees,
+    e.numero_rbq,
+    coalesce(e.associations, case when e.membre_cmmtq then '["cmmtq"]'::jsonb else '[]'::jsonb end),
+    e.adresse,
+    e.site_web,
+    e.numero_tps,
+    e.numero_tvq,
+    e.numero_neq,
+    coalesce(d.est_contrat, false),
+    d.frequence_facturation::integer
+  from devis_app porteur
+  join devis_app d
+    on coalesce(d.numero_base, d.numero) = coalesce(porteur.numero_base, porteur.numero)
+   and d.entreprise_id = porteur.entreprise_id
+   and d.version_active
+  left join entreprises e on e.id = d.entreprise_id
+  where porteur.jeton_public = p_jeton;
+$$;
+revoke all on function devis_public(text) from public;
+grant execute on function devis_public(text) to anon, authenticated;
+
+-- Vérification : la fonction existe avec ses 25 colonnes (dont les 2 nouvelles).
+select count(*) as nb_colonnes,
+       bool_or(parameter_name = 'est_contrat') as a_est_contrat,
+       bool_or(parameter_name = 'frequence_facturation') as a_frequence
+  from information_schema.parameters
+ where specific_schema = 'public'
+   and specific_name like 'devis_public\_%'
+   and specific_name not like 'devis_public\_options%'
+   and specific_name not like 'devis_public\_version%'
+   and parameter_mode = 'OUT';

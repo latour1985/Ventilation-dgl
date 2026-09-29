@@ -238,8 +238,20 @@ export default function PageDevisPublic({ params }) {
             </div>
           </div>
 
-          <h1 className="mt-4 text-2xl font-extrabold text-[#131B2E]">DEVIS {devis.numero}</h1>
+          {/* 📄 CONTRAT D'ENTRETIEN (snippet 159, 2026-09-29, demande du
+              propriétaire) : le client doit savoir qu'il SIGNE un contrat,
+              et qu'il n'est en vigueur qu'à sa signature. */}
+          <h1 className="mt-4 text-2xl font-extrabold text-[#131B2E]">
+            {devis.estContrat ? `CONTRAT D'ENTRETIEN PÉRIODIQUE ${devis.numero}` : `DEVIS ${devis.numero}`}
+          </h1>
           <p className="text-xs text-slate-500">Date : {devis.date}</p>
+          {devis.estContrat && (
+            <p className="mt-2 rounded-xl bg-purple-50 px-3 py-2 text-[12px] font-semibold leading-snug text-purple-900">
+              📄 Ce contrat entre en vigueur à la date de votre signature électronique ci-dessous
+              {devis.frequenceFacturation ? ` — facturé en ${devis.frequenceFacturation === 1 ? "1 versement par année" : `${devis.frequenceFacturation} versements par année`}` : ""}.
+              Tant qu&apos;il n&apos;est pas signé, aucun entretien n&apos;est planifié ni facturé.
+            </p>
+          )}
           <p className="mt-2 text-xs text-slate-500">Préparé pour</p>
           <p className="text-sm font-bold text-slate-800">{devis.clientNom}</p>
         </div>
@@ -416,9 +428,11 @@ export default function PageDevisPublic({ params }) {
             {dejaRepondu === "accepte" ? (
               <>
                 <CheckCircle2 size={34} className="mx-auto text-emerald-500" />
-                <p className="mt-3 text-lg font-extrabold text-slate-900">Devis accepté</p>
+                <p className="mt-3 text-lg font-extrabold text-slate-900">{devis.estContrat ? "Contrat signé" : "Devis accepté"}</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  Merci ! Nous avons reçu votre acceptation et communiquerons avec vous pour la suite.
+                  {devis.estContrat
+                    ? `Merci ! Votre contrat d'entretien est en vigueur${devis.reponduLe ? ` depuis le ${new Date(devis.reponduLe).toLocaleDateString("fr-CA", { day: "numeric", month: "long", year: "numeric" })}` : " à compter d'aujourd'hui"}. Nous communiquerons avec vous pour planifier le premier entretien.`
+                    : "Merci ! Nous avons reçu votre acceptation et communiquerons avec vous pour la suite."}
                 </p>
               </>
             ) : (
@@ -524,7 +538,9 @@ export default function PageDevisPublic({ params }) {
                         className="mt-0.5 h-5 w-5 shrink-0 accent-[#131B2E]"
                       />
                       <span className="text-[13px] font-semibold leading-snug text-slate-700">
-                        J&apos;ai lu et j&apos;accepte les termes et conditions générales ci-dessus.
+                        {devis.estContrat
+                          ? "J'ai lu et j'accepte le contrat d'entretien ci-dessus ainsi que les termes et conditions générales. Je comprends qu'il entre en vigueur à la date de ma signature."
+                          : "J'ai lu et j'accepte les termes et conditions générales ci-dessus."}
                       </span>
                     </label>
 
@@ -533,7 +549,7 @@ export default function PageDevisPublic({ params }) {
                       disabled={!accepte || nom.trim().length < 3 || envoi === "envoi"}
                       className="mt-3 min-h-[54px] w-full rounded-xl bg-emerald-600 text-base font-extrabold text-white active:scale-[0.99] disabled:opacity-40"
                     >
-                      {envoi === "envoi" ? "Envoi…" : "✓ Accepter ce devis"}
+                      {envoi === "envoi" ? "Envoi…" : devis.estContrat ? "✓ Signer le contrat" : "✓ Accepter ce devis"}
                     </button>
                     {/* L'aide nomme TOUJOURS ce qui manque (vécu : « JF »
                         cochée mais 2 lettres — bouton grisé sans un mot). */}

@@ -3532,11 +3532,13 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       // CONTRATS apparaissent en premier, clairement marqués.
                       .sort((a, b) => (nouveauType === "entretien_contrat" ? (b.estContrat ? 1 : 0) - (a.estContrat ? 1 : 0) : 0))
                       .map((d) => (
-                        <option key={d.id} value={d.id}>
+                        // 📄 Un CONTRAT pas encore signé n'est pas en vigueur :
+                        // grisé, impossible d'y rattacher une tâche (2026-09-29).
+                        <option key={d.id} value={d.id} disabled={d.estContrat && d.statut !== "accepte"}>
                           {/* 📍 L'adresse des travaux du devis dans le libellé
                               (2026-09-15, demande du propriétaire) — un client
                               à plusieurs adresses se choisit sans se tromper. */}
-                          {d.estContrat ? `📄 CONTRAT ${d.frequenceFacturationAnnuelle}×/an — ` : ""}{d.numero} — {d.clientNom}{d.adresseTravaux ? ` — 📍 ${d.adresseTravaux}` : ""}{Number(d.totalVendant) > 0 ? ` — ${Number(d.totalVendant).toFixed(0)} $` : ""}
+                          {d.estContrat ? `📄 CONTRAT ${d.frequenceFacturationAnnuelle}×/an${d.statut !== "accepte" ? " (⏳ en attente de signature)" : ""} — ` : ""}{d.numero} — {d.clientNom}{d.adresseTravaux ? ` — 📍 ${d.adresseTravaux}` : ""}{Number(d.totalVendant) > 0 ? ` — ${Number(d.totalVendant).toFixed(0)} $` : ""}
                         </option>
                       ))}
                   </select>

@@ -1967,7 +1967,7 @@ export function ApercuDevisClient({ devis, onFermer }) {
 
         <div className="rounded-xl border border-slate-200 p-5 text-sm">
           <EnTeteEntreprise />
-          <p className="mt-3 text-lg font-extrabold text-[#131B2E]">DEVIS {devis.numero}</p>
+          <p className="mt-3 text-lg font-extrabold text-[#131B2E]">{devis.estContrat ? "CONTRAT D'ENTRETIEN PÉRIODIQUE" : "DEVIS"} {devis.numero}</p>
           <p className="text-xs text-slate-500">Date : {devis.date}</p>
           {/* Exactement la même source que le PDF (AdressesPDF) : cet écran
               s'annonce comme « la version envoyée au client », il ne doit
