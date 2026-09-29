@@ -1114,7 +1114,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
         </button>
         {!estBureauSec && !lectureSeule && (
           <button
-            onClick={() => setModalFicheST({ nom: "", specialite: "", telephone: "", note: "", clientId: "" })}
+            onClick={() => setModalFicheST({ nom: "", specialite: "", telephone: "", courriel: "", note: "", clientId: "" })}
             className="sticky right-3 z-[1] shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600"
           >
             ➕ Sous-traitant
@@ -6082,18 +6082,68 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     <input type="tel" value={f.telephone} onChange={(e) => setModalFicheST({ ...f, telephone: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                   </div>
                 </div>
+                {/* 📧 COURRIEL (2026-09-29, demande du propriétaire) — la
+                    colonne existait depuis le snippet 75, sans champ. */}
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">Courriel</label>
+                  <input
+                    type="email"
+                    value={f.courriel || ""}
+                    onChange={(e) => setModalFicheST({ ...f, courriel: e.target.value })}
+                    placeholder="ex. info@isolationalgon.ca"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </div>
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-500">Aussi un client ?</label>
-                  <select
-                    value={f.clientId || ""}
-                    onChange={(e) => setModalFicheST({ ...f, clientId: e.target.value || "" })}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">— Aucun lien (sous-traitant seulement) —</option>
-                    {clientsTries.map((c) => (
-                      <option key={c.id} value={c.id}>{c.nom}</option>
-                    ))}
-                  </select>
+                  {/* 🔍 RECHERCHE EN TAPANT (2026-09-29, demande du propriétaire)
+                      — 1 481 clients dans une liste déroulante, c'était
+                      introuvable. Même principe que le client d'une tâche. */}
+                  {clientLie ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[#FF6A13] bg-orange-50 px-3 py-2">
+                      <span className="min-w-0 truncate text-sm font-bold text-slate-800">🔗 {nomAffichageClient(clientLie)}</span>
+                      <button
+                        type="button"
+                        onClick={() => setModalFicheST({ ...f, clientId: "", rechercheClient: "" })}
+                        className="shrink-0 text-[11px] font-bold text-slate-400 underline underline-offset-2"
+                      >
+                        retirer le lien
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        value={f.rechercheClient || ""}
+                        onChange={(e) => setModalFicheST({ ...f, rechercheClient: e.target.value })}
+                        placeholder="🔍 Tape le nom du client (laisser vide = aucun lien)"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                      {(f.rechercheClient || "").trim().length >= 2 && (() => {
+                        const q = f.rechercheClient.trim().toLowerCase();
+                        const trouves = clientsTries
+                          .filter((c) => `${c.nom} ${c.entreprise || ""} ${c.telephone || ""}`.toLowerCase().includes(q))
+                          .slice(0, 30);
+                        return (
+                          <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                            {trouves.length === 0 ? (
+                              <p className="px-2 py-2 text-xs text-slate-400">Aucun client trouvé.</p>
+                            ) : (
+                              trouves.map((c) => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => setModalFicheST({ ...f, clientId: c.id, rechercheClient: "" })}
+                                  className="block w-full truncate border-b border-slate-100 px-2 py-2 text-left text-xs font-semibold text-slate-700 last:border-0 hover:bg-orange-50"
+                                >
+                                  {nomAffichageClient(c)}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
                   <p className="mt-1 text-[10px] leading-snug text-slate-400">
                     {clientLie
                       ? `🔗 Lié à la fiche client « ${clientLie.nom} » — ses coordonnées font foi (une seule source de vérité).`
@@ -6111,6 +6161,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       nom: f.nom.trim(),
                       specialite: f.specialite.trim(),
                       telephone: f.telephone.trim(),
+                      courriel: (f.courriel || "").trim(),
                       note: f.note.trim(),
                       clientId: f.clientId || null,
                       actif: true,
