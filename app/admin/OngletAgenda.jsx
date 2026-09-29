@@ -1133,7 +1133,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   const jourLabel = jourAffiche.toLocaleDateString(localeDates, { weekday: "long", day: "numeric", month: "long" });
   const moisLabel = jourAffiche.toLocaleDateString(localeDates, { month: "long", year: "numeric" });
 
-  const semaine = Array.from({ length: 7 }, (_, i) => ajouterJours(jourAffiche, i - jourAffiche.getDay() + 1));
+  const semaine = Array.from({ length: 7 }, (_, i) => ajouterJours(jourAffiche, i - ((jourAffiche.getDay() + 6) % 7)));
   const mois = joursDuMois(jourAffiche);
   const joursAffiches = vue === "semaine" ? semaine : vue === "mois" ? mois : [];
   // 📦 COMMANDES À RECEVOIR PAR JOUR (2026-09-15, demande du propriétaire :
@@ -1196,7 +1196,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // retour du propriétaire : « quand on bouge les semaines on arrive au
   // mercredi ») — la grille montrait la bonne semaine mais l'en-tête
   // gardait le jour de départ. Même formule de lundi que la grille.
-  const lundiDe = (d) => ajouterJours(d, -d.getDay() + 1);
+  // Dimanche = 7e jour de SA semaine (2026-09-29, vécu : cliquer le
+  // dimanche 11 sautait à la semaine du 12 — getDay() vaut 0 le dimanche).
+  const lundiDe = (d) => ajouterJours(d, -((d.getDay() + 6) % 7));
   // ‹ › EN VUE JOUR = UNE SEMAINE (2026-09-17, demande du propriétaire :
   // la barre lun.–dim. choisit déjà le jour ; les flèches servaient à
   // avancer d'un jour, ce qui rendait l'autre semaine longue à atteindre).
