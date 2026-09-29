@@ -1262,8 +1262,48 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       .replace(/[̀-ͯ]/g, "")
       .replace(/\s+/g, " ");
 
+  // 🏗️ PROJET CRÉÉ AVEC LA TÂCHE — un seul chemin (2026-09-29, vécu JF
+  // sur Gestion MFV : le petit formulaire du projet rempli, puis « Créer la
+  // tâche » cliqué — le projet était ignoré en silence). Renvoie l'id du
+  // projet créé, ou null si le formulaire est incomplet.
+  const miniProjetValide = !!miniProjetNom.trim() && (Number(miniProjetFacture) || 0) > 0;
+  const creerMiniProjet = () => {
+    if (!miniProjetValide || !onCreerProjet) return null;
+    const nouveau = {
+      id: `projet-${Date.now()}`,
+      nom: miniProjetNom.trim(),
+      clientId: nouveauClientId,
+      adresseTravaux: null,
+      dateDebut: nouvelleDate || todayISO(),
+      dateFin: "",
+      secteur: nouveauSecteur === "residentiel" ? "residentiel" : "commercial",
+      statut: "À planifier",
+      budgetTotal: Number(miniProjetFacture) || 0,
+      tauxHoraireCoutant: 45,
+      bonsCommande: [],
+      ...(verifDevisQbo?.etat === "trouve" && numeroDevisExistant.trim() ? { devisNumero: numeroDevisExistant.trim() } : {}),
+      budgetPrevu: {
+        modeSimple: true,
+        mainOeuvreChantier: { heures: 0, facture: 0, coutant: 0 },
+        transport: { heures: 0, facture: 0, coutant: 0 },
+        materiaux: { facture: 0, coutant: 0 },
+        sousTraitants: [],
+        totalFacture: Number(miniProjetFacture) || 0,
+        totalCoutant: Number(miniProjetCoutant) || 0,
+        marge: (Number(miniProjetFacture) || 0) - (Number(miniProjetCoutant) || 0),
+      },
+    };
+    onCreerProjet(nouveau);
+    setNouveauProjetId(nouveau.id);
+    setMiniProjetOuvert(false);
+    ajouterJournal(`🏗️ Projet "${nouveau.nom}" créé avec la tâche — budget global ${(Number(miniProjetFacture) || 0).toFixed(2)} $.`);
+    return nouveau.id;
+  };
+
   const creerTache = (doublonAccepte = false) => {
     if (lectureSeule || !nouveauTitre.trim()) return;
+    // Formulaire de projet ouvert et complet : le projet naît avec la tâche.
+    const projetIdCree = !nouveauProjetId && miniProjetOuvert ? creerMiniProjet() : null;
     const client = clients.find((c) => c.id === nouveauClientId);
     if (!doublonAccepte) {
       const adresseVisee = normaliserTexte(
@@ -1321,7 +1361,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // rentabilité). Dès qu'un projet est choisi, cette tâche (et ses
       // heures une fois travaillée) sera prise en compte par
       // calculerRentabiliteProjet pour ce projet.
-      projetId: nouveauProjetId || null,
+      projetId: projetIdCree || nouveauProjetId || null,
       // Adresse des travaux — distincte de l'adresse de facturation du
       // client quand ce n'est pas la même. `null` = même adresse que la
       // facturation. Transmise à QuickBooks au moment de la facturation
@@ -1340,7 +1380,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       categorieHeures: estTypeSansHeures(nouveauType)
         ? "aucune"
         : nouveauType === "shop"
-        ? (nouveauProjetId ? "projet" : "divers")
+        ? (projetIdCree || nouveauProjetId ? "projet" : "divers")
         : nouveauType === "divers" || nouveauType === "course"
         ? "divers"
         : estTypeAdministratif(nouveauType) && !tempsSurProjet
@@ -1487,7 +1527,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     }
 
     const projetLie = projetsDisponibles.find((p) => p.id === nouveauProjetId);
-    const suffixeProjet = projetLie ? ` — lié au projet "${projetLie.nom}"` : "";
+    const suffixeProjet = projetLie ? ` — lié au projet "${projetLie.nom}"` : projetIdCree ? ` — lié au projet "${miniProjetNom.trim()}" (créé avec la tâche)` : "";
     const libelleType =
       nouveauType === "devis"
         ? (nouvelle.devisAFaire ? "Travaux avec devis — 📄 devis à faire plus tard" : `Travaux avec devis #${nouvelle.devisNumero}`)
@@ -3425,42 +3465,18 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                     <div className="grid grid-cols-2 gap-1.5">
                       <Button variant="outline" onClick={() => setMiniProjetOuvert(false)} className="min-h-0 py-1.5 text-[11px]">Annuler</Button>
                       <Button
-                        disabled={!miniProjetNom.trim() || (Number(miniProjetFacture) || 0) <= 0}
-                        onClick={() => {
-                          const nouveau = {
-                            id: `projet-${Date.now()}`,
-                            nom: miniProjetNom.trim(),
-                            clientId: nouveauClientId,
-                            adresseTravaux: null,
-                            dateDebut: nouvelleDate || todayISO(),
-                            dateFin: "",
-                            secteur: nouveauSecteur === "residentiel" ? "residentiel" : "commercial",
-                            statut: "À planifier",
-                            budgetTotal: Number(miniProjetFacture) || 0,
-                            tauxHoraireCoutant: 45,
-                            bonsCommande: [],
-                            ...(verifDevisQbo?.etat === "trouve" && numeroDevisExistant.trim() ? { devisNumero: numeroDevisExistant.trim() } : {}),
-                            budgetPrevu: {
-                              modeSimple: true,
-                              mainOeuvreChantier: { heures: 0, facture: 0, coutant: 0 },
-                              transport: { heures: 0, facture: 0, coutant: 0 },
-                              materiaux: { facture: 0, coutant: 0 },
-                              sousTraitants: [],
-                              totalFacture: Number(miniProjetFacture) || 0,
-                              totalCoutant: Number(miniProjetCoutant) || 0,
-                              marge: (Number(miniProjetFacture) || 0) - (Number(miniProjetCoutant) || 0),
-                            },
-                          };
-                          onCreerProjet(nouveau);
-                          setNouveauProjetId(nouveau.id);
-                          setMiniProjetOuvert(false);
-                          ajouterJournal(`🏗️ Projet "${nouveau.nom}" créé avec la tâche — budget global ${(Number(miniProjetFacture) || 0).toFixed(2)} $.`);
-                        }}
+                        disabled={!miniProjetValide}
+                        onClick={() => creerMiniProjet()}
                         className="min-h-0 py-1.5 text-[11px]"
                       >
                         Créer et rattacher
                       </Button>
                     </div>
+                    {!miniProjetValide && (
+                      <p className="text-[9px] font-semibold text-slate-500">
+                        Il manque : {[!miniProjetNom.trim() && "le nom du projet", !((Number(miniProjetFacture) || 0) > 0) && "le prix vendu"].filter(Boolean).join(" et ")}.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -4322,6 +4338,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       // crée pas une tâche avec un contact fantôme.
                       if (contactSurPlaceId === "nouveau" && (!contactNom.trim() || !contactTel.trim()))
                         raisons.push("le nom et le téléphone du nouveau contact sur place");
+                      // 🏗️ Projet commencé mais incomplet : on ne l'oublie plus en silence.
+                      if (miniProjetOuvert && !nouveauProjetId && !miniProjetValide)
+                        raisons.push("le projet commencé — son nom et son prix vendu (ou « Annuler » pour créer la tâche sans projet)");
                       // Choix 💰/🤝 obligatoire pour chaque technicien
                       // supplémentaire coché (2026-08-17) — les SOUS-
                       // TRAITANTS en sont exemptés (2026-08-19) : la
