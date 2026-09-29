@@ -10,7 +10,7 @@ import React, { useState } from "react";
 import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Pencil, Phone } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { joursBloques, cleJour, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
-import { dateISO, ajouterJours, dimancheDeSemaineISO, Button, DefilementHorizontal } from "./partage";
+import { dateISO, ajouterJours, dimancheDeSemaineISO, Button, DefilementHorizontal, transportQuotidienPayePour } from "./partage";
 
 // ============================================================
 // TABLEAU DE BORD (accueil — vue d'ensemble)
@@ -52,6 +52,8 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   // Action en un clic sur une ligne (« Ramener au … », trou comblé) :
   // { id, enCours, erreur } — l'erreur s'affiche collée à la ligne.
   const [actionLigne, setActionLigne] = useState(null);
+  // 🔎 Panneau « Vérification avant la paie » déplié ?
+  const [verifOuverte, setVerifOuverte] = useState(false);
   // 🚚 Les transports qui SUIVENT un déplacement (2026-09-28, vécu
   // Charles : sa journée ramenée au 22, son transport du matin resté au
   // 23). Transports de la même journée d'origine chronométrés à la date
@@ -394,6 +396,54 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       supplementaires: Math.max(0, e.total - seuilSupp),
     }))
     .sort((a, b) => a.nom.localeCompare(b.nom));
+
+  // 🔎 VÉRIFICATION AVANT LA PAIE (2026-09-29, demande du propriétaire) —
+  // tout ce qui cloche dans la semaine affichée, en une liste. Chaque
+  // point ouvre la journée concernée ; RIEN ne se corrige tout seul.
+  // (Fonction appelée au rendu du JSX : hM est déclarée plus bas.)
+  const calculerPointsAVerifier = () => {
+    const points = [];
+    const nomDe = (email) => nomPour(email, null);
+    journeesBloquees.forEach((j) =>
+      points.push({ cle: `bloq|${j.cle}`, email: j.email.toLowerCase(), iso: j.date, icone: "🔒", texte: `Journée bloquée (chrono oublié)${j.raison ? ` — ${j.raison}` : ""}` })
+    );
+    const propos = new Set();
+    lignesSemaineBrutes.forEach((l) => {
+      const email = l.employeEmail.toLowerCase();
+      if (l.heuresProposees != null && !propos.has(`${email}|${l.date}`)) {
+        propos.add(`${email}|${l.date}`);
+        points.push({ cle: `prop|${l.id}`, email, iso: l.date, icone: "⏳", texte: `Correction proposée pas encore validée — « ${l.titre || "ligne"} »` });
+      }
+      const jc = jourLocalDe(l.debutReel);
+      if (jc && jc !== l.date && !estLunch(l)) {
+        points.push({ cle: `date|${l.id}`, email, iso: l.date, icone: "📅", texte: `« ${l.titre || "ligne"} » chronométrée le ${jc}, classée au ${l.date}` });
+      }
+    });
+    employesSemaine.forEach((e) => {
+      const parDate = {};
+      e.details.forEach((l) => (parDate[l.date] = parDate[l.date] || []).push(l));
+      const fiche = (utilisateurs || []).find((u) => (u.courriel || "").toLowerCase() === e.email);
+      const transportAttendu = transportQuotidienPayePour(fiche, configEnt);
+      Object.entries(parDate).forEach(([iso, lignes]) => {
+        const chrono = lignes
+          .filter((l) => l.debutReel && l.finReelle && !estLunch(l))
+          .sort((a, b) => new Date(a.debutReel) - new Date(b.debutReel));
+        for (let i = 0; i < chrono.length - 1; i++) {
+          const a = chrono[i];
+          if (a.estTransport && /fin de journée/i.test(a.titre || "")) continue;
+          const min = Math.round((new Date(chrono[i + 1].debutReel) - new Date(a.finReelle)) / 60000);
+          if (min >= 10) points.push({ cle: `trou|${a.id}`, email: e.email, iso, icone: "⏳", texte: `Trou de ${hM(min / 60)} (${heureLocaleDe(a.finReelle)} → ${heureLocaleDe(chrono[i + 1].debutReel)})` });
+        }
+        const chantier = lignes.some((l) => !l.estTransport && !estLunch(l) && !estCourse(l) && (l.categorieHeures || "projet") === "projet");
+        if (transportAttendu && chantier && !lignes.some((l) => l.estTransport)) {
+          points.push({ cle: `transp|${e.email}|${iso}`, email: e.email, iso, icone: "🚚", texte: "Journée de chantier sans aucun transport" });
+        }
+      });
+    });
+    return points
+      .map((p) => ({ ...p, nom: nomDe(p.email) }))
+      .sort((a, b) => a.nom.localeCompare(b.nom) || a.iso.localeCompare(b.iso));
+  };
 
   const labelSemaine = `du ${jours[0].toLocaleDateString("fr-CA", { day: "numeric", month: "long" })} au ${jours[6].toLocaleDateString("fr-CA", { day: "numeric", month: "long" })}`;
 
@@ -1619,6 +1669,50 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                   );
                 })()}
 
+
+          {/* 🔎 VÉRIFICATION AVANT LA PAIE (2026-09-29) — une liste à
+              parcourir avant « Copier pour la paie » ; chaque point ouvre
+              la journée. Rien ne se corrige tout seul. */}
+          {(() => {
+            const points = calculerPointsAVerifier();
+            if (points.length === 0) {
+              return (
+                <p className="mb-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+                  ✅ Vérification avant la paie : rien à signaler cette semaine (aucune journée bloquée, aucun trou, aucune ligne mal datée, aucune correction en attente).
+                </p>
+              );
+            }
+            return (
+              <div className="mb-2 rounded-xl border border-amber-300 bg-amber-50">
+                <button
+                  onClick={() => setVerifOuverte((v) => !v)}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-extrabold text-amber-800"
+                >
+                  <span>🔎 Vérification avant la paie — {points.length} point{points.length > 1 ? "s" : ""} à regarder</span>
+                  <span className="text-[11px] font-bold underline">{verifOuverte ? "Replier" : "Voir la liste"}</span>
+                </button>
+                {verifOuverte && (
+                  <div className="space-y-1 border-t border-amber-200 px-3 py-2">
+                    {points.map((p) => (
+                      <button
+                        key={p.cle}
+                        onClick={() => setDetailJour({ email: p.email, iso: p.iso })}
+                        className="flex w-full items-center gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left text-[11px] text-slate-700 hover:bg-amber-100"
+                      >
+                        <span className="shrink-0">{p.icone}</span>
+                        <span className="shrink-0 font-bold">{p.nom}</span>
+                        <span className="shrink-0 capitalize text-slate-500">
+                          {new Date(`${p.iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "short", day: "numeric" })}
+                        </span>
+                        <span className="min-w-0 truncate">{p.texte}</span>
+                      </button>
+                    ))}
+                    <p className="pt-1 text-[10px] text-amber-700">Clique un point pour ouvrir la journée. Ce qui est normal (ex. pause, technicien à pied) peut simplement être ignoré.</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-[11px] text-slate-400">

@@ -598,7 +598,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null, descriptionTache = null, calculerFacturationDevis = null }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null, descriptionTache = null, calculerFacturationDevis = null, indicateurs = [], historique = [] }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -971,6 +971,32 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
         ) : (
           <div className="mb-3 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-800">
             Révision déjà validée — tes lignes sont rechargées telles quelles. Corrige, puis revalide : le nouveau total remplace l&apos;ancien. Rien n&apos;est encore facturé.
+          </div>
+        )}
+
+        {/* 🏷️ Indicateurs (2026-09-29) — ce qui change la façon de facturer. */}
+        {indicateurs.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1">
+            {indicateurs.map((i) => (
+              <span key={i.cle} title={i.title} className={`rounded-full border px-2 py-0.5 text-[11px] font-extrabold ${i.cls}`}>{i.txt}</span>
+            ))}
+          </div>
+        )}
+
+        {/* 🕘 AUTRES JOBS DU CLIENT (2026-09-29) — « l'avais-je déjà mis non
+            facturable ? » : la réponse est ici, sans chercher ailleurs. */}
+        {historique.length > 0 && (
+          <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3">
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">🕘 Autres jobs de ce client (± 45 jours)</p>
+            <div className="mt-1 space-y-0.5">
+              {historique.map((h) => (
+                <p key={h.cle} className="flex items-baseline gap-2 text-[11px]">
+                  <span className="shrink-0 tabular-nums text-slate-400">{h.date}</span>
+                  <span className="min-w-0 flex-1 truncate text-slate-700">{h.titre}</span>
+                  <span className={`shrink-0 font-bold ${h.etat.cls}`}>{h.etat.txt}</span>
+                </p>
+              ))}
+            </div>
           </div>
         )}
 
@@ -1932,7 +1958,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, tachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
   // 🌎 Traduction (tranche facturation, 2026-09-14) — nommée `tr` car le
   // fichier utilise `t` comme variable de boucle (bons/travaux).
   const { t: tr } = useLangue();
@@ -2653,6 +2679,62 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // Catégorie d'un bon — reprend exactement la même logique que les
   // encadrés ci-dessous, pour que le filtrage par clic reste toujours
   // cohérent avec les compteurs affichés.
+  // 🏷️ INDICATEURS D'UN BON (2026-09-29, demande du propriétaire) — ce
+  // qui change la façon de facturer, affiché EN HAUT de la carte et de la
+  // fenêtre Réviser : aide interne, tâche non facturable, garantie, dépôt
+  // perçu. (Appelée au rendu — les fonctions plus bas sont prêtes.)
+  const indicateursBon = (b) => {
+    const liste = [];
+    const tache = b?.tacheId && tachePour ? tachePour(String(b.tacheId).split("::")[0]) : null;
+    if (tache?.nonFacturable) liste.push({ cle: "nonfact", txt: "🚫 Tâche NON facturable", cls: "border-slate-400 bg-slate-100 text-slate-700", title: "La tâche a été marquée non facturable à l'agenda." });
+    if (b?.garantie || tache?.garantie || b?.retraitRaison === "garantie") liste.push({ cle: "garantie", txt: "🛡️ Garantie", cls: "border-sky-300 bg-sky-50 text-sky-800", title: "Retour sous garantie." });
+    const aides = (b?.equipe || []).filter((e) => facturablesAssignations[`${b.tacheId || ""}|${(e.courriel || "").toLowerCase()}`] === false);
+    if (aides.length > 0) liste.push({ cle: "aide", txt: `🤝 Aide interne : ${aides.map((e) => e.nom).join(", ")}`, cls: "border-slate-300 bg-slate-50 text-slate-600", title: "Ces heures ne sont pas suggérées au client." });
+    const depot = b?.tacheId ? depotPayePour(b.tacheId) : null;
+    if (depot) liste.push({ cle: "depot", txt: `💵 Dépôt perçu ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT`, cls: "border-emerald-300 bg-emerald-50 text-emerald-800", title: "Un dépôt payé d'avance couvre une partie (ou la totalité) de cette job." });
+    return liste;
+  };
+  // 🕘 HISTORIQUE DU CLIENT (2026-09-29, vécu Alexandre Adou : « il me
+  // semble que je l'avais mis non facturable ») — les autres jobs du même
+  // client, 45 jours avant/après ce bon, avec leur état de facturation.
+  // Les tâches sans bon (non facturables, visites) viennent des heures.
+  const historiqueClientPour = (bon) => {
+    if (!bon?.client) return [];
+    const base = (id) => String(id || "").split("::")[0];
+    const ici = base(bon.tacheId || bon.id);
+    const ref = new Date(`${bon.date || dateISO(new Date())}T12:00:00`);
+    const proche = (d) => d && Math.abs(new Date(`${d}T12:00:00`) - ref) <= 45 * 86400000;
+    const etiquette = (b) => {
+      const c = categorieBon(b);
+      if (c === "retire") return { txt: `Retiré${b.retraitRaison ? ` (${b.retraitRaison.replace(/_/g, " ")})` : ""}`, cls: "text-slate-500" };
+      if (c === "facture") return { txt: "Facturé", cls: "text-emerald-700" };
+      if (c === "rouge") return { txt: "À réviser", cls: "text-red-600" };
+      return { txt: "Prêt à facturer", cls: "text-amber-700" };
+    };
+    const lignes = [];
+    const vues = new Set([ici]);
+    bonsGroupes
+      .filter((b) => b.client === bon.client && proche(b.date) && !vues.has(base(b.tacheId || b.id)))
+      .forEach((b) => {
+        vues.add(base(b.tacheId || b.id));
+        const tache = tachePour ? tachePour(base(b.tacheId)) : null;
+        const e = tache?.nonFacturable ? { txt: "Non facturable", cls: "text-slate-600" } : etiquette(b);
+        lignes.push({ cle: `b-${b.id}`, date: b.date, titre: b.projet || "Travail", etat: e });
+      });
+    (travaux || [])
+      .filter((t) => t.clientNom === bon.client && proche(t.date) && !vues.has(base(t.tacheId)))
+      .forEach((t) => {
+        vues.add(base(t.tacheId));
+        const tache = tachePour ? tachePour(base(t.tacheId)) : null;
+        lignes.push({
+          cle: `t-${t.id}`,
+          date: t.date,
+          titre: t.titre || "Travail",
+          etat: tache?.nonFacturable ? { txt: "Non facturable", cls: "text-slate-600" } : { txt: "Pas de bon (pas encore fermé ?)", cls: "text-slate-400" },
+        });
+      });
+    return lignes.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 10);
+  };
   const categorieBon = (b) => {
     if (b.statutQb === "retire") return "retire";
     if (b.statutQb === "envoye") return "facture";
@@ -4639,6 +4721,17 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
               <div className="min-w-[230px] flex-1">
                 <p className="text-sm font-bold text-slate-900">{b.projet}</p>
                 <p className="text-xs text-slate-500">{b.client} · {b.date}</p>
+                {(() => {
+                  const ind = indicateursBon(b);
+                  if (ind.length === 0) return null;
+                  return (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {ind.map((i) => (
+                        <span key={i.cle} title={i.title} className={`rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${i.cls}`}>{i.txt}</span>
+                      ))}
+                    </div>
+                  );
+                })()}
                 {/* ÉQUIPE — visible seulement quand ils sont plusieurs.
                     Les heures s'additionnent (elles vont au coût du
                     projet), mais le montant facturé reste unique : le
@@ -5271,6 +5364,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {bonAReviser && (
         <ModalReviserPrixNonListe
           bon={bonAReviser}
+          indicateurs={indicateursBon(bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser)}
+          historique={historiqueClientPour(bonAReviser)}
           onCouvertParDepot={() => {
             const b = bonAReviser;
             const depot = depotPayePour(b.tacheId);

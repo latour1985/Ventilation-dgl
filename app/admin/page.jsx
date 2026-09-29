@@ -4215,6 +4215,7 @@ function AppAdmin() {
           // révision montre ce que le bureau avait demandé, pas
           // seulement le rapport du technicien.
           descriptionTachePour={(tacheId) => tacheParId(tacheId)?.description || null}
+          tachePour={(tacheId) => tacheParId(tacheId)}
           zonePourTache={(tacheId) => {
             if (!tacheId) return null;
             for (const valeur of Object.values(planning)) {

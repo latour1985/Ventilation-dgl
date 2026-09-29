@@ -38,7 +38,7 @@ export async function GET(request) {
   const admin = clientSupabaseService();
   let requete = admin
     .from("bons_travail")
-    .select("tache_id, titre, client_nom, date_travail, adresse_travaux, description, employe_nom, employe_email, photos")
+    .select("tache_id, titre, client_nom, date_travail, adresse_travaux, description, employe_nom, employe_email, photos, unites, modele_unite, serie_unite")
     .eq("entreprise_id", entrepriseDuCompte(utilisateur))
     .order("date_travail", { ascending: false })
     .limit(400);
@@ -80,5 +80,25 @@ export async function GET(request) {
     });
     if (visites.length >= 20) break;
   }
-  return Response.json({ visites, critere: parAdresse.length > 0 ? "adresse" : "client" });
+  // 🔧 UNITÉS DÉJÀ NOTÉES À CETTE ADRESSE (2026-09-29, demande du
+  // propriétaire) — proposées au technicien dans « Unité vérifiée ».
+  // SEULEMENT la même adresse des travaux, jamais le repli « même client »
+  // (règle : pas de risque d'erreur de localisation). Plus récente d'abord.
+  const unitesAdresse = [];
+  for (const b of parAdresse) {
+    const liste = Array.isArray(b.unites) && b.unites.length > 0 ? b.unites : b.modele_unite || b.serie_unite ? [{ modele: b.modele_unite, serie: b.serie_unite }] : [];
+    for (const u of liste) {
+      const modele = String(u?.modele || "").trim();
+      const serie = String(u?.serie || "").trim();
+      if (!modele && !serie) continue;
+      const k = `${modele.toLowerCase()}|${serie.toLowerCase()}`;
+      const existe = unitesAdresse.find((x) => x.cle === k);
+      if (existe) {
+        if (!existe.emplacement && u?.emplacement) existe.emplacement = String(u.emplacement).trim();
+        continue;
+      }
+      unitesAdresse.push({ cle: k, modele, serie, emplacement: String(u?.emplacement || "").trim(), vueLe: b.date_travail });
+    }
+  }
+  return Response.json({ visites, critere: parAdresse.length > 0 ? "adresse" : "client", unitesAdresse: unitesAdresse.slice(0, 12) });
 }

@@ -3765,6 +3765,67 @@ function ListeRamassage({ tache, session, enLigne, lectureSeule }) {
 }
 
 // ============================================================
+// 🔧 UNITÉS DÉJÀ NOTÉES À CETTE ADRESSE (2026-09-29, demande du
+// propriétaire) — relevées sur les bons précédents à la MÊME adresse des
+// travaux (jamais « même client, autre adresse »). Un toucher = l'unité
+// s'ajoute à « Unité vérifiée » avec son vrai Nº de série : fini de le
+// retaper (et les fautes dans le registre du client). Rien ne s'ajoute
+// tout seul ; hors ligne, la section ne s'affiche pas.
+// ============================================================
+function UnitesDejaNotees({ tache, session, enLigne, presentes, onChoisir }) {
+  const [unites, setUnites] = useState([]);
+  const adresse = tache?.adresseIntervention || tache?.adresseTravaux || "";
+  useEffect(() => {
+    if (!adresse || !enLigne) return;
+    let annule = false;
+    (async () => {
+      try {
+        const jeton = session?.access_token || (await supabase.auth.getSession()).data?.session?.access_token;
+        if (!jeton) return;
+        const q = new URLSearchParams({ adresse, client: "", exclure: String(tache?.tacheOrigineId || tache?.id || "") });
+        const r = await fetch(`/api/taches/historique?${q.toString()}`, { headers: { Authorization: `Bearer ${jeton}` } });
+        const j = await r.json().catch(() => ({}));
+        if (!annule && r.ok) setUnites(Array.isArray(j.unitesAdresse) ? j.unitesAdresse : []);
+      } catch {}
+    })();
+    return () => {
+      annule = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adresse, enLigne]);
+  const norm = (s) => String(s || "").trim().toLowerCase();
+  const restantes = unites.filter(
+    (u) => !(presentes || []).some((p) => p && norm(p.modele) === norm(u.modele) && norm(p.serie) === norm(u.serie))
+  );
+  if (restantes.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-sky-200 bg-sky-50 p-2.5">
+      <p className="text-[11px] font-extrabold text-sky-800">🔧 Déjà notées à cette adresse — touche celle que tu vérifies :</p>
+      <div className="mt-1.5 space-y-1.5">
+        {restantes.map((u) => (
+          <button
+            key={u.cle}
+            type="button"
+            onClick={() => onChoisir(u)}
+            className="flex min-h-[44px] w-full items-center justify-between gap-2 rounded-lg border border-sky-200 bg-white px-2.5 py-1.5 text-left"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-xs font-bold text-slate-800">
+                {u.modele || "Modèle ?"} · Nº {u.serie || "?"}
+              </span>
+              <span className="block truncate text-[10px] text-slate-500">
+                {u.emplacement ? `${u.emplacement} · ` : ""}vue le {u.vueLe}
+              </span>
+            </span>
+            <span className="shrink-0 text-lg font-bold text-sky-700">＋</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // 🕘 DÉJÀ VENUS À CETTE ADRESSE (2026-09-22, demande du propriétaire :
 // « voir les anciennes notes ou photos reliées à l'adresse »). Section
 // repliée dans la fiche de la tâche ; à l'ouverture, la route
@@ -5277,6 +5338,19 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 Aucun numéro à prendre, ou déjà pris
               </span>
             </label>
+
+            {!tache.aucunNumero && (
+              <UnitesDejaNotees
+                tache={tache}
+                session={session}
+                enLigne={enLigne}
+                presentes={tache.unites || []}
+                onChoisir={(u) => {
+                  const actuelles = (tache.unites || []).filter((x) => x && (x.modele || x.serie || x.emplacement));
+                  onMajTache(tache.id, { unites: [...actuelles, { modele: u.modele, serie: u.serie, ...(u.emplacement ? { emplacement: u.emplacement } : {}) }] });
+                }}
+              />
+            )}
 
             {/* PLUSIEURS UNITÉS — un immeuble peut avoir trois rooftops,
                 une résidence une thermopompe et un échangeur d'air. Un
@@ -7193,6 +7267,34 @@ function AppTechnicien() {
   };
   const retourAccueil = () => setVue("accueil");
 
+  // 📅 TÂCHE D'UN AUTRE JOUR (2026-09-29, demande du propriétaire — vécu
+  // Charles le 22 : il a démarré les cartes du 23, la paie a dû être
+  // corrigée au bureau). Au PREMIER « Débuter » d'une carte prévue un
+  // autre jour, une question avant de partir le chrono. Transport : on
+  // propose plutôt celui d'aujourd'hui (chaque jour a le sien).
+  const [autreJourPour, setAutreJourPour] = useState(null); // { id, suite }
+  const demarrerAvecVerifDate = (t, suite) => {
+    const aujourdhui = isoLocal(new Date());
+    const premierDepart = t && t.etat === "a_faire" && !t.debutReel && !(t.tempsAccumuleSec > 0);
+    if (premierDepart && t.date && t.date !== aujourdhui && t.momentTransport !== "ccq") {
+      setAutreJourPour({ id: t.id, suite });
+      return;
+    }
+    suite();
+  };
+  const journaliserBureau = async (texte) => {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const jeton = data?.session?.access_token;
+      if (!jeton) return;
+      fetch("/api/journal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jeton}` },
+        body: JSON.stringify({ action: "ajouter", texte }),
+      }).catch(() => {});
+    } catch {}
+  };
+
   // Réponse à « As-tu dîné ? » (une fois par journée, au démarrage du
   // Transport — Fin de journée). LUNCH = une ligne de temps NÉGATIF (la
   // pause non payée) part vers le bureau (visible dans « Heures de la
@@ -7421,16 +7523,18 @@ function AppTechnicien() {
         ) : tacheActive.type === "transport" ? (
           <TacheTransport
             tache={tacheActive}
-            onDemarrer={() => {
-              // TRANSPORT FIN DE JOURNÉE : avant de partir, une question —
-              // « As-tu dîné ? » (une seule fois par journée). Lunch = 30
-              // minutes non payées retirées de la journée.
-              if (tacheActive.momentTransport === "fin" && !tacheActive.lunchReponse) {
-                setModalLunchPour(tacheActive.id);
-                return;
-              }
-              demarrerTache(tacheActive.id);
-            }}
+            onDemarrer={() =>
+              demarrerAvecVerifDate(tacheActive, () => {
+                // TRANSPORT FIN DE JOURNÉE : avant de partir, une question —
+                // « As-tu dîné ? » (une seule fois par journée). Lunch = 30
+                // minutes non payées retirées de la journée.
+                if (tacheActive.momentTransport === "fin" && !tacheActive.lunchReponse) {
+                  setModalLunchPour(tacheActive.id);
+                  return;
+                }
+                demarrerTache(tacheActive.id);
+              })
+            }
             onPause={() => mettreEnPause(tacheActive.id)}
             onReprendre={() => demarrerTache(tacheActive.id)}
             onTerminer={() => terminerTache(tacheActive.id)}
@@ -7443,7 +7547,7 @@ function AppTechnicien() {
         ) : (
           <BonDeTravail
             tache={tacheActive}
-            onDemarrer={() => demarrerTache(tacheActive.id)}
+            onDemarrer={() => demarrerAvecVerifDate(tacheActive, () => demarrerTache(tacheActive.id))}
             onPause={() => mettreEnPause(tacheActive.id)}
             onReprendre={() => demarrerTache(tacheActive.id)}
             onTerminer={() => terminerTache(tacheActive.id)}
@@ -7519,6 +7623,80 @@ function AppTechnicien() {
               setFermetureEquipePour(null);
             }}
           />
+        );
+      })()}
+
+      {autreJourPour && (() => {
+        const t = taches.find((x) => x.id === autreJourPour.id);
+        if (!t) return null;
+        const aujourdhui = isoLocal(new Date());
+        const jourLong = (iso) => dateDepuisIso(iso).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
+        // Transport : celui d'AUJOURD'HUI, même moment (début/fin), s'il existe.
+        const transportDuJour =
+          t.type === "transport"
+            ? taches.find((x) => x.type === "transport" && x.momentTransport === t.momentTransport && x.date === aujourdhui && x.id !== t.id)
+            : null;
+        const fermer = () => setAutreJourPour(null);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+              <h3 className="text-base font-extrabold text-slate-900">📅 Cette {t.type === "transport" ? "carte de transport" : "tâche"} n&apos;est pas pour aujourd&apos;hui</h3>
+              <p className="mt-2 text-sm text-slate-600">
+                « {t.titre || "Tâche"} » est prévue le <strong className="capitalize">{jourLong(t.date)}</strong>.
+                Aujourd&apos;hui, c&apos;est le <span className="capitalize">{jourLong(aujourdhui)}</span>.
+              </p>
+              <div className="mt-4 space-y-2">
+                {transportDuJour ? (
+                  <button
+                    onClick={() => {
+                      fermer();
+                      ouvrirTache(transportDuJour.id);
+                    }}
+                    className="min-h-[52px] w-full rounded-xl bg-[#131B2E] text-sm font-bold text-white"
+                  >
+                    🚗 Ouvrir le transport d&apos;aujourd&apos;hui
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      const suite = autreJourPour.suite;
+                      fermer();
+                      journaliserBureau(
+                        `📅 ${nomTechnicien || session?.user?.email || "Un technicien"} a démarré AUJOURD'HUI (${aujourdhui}) « ${t.titre || "tâche"} »${t.clientNom ? ` (${t.clientNom})` : ""}, prévue le ${t.date} — ses heures seront datées d'aujourd'hui ; déplacer le bloc à l'agenda au besoin.`
+                      );
+                      suite();
+                    }}
+                    className="min-h-[52px] w-full rounded-xl bg-[#FF6A13] text-sm font-bold text-white"
+                  >
+                    Oui, je la commence aujourd&apos;hui
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    fermer();
+                    setDateSelectionnee(new Date());
+                    retourAccueil();
+                  }}
+                  className="min-h-[48px] w-full rounded-xl border border-slate-300 text-sm font-bold text-slate-700"
+                >
+                  ← Voir mes tâches d&apos;aujourd&apos;hui
+                </button>
+                {transportDuJour && (
+                  <button
+                    onClick={() => {
+                      const suite = autreJourPour.suite;
+                      fermer();
+                      journaliserBureau(`📅 ${nomTechnicien || session?.user?.email || "Un technicien"} a démarré AUJOURD'HUI (${aujourdhui}) le « ${t.titre || "transport"} » prévu le ${t.date}.`);
+                      suite();
+                    }}
+                    className="w-full py-1 text-[11px] font-semibold text-slate-400 underline"
+                  >
+                    Démarrer celui-ci quand même
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         );
       })()}
 
