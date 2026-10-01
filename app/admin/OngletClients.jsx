@@ -175,7 +175,7 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, 
             )}
             {affichee.traite && (
               <p className="mt-1 text-[9px] font-bold text-blue-600">
-                ✓ Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
+                ✓ Traité — {String(affichee.modeTraitement || "").startsWith("joint_tache") ? "📎 joint à une autre tâche (facturé à part)" : affichee.modeTraitement === "projet" ? "converti en projet" : "converti en bon de travail"}
               </p>
             )}
             <div className="mt-1.5 flex gap-1.5">

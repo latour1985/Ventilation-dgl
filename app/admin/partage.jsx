@@ -1474,6 +1474,89 @@ function ChampTexteLocal({ valeur, onValeur, ...props }) {
 // via onNouvelle). Une fois choisie : ligne orange + « changer », et les
 // petits champs facultatifs (petit nom, app.) se modifient APRÈS coup.
 //   choisie : { type: "dossier", adresse } | { type: "nouvelle", label } | null
+// 📎 DEVIS JOINTS À UNE TÂCHE (2026-10-01, demande du propriétaire :
+// « joindre plusieurs devis sur la même tâche, ou des devis QuickBooks »).
+// Le devis PRINCIPAL reste `devisNumero` (rien ne change pour lui) ; les
+// AUTRES devis faits à la même visite vivent dans `devisJoints` (liste
+// de numéros). Règle du propriétaire : UNE FACTURE PAR DEVIS — chaque
+// devis joint aura sa propre carte en Facturation.
+//   devisDuClient : devis Fluxya du client (versions actives)
+//   exclure       : le numéro du devis principal
+export function lignesSansPrixDevis(devis) {
+  return (devis?.lignes || []).map((l) => ({ nom: l.nom, quantite: l.quantite, unite: l.unite || "" }));
+}
+export function EditeurDevisJoints({ joints = [], onChange, devisDuClient = [], exclure = null, compact = false }) {
+  const [numeroQb, setNumeroQb] = useState("");
+  const pris = new Set([...(joints || []), exclure].filter(Boolean).map((n) => String(n).trim().toUpperCase()));
+  const offerts = (devisDuClient || []).filter((d) => d.versionActive !== false && !pris.has(String(d.numero || "").trim().toUpperCase()));
+  const ajouter = (numero) => {
+    const n = String(numero || "").trim();
+    if (!n || pris.has(n.toUpperCase())) return;
+    onChange([...(joints || []), n]);
+  };
+  const t = compact ? "text-[10px]" : "text-[11px]";
+  return (
+    <div className="mt-1.5 rounded-lg border border-dashed border-blue-300 bg-blue-50/40 p-2">
+      <p className={`${t} font-bold text-blue-900`}>📎 Autres devis faits à la même visite <span className="font-normal text-blue-700">— optionnel · une facture par devis</span></p>
+      {(joints || []).length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {joints.map((n) => {
+            const d = (devisDuClient || []).find((x) => String(x.numero).trim().toUpperCase() === String(n).trim().toUpperCase());
+            return (
+              <span key={n} className={`flex items-center gap-1 rounded-full border border-blue-300 bg-white px-2 py-0.5 ${t} font-bold text-blue-900`}>
+                📎 {n}{d ? (Number(d.totalVendant) > 0 ? ` — ${Number(d.totalVendant).toFixed(0)} $` : "") : " (QuickBooks)"}
+                <button type="button" onClick={() => onChange(joints.filter((x) => x !== n))} aria-label={`Retirer ${n}`} className="font-extrabold text-slate-400 hover:text-red-600">
+                  ✕
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <select
+          value=""
+          onChange={(e) => ajouter(e.target.value)}
+          className={`min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1 ${t}`}
+        >
+          <option value="">➕ Joindre un devis Fluxya du client…</option>
+          {offerts.map((d) => (
+            <option key={d.id || d.numero} value={d.numero} disabled={d.estContrat && d.statut !== "accepte"}>
+              {d.numero}{d.adresseTravaux ? ` — 📍 ${d.adresseTravaux}` : ""}{Number(d.totalVendant) > 0 ? ` — ${Number(d.totalVendant).toFixed(0)} $` : ""}{d.statut === "accepte" ? " ✅" : ""}{d.estContrat && d.statut !== "accepte" ? " (contrat non signé)" : ""}
+            </option>
+          ))}
+        </select>
+        <div className="flex gap-1">
+          <input
+            value={numeroQb}
+            onChange={(e) => setNumeroQb(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                ajouter(numeroQb);
+                setNumeroQb("");
+              }
+            }}
+            placeholder="ou Nº QuickBooks (ex. s3155)"
+            className={`w-40 rounded-lg border border-slate-300 bg-white px-2 py-1 ${t}`}
+          />
+          <button
+            type="button"
+            disabled={!numeroQb.trim()}
+            onClick={() => {
+              ajouter(numeroQb);
+              setNumeroQb("");
+            }}
+            className={`rounded-lg border border-slate-300 bg-white px-2 py-1 ${t} font-bold text-slate-600 disabled:opacity-40`}
+          >
+            Joindre
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SelecteurAdresseTravaux({ client, choisie, onChoisirDossier, onNouvelle, onAucune, onModifierChoisie = null, enfants = null, indice = null, compact = false }) {
   if (choisie) {
     const libelle =

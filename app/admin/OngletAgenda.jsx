@@ -13,7 +13,7 @@ import { Briefcase, Car, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, Ma
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritConfirmationRdv } from "@/lib/courriels";
-import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
+import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, majDonneesTousLesTechniciens, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { estCourrielST } from "@/lib/supabase/sousTraitants";
 import { estFerieCcq, marqueurCcq } from "@/lib/calendrierCcq";
 import { useLangue } from "@/lib/i18n";
@@ -27,7 +27,7 @@ import { annulerFactureDepot, envoyerFactureQbo, lireEstimateQbo } from "@/lib/q
 import { ModalEditionTache } from "./ModalEditionTache";
 import { ModalTourneeRamassage } from "./ModalTourneeRamassage";
 import { ModalEditionClient, ModalNouveauClient } from "./OngletClients";
-import { completerTacheDepuisFiche, AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour, bcEstAsap, bcEstRamassage } from "./partage";
+import { EditeurDevisJoints, lignesSansPrixDevis, completerTacheDepuisFiche, AutocompleteAdresse, Button, EditeurEtapesJob, SelecteurAdresseTravaux, adresseFacturationClient, courrielDefautClient, FREQUENCES_CONTRAT, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, ajouterJours, cleTacheDesHeures, dateISO, estTypeSansClient, indexCaseHeure, libelleAdresse, listeCellule, nomAffichageClient, tachesDuJourPourEmploye, todayISO, zonesEffectives, transportQuotidienPayePour, bcEstAsap, bcEstRamassage } from "./partage";
 
 export function texteDevisPourDescription(devis) {
   return (devis?.lignes || [])
@@ -396,7 +396,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null, onMajRamassageBc = null, ramassagesAttribuer = [] }) {
+export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null, onMajRamassageBc = null, ramassagesAttribuer = [] }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -866,6 +866,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setDepotRequis(nouveauType === "appel_service" && configEnt?.appelsDepotDefaut !== false);
   }, [nouveauType]);
   const [nouveauDevisId, setNouveauDevisId] = useState("");
+  // 📎 Autres devis de la même visite (2026-10-01) — une facture par devis.
+  const [devisJoints, setDevisJoints] = useState([]);
   const [nouvelleFrequence, setNouvelleFrequence] = useState(4);
   const [nouveauProjetId, setNouveauProjetId] = useState(""); // "" = Aucun / Projet général
   // 🏗️ Mini-panneau « créer un projet pour cette tâche » (2026-09-03).
@@ -932,6 +934,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setContactRole("");
     setContactTel("");
     setNouveauDevisId("");
+    setDevisJoints([]);
     // Les items du devis de l'ANCIEN client sortent de la description —
     // le texte tapé à la main, lui, reste.
     if (dernierTexteDevisRef.current) {
@@ -1528,11 +1531,34 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       nouvelle.devisNumero = numeroDevisExistant.trim();
     }
 
+    // 📎 AUTRES DEVIS DE LA MÊME VISITE (2026-10-01) — leurs items (sans
+    // prix) s'ajoutent à la description et à « Voir le devis » du
+    // téléphone ; chacun aura SA facture (carte à part en Facturation).
+    const jointsRetenus = nouveauType === "devis"
+      ? devisJoints.filter((n) => n && n !== nouvelle.devisNumero)
+      : [];
+    if (jointsRetenus.length > 0) {
+      nouvelle.devisJoints = jointsRetenus;
+      nouvelle.devisJointsLignes = jointsRetenus.map((n) => {
+        const d = devisListe.find((x) => x.numero === n && x.versionActive !== false) || devisListe.find((x) => x.numero === n);
+        return { numero: n, lignes: d ? lignesSansPrixDevis(d) : [] };
+      });
+      const textes = jointsRetenus
+        .map((n) => {
+          const d = devisListe.find((x) => x.numero === n && x.versionActive !== false) || devisListe.find((x) => x.numero === n);
+          const texte = d ? texteDevisPourDescription(d) : "";
+          return `📎 Devis ${n}${texte ? `\n${texte}` : " (QuickBooks)"}`;
+        })
+        .join("\n\n");
+      nouvelle.description = nouvelle.description ? `${nouvelle.description}\n\n${textes}` : textes;
+    }
+
     const projetLie = projetsDisponibles.find((p) => p.id === nouveauProjetId);
     const suffixeProjet = projetLie ? ` — lié au projet "${projetLie.nom}"` : projetIdCree ? ` — lié au projet "${miniProjetNom.trim()}" (créé avec la tâche)` : "";
     const libelleType =
       nouveauType === "devis"
-        ? (nouvelle.devisAFaire ? "Travaux avec devis — 📄 devis à faire plus tard" : `Travaux avec devis #${nouvelle.devisNumero}`)
+        ? (nouvelle.devisAFaire ? "Travaux avec devis — 📄 devis à faire plus tard" : `Travaux avec devis #${nouvelle.devisNumero}`) +
+          (jointsRetenus.length > 0 ? ` + devis joint${jointsRetenus.length > 1 ? "s" : ""} ${jointsRetenus.map((n) => `#${n}`).join(", ")} (une facture par devis)` : "")
         : nouveauType === "entretien_contrat"
         ? (nouvelle.devisNumero ? `Entretien selon contrat #${nouvelle.devisNumero}, ${nouvelleFrequence} factures/an` : `Entretien sans contrat (prix à réviser à la facturation), ${nouvelleFrequence} factures/an`)
         : TYPES_TACHE.find((t) => t.id === nouveauType).label;
@@ -1676,6 +1702,9 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ajouterJournal(`📋 Tâche créée — ${libelleType}${client?.nom ? ` (${client.nom})` : ""}${suffixeProjet}`);
     }
 
+    // 📎 Les devis joints sont planifiés : marqués traités (page.jsx).
+    if (jointsRetenus.length > 0) onDevisJoints?.(jointsRetenus, nouvelle);
+
     viderFormulaireTache();
   };
 
@@ -1700,6 +1729,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
     setNouvelleDescription("");
     setNouvelleNoteBureau("");
     setNouveauDevisId("");
+    setDevisJoints([]);
     dernierTexteDevisRef.current = "";
     setNouvelleFrequence(4);
     setNouveauProjetId("");
@@ -2292,6 +2322,8 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       // ✅ Étapes de la job — clé absente = inchangées.
       ...(champs.etapes !== undefined ? { etapes: champs.etapes } : {}),
       ...(champs.noteBureau !== undefined ? { noteBureau: champs.noteBureau } : {}),
+      // 📎 Devis joints — clé absente = inchangés.
+      ...(champs.devisJoints !== undefined ? { devisJoints: champs.devisJoints, devisJointsLignes: champs.devisJointsLignes || [] } : {}),
     };
     if (champs.employeId) {
       // « conserver » : une modification/un déplacement ne repose jamais
@@ -2314,7 +2346,7 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau, devisJoints, devisJointsLignes }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2349,7 +2381,14 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
       ...(devisNumero !== undefined && devisNumero && /^Devis .+ — Intervention$/.test(tache.titre || "")
         ? { titre: `Devis ${devisNumero} — Intervention` }
         : {}),
+      // 📎 Devis joints — clé absente = inchangés.
+      ...(devisJoints !== undefined ? { devisJoints, devisJointsLignes: devisJointsLignes || [] } : {}),
     };
+    if (devisJoints !== undefined) {
+      const avant = new Set(Array.isArray(tache.devisJoints) ? tache.devisJoints : []);
+      const ajoutes = devisJoints.filter((n) => !avant.has(n));
+      if (ajoutes.length > 0) onDevisJoints?.(ajoutes, tacheMiseAJour);
+    }
     // Assignation multiple : tous les techniciens cochés reçoivent la
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
     // individuellement en cliquant son bloc dans la grille.
@@ -3660,6 +3699,18 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
                       : "Pour la transition : le numéro suivra la tâche jusqu'au bon de travail et à la facturation, et son contenu sera relu depuis QuickBooks au moment de facturer."}
                   </p>
                 </div>
+              )}
+
+              {/* 📎 AUTRES DEVIS DE LA MÊME VISITE (2026-10-01) — une facture
+                  par devis (règle du propriétaire). */}
+              {nouveauType === "devis" && nouveauClientId && (
+                <EditeurDevisJoints
+                  joints={devisJoints}
+                  onChange={setDevisJoints}
+                  devisDuClient={devisListe.filter((d) => d.clientId === nouveauClientId)}
+                  exclure={(devisListe.find((d) => d.id === nouveauDevisId)?.numero) || numeroDevisExistant.trim() || null}
+                  compact
+                />
               )}
 
               <div>
@@ -5928,6 +5979,26 @@ export function OngletAgenda({ tachesAttente, setTachesAttente, planning, setPla
             // Rattachements : UNE fois pour la tâche (pas par technicien).
             if (champs.projetId !== undefined || champs.devisNumero !== undefined) {
               appliquerRattachements(tacheDetailOuverte.tache, champs);
+            }
+            // 📎 DEVIS JOINTS (2026-10-01) : TOUTE l'équipe les reçoit — la
+            // grille du bureau et la fiche de chaque téléphone.
+            if (champs.devisJoints !== undefined) {
+              const t0 = tacheDetailOuverte.tache;
+              const complement = { devisJoints: champs.devisJoints, devisJointsLignes: champs.devisJointsLignes || [] };
+              setPlanning((prev) => {
+                const copie = { ...prev };
+                Object.keys(copie).forEach((cle) => {
+                  const liste = listeCellule(copie[cle]);
+                  if (liste.some((x) => x.id === t0.id)) copie[cle] = liste.map((x) => (x.id === t0.id ? { ...x, ...complement } : x));
+                });
+                return copie;
+              });
+              majDonneesTousLesTechniciens(t0.id, complement).catch(() =>
+                ajouterJournal(`⚠️ Devis joints de « ${t0.titre || t0.clientNom} » affichés ici, mais NON transmis à tous les téléphones — réessaie.`)
+              );
+              const avant = new Set(Array.isArray(t0.devisJoints) ? t0.devisJoints : []);
+              const ajoutes = champs.devisJoints.filter((n) => !avant.has(n));
+              if (ajoutes.length > 0) onDevisJoints?.(ajoutes, { ...t0, ...complement });
             }
             // Modification groupée : chaque technicien coché reçoit les
             // mêmes date/heure/durée/description — sur SES plages (son

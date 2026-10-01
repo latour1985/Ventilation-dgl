@@ -2099,7 +2099,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                 )}
                 {affichee.traite && (
                   <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">
-                    <CheckCircle2 size={11} /> Traité — {affichee.modeTraitement === "projet" ? "converti en projet" : affichee.modeTraitement === "vente_directe" ? `vente directe, facturé${affichee.factureVenteDirecte?.docNumber ? ` (nº ${affichee.factureVenteDirecte.docNumber})` : ""}` : "converti en bon de travail"}
+                    <CheckCircle2 size={11} /> Traité — {String(affichee.modeTraitement || "").startsWith("joint_tache") ? `📎 joint à la tâche${String(affichee.modeTraitement).split(":")[1] ? ` du devis ${String(affichee.modeTraitement).split(":")[1]}` : ""} — facturé à part` : affichee.modeTraitement === "projet" ? "converti en projet" : affichee.modeTraitement === "vente_directe" ? `vente directe, facturé${affichee.factureVenteDirecte?.docNumber ? ` (nº ${affichee.factureVenteDirecte.docNumber})` : ""}` : "converti en bon de travail"}
                   </span>
                 )}
 

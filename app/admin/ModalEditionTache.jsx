@@ -12,7 +12,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
+import { EditeurDevisJoints, lignesSansPrixDevis, AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
@@ -136,6 +136,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [projetLie, setProjetLie] = useState(tache.projetId || "");
   const [devisLie, setDevisLie] = useState(tache.devisNumero || "");
   const [devisSaisiMain, setDevisSaisiMain] = useState("");
+  // 📎 Autres devis de la même visite (2026-10-01) — une facture par devis.
+  const [devisJointsEdit, setDevisJointsEdit] = useState(Array.isArray(tache.devisJoints) ? tache.devisJoints : []);
   // Projets proposés : ceux du client de la tâche d'abord ; les autres
   // restent accessibles (un chantier peut être ouvert sous une société
   // mère). Un projet terminé n'est plus proposé, mais s'il est déjà lié
@@ -343,6 +345,16 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       ...((projetLie || "") !== (tache.projetId || "") ? { projetId: projetLie || null } : {}),
       ...((devisSaisiMain.trim() || devisLie || "") !== (tache.devisNumero || "")
         ? { devisNumero: devisSaisiMain.trim() || devisLie || null }
+        : {}),
+      // 📎 Devis joints — transmis seulement s'ils ont changé.
+      ...(JSON.stringify(devisJointsEdit) !== JSON.stringify(Array.isArray(tache.devisJoints) ? tache.devisJoints : [])
+        ? {
+            devisJoints: devisJointsEdit,
+            devisJointsLignes: devisJointsEdit.map((n) => {
+              const d = (devisListe || []).find((x) => x.numero === n && x.versionActive !== false) || (devisListe || []).find((x) => x.numero === n);
+              return { numero: n, lignes: d ? lignesSansPrixDevis(d) : [] };
+            }),
+          }
         : {}),
       // Autres techniciens cochés dans « Appliquer la modification à… » —
       // ils reçoivent les mêmes date/heure/durée/description sur leurs plages.
@@ -962,6 +974,15 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                 placeholder="…ou un numéro de devis fait hors de l'application"
                 className="mt-1.5 w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
               />
+              {/* 📎 AUTRES DEVIS DE LA MÊME VISITE (2026-10-01). */}
+              {(tache.typeTache === "devis" || devisJointsEdit.length > 0) && (
+                <EditeurDevisJoints
+                  joints={devisJointsEdit}
+                  onChange={setDevisJointsEdit}
+                  devisDuClient={(devisListe || []).filter((d) => !tache.clientId || !d.clientId || d.clientId === tache.clientId)}
+                  exclure={devisSaisiMain.trim() || devisLie || null}
+                />
+              )}
 
               {rattachementChange && (
                 <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-800">

@@ -7142,3 +7142,54 @@ select count(*) as nb_colonnes,
    and specific_name not like 'devis_public\_options%'
    and specific_name not like 'devis_public\_version%'
    and parameter_mode = 'OUT';
+
+-- ============================================================
+-- 160 - DEVIS JOINTS : LE RATTACHEMENT NE TOUCHE PAS LEURS BONS (2026-10-01)
+-- ------------------------------------------------------------
+-- Une tâche peut porter d'AUTRES devis faits à la même visite ; chacun a
+-- son propre bon (courriel synthétique « devis::<numéro> ») pour être
+-- facturé à part (règle du propriétaire : une facture par devis).
+-- Changer le devis PRINCIPAL d'une tâche ne doit plus réécrire le numéro
+-- de ces bons-là — seul le projet les suit. Même fonction qu'au
+-- snippet 141, une condition de plus.
+-- ============================================================
+create or replace function rattacher_tache_lot(
+  p_tache_id text,
+  p_maj_projet boolean default false,
+  p_projet_id text default null,
+  p_toutes_categories boolean default false,
+  p_maj_devis boolean default false,
+  p_devis_numero text default null
+)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  n integer := 0;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  if p_maj_projet then
+    update travaux_effectues
+       set projet_id = nullif(p_projet_id, '')
+     where entreprise_id = ent
+       and (tache_id = p_tache_id or tache_id like p_tache_id || '::%')
+       and (p_toutes_categories or coalesce(categorie_heures, 'projet') = 'projet');
+    get diagnostics n = row_count;
+  end if;
+  if p_maj_projet or p_maj_devis then
+    update bons_travail
+       set projet_id = case when p_maj_projet then nullif(p_projet_id, '') else projet_id end,
+           devis_numero = case
+             when p_maj_devis and coalesce(employe_email, '') not like 'devis::%' then nullif(p_devis_numero, '')
+             else devis_numero
+           end
+     where tache_id = p_tache_id and entreprise_id = ent;
+  end if;
+  return n;
+end;
+$$;
+revoke all on function rattacher_tache_lot(text, boolean, text, boolean, boolean, text) from public, anon;
+grant execute on function rattacher_tache_lot(text, boolean, text, boolean, boolean, text) to authenticated;
+
+-- Vérification : la nouvelle condition est bien dans la fonction (true).
+select position('devis::' in pg_get_functiondef('public.rattacher_tache_lot(text,boolean,text,boolean,boolean,text)'::regprocedure)) > 0 as protege_les_devis_joints;

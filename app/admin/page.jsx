@@ -25,7 +25,7 @@ import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, 
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA, deplacerLigneHeures, rattacherTacheLot } from "@/lib/supabase/travauxEffectues";
-import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock } from "@/lib/supabase/bonsTravail";
+import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock, creerBonDevisJoint } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
 import { bonsARamasser, calculerTournees, tacheDeTournee, ramassagesAAttribuer, PREFIXE_TOURNEE } from "@/lib/tourneesRamassage";
@@ -3365,6 +3365,41 @@ function AppAdmin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, accesCharge, accesPerso]);
 
+  // 📎 BONS DES DEVIS JOINTS (2026-10-01, règle du propriétaire : « une
+  // facture par devis »). Dès que le bon PRINCIPAL d'une tâche existe et
+  // que la tâche porte des devis joints, un bon par devis joint est créé
+  // à côté (0 h, même preuve) — chacun aura sa carte et sa facture en
+  // Facturation. Bureau seulement ; un 2e poste ne crée pas de doublon
+  // (clé unique + ignoreDuplicates) ; la mémoire évite de réessayer en boucle.
+  const bonsJointsTentesRef = useRef(new Set());
+  useEffect(() => {
+    if (!session || !accesCharge) return;
+    const { role: r } = permissionsEffectives(accesPerso, session);
+    if (r !== "Admin principal" && r !== "Admin régulier") return;
+    const norm = (n) => String(n || "").trim().toUpperCase();
+    const vus = new Set();
+    (bons || []).forEach((b) => {
+      if (!b.supabase || b.estDevisJoint || !b.tacheId || vus.has(b.tacheId)) return;
+      vus.add(b.tacheId);
+      const tache = tacheParId(String(b.tacheId).split("::")[0]);
+      const joints = Array.isArray(tache?.devisJoints) ? tache.devisJoints : [];
+      joints.forEach((n) => {
+        if (!n || norm(n) === norm(b.devisNumero)) return;
+        if ((bons || []).some((x) => x.estDevisJoint && x.tacheId === b.tacheId && norm(x.devisNumero) === norm(n))) return;
+        const cle = `${b.tacheId}#${norm(n)}`;
+        if (bonsJointsTentesRef.current.has(cle)) return;
+        bonsJointsTentesRef.current.add(cle);
+        creerBonDevisJoint(b, n)
+          .then(() => ajouterJournal(`📎 Bon du devis joint ${n} créé à côté de « ${b.projet} » (${b.client}) — sa propre carte en Facturation, une facture par devis.`))
+          .catch((e) => {
+            bonsJointsTentesRef.current.delete(cle);
+            ajouterJournal(`⚠️ Bon du devis joint ${n} (« ${b.projet} ») NON créé — ${e?.message || "connexion impossible"}. Il sera retenté.`);
+          });
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bons, planning, tachesAttente, session, accesCharge, accesPerso]);
+
   if (!authVerifie) {
     return <SqueletteAdmin />;
   }
@@ -4029,6 +4064,24 @@ function AppAdmin() {
           planning={planning}
           setPlanning={setPlanning}
           statutsAssignations={statutsAssignations}
+          onDevisJoints={(numeros, tache) => {
+            // 📎 DEVIS JOINTS À UNE TÂCHE (2026-10-01) : ils sont planifiés —
+            // marqués « traités » pour qu'on ne les convertisse pas une 2e
+            // fois. Sauvegarde directe (pas de miroir QuickBooks : rien ne
+            // change dans le devis lui-même).
+            const voulus = new Set((numeros || []).map((n) => String(n).trim().toUpperCase()));
+            const mode = `joint_tache:${tache?.devisNumero || ""}`;
+            const touches = (devisListe || []).filter((d) => d.versionActive !== false && voulus.has(String(d.numero || "").trim().toUpperCase()) && !d.traite);
+            if (touches.length === 0) return;
+            const ids = new Set(touches.map((d) => d.id));
+            setDevisListe((prev) => prev.map((d) => (ids.has(d.id) ? { ...d, traite: true, modeTraitement: mode } : d)));
+            touches.forEach((d) =>
+              sauvegarderDevis({ ...d, traite: true, modeTraitement: mode }).catch(() =>
+                ajouterJournal(`⚠️ Devis ${d.numero} joint à « ${tache?.titre || "la tâche"} » à l'écran, mais NON marqué traité en base — réessaie.`)
+              )
+            );
+            ajouterJournal(`📎 Devis ${touches.map((d) => d.numero).join(", ")} joint${touches.length > 1 ? "s" : ""} à « ${tache?.titre || "la tâche"} »${tache?.devisNumero ? ` (avec ${tache.devisNumero})` : ""} — une facture par devis.`);
+          }}
           onCreerProjet={(p) => {
             setProjets((prev) => [...prev, p]);
             sauvegarderProjet(p).catch(() =>

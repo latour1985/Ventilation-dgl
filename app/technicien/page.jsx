@@ -5136,7 +5136,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
 
         {/* DEVIS LIÉ — le numéro est cliquable et ouvre la fenêtre de
             consultation (items et quantités SEULEMENT, jamais de prix). */}
-        {tache.devisNumero && (
+        {(tache.devisNumero || (tache.devisJoints || []).length > 0) && (
           <button
             onClick={() => setModaleDevis(true)}
             className="flex w-full items-center justify-between rounded-2xl border border-purple-200 bg-purple-50 p-4 text-left active:scale-[0.99]"
@@ -5144,8 +5144,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             <span className="flex items-center gap-2">
               <FileText size={16} className="shrink-0 text-purple-600" />
               <span>
-                <span className="block text-xs font-bold uppercase tracking-wide text-purple-700">Devis lié aux travaux</span>
-                <span className="block text-sm font-extrabold text-purple-900">Devis #{tache.devisNumero}</span>
+                <span className="block text-xs font-bold uppercase tracking-wide text-purple-700">
+                  {(tache.devisJoints || []).length > 0 ? `${1 + tache.devisJoints.length} devis liés aux travaux` : "Devis lié aux travaux"}
+                </span>
+                <span className="block text-sm font-extrabold text-purple-900">
+                  {[tache.devisNumero, ...(tache.devisJoints || [])].filter(Boolean).map((n) => `#${n}`).join(" · ")}
+                </span>
               </span>
             </span>
             <span className="rounded-full bg-purple-600 px-3 py-1 text-[11px] font-bold text-white">Voir le devis</span>
@@ -5208,7 +5212,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             <div className="max-h-[80vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-extrabold text-slate-900">Devis #{tache.devisNumero}</h3>
+                  <h3 className="text-sm font-extrabold text-slate-900">{tache.devisNumero ? `Devis #${tache.devisNumero}` : "Devis liés"}</h3>
                   <p className="text-[11px] text-slate-500">Items et quantités — les prix sont gérés par l'administration.</p>
                 </div>
                 <button onClick={() => setModaleDevis(false)} aria-label="Fermer">
@@ -5231,6 +5235,33 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                   {tache.description || "Le détail de ce devis n'a pas été transmis avec la tâche — demande à l'administration de la réassigner."}
                 </p>
               )}
+              {/* 📎 AUTRES DEVIS DE LA MÊME VISITE (2026-10-01) — à la suite,
+                  chacun sous son numéro, toujours sans prix. */}
+              {(tache.devisJoints || []).map((n) => {
+                const bloc = (tache.devisJointsLignes || []).find((x) => x.numero === n);
+                const lignes = bloc?.lignes || [];
+                return (
+                  <div key={n} className="mt-4">
+                    <h4 className="mb-1.5 text-sm font-extrabold text-slate-900">📎 Devis #{n}</h4>
+                    {lignes.length > 0 ? (
+                      <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+                        {lignes.map((l, i) => (
+                          <div key={i} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                            <p className="text-sm font-semibold text-slate-800">{l.nom}</p>
+                            <p className="shrink-0 text-sm font-bold tabular-nums text-slate-600">
+                              {l.quantite} {l.unite || ""}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                        Devis QuickBooks — son détail est dans la description des travaux.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
               <button
                 onClick={() => setModaleDevis(false)}
                 className="mt-4 min-h-[48px] w-full rounded-xl bg-[#131B2E] py-3 text-sm font-bold text-white active:scale-[0.99]"
@@ -6265,6 +6296,8 @@ function AppTechnicien() {
                   description: d.description,
                   devisNumero: d.devisNumero,
                   devisLignes: d.devisLignes,
+                  devisJoints: d.devisJoints, // 📎 suivent le bureau (2026-10-01)
+                  devisJointsLignes: d.devisJointsLignes,
                   zoneAppel: d.zoneAppel,
                   depotRequis: d.depotRequis,
                   depotMontant: d.depotMontant,

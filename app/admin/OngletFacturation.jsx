@@ -2582,7 +2582,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   const bonsGroupes = useMemo(() => {
     const parTache = new Map();
     (bons || []).forEach((b) => {
-      const cle = b.tacheId || b.id;
+      // 📎 Un DEVIS JOINT (même visite, 2026-10-01) a SA carte : une facture
+      // par devis (règle du propriétaire) — jamais fondu dans la principale.
+      const cle = b.estDevisJoint ? `${b.tacheId}#${b.devisNumero}` : b.tacheId || b.id;
       const existant = parTache.get(cle);
       if (!existant) {
         parTache.set(cle, {
@@ -2611,7 +2613,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // tâche (source paie), détaillées par technicien — le bon, lui,
       // ne porte que celles du dernier (2026-08-27).
       let enrichi = b;
-      const reelles = travauxDeTache(b.tacheId);
+      // 📎 Carte de devis joint : les heures restent sur la carte PRINCIPALE.
+      const reelles = b.estDevisJoint ? [] : travauxDeTache(b.tacheId);
       if (reelles.length > 0) {
         const parEmp = new Map();
         reelles.forEach((t) => {
@@ -2685,6 +2688,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // perçu. (Appelée au rendu — les fonctions plus bas sont prêtes.)
   const indicateursBon = (b) => {
     const liste = [];
+    if (b?.estDevisJoint) liste.push({ cle: "joint", txt: `📎 Devis joint — même visite que « ${String(b.projet || "").split(" — 📎")[0]} »`, cls: "border-blue-300 bg-blue-50 text-blue-800", title: "Une facture par devis : ce devis a sa propre carte. Les heures et la signature sont sur la carte principale." });
     const tache = b?.tacheId && tachePour ? tachePour(String(b.tacheId).split("::")[0]) : null;
     if (tache?.nonFacturable) liste.push({ cle: "nonfact", txt: "🚫 Tâche NON facturable", cls: "border-slate-400 bg-slate-100 text-slate-700", title: "La tâche a été marquée non facturable à l'agenda." });
     if (b?.garantie || tache?.garantie || b?.retraitRaison === "garantie") liste.push({ cle: "garantie", txt: "🛡️ Garantie", cls: "border-sky-300 bg-sky-50 text-sky-800", title: "Retour sous garantie." });
