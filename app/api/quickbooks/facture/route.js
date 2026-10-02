@@ -293,7 +293,13 @@ export async function POST(request) {
         // repris). L'objet du courriel, lui, vient du gabarit global de
         // QuickBooks — impossible à changer facture par facture.
         const ligneTravaux = corps?.adresseTravaux ? `📍 Travaux : ${String(corps.adresseTravaux).trim().slice(0, 200)}` : "";
-        const memo = [ligneTravaux, String(corps?.customerMemo || "").trim(), note.trim(), lienConditions].filter(Boolean).join("\n\n");
+        // 🔢 Nº DE SUIVI DU CLIENT dans le MESSAGE aussi (2026-10-15, demande
+        // du propriétaire) : le champ « Nº de suivi » (TrackingNum, plus
+        // haut) appartient à la section expédition et ne s'imprime pas
+        // selon les réglages de QuickBooks — le message, lui, s'imprime
+        // toujours, sur la facture et dans le courriel.
+        const ligneSuivi = String(corps?.numeroSuivi || "").trim() ? `🔢 Votre Nº de suivi : ${String(corps.numeroSuivi).trim().slice(0, 60)}` : "";
+        const memo = [ligneSuivi, ligneTravaux, String(corps?.customerMemo || "").trim(), note.trim(), lienConditions].filter(Boolean).join("\n\n");
         return memo ? { CustomerMemo: { value: memo.slice(0, 900) } } : {};
       })()),
       // L'ADRESSE DES TRAVAUX — elle change à chaque job, donc elle vit

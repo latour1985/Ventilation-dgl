@@ -18,7 +18,7 @@ import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo } from "@/lib/quickbooksClient";
 import { creerFactureSage as creerFactureSageCopie } from "@/lib/sageClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
-import { creerFactureMaison, lienFactureMaison, finaliserFactureMaison } from "@/lib/supabase/facturesMaison";
+import { creerFactureMaison, lienFactureMaison, finaliserFactureMaison, PREFIXE_SUIVI_FACTURE } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
 import { SectionFacturesMaison } from "./FacturesMaison";
 import { majFacturesEmises, poserFacturesEmisesLot, sauvegarderRevisionBon, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
@@ -3347,7 +3347,15 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         total,
         terme: configEnt?.termePaiementDefaut || "Net 30",
         dateEcheance: echeanceDepuisTerme(configEnt?.termePaiementDefaut || "Net 30"),
-        note: b.devisNumero ? `Bon de travail — devis ${b.devisNumero}` : "Bon de travail",
+        // 🔢 Nº de suivi du client en PREMIÈRE ligne de la note (2026-10-15) :
+        // la page de la facture le repère et l'affiche en haut, sous le
+        // numéro de facture (même format que FacturesMaison/la page).
+        note: [
+          suiviDuProjet(b.projetId) ? `${PREFIXE_SUIVI_FACTURE} ${suiviDuProjet(b.projetId)}` : "",
+          b.devisNumero ? `Bon de travail — devis ${b.devisNumero}` : "Bon de travail",
+        ]
+          .filter(Boolean)
+          .join("\n"),
       });
     } catch (e) {
       ajouterJournal(`⚠️ Facture maison NON créée pour « ${b.projet} » : ${e?.message || "erreur"} — le bon reste en attente.`);
@@ -3625,6 +3633,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       })),
       termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: donnees.reference || "Facture",
+      // 🔢 Facture libre liée à un projet : le Nº de suivi du client suit
+      // (2026-10-15) — champ « Nº de suivi » ET message de la facture.
+      numeroSuivi: suiviDuProjet(donnees.projetId),
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
       // 📧 TOUJOURS envoyée : contrairement aux factures issues d'un bon

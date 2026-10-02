@@ -13,7 +13,7 @@
 import { useEffect, useState } from "react";
 import { use } from "react";
 import { AlertTriangle, Loader2, Printer } from "lucide-react";
-import { chargerFactureMaisonPublique, noterConsultationFactureMaison } from "@/lib/supabase/facturesMaison";
+import { chargerFactureMaisonPublique, noterConsultationFactureMaison, separerSuiviDeNote } from "@/lib/supabase/facturesMaison";
 import ContactEntreprise from "@/components/ContactEntreprise";
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import { numeroPourTaxe } from "@/lib/taxesCanada";
@@ -62,6 +62,8 @@ export default function PageFacturePublique({ params }) {
   }
 
   const e = facture.entreprise;
+  // 🔢 Le Nº de suivi du client sort de la note pour s'afficher en haut.
+  const { suivi: numeroSuivi, reste: noteSansSuivi } = separerSuiviDeNote(facture.note);
   const estCredit = facture.type === "credit";
   const payee = facture.statut === "payee";
   const annulee = facture.statut === "annulee";
@@ -99,6 +101,9 @@ export default function PageFacturePublique({ params }) {
             {!estCredit && facture.dateEcheance && <span>Échéance : {facture.dateEcheance}</span>}
             {facture.terme && <span>Conditions : {facture.terme}</span>}
           </div>
+          {numeroSuivi && (
+            <p className="mt-1 text-sm font-bold text-slate-800">Votre Nº de suivi : {numeroSuivi}</p>
+          )}
           <p className="mt-3 text-xs text-slate-500">{estCredit ? "Émise à" : "Facturé à"}</p>
           <p className="text-sm font-bold text-slate-800">{facture.clientNom}</p>
           {facture.clientAdresse && <p className="text-xs text-slate-600">{facture.clientAdresse}</p>}
@@ -150,10 +155,10 @@ export default function PageFacturePublique({ params }) {
         </div>
 
         {/* NOTE + MODALITÉS DE PAIEMENT (Paramètres de l'entreprise) */}
-        {(facture.note || e.noteFacture) && (
+        {(noteSansSuivi || e.noteFacture) && (
           <div className="rounded-2xl bg-white p-5 text-xs leading-relaxed text-slate-600 print:rounded-none print:p-0">
-            {facture.note && <p className="whitespace-pre-wrap">{facture.note}</p>}
-            {e.noteFacture && <p className={`whitespace-pre-wrap ${facture.note ? "mt-2 border-t border-slate-100 pt-2" : ""}`}>{e.noteFacture}</p>}
+            {noteSansSuivi && <p className="whitespace-pre-wrap">{noteSansSuivi}</p>}
+            {e.noteFacture && <p className={`whitespace-pre-wrap ${noteSansSuivi ? "mt-2 border-t border-slate-100 pt-2" : ""}`}>{e.noteFacture}</p>}
           </div>
         )}
 
