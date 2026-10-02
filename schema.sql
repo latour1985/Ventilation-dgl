@@ -7203,3 +7203,13 @@ select position('devis::' in pg_get_functiondef('public.rattacher_tache_lot(text
 -- les cloisons (RLS) de prix_depots s'appliquent déjà.
 -- ============================================================
 alter table prix_depots add column if not exists territoire text;
+
+-- ============================================================
+-- 162 - RATTRAPAGE PONCTUEL : TRANSPORT JOURNALIER DE RAPHAËL (2026-10-02)
+-- ONE-SHOT DE DONNÉES — volontairement NON exécutable ici (ne jamais le
+-- rejouer en relançant ce fichier). Raphaël, passager de Charles du 28
+-- sept au 2 oct, n'avait aucun transport entre les chantiers (bogue
+-- corrigé au commit d99b60c). Le texte complet (aperçu 162-A + ajout
+-- 162-B, garde « exactement 1 Charles et 1 Raphaël », taux figé de
+-- Raphaël, jours déjà couverts sautés) a été remis au propriétaire.
+-- ============================================================
