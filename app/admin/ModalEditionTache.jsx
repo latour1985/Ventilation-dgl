@@ -12,7 +12,7 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { EditeurDevisJoints, lignesSansPrixDevis, AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
+import { EditeurDevisJoints, lignesSansPrixDevis, devisDepuisQbo, AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
 export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
@@ -346,12 +346,17 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       ...((devisSaisiMain.trim() || devisLie || "") !== (tache.devisNumero || "")
         ? { devisNumero: devisSaisiMain.trim() || devisLie || null }
         : {}),
-      // 📎 Devis joints — transmis seulement s'ils ont changé.
-      ...(JSON.stringify(devisJointsEdit) !== JSON.stringify(Array.isArray(tache.devisJoints) ? tache.devisJoints : [])
+      // 📎 Devis joints — transmis seulement s'ils ont changé, OU si un devis
+      // QuickBooks vient d'être vérifié et que la tâche n'avait pas encore
+      // ses lignes (tâche jointe avant le 2026-10-08) : le téléphone les reçoit.
+      ...(JSON.stringify(devisJointsEdit) !== JSON.stringify(Array.isArray(tache.devisJoints) ? tache.devisJoints : []) ||
+      devisJointsEdit.some(
+        (n) => devisDepuisQbo(n)?.lignes?.length > 0 && !(tache.devisJointsLignes || []).some((x) => x.numero === n && (x.lignes || []).length > 0)
+      )
         ? {
             devisJoints: devisJointsEdit,
             devisJointsLignes: devisJointsEdit.map((n) => {
-              const d = (devisListe || []).find((x) => x.numero === n && x.versionActive !== false) || (devisListe || []).find((x) => x.numero === n);
+              const d = (devisListe || []).find((x) => x.numero === n && x.versionActive !== false) || (devisListe || []).find((x) => x.numero === n) || devisDepuisQbo(n);
               return { numero: n, lignes: d ? lignesSansPrixDevis(d) : [] };
             }),
           }
@@ -997,6 +1002,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                   onChange={setDevisJointsEdit}
                   devisDuClient={(devisListe || []).filter((d) => !tache.clientId || !d.clientId || d.clientId === tache.clientId)}
                   exclure={devisSaisiMain.trim() || devisLie || null}
+                  clientNom={tache.clientNom || ""}
                 />
               )}
 

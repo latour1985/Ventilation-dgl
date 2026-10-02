@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { Briefcase, Car, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, MapPin, Pencil, Plus, User, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { territoireDe, CLE_NOTE_ZONES } from "@/lib/supabase/prixDepots";
+import { devisDepuisQbo } from "./partage";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritConfirmationRdv } from "@/lib/courriels";
 import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, majDonneesTousLesTechniciens, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
@@ -1548,13 +1549,15 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       : [];
     if (jointsRetenus.length > 0) {
       nouvelle.devisJoints = jointsRetenus;
+      // 🔎 Un devis QuickBooks VÉRIFIÉ à l'ajout (2026-10-08) prête ses
+      // lignes (sans prix) comme un devis Fluxya — devisDepuisQbo.
       nouvelle.devisJointsLignes = jointsRetenus.map((n) => {
-        const d = devisListe.find((x) => x.numero === n && x.versionActive !== false) || devisListe.find((x) => x.numero === n);
+        const d = devisListe.find((x) => x.numero === n && x.versionActive !== false) || devisListe.find((x) => x.numero === n) || devisDepuisQbo(n);
         return { numero: n, lignes: d ? lignesSansPrixDevis(d) : [] };
       });
       const textes = jointsRetenus
         .map((n) => {
-          const d = devisListe.find((x) => x.numero === n && x.versionActive !== false) || devisListe.find((x) => x.numero === n);
+          const d = devisListe.find((x) => x.numero === n && x.versionActive !== false) || devisListe.find((x) => x.numero === n) || devisDepuisQbo(n);
           const texte = d ? texteDevisPourDescription(d) : "";
           return `📎 Devis ${n}${texte ? `\n${texte}` : " (QuickBooks)"}`;
         })
@@ -3741,6 +3744,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                   onChange={setDevisJoints}
                   devisDuClient={devisListe.filter((d) => d.clientId === nouveauClientId)}
                   exclure={(devisListe.find((d) => d.id === nouveauDevisId)?.numero) || numeroDevisExistant.trim() || null}
+                  clientNom={clients.find((c) => c.id === nouveauClientId)?.nom || ""}
                   compact
                 />
               )}

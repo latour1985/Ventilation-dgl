@@ -18,6 +18,7 @@ import { supabase } from "@/lib/supabase/client";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
+import { lireEstimateQbo } from "@/lib/quickbooksClient";
 import { listerLegendes, sauvegarderLegende, televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { listerModelesEtapes, sauvegarderModeleEtapes } from "@/lib/supabase/modelesEtapes";
 import TermesConditions from "@/components/TermesConditions";
@@ -1485,10 +1486,95 @@ function ChampTexteLocal({ valeur, onValeur, ...props }) {
 export function lignesSansPrixDevis(devis) {
   return (devis?.lignes || []).map((l) => ({ nom: l.nom, quantite: l.quantite, unite: l.unite || "" }));
 }
-export function EditeurDevisJoints({ joints = [], onChange, devisDuClient = [], exclure = null, compact = false }) {
+
+// 🔎 DEVIS JOINTS VÉRIFIÉS DANS QUICKBOOKS (2026-10-08, demande du
+// propriétaire). Un numéro tapé à la main (« s3202 ») est relu dans
+// QuickBooks — existe-t-il ? est-ce le bon client ? quelles lignes ? La
+// réponse est gardée ici, en mémoire de la page, pour que la création ou
+// la modification de la tâche reprenne ses lignes (sans prix) jusqu'au
+// téléphone, exactement comme un devis fait dans Fluxya. Lecture seule.
+const cacheDevisQbo = new Map(); // NUMÉRO → { etat: "trouve" | "introuvable" | "injoignable", total, lignes, clientNomQbo }
+const normNumeroDevis = (n) => String(n || "").trim().toUpperCase();
+// Le devis QuickBooks au même moule qu'un devis Fluxya ({ lignes:[{nom,
+// quantite, unite, description}], totalVendant }) — null s'il n'a pas été
+// trouvé. Les lignes de RABAIS (prix négatif) sont écartées : sans prix,
+// elles ne disent rien au technicien.
+export function devisDepuisQbo(numero) {
+  const v = cacheDevisQbo.get(normNumeroDevis(numero));
+  if (!v || v.etat !== "trouve") return null;
+  return {
+    numero,
+    sourceQbo: true,
+    totalVendant: Number(v.total) || 0,
+    lignes: (v.lignes || [])
+      .filter((l) => (Number(l.prixUnitaire) || 0) >= 0)
+      .map((l) => ({ nom: l.description, quantite: Number(l.quantite) || 1, unite: "", description: "" })),
+  };
+}
+// « Construction JG Lessard Inc. » ≈ « construction jg lessard » : on
+// compare les noms sans accents, ponctuation ni forme juridique.
+function memeClientDevis(a, b) {
+  const n = (s) =>
+    String(s || "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .replace(/\b(inc|ltee|ltd|enr|senc|cie)\b/g, "")
+      .replace(/[^a-z0-9]/g, "");
+  const x = n(a);
+  const y = n(b);
+  if (!x || !y) return true; // rien à comparer — on ne crie pas au loup
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+export function EditeurDevisJoints({ joints = [], onChange, devisDuClient = [], exclure = null, compact = false, clientNom = "" }) {
   const [numeroQb, setNumeroQb] = useState("");
+  const [, setVersionCache] = useState(0);
   const pris = new Set([...(joints || []), exclure].filter(Boolean).map((n) => String(n).trim().toUpperCase()));
   const offerts = (devisDuClient || []).filter((d) => d.versionActive !== false && !pris.has(String(d.numero || "").trim().toUpperCase()));
+  const estDevisFluxya = (n) => (devisDuClient || []).some((x) => normNumeroDevis(x.numero) === normNumeroDevis(n));
+  // Chaque numéro joint qui n'est PAS un devis Fluxya est relu dans
+  // QuickBooks (une seule fois par numéro et par page).
+  const monteRef = useRef(true);
+  useEffect(() => {
+    monteRef.current = true;
+    return () => {
+      monteRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    (joints || []).forEach((n) => {
+      const cle = normNumeroDevis(n);
+      if (!cle || estDevisFluxya(n) || cacheDevisQbo.has(cle)) return;
+      cacheDevisQbo.set(cle, { etat: "verif" });
+      setVersionCache((v) => v + 1);
+      lireEstimateQbo(String(n).trim())
+        .then((r) => {
+          if (r?.trouve) cacheDevisQbo.set(cle, { etat: "trouve", total: r.total, lignes: r.lignes || [], clientNomQbo: r.clientNomQbo || "" });
+          else if (r?.trouve === false) cacheDevisQbo.set(cle, { etat: "introuvable" });
+          else cacheDevisQbo.delete(cle); // QuickBooks injoignable — on réessaiera à la prochaine ouverture
+        })
+        .catch(() => cacheDevisQbo.delete(cle))
+        .finally(() => {
+          if (monteRef.current) setVersionCache((v) => v + 1);
+        });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(joints || [])]);
+  // Pastille d'état QuickBooks d'un devis joint (rien pour un devis Fluxya).
+  const etatQbo = (n) => {
+    if (estDevisFluxya(n)) return null;
+    const v = cacheDevisQbo.get(normNumeroDevis(n));
+    if (!v) return { texte: "QuickBooks — non vérifié", cls: "text-slate-500" };
+    if (v.etat === "verif") return { texte: "⏳ vérification QuickBooks…", cls: "text-slate-500" };
+    if (v.etat === "introuvable") return { texte: "⚠️ introuvable dans QuickBooks — vérifie le numéro", cls: "text-red-700" };
+    const nb = (v.lignes || []).length;
+    const base = `✅ QuickBooks — ${nb} ligne${nb > 1 ? "s" : ""} · ${(Number(v.total) || 0).toFixed(2)} $ HT`;
+    if (clientNom && v.clientNomQbo && !memeClientDevis(clientNom, v.clientNomQbo)) {
+      return { texte: `${base} · ⚠️ ce devis est au nom de « ${v.clientNomQbo} » — es-tu sûr ?`, cls: "text-amber-800" };
+    }
+    return { texte: base, cls: "text-emerald-700" };
+  };
   const ajouter = (numero) => {
     const n = String(numero || "").trim();
     if (!n || pris.has(n.toUpperCase())) return;
@@ -1502,12 +1588,16 @@ export function EditeurDevisJoints({ joints = [], onChange, devisDuClient = [], 
         <div className="mt-1 flex flex-wrap gap-1">
           {joints.map((n) => {
             const d = (devisDuClient || []).find((x) => String(x.numero).trim().toUpperCase() === String(n).trim().toUpperCase());
+            const qbo = etatQbo(n);
             return (
-              <span key={n} className={`flex items-center gap-1 rounded-full border border-blue-300 bg-white px-2 py-0.5 ${t} font-bold text-blue-900`}>
-                📎 {n}{d ? (Number(d.totalVendant) > 0 ? ` — ${Number(d.totalVendant).toFixed(0)} $` : "") : " (QuickBooks)"}
-                <button type="button" onClick={() => onChange(joints.filter((x) => x !== n))} aria-label={`Retirer ${n}`} className="font-extrabold text-slate-400 hover:text-red-600">
-                  ✕
-                </button>
+              <span key={n} className={`flex flex-col rounded-xl border border-blue-300 bg-white px-2 py-0.5 ${t} font-bold text-blue-900`}>
+                <span className="flex items-center gap-1">
+                  📎 {n}{d ? (Number(d.totalVendant) > 0 ? ` — ${Number(d.totalVendant).toFixed(0)} $` : "") : " (QuickBooks)"}
+                  <button type="button" onClick={() => onChange(joints.filter((x) => x !== n))} aria-label={`Retirer ${n}`} className="font-extrabold text-slate-400 hover:text-red-600">
+                    ✕
+                  </button>
+                </span>
+                {qbo && <span className={`font-semibold ${qbo.cls}`}>{qbo.texte}</span>}
               </span>
             );
           })}

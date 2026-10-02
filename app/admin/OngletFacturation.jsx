@@ -2579,6 +2579,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   //
   // Au passage, une tâche rattachée à un DEVIS récupère le montant
   // déjà négocié — elle n'a rien à faire dans la pile « prix à réviser ».
+  // Devis QUICKBOOKS relus (numéro → même moule qu'un devis Fluxya). Déclaré
+  // AVANT bonsGroupes : les cartes y prennent leur montant (2026-10-08).
+  const [devisQboCache, setDevisQboCache] = useState({});
   const bonsGroupes = useMemo(() => {
     const parTache = new Map();
     (bons || []).forEach((b) => {
@@ -2642,11 +2645,66 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       if (!enrichi.devisNumero || !enrichi.prixNonListe) return enrichi;
       // Version ACTIVE du dossier (revue 2026-09-22) : un bon qui porte DEV-3542
       // reprend le total de DEV-3542-1 si c'est elle qui est en vigueur.
-      const devis = devisAJourPourNumero(devisListe, enrichi.devisNumero);
-      if (!devis) return enrichi;
+      // 🔎 Devis QUICKBOOKS (joint ou principal, 2026-10-08) : son total
+      // relu dans QuickBooks donne le montant de la carte — elle quitte la
+      // pile « prix à réviser » sans qu'on ait à ouvrir « Réviser ».
+      const devis = devisAJourPourNumero(devisListe, enrichi.devisNumero) || devisQboCache[enrichi.devisNumero] || null;
+      if (!devis || (devis.sourceQbo && !(Number(devis.totalVendant) > 0))) return enrichi;
       return { ...enrichi, montant: Number(devis.totalVendant) || 0, prixNonListe: false };
     });
-  }, [bons, devisListe]);
+  }, [bons, devisListe, devisQboCache]);
+
+  // 🔎 LECTURE D'AVANCE des devis QuickBooks des cartes à facturer
+  // (2026-10-08, demande du propriétaire) : chaque numéro inconnu de Fluxya
+  // est relu UNE fois dans QuickBooks (lecture seule), l'un après l'autre
+  // pour ménager l'API. Entreprises sur QuickBooks seulement.
+  const devisQboTentesRef = useRef(new Set());
+  useEffect(() => {
+    if ((configEnt?.systemeComptable || "quickbooks") !== "quickbooks") return;
+    const numeros = [
+      ...new Set(
+        (bons || [])
+          .filter((b) => b.devisNumero && b.statutQb === "en_attente")
+          .map((b) => String(b.devisNumero).trim())
+          .filter((n) => n && !devisAJourPourNumero(devisListe, n) && !devisQboTentesRef.current.has(n))
+      ),
+    ];
+    if (numeros.length === 0) return;
+    numeros.forEach((n) => devisQboTentesRef.current.add(n));
+    (async () => {
+      for (const numero of numeros) {
+        try {
+          const r = await lireEstimateQbo(numero);
+          if (r?.trouve) {
+            setDevisQboCache((prev) =>
+              prev[numero]
+                ? prev
+                : {
+                    ...prev,
+                    [numero]: {
+                      numero,
+                      sourceQbo: true,
+                      totalVendant: Number(r.total) || 0,
+                      lignes: (r.lignes || []).map((l, i) => ({
+                        uid: `qbo-${numero}-${i}`,
+                        nom: l.description,
+                        description: "",
+                        quantite: Number(l.quantite) || 1,
+                        prix_vendant: Number(l.prixUnitaire) || 0,
+                      })),
+                    },
+                  }
+            );
+          } else if (r?.trouve !== false) {
+            devisQboTentesRef.current.delete(numero); // QuickBooks injoignable — on réessaiera
+          }
+        } catch {
+          devisQboTentesRef.current.delete(numero);
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bons, devisListe, configEnt?.systemeComptable]);
 
   // 🧾 DEVIS SANS SOLDE (2026-09-03, retour du propriétaire : « pourquoi
   // ça reste là alors que la facturation a toute été faite ? ») —
@@ -2921,7 +2979,6 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // numéro (la fenêtre peut se rouvrir dix fois). Introuvable : la
   // fenêtre garde son comportement d'avant, et le Journal le dit.
   // ============================================================
-  const [devisQboCache, setDevisQboCache] = useState({});
   const devisFacturation = bonFacturation
     ? devisAJourPourNumero(devisListe, bonFacturation.devisNumero) ||
       devisQboCache[bonFacturation.devisNumero] ||
