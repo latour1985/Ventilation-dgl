@@ -5367,6 +5367,16 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                               return sienne ? <span title={`Note interne de ${emp.nom} : ${sienne}`} className="shrink-0 text-[9px]">🔒</span> : null;
                             })()}
                             {seg.tache.devisAFaire && !seg.tache.devisNumero &&<span title="Devis à faire — la tâche a été créée sans devis (travaux acceptés). Rattache-le dans sa fiche." className="shrink-0 rounded bg-orange-200 px-1 text-[8px] font-extrabold text-orange-900">📄 devis</span>}
+                            {/* 📎 PLUSIEURS DEVIS sur la tâche (2026-10-08, demande du
+                                propriétaire) : le bloc le dit d'un coup d'œil. */}
+                            {(seg.tache.devisJoints || []).length > 0 && (
+                              <span
+                                title={`Devis de cette tâche : ${[seg.tache.devisNumero, ...seg.tache.devisJoints].filter(Boolean).join(" · ")} — une facture par devis`}
+                                className="shrink-0 rounded bg-blue-100 px-1 text-[8px] font-extrabold text-blue-900"
+                              >
+                                📄 {(seg.tache.devisNumero ? 1 : 0) + seg.tache.devisJoints.length} devis
+                              </span>
+                            )}
                             {!emp.estSousTraitant && estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
@@ -5585,6 +5595,14 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                                 {!emp.estSousTraitant && estTerminee(tache, emp) && <Check size={9} className="mt-px shrink-0 text-emerald-600" />}
                                 {!emp.estSousTraitant && estEnCours(tache, emp) && <span className="mt-0.5 block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                                 {tache.est_tache_systeme && <Car size={9} className="mt-px shrink-0" />}
+                                {(tache.devisJoints || []).length > 0 && (
+                                  <span
+                                    title={`Devis de cette tâche : ${[tache.devisNumero, ...tache.devisJoints].filter(Boolean).join(" · ")} — une facture par devis`}
+                                    className="shrink-0 rounded bg-blue-100 px-1 text-[8px] font-extrabold text-blue-900"
+                                  >
+                                    📄 {(tache.devisNumero ? 1 : 0) + tache.devisJoints.length}
+                                  </span>
+                                )}
                                 <span className="min-w-0">
                                   {tache.titre || tache.clientNom}
                                   {/* ⏱️ Heures RÉELLES du bloc terminé —

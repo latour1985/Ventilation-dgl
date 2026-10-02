@@ -506,9 +506,25 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
             « il manque les infos de base comme le nº de devis ou le
             numéro de la facture de dépôt ») — visibles d'entrée, sans
             descendre jusqu'aux rattachements. */}
-        {(tache.devisNumero || depot || (commandes || []).length > 0) && (
+        {(tache.devisNumero || (tache.devisJoints || []).length > 0 || depot || (commandes || []).length > 0) && (
           <div className="mb-4 flex flex-wrap gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-700">
-            {tache.devisNumero && <span>📄 Devis {tache.devisNumero}</span>}
+            {/* 📎 TOUS LES DEVIS côte à côte (2026-10-08, demande du
+                propriétaire) : le devis joint vivait seulement dans les
+                Rattachements, loin plus bas — on croyait n'en voir qu'un. */}
+            {(tache.devisJoints || []).length > 0 ? (
+              <span className="basis-full">
+                📄 <span className="font-extrabold">{(tache.devisNumero ? 1 : 0) + tache.devisJoints.length} devis</span> :{" "}
+                {tache.devisNumero ? `${tache.devisNumero} · ` : ""}
+                {tache.devisJoints.map((n, i) => (
+                  <span key={n}>
+                    {i > 0 ? " · " : ""}
+                    {n} <span className="font-normal italic text-slate-500">(joint — facture séparée)</span>
+                  </span>
+                ))}
+              </span>
+            ) : (
+              tache.devisNumero && <span>📄 Devis {tache.devisNumero}</span>
+            )}
             {depot && (
               <span>
                 💰 Dépôt {depot.qboDocNumber ? `— facture nº ${depot.qboDocNumber} ` : ""}· {(Number(depot.montantHT) || 0).toFixed(2)} $ HT ·{" "}
