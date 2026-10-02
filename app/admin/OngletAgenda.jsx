@@ -2347,6 +2347,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       ...(champs.noteBureau !== undefined ? { noteBureau: champs.noteBureau } : {}),
       // 🔢 Nº de suivi du client — clé absente = inchangé.
       ...(champs.numeroSuiviClient !== undefined ? { numeroSuiviClient: champs.numeroSuiviClient } : {}),
+      // ✏️ Nom de la tâche tapé dans la fiche — l'emporte sur le titre auto.
+      ...(champs.titre ? { titre: champs.titre } : {}),
       // 📎 Devis joints — clé absente = inchangés.
       ...(champs.devisJoints !== undefined ? { devisJoints: champs.devisJoints, devisJointsLignes: champs.devisJointsLignes || [] } : {}),
     };
@@ -2371,7 +2373,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau, devisJoints, devisJointsLignes, numeroSuiviClient }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau, devisJoints, devisJointsLignes, numeroSuiviClient, titre }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2409,6 +2411,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
         : {}),
       // 📎 Devis joints — clé absente = inchangés.
       ...(devisJoints !== undefined ? { devisJoints, devisJointsLignes: devisJointsLignes || [] } : {}),
+      // ✏️ Nom de la tâche tapé dans la fiche — l'emporte sur le titre auto.
+      ...(titre ? { titre } : {}),
     };
     if (devisJoints !== undefined) {
       const avant = new Set(Array.isArray(tache.devisJoints) ? tache.devisJoints : []);

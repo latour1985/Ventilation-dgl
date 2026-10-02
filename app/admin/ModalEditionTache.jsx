@@ -59,6 +59,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [noteBureau, setNoteBureau] = useState(tache.noteBureau || ""); // 🔒 note interne pour le technicien
   // 🔢 Nº de suivi du client (bon de commande) — pré-remplit l'envoi de la facture.
   const [suiviClient, setSuiviClient] = useState(tache.numeroSuiviClient || "");
+  // ✏️ Le NOM de la tâche, modifiable après coup (2026-10-26, demande du propriétaire).
+  const [titreTache, setTitreTache] = useState(tache.titre || "");
   const [pjTelevers, setPjTelevers] = useState(false);
   const ajouterPjEdition = async (fichiers) => {
     setPjTelevers(true);
@@ -402,6 +404,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       ...(JSON.stringify(etapesTache) !== JSON.stringify(tache.etapes || []) ? { etapes: etapesTache } : {}),
       ...(noteBureau.trim() !== (tache.noteBureau || "").trim() ? { noteBureau: noteBureau.trim() } : {}),
       ...(suiviClient.trim() !== (tache.numeroSuiviClient || "").trim() ? { numeroSuiviClient: suiviClient.trim().slice(0, 60) || null } : {}),
+      // ✏️ Nom de la tâche — transmis seulement s'il a changé (jamais vidé).
+      ...(titreTache.trim() && titreTache.trim() !== (tache.titre || "").trim() ? { titre: titreTache.trim().slice(0, 160) } : {}),
       // 🏗️/📄 Rattachements — transmis SEULEMENT s'ils ont changé : une
       // clé absente laisse l'existant tranquille (les heures déjà
       // pointées ne sont alors jamais réécrites pour rien).
@@ -459,6 +463,21 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
           </div>
           <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
         </div>
+
+        {/* ✏️ NOM DE LA TÂCHE (2026-10-26) — ce que voient l'agenda, le
+            téléphone du technicien et le bon de travail. */}
+        {!estConge && (
+          <div className="mb-3">
+            <label className="mb-1 block text-[11px] font-bold text-slate-500">✏️ Nom de la tâche</label>
+            <input
+              value={titreTache}
+              onChange={(e) => setTitreTache(e.target.value)}
+              maxLength={160}
+              placeholder={tache.clientNom || "Nom de la tâche"}
+              className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm font-semibold"
+            />
+          </div>
+        )}
 
         {/* CLIENT & ADRESSE DES TRAVAUX — l'adresse des travaux (où le
             technicien doit se rendre) n'est JAMAIS la même chose que
