@@ -126,10 +126,11 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // vécu du propriétaire). Ce qui a VRAIMENT changé dans la fiche
   // (date, heure, jours) est seul imposé aux autres cochés — chacun garde
   // sinon son propre horaire. Les valeurs de départ servent de repère.
-  const [departs] = useState(() => ({ date: dateInitiale || todayISO(), heure: heureInitiale || HEURE_PAR_DEFAUT }));
+  const [departs] = useState(() => ({ heure: heureInitiale || HEURE_PAR_DEFAUT }));
+  const dateDepartRef = useRef(dateInitiale || todayISO());
   const joursDepartRef = useRef(tache.jours ?? 1);
-  // Durées ajustées sur la ligne d'un technicien : { employeId: jours }.
-  const [joursAjustes, setJoursAjustes] = useState({});
+  // Horaires ajustés sur la ligne d'un technicien : { employeId: { jours, date } }.
+  const [horairesAjustes, setHorairesAjustes] = useState({});
   // ✕ : retiré pour de bon — il quitte aussi « Appliquer à… » (sinon la
   // sauvegarde le remettait dans l'horaire). Si c'est le technicien dont
   // le bloc est ouvert, la fiche se ferme : plus rien ne peut le remettre.
@@ -141,14 +142,44 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
     }
     setAutresCibles((prev) => prev.filter((x) => x !== id));
   };
-  const changerJoursTechnicien = (id, n) => {
-    onChangerJoursTechnicien?.(id, n);
-    setJoursAjustes((prev) => ({ ...prev, [id]: n }));
-    if (id === employeIdInitial) {
-      // Le champ « jours » de la fiche suit — et ce n'est pas un changement
-      // à imposer à toute l'équipe.
-      setJours(n);
-      joursDepartRef.current = n;
+  // Les JOURS DE LA JOB offerts comme jour de départ : à partir du premier
+  // jour de toute l'équipe, 15 journées (fins de semaine sautées si la
+  // tâche les saute) — « Jour 2 — ven. 16 oct. ». Le jour actuel du
+  // technicien est toujours offert, même hors de cette liste.
+  const joursDeLaJob = (ligne) => {
+    const premier = (techniciensSurTache || []).map((x) => x.premiereDate).filter(Boolean).sort()[0] || ligne.premiereDate;
+    const liste = [];
+    if (premier) {
+      const d = new Date(`${premier}T00:00:00`);
+      while (liste.length < 15) {
+        const jourSemaine = d.getDay();
+        if (!(sauterWeekend && (jourSemaine === 0 || jourSemaine === 6))) {
+          const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          liste.push({
+            iso,
+            libelle: `Jour ${liste.length + 1} — ${d.toLocaleDateString("fr-CA", { weekday: "short", day: "numeric", month: "short" })}`,
+          });
+        }
+        d.setDate(d.getDate() + 1);
+      }
+    }
+    const actuel = horairesAjustes[ligne.employeId]?.date ?? ligne.premiereDate;
+    if (actuel && !liste.some((j) => j.iso === actuel)) liste.unshift({ iso: actuel, libelle: actuel });
+    return liste;
+  };
+  // `t` = la ligne de l'équipe (nbJours, premiereDate) ; `patch` = { jours } ou { date }.
+  const changerHoraireTechnicien = (t, patch) => {
+    const actuel = horairesAjustes[t.employeId] || { jours: t.nbJours, date: t.premiereDate };
+    const nouveau = { ...actuel, ...patch };
+    onChangerJoursTechnicien?.(t.employeId, nouveau);
+    setHorairesAjustes((prev) => ({ ...prev, [t.employeId]: nouveau }));
+    if (t.employeId === employeIdInitial) {
+      // Les champs de la fiche suivent — et ce n'est pas un changement à
+      // imposer à toute l'équipe.
+      setJours(nouveau.jours);
+      joursDepartRef.current = nouveau.jours;
+      setDate(nouveau.date);
+      dateDepartRef.current = nouveau.date;
     }
   };
 
@@ -396,11 +427,12 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       // Ce qui a VRAIMENT changé — seul imposé aux autres (2026-10-15) —
       // et les durées ajustées ligne par ligne, qui l'emportent.
       champsModifies: {
-        date: date !== departs.date,
+        date: date !== dateDepartRef.current,
         heure: heureDebut !== departs.heure,
         jours: Math.max(0, jours) !== joursDepartRef.current,
       },
-      joursParTechnicien: joursAjustes,
+      joursParTechnicien: Object.fromEntries(Object.entries(horairesAjustes).map(([id, h]) => [id, h.jours])),
+      dateParTechnicien: Object.fromEntries(Object.entries(horairesAjustes).map(([id, h]) => [id, h.date])),
     });
   };
 
@@ -1076,18 +1108,34 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                       {/* 📅 SA durée à lui (2026-10-15) — tous pareils par
                           défaut, on corrige au besoin : ne touche que lui. */}
                       {onChangerJoursTechnicien && Number(t.nbJours) > 0 && (techniciensSurTache || []).length > 1 && (
-                        <select
-                          value={joursAjustes[t.employeId] ?? t.nbJours}
-                          onChange={(e) => changerJoursTechnicien(t.employeId, Number(e.target.value))}
-                          title={`Durée de ${t.nom} SEULEMENT — les autres techniciens gardent la leur`}
-                          className="shrink-0 rounded-lg border border-slate-300 bg-white px-1 py-1 text-[10px] font-bold text-slate-700"
-                        >
-                          {Array.from({ length: Math.max(10, Number(t.nbJours) || 1) }, (_, i) => i + 1).map((n) => (
-                            <option key={n} value={n}>
-                              {n} jour{n > 1 ? "s" : ""}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex shrink-0 flex-col gap-1">
+                          {/* 📅 À PARTIR DE QUEL JOUR de la job (2026-10-15 :
+                              « qu'il soit là à la 2e journée »). */}
+                          <select
+                            value={horairesAjustes[t.employeId]?.date ?? t.premiereDate}
+                            onChange={(e) => changerHoraireTechnicien(t, { date: e.target.value })}
+                            title={`Jour de départ de ${t.nom} SEULEMENT`}
+                            className="rounded-lg border border-slate-300 bg-white px-1 py-1 text-[10px] font-bold text-slate-700"
+                          >
+                            {joursDeLaJob(t).map((j) => (
+                              <option key={j.iso} value={j.iso}>
+                                {j.libelle}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={horairesAjustes[t.employeId]?.jours ?? t.nbJours}
+                            onChange={(e) => changerHoraireTechnicien(t, { jours: Number(e.target.value) })}
+                            title={`Durée de ${t.nom} SEULEMENT — les autres techniciens gardent la leur`}
+                            className="rounded-lg border border-slate-300 bg-white px-1 py-1 text-[10px] font-bold text-slate-700"
+                          >
+                            {Array.from({ length: Math.max(10, Number(t.nbJours) || 1) }, (_, i) => i + 1).map((n) => (
+                              <option key={n} value={n}>
+                                {n} jour{n > 1 ? "s" : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       )}
                       {/* Le statut facturable des SOUS-TRAITANTS vit dans
                           leur propre suivi (coûts/statuts ST) — pas ici. */}
@@ -1119,7 +1167,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                 💰/🤝 se change en un clic — les heures d'un 🤝 (aide interne) ne comptent pas dans la facturation. Le ✕
                 retire ce technicien seulement ; « Retirer de l'horaire » plus bas retire la tâche au complet.
                 {onChangerJoursTechnicien && (techniciensSurTache || []).length > 1
-                  ? " Les jours se changent par technicien : tout le monde a la même durée au départ, tu corriges au besoin — ça ne touche que lui, tout de suite."
+                  ? " Le jour de départ et le nombre de jours se changent par technicien : tout le monde a le même horaire au départ, tu corriges au besoin — ça ne touche que lui, tout de suite."
                   : ""}
               </p>
             </div>

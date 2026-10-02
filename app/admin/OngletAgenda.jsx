@@ -272,6 +272,7 @@ export function techniciensPourTache(planning, tacheId, employes) {
       premiereDate,
       premiereHeure: e.premiereHeure,
       nbJours,
+      dates: [...e.dates].sort(),
     };
   });
 }
@@ -6018,26 +6019,29 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           onChangerJoursTechnicien={
             lectureSeule
               ? undefined
-              : (empId, nbJours) => {
-                  // 📅 DURÉE D'UN SEUL TECHNICIEN (2026-10-15, demande du
+              : (empId, { jours: nbJours, date: dateDepart } = {}) => {
+                  // 📅 HORAIRE D'UN SEUL TECHNICIEN (2026-10-15, demande du
                   // propriétaire : « tous sur le même temps, puis on corrige
-                  // au besoin ») — même date et heure de départ, ses jours
-                  // à lui seulement ; les autres ne bougent pas.
+                  // au besoin » — et « qu'il soit là la 2e journée ») : SON
+                  // jour de départ et SES jours ; même heure de début ; les
+                  // autres ne bougent pas.
                   const t = tacheDetailOuverte.tache;
                   const sien = techniciensPourTache(planning, t.id, employes).find((x) => x.employeId === empId);
                   if (!sien) return;
+                  const jours = Number(nbJours) > 0 ? Number(nbJours) : sien.nbJours;
+                  const date = dateDepart || sien.premiereDate;
                   modifierTachePlanifiee(t, empId, {
                     heures: t.heures,
-                    jours: nbJours,
+                    jours,
                     sauterWeekend: t.sauterWeekend,
                     sauterFeries: t.sauterFeries,
                     description: t.description,
                     employeId: empId,
-                    date: sien.premiereDate,
+                    date,
                     heureDebut: sien.premiereHeure,
                   });
                   const employe = employes.find((x) => x.id === empId);
-                  ajouterJournal(`📅 ${employe?.nom || "Technicien"} : ${nbJours} jour${nbJours > 1 ? "s" : ""} sur « ${t.titre || t.clientNom} » (à partir du ${sien.premiereDate}) — les autres techniciens gardent leur durée.`);
+                  ajouterJournal(`📅 ${employe?.nom || "Technicien"} : ${jours} jour${jours > 1 ? "s" : ""} sur « ${t.titre || t.clientNom} », à partir du ${date} — les autres techniciens gardent leur horaire.`);
                 }
           }
           onAjouterTechnicien={({ employeId, date, heureDebut, heures, jours, dupliquer }) => {
@@ -6134,7 +6138,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
               modifierTachePlanifiee(tacheDetailOuverte.tache, empId, {
                 ...champs,
                 employeId: empId,
-                date: modifies.date ? champs.date : sien.premiereDate,
+                date: champs.dateParTechnicien?.[empId] ?? (modifies.date ? champs.date : sien.premiereDate),
                 heureDebut: modifies.heure ? champs.heureDebut : sien.premiereHeure,
                 jours: champs.joursParTechnicien?.[empId] ?? (modifies.jours ? champs.jours : sien.nbJours),
               });
