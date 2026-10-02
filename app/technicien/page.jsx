@@ -6792,6 +6792,34 @@ function AppTechnicien() {
     // (jamais réécrite par une reprise après pause) — envoyée au bureau à
     // la fin pour l'affichage « 7 h 42 → 11 h 15 » et les ajustements.
     const cible = taches.find((x) => x.id === id);
+    // 🚚 TRANSPORT RATTRAPÉ AU DÉMARRAGE (2026-10-02, vécu : passagers et
+    // assistants sans aucune heure entre deux chantiers). Le transport
+    // journalier ne partait QUE sur « Terminer » de la tâche précédente —
+    // or depuis le 2026-09-17 on peut démarrer B pendant que A est EN
+    // PAUSE (jongler dans la même bâtisse), et une fermeture d'équipe
+    // confirmée dans le désordre sautait aussi l'enchaînement. Ici, au
+    // démarrage de B : si son transport n'a jamais roulé, le temps entre
+    // la FIN (ou la mise en pause) de la tâche précédente et maintenant
+    // devient ce transport. Jongler sur place = ~0 min, rouler 40 min =
+    // 40 min. Plafond : au-delà de 6 h, ce n'est pas un trajet (oubli).
+    if (!ccqEnRoute && cible?.type === "travail" && cible.etat === "a_faire") {
+      const ccqDeCible = taches.find((x) => x.momentTransport === "ccq" && x.tacheSuivanteId === id && x.etat === "a_faire");
+      const jour = taches
+        .filter((x) => x.type === "travail" && x.date === cible.date)
+        .sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
+      const precedente = jour[jour.findIndex((x) => x.id === id) - 1] || null;
+      const finPrecedente =
+        precedente?.etat === "en_pause" ? precedente.pauseLe : precedente?.etat === "complete" ? precedente.finReelle : null;
+      const maintenant = Date.now();
+      const ecart = finPrecedente ? (maintenant - Number(finPrecedente)) / 1000 : 0;
+      if (ccqDeCible && ecart > 0 && ecart < HEURES_AVANT_PLAFOND_TRANSPORT * 3600) {
+        const charge = chargeHeuresDepuisTache({ ...ccqDeCible, tempsAccumuleSec: ecart, tempsDebutSegment: null, debutReel: Number(finPrecedente) });
+        enregistrerTravailEffectue(charge, session).catch(() => {
+          setFileAttente((prev) => [...prev, { id: `sync-travail-${Date.now()}`, type: "travail", charge, horodatage: Date.now() }]);
+        });
+        majTache(ccqDeCible.id, { etat: "complete", tempsAccumuleSec: ecart, tempsDebutSegment: null, debutReel: Number(finPrecedente), finReelle: maintenant });
+      }
+    }
     majTache(id, { etat: "en_cours", tempsDebutSegment: Date.now(), debutReel: cible?.debutReel || Date.now() });
     // ⏱️ AGENDA EN DIRECT (2026-08-18) : le bloc du bureau passe « en
     // cours » (bleu) dès le Débuter. Un bonus, jamais un bloqueur — en
@@ -6806,7 +6834,9 @@ function AppTechnicien() {
       prev.map((t) => {
         if (t.id !== id) return t;
         const ecoule = t.tempsDebutSegment ? (Date.now() - t.tempsDebutSegment) / 1000 : 0;
-        return { ...t, etat: "en_pause", tempsAccumuleSec: t.tempsAccumuleSec + ecoule, tempsDebutSegment: null };
+        // pauseLe : point de départ du transport rattrapé si la tâche
+        // suivante démarre pendant cette pause (voir demarrerTache).
+        return { ...t, etat: "en_pause", tempsAccumuleSec: t.tempsAccumuleSec + ecoule, tempsDebutSegment: null, pauseLe: Date.now() };
       })
     );
   };
@@ -6883,7 +6913,8 @@ function AppTechnicien() {
       prev.map((t) => {
         if (t.id !== id) return t;
         const ecoule = t.tempsDebutSegment ? (Date.now() - t.tempsDebutSegment) / 1000 : 0;
-        return { ...t, etat: "complete", tempsAccumuleSec: t.tempsAccumuleSec + ecoule, tempsDebutSegment: null };
+        // finReelle locale : repère du transport rattrapé (demarrerTache).
+        return { ...t, etat: "complete", tempsAccumuleSec: t.tempsAccumuleSec + ecoule, tempsDebutSegment: null, finReelle: Date.now() };
       })
     );
     // TRANSPORT CCQ automatique : une tâche de TRAVAIL vient de se
@@ -7224,17 +7255,23 @@ function AppTechnicien() {
     if (fermetureEquipePour) return;
     const monEmail = (session?.user?.email || "").toLowerCase();
     if (!monEmail) return;
-    const candidate = taches.find(
-      (t) =>
-        t.supabase &&
-        t.type === "travail" &&
-        t.etat !== "complete" &&
-        !t.envoye &&
-        t.fermetureEquipe &&
-        (t.fermetureEquipe.parEmail || "").toLowerCase() !== monEmail &&
-        (!t.fermetureEquipe.jour || t.fermetureEquipe.jour === t.date) &&
-        !fermeturesReporteesRef.current.has(t.id)
-    );
+    // Ordre CHRONOLOGIQUE (2026-10-02) : deux tâches fermées pour l'équipe
+    // et confirmées dans le désordre (la 2e d'abord) perdaient le
+    // transport entre elles — la 1re, confirmée ensuite, ne trouvait plus
+    // de tâche suivante « à faire » pour enchaîner.
+    const candidate = taches
+      .filter(
+        (t) =>
+          t.supabase &&
+          t.type === "travail" &&
+          t.etat !== "complete" &&
+          !t.envoye &&
+          t.fermetureEquipe &&
+          (t.fermetureEquipe.parEmail || "").toLowerCase() !== monEmail &&
+          (!t.fermetureEquipe.jour || t.fermetureEquipe.jour === t.date) &&
+          !fermeturesReporteesRef.current.has(t.id)
+      )
+      .sort((a, b) => `${a.date || ""} ${a.heure || ""}`.localeCompare(`${b.date || ""} ${b.heure || ""}`))[0];
     if (!candidate) return;
     let annule = false;
     (async () => {
@@ -7244,7 +7281,9 @@ function AppTechnicien() {
       );
       if (annule) return;
       if (deja) {
-        majTache(candidate.id, { etat: "complete", tempsDebutSegment: null });
+        // finReelle = heure de la fermeture : la tâche suivante pourra
+        // rattraper son transport au démarrage (voir demarrerTache).
+        majTache(candidate.id, { etat: "complete", tempsDebutSegment: null, finReelle: Date.parse(candidate.fermetureEquipe.a) || Date.now() });
         return;
       }
       setFermetureEquipePour(candidate.id);
@@ -7269,7 +7308,10 @@ function AppTechnicien() {
         (!t.fermetureBureau.jour || t.fermetureBureau.jour === t.date)
     );
     if (!c) return;
-    majTache(c.id, { etat: "complete", tempsDebutSegment: null });
+    // finReelle = l'heure de fin déclarée par le bureau (« HH:MM » du jour) —
+    // repère du transport rattrapé au démarrage de la tâche suivante.
+    const finBureau = c.fermetureBureau.fin ? new Date(`${c.fermetureBureau.jour || c.date}T${c.fermetureBureau.fin}:00`).getTime() : NaN;
+    majTache(c.id, { etat: "complete", tempsDebutSegment: null, ...(Number.isFinite(finBureau) ? { finReelle: finBureau } : {}) });
     setAvisFermetureBureau({
       titre: c.titre || c.clientNom || "ta tâche",
       debut: c.fermetureBureau.debut,
