@@ -1966,9 +1966,28 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                     <p className="text-xs text-slate-500">{affichee.clientNom}</p>
                     {/* 🏠 L'adresse des travaux — l'identifiant le plus
                         parlant quand elle est là. */}
-                    {affichee.adresseTravaux && (
+                    {affichee.adresseTravaux && !enModale && (
                       <p className="truncate text-[11px] font-semibold text-slate-600">🏠 {affichee.adresseTravaux}</p>
                     )}
+                    {/* 📍 LES DEUX ADRESSES dans la fenêtre du dossier (2026-10-15,
+                        demande du propriétaire : « plus rapide pour répondre au
+                        client au sujet du projet ») — en entier, sans couper. */}
+                    {enModale && (() => {
+                      const fiche = ficheClientDe(affichee);
+                      const facturation = fiche ? adresseFacturationClient(fiche) : "";
+                      return (
+                        <div className="mt-1 space-y-0.5 rounded-lg bg-slate-50 px-2 py-1.5 text-[11px] leading-snug text-slate-700">
+                          <p>
+                            🏠 <span className="font-bold">Travaux :</span>{" "}
+                            {affichee.adresseTravaux || <span className="italic text-slate-400">aucune adresse des travaux sur ce devis</span>}
+                          </p>
+                          <p>
+                            🧾 <span className="font-bold">Facturation :</span>{" "}
+                            {facturation || <span className="italic text-slate-400">aucune adresse au dossier du client</span>}
+                          </p>
+                        </div>
+                      );
+                    })()}
                     {/* 🏷️ Titre du devis (snippet 149) — l'identifiant
                         quand il n'y a pas d'adresse. */}
                     {affichee.titre && (
