@@ -6,7 +6,7 @@
 // du decoupage de page.jsx (2026-09-01). Extraction MECANIQUE : aucun
 // comportement ne change — seuls des export/import s'ajoutent.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Check, Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
@@ -14,7 +14,7 @@ import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { EditeurDevisJoints, lignesSansPrixDevis, devisDepuisQbo, AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
-export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null }) {
+export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null, onChangerJoursTechnicien = null }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -122,6 +122,35 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   );
   const basculerCible = (id) =>
     setAutresCibles((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // 👥 ÉQUIPE : TOUS PAREILS PAR DÉFAUT, AJUSTÉS AU BESOIN (2026-10-15,
+  // vécu du propriétaire). Ce qui a VRAIMENT changé dans la fiche
+  // (date, heure, jours) est seul imposé aux autres cochés — chacun garde
+  // sinon son propre horaire. Les valeurs de départ servent de repère.
+  const [departs] = useState(() => ({ date: dateInitiale || todayISO(), heure: heureInitiale || HEURE_PAR_DEFAUT }));
+  const joursDepartRef = useRef(tache.jours ?? 1);
+  // Durées ajustées sur la ligne d'un technicien : { employeId: jours }.
+  const [joursAjustes, setJoursAjustes] = useState({});
+  // ✕ : retiré pour de bon — il quitte aussi « Appliquer à… » (sinon la
+  // sauvegarde le remettait dans l'horaire). Si c'est le technicien dont
+  // le bloc est ouvert, la fiche se ferme : plus rien ne peut le remettre.
+  const retirerTechnicien = (id) => {
+    onRetirerTechnicien?.(id);
+    if (id === employeIdInitial) {
+      onFermer?.();
+      return;
+    }
+    setAutresCibles((prev) => prev.filter((x) => x !== id));
+  };
+  const changerJoursTechnicien = (id, n) => {
+    onChangerJoursTechnicien?.(id, n);
+    setJoursAjustes((prev) => ({ ...prev, [id]: n }));
+    if (id === employeIdInitial) {
+      // Le champ « jours » de la fiche suit — et ce n'est pas un changement
+      // à imposer à toute l'équipe.
+      setJours(n);
+      joursDepartRef.current = n;
+    }
+  };
 
   // ============================================================
   // 🏗️/📄 RATTACHEMENTS APRÈS COUP (demande du propriétaire, 2026-08-22)
@@ -364,6 +393,14 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       // Autres techniciens cochés dans « Appliquer la modification à… » —
       // ils reçoivent les mêmes date/heure/durée/description sur leurs plages.
       autresCibles,
+      // Ce qui a VRAIMENT changé — seul imposé aux autres (2026-10-15) —
+      // et les durées ajustées ligne par ligne, qui l'emportent.
+      champsModifies: {
+        date: date !== departs.date,
+        heure: heureDebut !== departs.heure,
+        jours: Math.max(0, jours) !== joursDepartRef.current,
+      },
+      joursParTechnicien: joursAjustes,
     });
   };
 
@@ -1036,6 +1073,22 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                         <p className="text-xs font-bold text-slate-800">{estST ? `🤝 ${t.nom} (sous-traitant)` : t.nom}</p>
                         <p className="text-[10px] text-slate-400">{t.detail}</p>
                       </div>
+                      {/* 📅 SA durée à lui (2026-10-15) — tous pareils par
+                          défaut, on corrige au besoin : ne touche que lui. */}
+                      {onChangerJoursTechnicien && Number(t.nbJours) > 0 && (techniciensSurTache || []).length > 1 && (
+                        <select
+                          value={joursAjustes[t.employeId] ?? t.nbJours}
+                          onChange={(e) => changerJoursTechnicien(t.employeId, Number(e.target.value))}
+                          title={`Durée de ${t.nom} SEULEMENT — les autres techniciens gardent la leur`}
+                          className="shrink-0 rounded-lg border border-slate-300 bg-white px-1 py-1 text-[10px] font-bold text-slate-700"
+                        >
+                          {Array.from({ length: Math.max(10, Number(t.nbJours) || 1) }, (_, i) => i + 1).map((n) => (
+                            <option key={n} value={n}>
+                              {n} jour{n > 1 ? "s" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       {/* Le statut facturable des SOUS-TRAITANTS vit dans
                           leur propre suivi (coûts/statuts ST) — pas ici. */}
                       {!estST && (
@@ -1051,7 +1104,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                       {(techniciensSurTache || []).length > 1 && onRetirerTechnicien && (
                         <button
                           type="button"
-                          onClick={() => onRetirerTechnicien(t.employeId)}
+                          onClick={() => retirerTechnicien(t.employeId)}
                           title="Retirer CE technicien de la tâche — les autres restent assignés"
                           className="shrink-0 rounded-lg border border-red-200 px-1.5 py-1 text-[10px] font-bold text-red-600"
                         >
@@ -1065,6 +1118,9 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               <p className="mt-1 text-[10px] text-slate-400">
                 💰/🤝 se change en un clic — les heures d'un 🤝 (aide interne) ne comptent pas dans la facturation. Le ✕
                 retire ce technicien seulement ; « Retirer de l'horaire » plus bas retire la tâche au complet.
+                {onChangerJoursTechnicien && (techniciensSurTache || []).length > 1
+                  ? " Les jours se changent par technicien : tout le monde a la même durée au départ, tu corriges au besoin — ça ne touche que lui, tout de suite."
+                  : ""}
               </p>
             </div>
           )}
@@ -1296,6 +1352,22 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               le trouver, et RIEN n'était enregistré. Il reste maintenant
               visible au bas de la fenêtre pendant qu'on défile. */}
           <div className="sticky bottom-0 -mx-1 border-t border-slate-200 bg-white px-1 pb-1 pt-2">
+            {/* 👥 À QUI S'APPLIQUE LA SAUVEGARDE (2026-10-15, vécu : le
+                changement à 1 journée était parti à toute l'équipe sans
+                qu'on le voie — les cases sont tout en bas de la fiche). */}
+            {dejaPlanifiee && (techniciensSurTache || []).length > 1 && (() => {
+              const noms = (techniciensSurTache || [])
+                .filter((t) => t.employeId === employeIdInitial || autresCibles.includes(t.employeId))
+                .map((t) => t.nom);
+              const seuls = (techniciensSurTache || []).length - noms.length;
+              return (
+                <p className="mb-1.5 text-[10px] leading-snug text-slate-500">
+                  👥 S&apos;applique à : <span className="font-bold text-slate-700">{noms.join(", ")}</span>
+                  {seuls > 0 ? ` · ${seuls} technicien${seuls > 1 ? "s" : ""} laissé${seuls > 1 ? "s" : ""} tel quel` : ""}
+                  {" "}— chacun garde sa date et ses jours, sauf ce que tu as changé ici.
+                </p>
+              );
+            })()}
             <Button onClick={enregistrer} className="w-full">
               {dejaPlanifiee ? "Enregistrer les modifications" : employeId ? "Enregistrer et assigner" : "Enregistrer"}
             </Button>

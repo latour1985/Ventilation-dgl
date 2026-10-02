@@ -267,6 +267,11 @@ export function techniciensPourTache(planning, tacheId, employes) {
       employeId: e.employeId,
       nom: employes.find((x) => x.id === e.employeId)?.nom || e.employeId,
       detail: `${premiereDate} · ${e.premiereHeure} · ${heuresParJour >= HEURES.length ? "journée complète" : `${heuresParJour} h/jour`} · ${nbJours} jour${nbJours > 1 ? "s" : ""}`,
+      // Valeurs brutes (2026-10-15) : la durée PAR TECHNICIEN de la fiche
+      // et la sauvegarde d'équipe gardent l'horaire propre de chacun.
+      premiereDate,
+      premiereHeure: e.premiereHeure,
+      nbJours,
     };
   });
 }
@@ -6010,6 +6015,31 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                   ajouterJournal(`↩️ ${employe?.nom || "Technicien"} retiré de « ${t.titre || t.clientNom} » — les autres techniciens restent assignés.`);
                 }
           }
+          onChangerJoursTechnicien={
+            lectureSeule
+              ? undefined
+              : (empId, nbJours) => {
+                  // 📅 DURÉE D'UN SEUL TECHNICIEN (2026-10-15, demande du
+                  // propriétaire : « tous sur le même temps, puis on corrige
+                  // au besoin ») — même date et heure de départ, ses jours
+                  // à lui seulement ; les autres ne bougent pas.
+                  const t = tacheDetailOuverte.tache;
+                  const sien = techniciensPourTache(planning, t.id, employes).find((x) => x.employeId === empId);
+                  if (!sien) return;
+                  modifierTachePlanifiee(t, empId, {
+                    heures: t.heures,
+                    jours: nbJours,
+                    sauterWeekend: t.sauterWeekend,
+                    sauterFeries: t.sauterFeries,
+                    description: t.description,
+                    employeId: empId,
+                    date: sien.premiereDate,
+                    heureDebut: sien.premiereHeure,
+                  });
+                  const employe = employes.find((x) => x.id === empId);
+                  ajouterJournal(`📅 ${employe?.nom || "Technicien"} : ${nbJours} jour${nbJours > 1 ? "s" : ""} sur « ${t.titre || t.clientNom} » (à partir du ${sien.premiereDate}) — les autres techniciens gardent leur durée.`);
+                }
+          }
           onAjouterTechnicien={({ employeId, date, heureDebut, heures, jours, dupliquer }) => {
             // « Ajouter » = même tâche partagée (id identique) ; « Dupliquer »
             // = copie indépendante (nouvel id). Dans les deux cas, le
@@ -6085,11 +6115,29 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
               if (ajoutes.length > 0) onDevisJoints?.(ajoutes, { ...t0, ...complement });
             }
             // Modification groupée : chaque technicien coché reçoit les
-            // mêmes date/heure/durée/description — sur SES plages (son
-            // instance est déplacée/mise à jour, pas celle des autres).
+            // mêmes changements — sur SES plages (son instance est
+            // déplacée/mise à jour, pas celle des autres).
+            // 👥 (2026-10-15, vécu du propriétaire, tâche du 15 oct.) :
+            //  • un technicien retiré par le ✕ n'est JAMAIS remis — seuls
+            //    ceux encore sur la tâche sont touchés ;
+            //  • date, heure et nombre de jours ne s'imposent aux autres
+            //    QUE s'ils ont été changés dans la fiche — sinon chacun
+            //    garde les siens (Dominic à 1 jour reste à 1 jour quand on
+            //    change la description depuis le bloc de Charles) ;
+            //  • une durée ajustée sur la ligne d'un technicien l'emporte.
+            const equipeActuelle = techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes);
+            const modifies = champs.champsModifies || { date: true, heure: true, jours: true };
             (champs.autresCibles || []).forEach((empId) => {
               if (empId === tacheDetailOuverte.employe.id) return;
-              modifierTachePlanifiee(tacheDetailOuverte.tache, empId, { ...champs, employeId: empId });
+              const sien = equipeActuelle.find((x) => x.employeId === empId);
+              if (!sien) return;
+              modifierTachePlanifiee(tacheDetailOuverte.tache, empId, {
+                ...champs,
+                employeId: empId,
+                date: modifies.date ? champs.date : sien.premiereDate,
+                heureDebut: modifies.heure ? champs.heureDebut : sien.premiereHeure,
+                jours: champs.joursParTechnicien?.[empId] ?? (modifies.jours ? champs.jours : sien.nbJours),
+              });
             });
             setTacheDetailOuverte(null);
           }}
