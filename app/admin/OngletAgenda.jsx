@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Briefcase, Car, Check, ChevronDown, ChevronLeft, ChevronRight, Lock, MapPin, Pencil, Plus, User, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
+import { territoireDe, CLE_NOTE_ZONES } from "@/lib/supabase/prixDepots";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritConfirmationRdv } from "@/lib/courriels";
 import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, majDonneesTousLesTechniciens, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
@@ -4049,9 +4050,12 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                     <option value="">— Choisir la zone —</option>
                     {zonesEffectives(prixDepots).filter((z) => Number(prixDepots?.[z]) > 0).map((z) => {
                       const p = Number(prixDepots[z]);
+                      // 🗺️ Le territoire suit le nom de la zone (snippet 161),
+                      // coupé court : la légende complète est sous la liste.
+                      const terr = territoireDe(prixDepots, z);
                       return (
                         <option key={z} value={z}>
-                          {z} — {p.toFixed(2)} $ HT ({taxesDepot(p, configEnt).total.toFixed(2)} $ taxes incl.) — transport inclus, {Number(prixDepots?.minutes_incluses) || 90} min chez le client
+                          {z}{terr ? ` (${terr.length > 45 ? `${terr.slice(0, 45)}…` : terr})` : ""} — {p.toFixed(2)} $ HT ({taxesDepot(p, configEnt).total.toFixed(2)} $ taxes incl.) — transport inclus, {Number(prixDepots?.minutes_incluses) || 90} min chez le client
                         </option>
                       );
                     })}
@@ -4059,6 +4063,31 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                       Hors zone — tarif sur mesure — {Number(prixDepots?.minutes_incluses_hors_zone) || 180} min totales, transport compté
                     </option>
                   </select>
+                  {/* 🗺️ LÉGENDE DES ZONES (2026-10-02, demande du propriétaire) :
+                      quelle ville va dans quelle zone, propre à CHAQUE
+                      entreprise (Tarifs → Liste de prix). La zone choisie
+                      ressort en gras. Rien ne s'affiche si rien n'est décrit. */}
+                  {(() => {
+                    const decrites = zonesEffectives(prixDepots).filter((z) => Number(prixDepots?.[z]) > 0 && territoireDe(prixDepots, z));
+                    const noteGenerale = territoireDe(prixDepots, CLE_NOTE_ZONES);
+                    if (decrites.length === 0 && !noteGenerale) return null;
+                    return (
+                      <div className="mt-1.5 rounded-lg bg-slate-50 px-2 py-1.5">
+                        <p className="text-[9px] font-extrabold uppercase tracking-wide text-slate-500">Territoires des zones</p>
+                        <ul className="mt-0.5 space-y-0.5">
+                          {decrites.map((z) => (
+                            <li
+                              key={z}
+                              className={`text-[10px] leading-snug ${zoneAppelChoix === z ? "font-bold text-slate-900" : "text-slate-600"}`}
+                            >
+                              {zoneAppelChoix === z ? "👉 " : ""}<span className="font-bold">{z}</span> : {territoireDe(prixDepots, z)}
+                            </li>
+                          ))}
+                        </ul>
+                        {noteGenerale && <p className="mt-1 text-[10px] italic leading-snug text-slate-500">ℹ️ {noteGenerale}</p>}
+                      </div>
+                    );
+                  })()}
                   <p className="mt-1 text-[9px] leading-snug text-slate-400">
                     La comptabilité s&apos;en sert même sans dépôt : prix de base de l&apos;appel et calcul du temps
                     supplémentaire (temps réel sur place seulement — jamais le bloc d&apos;agenda).

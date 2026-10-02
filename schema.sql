@@ -7193,3 +7193,13 @@ grant execute on function rattacher_tache_lot(text, boolean, text, boolean, bool
 
 -- Vérification : la nouvelle condition est bien dans la fonction (true).
 select position('devis::' in pg_get_functiondef('public.rattacher_tache_lot(text,boolean,text,boolean,boolean,text)'::regprocedure)) > 0 as protege_les_devis_joints;
+
+-- ============================================================
+-- 161 - LÉGENDE DES ZONES : TERRITOIRE PAR ZONE + MOT GÉNÉRAL (2026-10-02)
+-- Chaque entreprise décrit le territoire de SES zones (« Blainville,
+-- Rosemère… ») dans Tarifs → Liste de prix ; le bureau le voit en
+-- choisissant la zone d'un appel de service. Le mot général vit sur la
+-- ligne de configuration « note_zones ». Ajout d'une colonne seulement :
+-- les cloisons (RLS) de prix_depots s'appliquent déjà.
+-- ============================================================
+alter table prix_depots add column if not exists territoire text;

@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Lock, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { ZONES_DEPOTS, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
+import { ZONES_DEPOTS, supprimerZoneDepot, CLE_TERRITOIRES, CLE_NOTE_ZONES, territoireDe } from "@/lib/supabase/prixDepots";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { listerCatalogueRetires, margePourcent, profitDollars, vendantPourMarge } from "@/lib/supabase/catalogue";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
@@ -76,7 +76,7 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
   const [nouvelleZoneNom, setNouvelleZoneNom] = useState("");
   const [guideZoneVisible, setGuideZoneVisible] = useState(false);
   const refChampZone = useRef(null);
-  const CLES_CONFIG_INTERDITES = ["taux_horaire_vendant", "minutes_incluses", "minutes_incluses_hors_zone"];
+  const CLES_CONFIG_INTERDITES = ["taux_horaire_vendant", "minutes_incluses", "minutes_incluses_hors_zone", CLE_NOTE_ZONES, CLE_TERRITOIRES];
   const [nouveauMetier, setNouveauMetier] = useState("");
   // Ajout par NOM (saisie libre OU pastille de suggestion CCQ) — les
   // nouvelles entreprises partent d'une grille VIDE (retour du
@@ -413,8 +413,37 @@ export function OngletTarifs({ tauxMetiers, setTauxMetiers, tauxMetiersRes, setT
                 />
                 <span className="text-[10px] text-slate-400">$ HT</span>
               </div>
+              {/* 🗺️ TERRITOIRE de la zone (snippet 161) — la légende que le
+                  bureau voit en choisissant la zone d'un appel de service. */}
+              <textarea
+                value={territoireDe(prixDepots, zone)}
+                disabled={!estAdminPrincipal}
+                onChange={(e) =>
+                  setPrixDepots((prev) => ({ ...prev, [CLE_TERRITOIRES]: { ...(prev?.[CLE_TERRITOIRES] || {}), [zone]: e.target.value } }))
+                }
+                rows={2}
+                maxLength={500}
+                placeholder="Territoire couvert — ex : Blainville, Rosemère, Sainte-Thérèse"
+                className="mt-1 w-full resize-y rounded-lg border border-slate-200 px-2 py-1 text-[11px] leading-snug text-slate-700 outline-none focus:border-slate-400 disabled:bg-slate-50 disabled:text-slate-400"
+              />
             </div>
           ))}
+        </div>
+        {/* 🗺️ MOT GÉNÉRAL sur les zones (cas particuliers) — affiché sous la
+            légende, à la création d'un appel de service. */}
+        <div className="mt-2">
+          <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Mot général sur les zones (cas particuliers)</label>
+          <textarea
+            value={territoireDe(prixDepots, CLE_NOTE_ZONES)}
+            disabled={!estAdminPrincipal}
+            onChange={(e) =>
+              setPrixDepots((prev) => ({ ...prev, [CLE_TERRITOIRES]: { ...(prev?.[CLE_TERRITOIRES] || {}), [CLE_NOTE_ZONES]: e.target.value } }))
+            }
+            rows={2}
+            maxLength={500}
+            placeholder="Ex : Rive-Sud et Rive-Nord au-delà de Saint-Jérôme = toujours hors zone"
+            className="w-full resize-y rounded-lg border border-slate-200 px-2 py-1 text-[11px] leading-snug text-slate-700 outline-none focus:border-slate-400 disabled:bg-slate-50 disabled:text-slate-400"
+          />
         </div>
         {estAdminPrincipal && (
           <div className="mt-2">
