@@ -3304,6 +3304,15 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const p = (projets || []).find((x) => x.id === projetId) || (projetNom ? (projets || []).find((x) => x.nom === projetNom) : null);
     return (p?.numeroSuiviClient || "").trim() || null;
   };
+  // 🔢 Le Nº de suivi PROPOSÉ pour un bon (2026-10-15) : celui inscrit sur
+  // la TÂCHE (le plus précis — donné à la réservation), sinon celui du projet.
+  // (« id::jour » des chantiers multi-jours : la tâche se cherche par son id.)
+  const suiviPourBon = (b) =>
+    (String(tachePour?.(String(b?.tacheId || "").split("::")[0])?.numeroSuiviClient || "").trim() || null) || suiviDuProjet(b?.projetId);
+  // Le numéro RETENU : celui de la fenêtre d'envoi s'il y en a une (vide =
+  // aucun, choix explicite) ; sinon le repli (tâche, projet).
+  const suiviChoisi = (choix, repli) =>
+    choix && choix.numeroSuivi !== undefined ? String(choix.numeroSuivi || "").trim() || null : repli;
   const echeanceDepuisTerme = (terme) => {
     const m = String(terme || "").match(/(\d+)/);
     if (!m) return null;
@@ -3351,7 +3360,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         // la page de la facture le repère et l'affiche en haut, sous le
         // numéro de facture (même format que FacturesMaison/la page).
         note: [
-          suiviDuProjet(b.projetId) ? `${PREFIXE_SUIVI_FACTURE} ${suiviDuProjet(b.projetId)}` : "",
+          suiviChoisi(choixCourriels, suiviPourBon(b)) ? `${PREFIXE_SUIVI_FACTURE} ${suiviChoisi(choixCourriels, suiviPourBon(b))}` : "",
           b.devisNumero ? `Bon de travail — devis ${b.devisNumero}` : "Bon de travail",
         ]
           .filter(Boolean)
@@ -3366,7 +3375,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     if (destinataires.length > 0 && lien) {
       const r = await envoyerCourriel({
         a: destinataires,
-        sujet: `Facture ${creee.numero}${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviDuProjet(b.projetId) ? ` — Suivi ${suiviDuProjet(b.projetId)}` : ""} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
+        sujet: `Facture ${creee.numero}${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviChoisi(choixCourriels, suiviPourBon(b)) ? ` — Suivi ${suiviChoisi(choixCourriels, suiviPourBon(b))}` : ""} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
         html: gabaritFactureMaison({
           config: configEnt,
           numero: creee.numero,
@@ -3531,7 +3540,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       const jeton = await assurerJetonBon(rowId);
       const r = await envoyerCourriel({
         a: adresses,
-        sujet: `Vos travaux sont terminés — bon de travail${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviDuProjet(b.projetId) ? ` — Suivi ${suiviDuProjet(b.projetId)}` : ""} (${configEnt.nomCommercial || configEnt.nomLegal})`,
+        sujet: `Vos travaux sont terminés — bon de travail${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviPourBon(b) ? ` — Suivi ${suiviPourBon(b)}` : ""} (${configEnt.nomCommercial || configEnt.nomLegal})`,
         html: gabaritBonTravail({
           config: configEnt,
           clientNom: b.client,
@@ -3635,7 +3644,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       reference: donnees.reference || "Facture",
       // 🔢 Facture libre liée à un projet : le Nº de suivi du client suit
       // (2026-10-15) — champ « Nº de suivi » ET message de la facture.
-      numeroSuivi: suiviDuProjet(donnees.projetId),
+      numeroSuivi: suiviChoisi(choixCourriels, suiviDuProjet(donnees.projetId)),
       paiementCarte: paiements.carte === true,
       paiementVirement: paiements.virement === true,
       // 📧 TOUJOURS envoyée : contrairement aux factures issues d'un bon
@@ -3802,7 +3811,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // 📅 Date du bon le plus récent du groupe (décision 2026-09-06) —
       // chaque ligne garde SA date de travaux. 🔢 Suivi du projet.
       dateFacture: bonsDuGroupe.map((x) => x.date).filter(Boolean).sort().slice(-1)[0] || null,
-      numeroSuivi: suiviDuProjet(bonsDuGroupe[0]?.projetId, groupe.projetNom),
+      numeroSuivi: suiviChoisi(choixCourriels, bonsDuGroupe.map((x) => suiviPourBon(x)).find(Boolean) || suiviDuProjet(bonsDuGroupe[0]?.projetId, groupe.projetNom)),
       lignes,
       termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: groupe.projetNom || "travaux",
@@ -3926,7 +3935,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // 📅 Date des travaux (décision du propriétaire, 2026-09-06 —
       // mise en garde taxes donnée) + 🔢 suivi du projet lié.
       dateFacture: b.date || null,
-      numeroSuivi: suiviDuProjet(b.projetId),
+      numeroSuivi: suiviChoisi(choixCourriels, suiviPourBon(b)),
       lignes,
       termePaiement: choixCourriels?.modalites || configEnt?.termePaiementDefaut || "Net 30",
       reference: b.projet || "travaux",
@@ -4050,7 +4059,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       clientNom: bons.find((x) => x.id === bonId)?.client || "",
       // 🔢 Suivi du projet lié — la facture progressive garde la date
       // d'émission (facturation périodique, pas une date de travaux).
-      numeroSuivi: suiviDuProjet(bons.find((x) => x.id === bonId)?.projetId),
+      numeroSuivi: suiviChoisi(choixCourriels, suiviPourBon(bons.find((x) => x.id === bonId))),
       // 📅 DATE DE LA FACTURE = DATE DES TRAVAUX (2026-09-16, demande du
       // propriétaire : « on facture parfois plusieurs jours après, c'est
       // la date des travaux qui compte ») — ce chemin (révision d'un bon)
@@ -5292,6 +5301,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(bonEnvoiCourriel)?.id, email)}
           contexte={`Facture — "${bonEnvoiCourriel.projet}" (${bonEnvoiCourriel.montant.toFixed(2)} $)`}
           avecModalites={qbConnecte !== false}
+          avecSuivi
+          numeroSuiviDefaut={suiviPourBon(bonEnvoiCourriel) || ""}
           termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setBonEnvoiCourrielId(null)}
           onConfirmer={(choix) => {
@@ -5322,6 +5333,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           onAjouterFiche={(email) => onAjouterCourrielClient?.(trouverClientDuBon(bonFactureEnAttente)?.id, email)}
           contexte={`Facture progressive — "${bonFactureEnAttente.projet}" (${factureEnAttenteCourriel.montant.toFixed(2)} $)`}
           avecModalites={qbConnecte !== false}
+          numeroSuiviDefaut={suiviPourBon(bonFactureEnAttente) || ""}
           termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setFactureEnAttenteCourriel(null)}
           onConfirmer={(courrielChoisi) => {
@@ -5377,6 +5389,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
               : "cette facture"
           }
           avecModalites={qbConnecte !== false}
+          numeroSuiviDefaut={(groupeAFacturer.bons || []).map((x) => suiviPourBon(x)).find(Boolean) || suiviDuProjet(groupeAFacturer.bons?.[0]?.projetId, groupeAFacturer.projetNom) || ""}
           termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setGroupeAFacturer(null)}
           onConfirmer={(choix) => {
@@ -5417,6 +5430,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           onAjouterFiche={(email) => onAjouterCourrielClient?.(courrielFactureLibre.client?.id, email)}
           contexte="cette facture"
           avecModalites={qbConnecte !== false}
+          numeroSuiviDefaut={suiviDuProjet(courrielFactureLibre.projetId) || ""}
           termeDefaut={configEnt?.termePaiementDefaut || "Net 30"}
           onFermer={() => setCourrielFactureLibre(null)}
           onConfirmer={(choix) => {

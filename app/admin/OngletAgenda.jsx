@@ -1069,6 +1069,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // visible sur son téléphone seulement — jamais sur le bon, la facture,
   // le PDF, les courriels ni la page que le client signe.
   const [nouvelleNoteBureau, setNouvelleNoteBureau] = useState("");
+  // 🔢 Nº de suivi du client (PO) donné à la réservation (2026-10-15) — il
+  // suit la tâche jusqu'à la fenêtre d'envoi de la facture (pré-rempli).
+  const [nouveauSuiviClient, setNouveauSuiviClient] = useState("");
   // 📝 Le texte de devis INJECTÉ dans la description (2026-08-29 — retour
   // du propriétaire : « je sélectionne un devis et la description ne suit
   // pas »). Mémorisé pour qu'un changement de devis REMPLACE les lignes de
@@ -1375,6 +1378,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       heurePrevue: nouvelleHeureDebut || null,
       description: nouvelleDescription.trim(),
       ...(nouvelleNoteBureau.trim() ? { noteBureau: nouvelleNoteBureau.trim() } : {}),
+      ...(nouveauSuiviClient.trim() ? { numeroSuiviClient: nouveauSuiviClient.trim().slice(0, 60) } : {}),
       // 📎 Photos et plans joints par le bureau — le technicien les
       // ouvre sur son téléphone, sans rappeler pour « c'est où déjà ? ».
       piecesJointes: nouvellesPiecesJointes,
@@ -1746,6 +1750,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     setNouvellesPiecesJointes([]);
     setNouvelleDescription("");
     setNouvelleNoteBureau("");
+    setNouveauSuiviClient("");
     setNouveauDevisId("");
     setDevisJoints([]);
     dernierTexteDevisRef.current = "";
@@ -2340,6 +2345,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       // ✅ Étapes de la job — clé absente = inchangées.
       ...(champs.etapes !== undefined ? { etapes: champs.etapes } : {}),
       ...(champs.noteBureau !== undefined ? { noteBureau: champs.noteBureau } : {}),
+      // 🔢 Nº de suivi du client — clé absente = inchangé.
+      ...(champs.numeroSuiviClient !== undefined ? { numeroSuiviClient: champs.numeroSuiviClient } : {}),
       // 📎 Devis joints — clé absente = inchangés.
       ...(champs.devisJoints !== undefined ? { devisJoints: champs.devisJoints, devisJointsLignes: champs.devisJointsLignes || [] } : {}),
     };
@@ -2364,7 +2371,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau, devisJoints, devisJointsLignes }) => {
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau, devisJoints, devisJointsLignes, numeroSuiviClient }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2388,6 +2395,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       // ✅ Étapes de la job — clé absente = inchangées.
       ...(etapes !== undefined ? { etapes } : {}),
       ...(noteBureau !== undefined ? { noteBureau } : {}),
+      ...(numeroSuiviClient !== undefined ? { numeroSuiviClient } : {}),
       // 🏗️/📄 Rattachements modifiés dans la fiche — clé absente = inchangé.
       ...(projetId !== undefined ? { projetId } : {}),
       ...(devisNumero !== undefined ? { devisNumero } : {}),
@@ -3385,6 +3393,25 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                   </div>
                 );
               })()}
+
+              {/* 🔢 Nº DE SUIVI DU CLIENT (2026-10-15, demande du propriétaire :
+                  « plusieurs fonctionnent avec des numéros de suivi sans
+                  projet ») — inscrit à la réservation, il pré-remplit la
+                  fenêtre d'envoi de la facture. */}
+              {!estTypeSansClient(nouveauType) && nouveauClientId && (
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                    🔢 Nº de suivi du client <span className="font-normal normal-case text-slate-400">— optionnel (bon de commande du client) · ira sur la facture</span>
+                  </label>
+                  <input
+                    value={nouveauSuiviClient}
+                    onChange={(e) => setNouveauSuiviClient(e.target.value)}
+                    maxLength={60}
+                    placeholder="ex. : PO-45812"
+                    className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs"
+                  />
+                </div>
+              )}
 
               {/* 🔧 UNITÉS CONCERNÉES — le carnet d'équipements du client
                   (relevé sur les bons passés). Cocher = le technicien

@@ -57,6 +57,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // la tâche). Une étape déjà cochée sur le terrain s'affiche ✓.
   const [etapesTache, setEtapesTache] = useState(() => (Array.isArray(tache.etapes) ? tache.etapes : []));
   const [noteBureau, setNoteBureau] = useState(tache.noteBureau || ""); // 🔒 note interne pour le technicien
+  // 🔢 Nº de suivi du client (bon de commande) — pré-remplit l'envoi de la facture.
+  const [suiviClient, setSuiviClient] = useState(tache.numeroSuiviClient || "");
   const [pjTelevers, setPjTelevers] = useState(false);
   const ajouterPjEdition = async (fichiers) => {
     setPjTelevers(true);
@@ -399,6 +401,7 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
       // ✅ Étapes de la job — transmises seulement si elles ont changé.
       ...(JSON.stringify(etapesTache) !== JSON.stringify(tache.etapes || []) ? { etapes: etapesTache } : {}),
       ...(noteBureau.trim() !== (tache.noteBureau || "").trim() ? { noteBureau: noteBureau.trim() } : {}),
+      ...(suiviClient.trim() !== (tache.numeroSuiviClient || "").trim() ? { numeroSuiviClient: suiviClient.trim().slice(0, 60) || null } : {}),
       // 🏗️/📄 Rattachements — transmis SEULEMENT s'ils ont changé : une
       // clé absente laisse l'existant tranquille (les heures déjà
       // pointées ne sont alors jamais réécrites pour rien).
@@ -913,6 +916,21 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                 rows={2}
                 placeholder="Code de porte, consigne particulière, mise en garde…"
                 className="w-full rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-sm"
+              />
+            </div>
+          )}
+          {/* 🔢 Nº DE SUIVI DU CLIENT (2026-10-15) — ira sur la facture. */}
+          {!estConge && !estTypeSansClient(typeChoisi) && (
+            <div className="mt-3">
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">
+                🔢 Nº de suivi du client <span className="font-normal text-slate-400">(bon de commande du client — pré-rempli à l&apos;envoi de la facture)</span>
+              </label>
+              <input
+                value={suiviClient}
+                onChange={(e) => setSuiviClient(e.target.value)}
+                maxLength={60}
+                placeholder="ex. : PO-45812"
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
               />
             </div>
           )}

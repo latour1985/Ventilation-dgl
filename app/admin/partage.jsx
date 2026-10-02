@@ -2333,7 +2333,12 @@ export function libelleDestinataires(choix) {
 // propriétaire).
 export const MODALITES_PAIEMENT = ["Payable sur réception", "Net 15", "Net 30", "Net 45", "Net 60"];
 
-export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer, onAjouterFiche = null, avecModalites = false, termeDefaut = "Net 30" }) {
+export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer, onAjouterFiche = null, avecModalites = false, termeDefaut = "Net 30", numeroSuiviDefaut = "", avecSuivi = null }) {
+  const montrerSuivi = avecSuivi ?? avecModalites;
+  // 🔢 Nº DE SUIVI DU CLIENT (2026-10-15) — offert avec les modalités (envoi
+  // d'une FACTURE seulement) ; pré-rempli depuis la tâche ou le projet,
+  // modifiable pour cette facture, vide = aucun numéro.
+  const [numeroSuivi, setNumeroSuivi] = useState(String(numeroSuiviDefaut || ""));
   const courriels = client?.courriels || [];
   // Terme pré-rempli : celui du client s'il en a un de connu, sinon le
   // défaut de l'entreprise. Ne s'affiche que pour les vraies factures
@@ -2456,6 +2461,23 @@ export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer
             </select>
           </div>
         )}
+        {montrerSuivi && (
+          <div className="mt-3">
+            <label className="mb-0.5 block text-[10px] font-bold text-slate-400">🔢 Nº de suivi du client (facultatif)</label>
+            <input
+              value={numeroSuivi}
+              onChange={(e) => setNumeroSuivi(e.target.value)}
+              maxLength={60}
+              placeholder="ex. : PO-45812 — bon de commande du client"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#FF6A13]"
+            />
+            <p className="mt-0.5 text-[10px] text-slate-400">
+              {String(numeroSuiviDefaut || "").trim()
+                ? "Pré-rempli depuis la tâche ou le projet — modifiable pour cette facture."
+                : "Imprimé sur la facture : champ « Nº de suivi » et message au client."}
+            </p>
+          </div>
+        )}
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={onFermer}>Annuler</Button>
           <Button
@@ -2466,6 +2488,8 @@ export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer
               // les appelants qui ne lisent que les courriels ne changent pas.
               const choix = [...selection, ...extras];
               if (avecModalites) choix.modalites = modalite;
+              // Le numéro voyage aussi avec la liste — "" = aucun (choix explicite).
+              if (montrerSuivi) choix.numeroSuivi = numeroSuivi.trim();
               onConfirmer(choix);
             }}
           >
