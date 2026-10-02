@@ -759,8 +759,16 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // chaque carte pour savoir laquelle des deux on regarde.
   const tachesPiece = tachesAttente.filter((t) => pieceBloque(t.id));
   const tachesBloquees = tachesAttente.filter((t) => depotBloque(t.id) && !pieceBloque(t.id));
+  // 🚚 Onglet « Ramassages » (2026-10-02) : il ne montre QUE les cartes de
+  // ramassage à attribuer — aucune tâche de la pile.
   const tachesAttenteAffichees =
-    ongletAttente === "bloquees" ? tachesBloquees : ongletAttente === "pieces" ? tachesPiece : tachesPretes;
+    ongletAttente === "ramassages"
+      ? []
+      : ongletAttente === "bloquees"
+        ? tachesBloquees
+        : ongletAttente === "pieces"
+          ? tachesPiece
+          : tachesPretes;
   // Une date promise déjà dépassée : le compteur de l'onglet vire au
   // rouge pour que personne n'ait à ouvrir la pile pour le découvrir.
   const piecesEnRetard = (pieces || []).filter((p) => p.enRetard).length;
@@ -2970,6 +2978,29 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                 {tachesPiece.length}
               </span>
             </button>
+            {/* 🚚 RAMASSAGES À ATTRIBUER dans leur propre onglet (2026-10-02,
+                demande du propriétaire : sans date, ces cartes polluaient
+                le haut de « Prêtes »). Le compteur reste visible. */}
+            <button
+              onClick={() => setOngletAttente("ramassages")}
+              title={tr("Ramassages à attribuer")}
+              className={`flex-1 whitespace-nowrap rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
+                ongletAttente === "ramassages" ? "bg-sky-700 text-white" : "text-slate-500"
+              }`}
+            >
+              🚚 {tr("Ramass.")}
+              <span
+                className={`ml-1 rounded-full px-1.5 py-0.5 text-[9px] ${
+                  ongletAttente === "ramassages"
+                    ? "bg-white/25"
+                    : (ramassagesAttribuer || []).length > 0
+                      ? "bg-sky-100 text-sky-800"
+                      : "bg-slate-100 text-slate-600"
+                }`}
+              >
+                {(ramassagesAttribuer || []).length}
+              </span>
+            </button>
           </div>
 
           {lectureSeule && (
@@ -4474,7 +4505,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
             {/* 🚚 RAMASSAGES À ATTRIBUER (2026-09-21) — une carte par
                 fournisseur ; glisse-la sur la rangée de la personne, le
                 bon jour : tous ses bons reçoivent qui + quand. */}
-            {ongletAttente === "pretes" && (ramassagesAttribuer || []).map((r) => (
+            {ongletAttente === "ramassages" && (ramassagesAttribuer || []).map((r) => (
               <div
                 key={r.id}
                 draggable={!lectureSeule}
@@ -4949,9 +4980,11 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                 )}
               </div>
             ))}
-            {tachesAttenteAffichees.length === 0 && (
+            {tachesAttenteAffichees.length === 0 && !(ongletAttente === "ramassages" && (ramassagesAttribuer || []).length > 0) && (
               <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
-                {tachesAttente.length === 0
+                {ongletAttente === "ramassages"
+                  ? "Aucun ramassage à attribuer. Quand un bon de commande est à ramasser chez le fournisseur, sa carte se range ici — glisse-la ensuite sur la rangée de quelqu'un, au jour voulu."
+                  : tachesAttente.length === 0
                   ? "Aucune tâche en attente. Les devis acceptés apparaissent ici."
                   : ongletAttente === "bloquees"
                   ? "Aucune tâche bloquée par un dépôt — dès qu'un dépôt est payé, sa tâche passe dans « ✅ Prêtes »."
