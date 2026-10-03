@@ -64,3 +64,94 @@ select {
     padding-right: env(safe-area-inset-right);
   }
 }
+
+/* ============================================================
+   ADMIN SUR CELLULAIRE — ÉTAPE 1 (2026-10-02, maquette validée)
+   ------------------------------------------------------------
+   TOUT est sous 768 px : l'ordinateur ne voit aucune de ces règles.
+   Ces styles sont hors des couches Tailwind, ils l'emportent donc
+   sur les classes utilitaires des mêmes éléments, sans !important.
+   ============================================================ */
+@media (max-width: 767px) {
+  /* 🗂️ Barres d'onglets → pastilles qui défilent au doigt. La couleur
+     de l'onglet actif reste celle de l'écran (ambre, ciel…) ; seules les
+     barres « soulignées » reçoivent la pastille foncée. */
+  .onglets-mobile {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    margin-left: 0;
+    margin-right: 0;
+    padding: 2px 0 4px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .onglets-mobile::-webkit-scrollbar {
+    display: none;
+  }
+  .onglets-mobile > button {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 7px 13px;
+    border: 1px solid #e2e8f0;
+    border-radius: 9999px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .onglets-mobile > button:not([data-actif="true"]) {
+    background: #ffffff;
+  }
+  .onglets-mobile > button[data-actif="true"] {
+    border-color: transparent;
+  }
+  .onglets-mobile.soulignes > button[data-actif="true"] {
+    background: #131b2e;
+    color: #ffffff;
+  }
+
+  /* 🪟 Fenêtres → plein écran. Le voile devient blanc (plus de bande
+     noire sous l'encoche) et le panneau prend toute la place. */
+  .fenetre-mobile {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: env(safe-area-inset-top) 0 0;
+    background: #ffffff;
+  }
+  .fenetre-mobile > .panneau-mobile {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
+  }
+
+  /* 💾 Le bouton d'enregistrement reste sous le pouce pendant qu'on
+     défile une longue fiche. */
+  .bouton-collant-mobile {
+    position: sticky;
+    bottom: 8px;
+    z-index: 2;
+    box-shadow: 0 -6px 16px rgba(255, 255, 255, 0.95), 0 4px 12px rgba(15, 23, 42, 0.18);
+  }
+
+  /* 📌 Barre « Enregistrer » collée en bas d'un écran (Paramètres) :
+     elle remonte au-dessus de la barre de navigation du bas. */
+  .zone-contenu-admin .sticky.bottom-3 {
+    bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  /* 🔍 Recherche plein écran : la liste des résultats suit le champ et
+     défile seule. */
+  .recherche-mobile-ouverte .liste-recherche {
+    position: static;
+    margin-top: 8px;
+    max-height: calc(100vh - 140px);
+    max-height: calc(100dvh - 140px);
+    overflow-y: auto;
+  }
+}

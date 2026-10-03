@@ -81,6 +81,8 @@ import TourGuide, { tourDejaFait } from "./TourGuide";
 import Toasts from "@/components/Toasts";
 import DeconnexionInactivite from "@/components/DeconnexionInactivite";
 import RaccourcisClavier from "@/components/RaccourcisClavier";
+import BarreNavigationBas from "./BarreNavigationBas";
+import { flushSync } from "react-dom";
 import { notifier } from "@/lib/toasts";
 import { navigationPermise } from "@/lib/gardeNonEnregistre";
 import { TYPES_TACHE, TYPE_INFO, estTypeSansClient, HEURES_QUART, HEURE_PAR_DEFAUT, listeCellule, cleTacheDesHeures, camionsEntretienDu, tachesDuJourPourEmploye } from "./partage";
@@ -332,7 +334,7 @@ function sauvegarderJournal(journal) {
   }
 }
 
-function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDeconnexion, ouvert, onFermer, reduit, onBasculerReduit }) {
+function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDeconnexion, ouvert, onFermer, reduit, onBasculerReduit, actionsMobile }) {
   const { t } = useLangue();
   // 🏢 SENTIMENT D'APPARTENANCE (retour du propriétaire, 2026-09-06) :
   // l'en-tête du menu porte le NOM et le LOGO de L'ENTREPRISE connectée
@@ -465,6 +467,24 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
           </div>
         ))}
       </nav>
+      {/* 📱 TIROIR CELLULAIRE SEULEMENT (2026-10-02) : les boutons retirés
+          de l'en-tête pour lui faire de la place (Mon horaire, notes, tour
+          guidé, langue) se retrouvent ici. Le bureau n'y passe jamais. */}
+      {!avecBascule && (
+        <div className="flex flex-wrap gap-1.5 border-t border-white/10 px-3 py-2.5">
+          {(actionsMobile || []).map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => { onFermer?.(); a.onClick(); }}
+              className="rounded-lg border border-white/20 px-2.5 py-1.5 text-[11px] font-bold text-slate-200 hover:bg-white/10"
+            >
+              {a.icone} {t(a.libelle)}
+            </button>
+          ))}
+          <BoutonLangue sombre className="border border-white/20" />
+        </div>
+      )}
       <div className={`border-t border-white/10 py-3 ${estReduit ? "px-2 text-center" : "px-4"}`}>
         {!estReduit && (
           <>
@@ -1207,6 +1227,11 @@ function AppAdmin() {
   // Liste déroulante des résultats sous la barre d'en-tête — on reste
   // sur l'écran en cours, les résultats viennent à nous.
   const [listeRechercheOuverte, setListeRechercheOuverte] = useState(false);
+  // 📱 Recherche PLEIN ÉCRAN sur cellulaire (admin mobile, étape 1 —
+  // 2026-10-02) : la loupe de l'en-tête ouvre le même champ et les mêmes
+  // résultats, par-dessus tout l'écran.
+  const [rechercheMobileOuverte, setRechercheMobileOuverte] = useState(false);
+  const champRechercheRef = useRef(null);
   const [menuOuvert, setMenuOuvert] = useState(false); // tiroir mobile du menu latéral
   // Menu latéral réduit (icônes seulement) — préférence mémorisée.
   const [menuReduit, setMenuReduit] = useState(() => {
@@ -3474,6 +3499,28 @@ function AppAdmin() {
   // Onglet effectif : si l'onglet courant n'est pas permis, on retombe sur le 1er autorisé.
   // « aide » est TOUJOURS permis (hors modules et accès — la ligne de vie vers Fluxya).
   const vue = onglet === "aide" ? "aide" : permissions.includes(onglet) && onglet !== "technicien" ? onglet : sectionsAdmin[0] || "tableau-de-bord";
+  // Pastilles du menu — partagées par le menu de gauche et la barre du
+  // bas sur cellulaire (2026-10-02).
+  const badgesMenu = {
+    facturation: compteAlertes,
+    // 💬 Reponses de clients a traiter (modification demandee ou
+    // devis accepte pas encore converti) — les refus, eux, sont
+    // pour information : ils ne font pas clignoter le menu.
+    devis: reponsesClientsATraiter.filter((r) => r.genre !== "refuse").length,
+    agenda: tachesAttente.length,
+    projets: compteRisqueProjets,
+    // Propositions d'ajustement d'heures en attente de validation.
+    // Propositions en attente + journées bloquées : les deux
+    // demandent une action de l'admin, les deux comptent au badge.
+    // + les BC libres NON ENVOYÉS (créés depuis la trace, 2026-09-15).
+    pieces:
+      pieces.filter((p) => p.statut !== "recue" && p.statut !== "annulee").length +
+      (achatsLibres || []).filter((a) => !a.bcEnvoyeLe && String(a.creeLe || "") >= "2026-09-15").length,
+    paies:
+      travaux.filter((t) => t.supabase && t.heuresProposees != null).length +
+      joursBloques(travaux).size,
+    aide: retoursATrier,
+  };
 
 
   if (sectionsAdmin.length === 0) {
@@ -3500,26 +3547,7 @@ function AppAdmin() {
         // de quitter l'écran (2026-09-15, soumission perdue par un clic).
         onChoisir={(id) => { if (id === vue || navigationPermise()) setOnglet(id); }}
         permissions={permissions}
-        badges={{
-          facturation: compteAlertes,
-          // 💬 Reponses de clients a traiter (modification demandee ou
-          // devis accepte pas encore converti) — les refus, eux, sont
-          // pour information : ils ne font pas clignoter le menu.
-          devis: reponsesClientsATraiter.filter((r) => r.genre !== "refuse").length,
-          agenda: tachesAttente.length,
-          projets: compteRisqueProjets,
-          // Propositions d'ajustement d'heures en attente de validation.
-          // Propositions en attente + journées bloquées : les deux
-          // demandent une action de l'admin, les deux comptent au badge.
-          // + les BC libres NON ENVOYÉS (créés depuis la trace, 2026-09-15).
-          pieces:
-            pieces.filter((p) => p.statut !== "recue" && p.statut !== "annulee").length +
-            (achatsLibres || []).filter((a) => !a.bcEnvoyeLe && String(a.creeLe || "") >= "2026-09-15").length,
-          paies:
-            travaux.filter((t) => t.supabase && t.heuresProposees != null).length +
-            joursBloques(travaux).size,
-          aide: retoursATrier,
-        }}
+        badges={badgesMenu}
         courriel={session.user?.email}
         role={role}
         onDeconnexion={() => supabase.auth.signOut()}
@@ -3527,9 +3555,23 @@ function AppAdmin() {
         onFermer={() => setMenuOuvert(false)}
         reduit={menuReduit}
         onBasculerReduit={basculerMenuReduit}
+        actionsMobile={[
+          ...(permissions.includes("technicien")
+            ? [{
+                id: "horaire",
+                icone: "📱",
+                libelle: "Mon horaire",
+                onClick: () => {
+                  transporterSessionPourBascule("technicien");
+                  window.location.href = "/technicien";
+                },
+              }]
+            : []),
+          { id: "tour", icone: "❓", libelle: "Tour guidé", onClick: () => setTourOuvert(true) },
+        ]}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="zone-contenu-admin flex min-w-0 flex-1 flex-col pb-16 md:pb-0">
       {/* 📜 PORTE D'ENTENTE — première connexion d'une entreprise
           cliente (jamais pour le Propriétaire ni les employés). */}
       {configEntreprise?.statutPlateforme && configEntreprise.statutPlateforme !== "proprietaire" &&
@@ -3543,13 +3585,13 @@ function AppAdmin() {
           }}
         />
       )}
-      <div className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 md:px-6">
+      <div className="sticky top-0 z-20 flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 md:gap-3 md:px-6 md:py-3">
         {/* ☰ mobile : ouvre le tiroir. Sur bureau, la bascule du menu se
             fait via la flèche ‹/› dans le menu lui-même. */}
         <button onClick={() => setMenuOuvert(true)} className="rounded-lg border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-50 md:hidden" aria-label="Ouvrir le menu">
           <Menu size={18} />
         </button>
-        <h1 className="shrink-0 text-lg font-extrabold text-[#131B2E]">{LIBELLES_SECTIONS[vue] || "Administration"}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-base font-extrabold text-[#131B2E] md:flex-none md:text-lg">{LIBELLES_SECTIONS[vue] || "Administration"}</h1>
         {/* 📱 MON HORAIRE (2026-08-20, demande du propriétaire) : un
             admin travaille parfois sur un chantier comme les autres.
             Bascule d'un tap vers SON horaire du jour — la session
@@ -3562,17 +3604,17 @@ function AppAdmin() {
               window.location.href = "/technicien";
             }}
             title="Ouvrir mon horaire du jour (app terrain)"
-            className="shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+            className="hidden shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 md:block"
           >
             📱 <span className="hidden sm:inline">{tEnTete("Mon horaire")}</span>
           </button>
         )}
-        <BoutonLangue />
+        <span className="hidden md:contents"><BoutonLangue /></span>
         {/* ❓ TOUR GUIDÉ — la visite de bienvenue, relançable à volonté. */}
         <button
           onClick={() => setTourOuvert(true)}
           title="Tour guidé de Fluxya — visite des écrans en 2 minutes"
-          className="shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
+          className="hidden shrink-0 rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 md:block"
         >
           ❓
         </button>
@@ -3582,6 +3624,14 @@ function AppAdmin() {
         {/* 🔔 Bulles de confirmation + ⌨️ Échap / Ctrl+Entrée (2026-09-14). */}
         <Toasts />
         <RaccourcisClavier />
+        {/* 📱 Barre du bas — cellulaire seulement (voir BarreNavigationBas). */}
+        <BarreNavigationBas
+          vue={vue}
+          onChoisir={(id) => { if (id === vue || navigationPermise()) setOnglet(id); }}
+          permissions={permissions}
+          badges={badgesMenu}
+          onPlus={() => setMenuOuvert(true)}
+        />
         {/* 🔐 Déconnexion après inactivité (Paramètres, snippet 157). */}
         <DeconnexionInactivite delaiMin={configEntreprise?.delaiInactiviteMin ?? 30} />
         {sessionPerdue && (
@@ -3631,32 +3681,75 @@ function AppAdmin() {
             pas une destination. Première frappe = la page Recherche
             s'ouvre avec les résultats ; la barre reste sous les doigts
             (elle vit dans l'en-tête, qui ne se démonte jamais). */}
+        {/* 🔍 LOUPE — cellulaire seulement : ouvre la recherche plein écran.
+            flushSync : le champ doit être affiché AVANT focus(), sinon
+            l'iPhone n'ouvre pas le clavier. */}
+        {permissions.includes("recherche") && (
+          <button
+            type="button"
+            onClick={() => {
+              flushSync(() => setRechercheMobileOuverte(true));
+              champRechercheRef.current?.focus();
+            }}
+            aria-label="Rechercher"
+            className="shrink-0 rounded-lg border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-50 md:hidden"
+          >
+            <Search size={18} />
+          </button>
+        )}
         {permissions.includes("recherche") && (
           // CENTRÉE dans l'espace libre (demande du propriétaire) : au
           // milieu de l'écran, l'œil la trouve sans la chercher — collée
           // au titre, elle se fondait dans le décor.
-          <div className="flex min-w-0 flex-1 justify-center">
+          // 📱 Sur cellulaire : cachée, ou PLEIN ÉCRAN après la loupe.
+          <div
+            className={`min-w-0 flex-1 md:flex md:justify-center ${
+              rechercheMobileOuverte
+                ? "recherche-mobile-ouverte fixed inset-0 z-[45] flex flex-col bg-white px-3 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)] md:static md:z-auto md:flex-row md:bg-transparent md:p-0"
+                : "hidden"
+            }`}
+          >
             <div className="relative w-full max-w-lg">
+              {rechercheMobileOuverte && (
+                <div className="mb-2 flex items-center justify-between md:hidden">
+                  <p className="text-sm font-extrabold text-[#131B2E]">🔍 Recherche</p>
+                  <button
+                    type="button"
+                    aria-label="Fermer"
+                    onClick={() => {
+                      setRechercheMobileOuverte(false);
+                      setListeRechercheOuverte(false);
+                    }}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600"
+                  >
+                    Fermer
+                  </button>
+                </div>
+              )}
               <div className="flex items-center gap-1.5 rounded-xl border-2 border-slate-300 bg-white px-3 py-2 shadow-sm focus-within:border-[#131B2E]">
                 <Search size={15} className="shrink-0 text-slate-400" />
                 <input
+                  ref={champRechercheRef}
                   value={rechercheGlobale}
                   onChange={(e) => {
                     setRechercheGlobale(e.target.value);
                     setListeRechercheOuverte(!!e.target.value.trim());
                   }}
                   onFocus={() => setListeRechercheOuverte(!!rechercheGlobale.trim())}
-                  onBlur={() => setTimeout(() => setListeRechercheOuverte(false), 150)}
+                  // Plein écran (cellulaire) : fermer le clavier ne doit pas
+                  // effacer les résultats qu'on veut parcourir.
+                  onBlur={() => { if (!rechercheMobileOuverte) setTimeout(() => setListeRechercheOuverte(false), 150); }}
                   onKeyDown={(e) => {
                     if (e.key === "Escape") setListeRechercheOuverte(false);
                     // Entrée = la page Recherche complète, pour qui aime ça.
                     if (e.key === "Enter" && rechercheGlobale.trim()) {
                       setListeRechercheOuverte(false);
+                      setRechercheMobileOuverte(false);
                       setOnglet("recherche");
                     }
                   }}
                   placeholder={tEnTete("Recherche rapide — client, devis, produit, commande…")}
-                  className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+                  className="w-full bg-transparent text-base outline-none placeholder:text-slate-400 md:text-sm"
                 />
                 {rechercheGlobale && (
                   <button
@@ -3736,7 +3829,11 @@ function AppAdmin() {
                   setListeRechercheOuverte(false);
                 };
                 return (
-                  <div className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
+                  <div
+                    className="liste-recherche absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg"
+                    // Un résultat choisi referme aussi le plein écran (cellulaire).
+                    onMouseDown={(ev) => { if (ev.target.closest?.("button")) setRechercheMobileOuverte(false); }}
+                  >
                     {clientsTrouves.length === 0 && devisTrouves.length === 0 && commandesTrouvees.length === 0 && tachesTrouvees.length === 0 ? (
                       <p className="px-3 py-3 text-xs text-slate-400">Aucun résultat pour « {rechercheGlobale.trim()} »</p>
                     ) : (

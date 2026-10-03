@@ -1155,11 +1155,11 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
   const devisDuClient = useMemo(() => devisListe.filter((d) => d.clientId === projet.clientId), [devisListe, projet.clientId]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       {/* max-w-2xl (2026-08-31) : avec 5 onglets, la fenêtre max-w-lg
           forçait un défilement horizontal des onglets — tout doit se
           voir d'un coup (retour du propriétaire). */}
-      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white">
+      <div className="panneau-mobile flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white">
         <div className="p-5 pb-0">
           <div className="mb-3 flex items-start justify-between gap-2">
             <div>
@@ -1191,10 +1191,11 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
           </div>
 
           {/* ONGLETS */}
-          <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
+          <div className="onglets-mobile soulignes flex gap-1 overflow-x-auto border-b border-slate-200">
             {ONGLETS_PROJET.map((o) => (
               <button
                 key={o.id}
+                data-actif={ongletActif === o.id}
                 onClick={() => setOngletActif(o.id)}
                 className={`shrink-0 border-b-2 px-3 py-2 text-xs font-bold ${
                   ongletActif === o.id ? "border-[#131B2E] text-[#131B2E]" : "border-transparent text-slate-400"

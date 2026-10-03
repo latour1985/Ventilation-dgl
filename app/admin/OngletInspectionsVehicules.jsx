@@ -843,8 +843,8 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
           setOngletDossier("etat");
         };
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (fermer)(); }}>
-            <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
+          <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (fermer)(); }}>
+            <div className="panneau-mobile max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">🚚 {nom}</h3>
@@ -857,7 +857,7 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
               </div>
 
               {/* ONGLETS */}
-              <div className="mb-3 flex rounded-xl border border-slate-200 p-0.5">
+              <div className="onglets-mobile mb-3 flex rounded-xl border border-slate-200 p-0.5">
                 {[
                   ["etat", `État actuel${ouvertes.length > 0 ? ` (${ouvertes.length})` : ""}`],
                   ["carnet", `📖 Carnet (${entrees.length})`],
@@ -865,6 +865,7 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
                 ].map(([id, label]) => (
                   <button
                     key={id}
+                    data-actif={ongletDossier === id}
                     onClick={() => setOngletDossier(id)}
                     className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-extrabold ${ongletDossier === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
                   >

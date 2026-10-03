@@ -918,7 +918,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       {/* 🖥️ DEUX PANNEAUX CÔTE À CÔTE (2026-09-03, demande du
           propriétaire : « difficile de facturer en remontant toujours de
           haut en bas ») — le DOSSIER à gauche (récit, notes, alertes),
@@ -926,7 +926,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
           propre ascenseur : les notes du technicien restent sous les
           yeux pendant qu'on tape les prix. Sur écran étroit, tout
           retombe en une colonne comme avant. */}
-      <div className="flex max-h-[92vh] w-full max-w-md flex-col rounded-2xl bg-white lg:max-w-5xl">
+      <div className="panneau-mobile flex max-h-[92vh] w-full max-w-md flex-col rounded-2xl bg-white lg:max-w-5xl">
         <div className="flex items-start justify-between gap-2 border-b border-slate-100 p-5 pb-3">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900">{bon.prixNonListe ? "Réviser le prix non listé" : "✏️ Modifier la révision (avant l'envoi)"}</h3>

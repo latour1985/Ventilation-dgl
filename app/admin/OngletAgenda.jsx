@@ -719,14 +719,22 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // Les deux servent, à des moments différents : c'est donc un choix,
   // pas une devinette sur la largeur de l'écran. Mémorisé PAR
   // APPAREIL — le téléphone garde son réglage, le bureau le sien.
-  const [modeAgendaMobile, setModeAgendaMobile] = useState("liste");
+  //
+  // ⏱️ 2026-10-02 — TROISIÈME MODE, « LIGNE DU TEMPS » (maquette B choisie
+  // par le propriétaire) : la grille du bureau réduite à la largeur du
+  // téléphone, toute l'équipe sur un écran. C'est le mode PAR DÉFAUT ; un
+  // choix déjà mémorisé sur l'appareil (Liste ou Grille) reste respecté.
+  const [modeAgendaMobile, setModeAgendaMobile] = useState("ligne");
   useEffect(() => {
     try {
-      if (localStorage.getItem("agenda-mobile-mode") === "grille") setModeAgendaMobile("grille");
+      const memorise = localStorage.getItem("agenda-mobile-mode");
+      if (memorise === "grille" || memorise === "liste") setModeAgendaMobile(memorise);
     } catch {
-      // stockage indisponible — on reste sur la liste, le choix sûr
+      // stockage indisponible — on reste sur la ligne du temps
     }
   }, []);
+  // Bloc touché dans la ligne du temps : son détail s'affiche dessous.
+  const [blocLigneChoisi, setBlocLigneChoisi] = useState(null);
   const choisirModeAgenda = (mode) => {
     setModeAgendaMobile(mode);
     try {
@@ -2880,11 +2888,11 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
             s'affiche pas — la grille y est toujours le bon choix, et
             c'est un bouton de moins à l'écran. */}
         <div className="flex rounded-lg border border-slate-200 p-0.5 md:hidden">
-          {[["liste", "📋 Liste"], ["grille", "▦ Grille"]].map(([id, label]) => (
+          {[["ligne", "⏱ Ligne"], ["liste", "📋 Liste"], ["grille", "▦ Grille"]].map(([id, label]) => (
             <button
               key={id}
               onClick={() => choisirModeAgenda(id)}
-              className={`rounded-md px-3 py-1.5 text-xs font-bold ${modeAgendaMobile === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-bold ${modeAgendaMobile === id ? "bg-[#131B2E] text-white" : "text-slate-500"}`}
             >
               {label}
             </button>
@@ -2957,8 +2965,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           </div>
 
           {/* ONGLETS : prêtes / dépôt impayé / pièce en commande. */}
-          <div className="mb-2 flex rounded-xl border border-slate-200 bg-white p-0.5">
+          <div className="onglets-mobile mb-2 flex rounded-xl border border-slate-200 bg-white p-0.5">
             <button
+              data-actif={ongletAttente === "pretes"}
               onClick={() => setOngletAttente("pretes")}
               className={`flex-1 rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
                 ongletAttente === "pretes" ? "bg-[#131B2E] text-white" : "text-slate-500"
@@ -2970,6 +2979,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
               </span>
             </button>
             <button
+              data-actif={ongletAttente === "bloquees"}
               onClick={() => setOngletAttente("bloquees")}
               className={`flex-1 rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
                 ongletAttente === "bloquees" ? "bg-amber-600 text-white" : "text-slate-500"
@@ -2981,6 +2991,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
               </span>
             </button>
             <button
+              data-actif={ongletAttente === "pieces"}
               onClick={() => setOngletAttente("pieces")}
               className={`flex-1 rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
                 ongletAttente === "pieces" ? "bg-sky-600 text-white" : piecesEnRetard > 0 ? "text-red-600" : "text-slate-500"
@@ -3003,6 +3014,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                 demande du propriétaire : sans date, ces cartes polluaient
                 le haut de « Prêtes »). Le compteur reste visible. */}
             <button
+              data-actif={ongletAttente === "ramassages"}
               onClick={() => setOngletAttente("ramassages")}
               title={tr("Ramassages à attribuer")}
               className={`flex-1 whitespace-nowrap rounded-lg px-1.5 py-1.5 text-[10px] font-extrabold ${
@@ -5040,6 +5052,258 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           </p>
         </div>
 
+        {/* ⏱️ VUE LIGNE DU TEMPS — TÉLÉPHONE (2026-10-02, maquette B
+            choisie par le propriétaire). La grille du bureau, réduite :
+            une ligne par personne, les heures en haut, les blocs de
+            couleur à leur place dans la journée, le trait rouge =
+            maintenant. Toute l'équipe tient sur un écran ; on touche un
+            bloc pour voir son détail dessous, puis « Ouvrir la fiche ».
+            Mêmes données que la grille : cases du planning, et heures
+            RÉELLES chronométrées pour une tâche terminée. Les transports
+            système sont laissés de côté, comme dans la vue liste. */}
+        {modeAgendaMobile === "ligne" && (
+          <div className="flex-1 md:hidden">
+            {vue !== "jour" ? (
+              <p className="border-b border-slate-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-snug text-amber-800">
+                La vue {vue === "semaine" ? "Semaine" : "Mois"} ne se met pas en ligne du temps — seule la vue{" "}
+                <span className="font-bold">Jour</span> le fait. Passe à <span className="font-bold">▦ Grille</span> pour
+                la voir sur ton téléphone.
+              </p>
+            ) : (() => {
+              const heureDecimale = (horodatage) => {
+                const d = new Date(horodatage);
+                return d.getHours() + d.getMinutes() / 60;
+              };
+              const nomCourt = (nom) => {
+                const morceaux = String(nom || "").trim().split(/\s+/);
+                return morceaux.length > 1 ? `${morceaux[0]} ${morceaux[1].charAt(0)}.` : morceaux[0] || "—";
+              };
+              const lignes = rangeesAgenda.map((emp) => {
+                if (emp.enteteSection) return { emp, entete: true };
+                // Un bloc par tâche : de sa première case à la dernière.
+                const blocs = [];
+                const parId = new Map();
+                for (let i = 0; i < HEURES.length; i++) {
+                  listeCellule(planning[`${jourKey}|${emp.id}|${HEURES[i]}`]).forEach((t) => {
+                    if (!t || t.est_tache_systeme) return;
+                    const deja = parId.get(t.id);
+                    if (deja) {
+                      deja.fin = i + 1;
+                    } else {
+                      const nouveau = { tache: t, heure: HEURES[i], debut: i, fin: i + 1 };
+                      parId.set(t.id, nouveau);
+                      blocs.push(nouveau);
+                    }
+                  });
+                }
+                // Tâche terminée : le bloc se replace sur ses heures RÉELLES.
+                blocs.forEach((b) => {
+                  const reel = (travaux || []).find(
+                    (x) =>
+                      x.supabase &&
+                      cleTacheDesHeures(x.tacheId) === b.tache.id &&
+                      (x.employeEmail || "").toLowerCase() === (emp.courriel || "").toLowerCase() &&
+                      x.date === jourKey &&
+                      x.debutReel &&
+                      x.finReelle
+                  );
+                  if (!reel) return;
+                  const debut = heureDecimale(reel.debutReel);
+                  let fin = heureDecimale(reel.finReelle);
+                  if (fin <= debut) fin = 24; // fini après minuit
+                  b.reel = reel;
+                  b.debut = debut;
+                  b.fin = Math.max(fin, debut + 0.25);
+                });
+                // Pistes : deux tâches qui se chevauchent s'empilent.
+                const finsPistes = [];
+                blocs.sort((a, b) => a.debut - b.debut || b.fin - b.debut - (a.fin - a.debut));
+                blocs.forEach((b) => {
+                  let piste = finsPistes.findIndex((fin) => fin <= b.debut);
+                  if (piste === -1) {
+                    piste = finsPistes.length;
+                    finsPistes.push(b.fin);
+                  } else {
+                    finsPistes[piste] = b.fin;
+                  }
+                  b.piste = piste;
+                });
+                return { emp, blocs, nbPistes: Math.max(1, finsPistes.length) };
+              });
+              // Axe : 7 h → 17 h, élargi si la journée déborde.
+              let debutAxe = 7;
+              let finAxe = 17;
+              lignes.forEach((l) =>
+                (l.blocs || []).forEach((b) => {
+                  debutAxe = Math.min(debutAxe, Math.floor(b.debut));
+                  finAxe = Math.max(finAxe, Math.ceil(b.fin));
+                })
+              );
+              const etendue = Math.max(1, finAxe - debutAxe);
+              const position = (h) => ((h - debutAxe) / etendue) * 100;
+              const pas = etendue > 12 ? 3 : 2;
+              const graduations = [];
+              for (let h = debutAxe; h <= finAxe; h += pas) graduations.push(h);
+              const maintenant = new Date();
+              const heureMaintenant = maintenant.getHours() + maintenant.getMinutes() / 60;
+              const montrerMaintenant = jourKey === dateISO(maintenant) && heureMaintenant >= debutAxe && heureMaintenant <= finAxe;
+              const occupes = lignes.filter((l) => !l.entete && l.blocs.length > 0).length;
+              const libres = lignes.filter((l) => !l.entete && l.blocs.length === 0).length;
+              const fondHeures = {
+                backgroundImage: "linear-gradient(90deg, #e2e8f0 1px, transparent 1px)",
+                backgroundSize: `${100 / etendue}% 100%`,
+              };
+              const classesBloc = (tache, emp) =>
+                emp.estSousTraitant
+                  ? ST_COULEURS[statutBlocST(tache.id, emp.courriel)][1]
+                  : estTerminee(tache, emp)
+                    ? "bg-emerald-200 text-emerald-900"
+                    : pasFermee(tache, emp, jourKey)
+                      ? "bg-amber-200 text-amber-900"
+                      : estEnCours(tache, emp)
+                        ? "bg-fuchsia-200 text-fuchsia-900"
+                        : `text-black ${(COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`;
+              // Le bloc touché (s'il est toujours dans la journée affichée).
+              let choisi = null;
+              if (blocLigneChoisi) {
+                const ligne = lignes.find((l) => !l.entete && l.emp.id === blocLigneChoisi.empId);
+                const bloc = ligne?.blocs.find((b) => b.tache.id === blocLigneChoisi.tacheId);
+                if (bloc) choisi = { emp: ligne.emp, bloc };
+              }
+              const hhmm = (h) => {
+                const minutes = Math.round(h * 60);
+                return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+              };
+              return (
+                <>
+                  <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-3 py-2">
+                    <span className="text-[11px] font-bold text-slate-500">
+                      👷 {occupes} sur le terrain
+                      {libres > 0 && (
+                        <span className="font-semibold text-slate-400">
+                          {" "}· {libres} libre{libres > 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="px-2 pb-2 pr-4 pt-1">
+                    {/* Les heures, alignées sur les pistes. */}
+                    <div className="grid grid-cols-[72px_1fr]">
+                      <span />
+                      <div className="relative h-5 border-b border-slate-200">
+                        {graduations.map((h) => (
+                          <span
+                            key={h}
+                            className="absolute top-0.5 -translate-x-1/2 text-[10px] font-semibold tabular-nums text-slate-400"
+                            style={{ left: `${position(h)}%` }}
+                          >
+                            {h}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {lignes.map((l) => {
+                      if (l.entete) return renderEnteteSection(l.emp.enteteSection);
+                      const { emp, blocs, nbPistes } = l;
+                      return (
+                        <div key={emp.id} className="grid grid-cols-[72px_1fr] border-b border-slate-100">
+                          <span className="truncate py-1.5 pr-1 text-[11px] font-bold leading-[22px] text-slate-700" title={emp.nom}>
+                            {emp.estSousTraitant ? "🤝 " : ""}{nomCourt(emp.nom)}
+                          </span>
+                          <div className="relative" style={{ ...fondHeures, height: `${nbPistes * 24 + 10}px` }}>
+                            {blocs.map((b) => {
+                              const actif = blocLigneChoisi?.tacheId === b.tache.id && blocLigneChoisi?.empId === emp.id;
+                              return (
+                                <button
+                                  key={b.tache.id}
+                                  type="button"
+                                  onClick={() => setBlocLigneChoisi(actif ? null : { tacheId: b.tache.id, empId: emp.id })}
+                                  title={b.tache.titre || b.tache.clientNom}
+                                  className={`absolute overflow-hidden whitespace-nowrap rounded px-1 text-left text-[9px] font-bold leading-[20px] ${classesBloc(b.tache, emp)} ${
+                                    actif ? "z-[2] ring-2 ring-[#131B2E] ring-offset-1" : ""
+                                  }`}
+                                  style={{
+                                    left: `${position(b.debut)}%`,
+                                    width: `calc(${position(b.fin) - position(b.debut)}% - 2px)`,
+                                    top: `${5 + b.piste * 24}px`,
+                                    height: "20px",
+                                  }}
+                                >
+                                  {b.tache.titre || b.tache.clientNom}
+                                </button>
+                              );
+                            })}
+                            {montrerMaintenant && (
+                              <span
+                                aria-hidden="true"
+                                className="pointer-events-none absolute inset-y-0 z-[1] w-0.5 bg-red-600"
+                                style={{ left: `${position(heureMaintenant)}%` }}
+                              />
+                            )}
+                            {blocs.length === 0 && (
+                              <span className="absolute inset-y-0 left-1.5 flex items-center text-[10px] font-bold text-emerald-600">libre</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Le détail du bloc touché. */}
+                  <div className="px-2 pb-3">
+                    {choisi ? (() => {
+                      const { emp, bloc } = choisi;
+                      const tache = bloc.tache;
+                      const couleur = COULEUR_TYPE_TACHE[tache.typeTache] || COULEUR_TYPE_DEFAUT;
+                      return (
+                        <div className={`rounded-xl border border-l-4 border-slate-200 bg-white p-3 shadow-sm ${couleur.bordurePastille}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="min-w-0 text-sm font-extrabold leading-snug text-slate-900">{tache.titre || tache.clientNom}</p>
+                            <button type="button" onClick={() => setBlocLigneChoisi(null)} aria-label="Fermer le détail" className="shrink-0 text-slate-400">
+                              <X size={16} />
+                            </button>
+                          </div>
+                          <p className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-600">
+                            {emp.nom} ·{" "}
+                            {bloc.reel
+                              ? `${heureLocaleHHMM(bloc.reel.debutReel)} → ${heureLocaleHHMM(bloc.reel.finReelle)} · ${(Number(bloc.reel.heures) || 0).toFixed(2)} h`
+                              : `${hhmm(bloc.debut)} → ${hhmm(bloc.fin)}`}
+                            {!emp.estSousTraitant && estTerminee(tache, emp) && (
+                              <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">TERMINÉ</span>
+                            )}
+                            {!emp.estSousTraitant && !estTerminee(tache, emp) && estEnCours(tache, emp) && (
+                              <span className="ml-1.5 rounded-full bg-fuchsia-100 px-1.5 py-0.5 text-[9px] font-bold text-fuchsia-700">EN COURS</span>
+                            )}
+                            {emp.estSousTraitant && <span className="ml-1.5">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}</span>}
+                          </p>
+                          {tache.clientNom && tache.titre && <p className="text-[11px] text-slate-500">{tache.clientNom}</p>}
+                          {(tache.adresseTravaux || tache.adresseIntervention) && (
+                            <p className="mt-0.5 truncate text-[11px] text-slate-400">📍 {tache.adresseTravaux || tache.adresseIntervention}</p>
+                          )}
+                          {!lectureSeule && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                emp.estSousTraitant
+                                  ? setModalStatutST({ tache, employe: emp, date: jourKey })
+                                  : setTacheDetailOuverte({ tache, employe: emp, date: jourKey, heure: bloc.heure })
+                              }
+                              className="mt-2.5 w-full rounded-xl bg-[#131B2E] py-2.5 text-xs font-extrabold text-white active:scale-[0.99]"
+                            >
+                              Ouvrir la fiche →
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })() : (
+                      <p className="text-center text-[11px] text-slate-400">Touche un bloc pour voir son détail.</p>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        )}
+
         {/* 📱 VUE LISTE — TÉLÉPHONE (2026-08-21, séance mobile)
             ------------------------------------------------------------
             La grille de 24 colonnes demande 640 px de large : sur un
@@ -5056,7 +5320,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
             haut est conservée de cet essai — elle ne cache rien et
             répond à « combien de monde travaille aujourd'hui » pendant
             qu'on descend dans la liste. */}
-        <div className={`${modeAgendaMobile === "grille" ? "hidden" : "flex-1 overflow-y-auto"} md:hidden`}>
+        <div className={`${modeAgendaMobile !== "liste" ? "hidden" : "flex-1 overflow-y-auto"} md:hidden`}>
           {vue !== "jour" && (
             <p className="border-b border-slate-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-snug text-amber-800">
               La vue {vue === "semaine" ? "Semaine" : "Mois"} ne se met pas en liste — seule la vue{" "}

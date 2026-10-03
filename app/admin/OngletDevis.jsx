@@ -3171,8 +3171,8 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         const dossier = dossiersDevis.find((x) => x.base === dossierEnModale);
         if (!dossier) return null;
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; setDossierEnModale(null); }}>
-            <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-2" onClick={(e) => e.stopPropagation()}>
+          <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; setDossierEnModale(null); }}>
+            <div className="panneau-mobile max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-2" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between px-2 pt-1">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">🪟 Dossier {dossierEnModale}</p>
                 <button onClick={() => setDossierEnModale(null)} aria-label="Fermer" className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">

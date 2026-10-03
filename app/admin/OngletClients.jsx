@@ -267,8 +267,8 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+    <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
+      <div className="panneau-mobile max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between">
           <h3 className="text-sm font-extrabold text-slate-900">✏️ Modifier la fiche — {nomAffichageClient(client)}</h3>
           <button onClick={onFermer} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
@@ -399,7 +399,7 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
               Pour enregistrer, il manque : {raisonsFiche.join(" · ")}.
             </p>
           )}
-          <Button onClick={enregistrer} disabled={raisonsFiche.length > 0} className="w-full">Enregistrer les modifications</Button>
+          <Button onClick={enregistrer} disabled={raisonsFiche.length > 0} className="bouton-collant-mobile w-full">Enregistrer les modifications</Button>
         </div>
       </div>
     </div>
@@ -1652,7 +1652,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                   {/* 🗂️ BARRE D'ONGLETS — une section à la fois. Équipements
                       et Factures/commandes n'apparaissent que s'ils ont
                       du contenu ; les autres restent (on y crée). */}
-                  <div className="-mx-1 flex gap-1 overflow-x-auto border-b border-slate-200 px-1 pt-1">
+                  <div className="onglets-mobile soulignes -mx-1 flex gap-1 overflow-x-auto border-b border-slate-200 px-1 pt-1">
                     {[
                       ["apercu", "Aperçu", null, true],
                       ["travaux", "Travaux", compte.travaux, true],
@@ -1666,6 +1666,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                         <button
                           key={id}
                           type="button"
+                          data-actif={ongletFiche === id}
                           onClick={() => setOngletFiche(id)}
                           className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-2.5 py-1.5 text-[11px] font-bold ${
                             ongletFiche === id ? "border-[#FF6A13] text-[#131B2E]" : "border-transparent text-slate-400 hover:text-slate-600"
@@ -2583,8 +2584,8 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
       .catch(() => ajouterJournal(`⚠️ Client "${nouveauClient.nom}" enregistré localement${sansCompta ? "" : ` mais transfert ${compta} à reprendre`}`));
   };
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
-      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
+    <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
+      <div className="panneau-mobile max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900">➕ Nouveau client</h3>
@@ -2644,7 +2645,7 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
               Pour créer le client, il manque : {ncRaisons.join(" · ")}.
             </p>
           )}
-          <Button onClick={creer} disabled={!ncComplet} className="w-full">
+          <Button onClick={creer} disabled={!ncComplet} className="bouton-collant-mobile w-full">
             Créer le client et l'utiliser
           </Button>
         </div>

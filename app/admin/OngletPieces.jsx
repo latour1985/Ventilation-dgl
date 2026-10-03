@@ -727,11 +727,12 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
       </div>
 
       {/* 🗂️ ONGLETS — un seul bloc visible à la fois. */}
-      <div className="flex flex-wrap gap-1.5">
+      <div className="onglets-mobile flex flex-wrap gap-1.5">
         {ONGLETS.map((o) => (
           <button
             key={o.cle}
             type="button"
+            data-actif={onglet === o.cle}
             onClick={() => setOnglet(o.cle)}
             className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${onglet === o.cle ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
           >

@@ -444,8 +444,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
+    <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="panneau-mobile max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900">{dejaPlanifiee ? "Modifier la tâche" : "Édition rapide"}</h3>
