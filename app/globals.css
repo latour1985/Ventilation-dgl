@@ -89,6 +89,18 @@ select {
   body {
     overflow-x: clip;
   }
+  /* 📐 LA VRAIE CAUSE (captures du propriétaire, 2026-10-03) : chaque
+     écran est centré par « mx-auto » dans la colonne de contenu, qui est
+     une colonne flex. Des marges automatiques y désactivent l'étirement :
+     le bloc prend alors la largeur de sa plus longue ligne qui ne se
+     coupe pas (texte tronqué « … », pastilles) — 742 px au lieu de 360 px
+     mesurés. Les écrans débordaient tous à droite. On fixe leur largeur
+     à celle de la colonne ; les en-têtes collants et les fenêtres
+     (fixed) ne sont pas touchés. */
+  .zone-contenu-admin > :not(.fixed):not(.sticky) {
+    width: 100%;
+    min-width: 0;
+  }
 
   /* 🗂️ Barres d'onglets → pastilles qui défilent au doigt. La couleur
      de l'onglet actif reste celle de l'écran (ambre, ciel…) ; seules les
