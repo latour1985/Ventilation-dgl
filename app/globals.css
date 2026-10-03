@@ -73,6 +73,23 @@ select {
    sur les classes utilitaires des mêmes éléments, sans !important.
    ============================================================ */
 @media (max-width: 767px) {
+  /* 📏 PAS DE DÉBORDEMENT SUR LE CÔTÉ (2026-10-02, vécu du propriétaire
+     sur Android : app « zoomée » à l'ouverture, il fallait dézoomer).
+     Un seul élément plus large que l'écran (un long nom, un courriel ou
+     un numéro sans espace…) suffit pour que Chrome permette de dézoomer
+     jusqu'à sa largeur. La page est coupée à la largeur de l'écran :
+     - html : « hidden » passe à la fenêtre elle-même, l'en-tête collant
+       (sticky) continue de fonctionner ;
+     - body : « clip » ne crée pas de zone de défilement (sticky intact).
+     Les zones qui défilent exprès (onglets, grille de l'agenda) gardent
+     leur propre défilement. */
+  html {
+    overflow-x: hidden;
+  }
+  body {
+    overflow-x: clip;
+  }
+
   /* 🗂️ Barres d'onglets → pastilles qui défilent au doigt. La couleur
      de l'onglet actif reste celle de l'écran (ambre, ciel…) ; seules les
      barres « soulignées » reçoivent la pastille foncée. */
