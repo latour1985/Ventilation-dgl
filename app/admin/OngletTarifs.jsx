@@ -1204,6 +1204,37 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
   // ce sont eux dont la marge reste aveugle.
   const sansCout = (catalogue || []).filter((i) => i.prix_coutant == null).length;
 
+  // Boutons Modifier / Retirer d'un item — partagés par le tableau
+  // (ordinateur) et les cartes (téléphone, 2026-10-02).
+  const actionsItem = (i) =>
+    retraitPour === i.id ? (
+    <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+      <button
+        onClick={() => retirer(i)}
+        className="rounded-lg bg-red-600 px-2 py-1 text-[10px] font-extrabold text-white"
+      >
+        Retirer ?
+      </button>
+      <button onClick={() => setRetraitPour(null)} className="text-[10px] font-semibold text-slate-400 underline">
+        Non
+      </button>
+    </span>
+  ) : (
+    <span className="flex items-center justify-end gap-2">
+      <button onClick={() => setItemModal(i)} className="text-slate-400 hover:text-slate-700" aria-label="Modifier">
+        <Pencil size={13} />
+      </button>
+      <button
+        onClick={() => setRetraitPour(i.id)}
+        className="text-slate-300 hover:text-red-600"
+        aria-label="Retirer du catalogue"
+        title="Retirer (discontinué / remplacé) — récupérable en tout temps"
+      >
+        <Trash2 size={13} />
+      </button>
+    </span>
+  );
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between text-left">
@@ -1287,7 +1318,41 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
           {/* Hauteur fixe qui défile : la liste ne pousse jamais le reste
               de l'écran, même avec 289 items. */}
           <div className="mt-1 max-h-[380px] overflow-y-auto rounded-xl border border-slate-200">
-            <table className="w-full text-xs">
+            {/* 📱 TÉLÉPHONE (2026-10-02, lot C) : une carte par item — le nom
+                en entier, les prix dessous. Six colonnes écrasaient le nom. */}
+            <div className="divide-y divide-slate-100 md:hidden">
+              {resultats.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-slate-400">Aucun item ne correspond.</p>
+              ) : (
+                resultats.slice(0, 200).map((i) => {
+                  const m = margePourcent(i.prix_vendant, i.prix_coutant);
+                  const p = profitDollars(i.prix_vendant, i.prix_coutant);
+                  return (
+                    <div key={i.id} className="px-3 py-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-slate-800">{i.nom}</p>
+                          {i.categorie && <p className="text-[10px] text-slate-400">{i.categorie}</p>}
+                        </div>
+                        {estAdminPrincipal && <div className="shrink-0 pt-0.5">{actionsItem(i)}</div>}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
+                        <span className="text-slate-500">
+                          Coûtant{" "}
+                          {i.prix_coutant != null ? <span className="font-semibold text-slate-700">{i.prix_coutant.toFixed(2)} $</span> : <span className="text-amber-500">inconnu</span>}
+                        </span>
+                        <span className="text-slate-500">
+                          Vente <span className="font-bold text-slate-800">{i.prix_vendant != null ? `${i.prix_vendant.toFixed(2)} $` : "—"}</span>
+                        </span>
+                        {p != null && <span className="text-emerald-700">+{p.toFixed(2)} $</span>}
+                        {m != null && <span className={`font-bold ${m < 0 ? "text-red-600" : "text-slate-700"}`}>{m.toFixed(1)} %</span>}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            <table className="hidden w-full text-xs md:table">
               <thead className="sticky top-0 bg-slate-50">
                 <tr className="border-b border-slate-200 text-left">
                   <th className="px-2.5 py-1.5 font-bold text-slate-500">Item</th>
@@ -1325,33 +1390,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
                         </td>
                         {estAdminPrincipal && (
                           <td className="px-2 py-1.5 text-right">
-                            {retraitPour === i.id ? (
-                              <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                                <button
-                                  onClick={() => retirer(i)}
-                                  className="rounded-lg bg-red-600 px-2 py-1 text-[10px] font-extrabold text-white"
-                                >
-                                  Retirer ?
-                                </button>
-                                <button onClick={() => setRetraitPour(null)} className="text-[10px] font-semibold text-slate-400 underline">
-                                  Non
-                                </button>
-                              </span>
-                            ) : (
-                              <span className="flex items-center justify-end gap-2">
-                                <button onClick={() => setItemModal(i)} className="text-slate-400 hover:text-slate-700" aria-label="Modifier">
-                                  <Pencil size={13} />
-                                </button>
-                                <button
-                                  onClick={() => setRetraitPour(i.id)}
-                                  className="text-slate-300 hover:text-red-600"
-                                  aria-label="Retirer du catalogue"
-                                  title="Retirer (discontinué / remplacé) — récupérable en tout temps"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </span>
-                            )}
+                            {actionsItem(i)}
                           </td>
                         )}
                       </tr>

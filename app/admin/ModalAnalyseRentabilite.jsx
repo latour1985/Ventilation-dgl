@@ -424,8 +424,8 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
   const fmt$ = (v) => `${(Number(v) || 0).toFixed(0)} $`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-3 md:p-6" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
-      <div className="w-full max-w-4xl rounded-2xl bg-white p-4 md:p-6" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-0 md:p-6" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (onFermer)(); }}>
+      <div className="min-h-full w-full max-w-4xl rounded-none bg-white p-4 md:min-h-0 md:rounded-2xl md:p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-lg font-extrabold text-slate-900">📊 Analyse de rentabilité</h3>
@@ -436,7 +436,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select value={periode} onChange={(e) => setPeriode(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs font-semibold">
               <option value="mois">Ce mois-ci</option>
               <option value="mois-1">Le mois dernier</option>
@@ -582,16 +582,19 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
             <div className="mt-2 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead><tr className="border-b border-slate-200 text-left text-slate-400">
-                  <th className="py-1 pr-2 font-semibold">Devis</th><th className="py-1 pr-2 font-semibold">Client</th>
-                  <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Estimée</th>
+                  <th className="py-1 pr-2 font-semibold">Devis</th><th className="hidden py-1 pr-2 font-semibold md:table-cell">Client</th>
+                  <th className="hidden py-1 pr-2 text-right font-semibold md:table-cell">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Estimée</th>
                   <th className="py-1 pr-2 text-right font-semibold">Réelle</th><th className="py-1 text-right font-semibold">Écart</th>
                 </tr></thead>
                 <tbody>
                   {estimeVsReel.map((l) => (
                     <tr key={l.numero} className="border-b border-slate-100 last:border-0">
-                      <td className="py-1.5 pr-2 font-bold text-slate-800">{l.numero}</td>
-                      <td className="py-1.5 pr-2 text-slate-500">{l.clientNom}</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(l.facture)}</td>
+                      <td className="py-1.5 pr-2 font-bold text-slate-800">
+                        {l.numero}
+                        <span className="block text-[10px] font-normal text-slate-400 md:hidden">{l.clientNom} · {fmt$(l.facture)}</span>
+                      </td>
+                      <td className="hidden py-1.5 pr-2 text-slate-500 md:table-cell">{l.clientNom}</td>
+                      <td className="hidden py-1.5 pr-2 text-right tabular-nums md:table-cell">{fmt$(l.facture)}</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{l.margeEstimee.toFixed(0)} %</td>
                       <td className={`py-1.5 pr-2 text-right font-bold tabular-nums ${classeMarge(l.margeReelle)}`}>{l.margeReelle.toFixed(0)} %</td>
                       <td className={`py-1.5 text-right font-extrabold tabular-nums ${l.ecart < -3 ? "text-red-600" : l.ecart > 3 ? "text-emerald-600" : "text-slate-400"}`}>
@@ -632,7 +635,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
             <div className="mt-2 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead><tr className="border-b border-slate-200 text-left text-slate-400">
-                  <th className="py-1 pr-2 font-semibold">Client</th><th className="py-1 pr-2 text-right font-semibold">Jobs</th>
+                  <th className="py-1 pr-2 font-semibold">Client</th><th className="hidden py-1 pr-2 text-right font-semibold md:table-cell">Jobs</th>
                   <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Profit</th>
                   <th className="py-1 text-right font-semibold">Marge</th>
                 </tr></thead>
@@ -640,7 +643,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
                   {parClient.map((c) => (
                     <tr key={c.clientNom} className="border-b border-slate-100 last:border-0">
                       <td className="py-1.5 pr-2 font-bold text-slate-800">{c.clientNom}</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{c.jobs}</td>
+                      <td className="hidden py-1.5 pr-2 text-right tabular-nums text-slate-500 md:table-cell">{c.jobs}</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(c.facture)}</td>
                       <td className={`py-1.5 pr-2 text-right font-bold tabular-nums ${c.profit < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(c.profit)}</td>
                       <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(c.marge)}`}>{c.marge == null ? "—" : `${c.marge.toFixed(0)} %`}</td>
@@ -671,8 +674,8 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
             <div className="mt-2 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead><tr className="border-b border-slate-200 text-left text-slate-400">
-                  <th className="py-1 pr-2 font-semibold">Tâche</th><th className="py-1 pr-2 font-semibold">Date</th>
-                  <th className="py-1 pr-2 font-semibold">Statut</th><th className="py-1 pr-2 text-right font-semibold">Heures</th>
+                  <th className="py-1 pr-2 font-semibold">Tâche</th><th className="hidden py-1 pr-2 font-semibold md:table-cell">Date</th>
+                  <th className="hidden py-1 pr-2 font-semibold md:table-cell">Statut</th><th className="hidden py-1 pr-2 text-right font-semibold md:table-cell">Heures</th>
                   <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Coût réel</th>
                   <th className="py-1 text-right font-semibold">Marge</th>
                 </tr></thead>
@@ -682,10 +685,11 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
                       <td className="py-1.5 pr-2">
                         <span className="font-bold text-slate-800">{l.nom}</span>
                         <span className="block text-[10px] text-slate-400">{l.clientNom}</span>
+                        <span className="block text-[10px] text-slate-400 md:hidden">{l.date} · {l.heures.toFixed(1)} h{l.statutTexte ? ` · ${l.statutTexte}` : ""}</span>
                       </td>
-                      <td className="py-1.5 pr-2 tabular-nums text-slate-500">{l.date}</td>
-                      <td className="py-1.5 pr-2 text-[10px] font-bold text-slate-500">{l.statutTexte}</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums">{l.heures.toFixed(1)} h</td>
+                      <td className="hidden py-1.5 pr-2 tabular-nums text-slate-500 md:table-cell">{l.date}</td>
+                      <td className="hidden py-1.5 pr-2 text-[10px] font-bold text-slate-500 md:table-cell">{l.statutTexte}</td>
+                      <td className="hidden py-1.5 pr-2 text-right tabular-nums md:table-cell">{l.heures.toFixed(1)} h</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">{l.facture > 0 ? fmt$(l.facture) : "—"}</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(l.cout)}</td>
                       <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(l.marge)}`}>
@@ -696,7 +700,8 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
                 </tbody>
                 <tfoot>
                   <tr className="border-t border-slate-300 font-extrabold text-slate-800">
-                    <td className="py-1.5 pr-2" colSpan={4}>Total ({parTacheLignes.length} tâche{parTacheLignes.length > 1 ? "s" : ""})</td>
+                    <td className="hidden py-1.5 pr-2 md:table-cell" colSpan={4}>Total ({parTacheLignes.length} tâche{parTacheLignes.length > 1 ? "s" : ""})</td>
+                    <td className="py-1.5 pr-2 md:hidden">Total ({parTacheLignes.length})</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(totauxTaches.facture)}</td>
                     <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(totauxTaches.cout)}</td>
                     <td className={`py-1.5 text-right tabular-nums ${classeMarge(totauxTaches.facture > 0 ? ((totauxTaches.facture - totauxTaches.cout) / totauxTaches.facture) * 100 : null)}`}>
@@ -710,17 +715,17 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
             <div className="mt-2 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead><tr className="border-b border-slate-200 text-left text-slate-400">
-                  <th className="py-1 pr-2 font-semibold">Client</th><th className="py-1 pr-2 text-right font-semibold">Tâches</th>
-                  <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="py-1 pr-2 text-right font-semibold">Coût réel</th>
+                  <th className="py-1 pr-2 font-semibold">Client</th><th className="hidden py-1 pr-2 text-right font-semibold md:table-cell">Tâches</th>
+                  <th className="py-1 pr-2 text-right font-semibold">Facturé</th><th className="hidden py-1 pr-2 text-right font-semibold md:table-cell">Coût réel</th>
                   <th className="py-1 pr-2 text-right font-semibold">Profit</th><th className="py-1 text-right font-semibold">Marge</th>
                 </tr></thead>
                 <tbody>
                   {parTacheClients.map((c) => (
                     <tr key={c.clientNom} className="border-b border-slate-100 last:border-0">
                       <td className="py-1.5 pr-2 font-bold text-slate-800">{c.clientNom || "—"}</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{c.jobs}</td>
+                      <td className="hidden py-1.5 pr-2 text-right tabular-nums text-slate-500 md:table-cell">{c.jobs}</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">{c.facture > 0 ? fmt$(c.facture) : "—"}</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(c.cout)}</td>
+                      <td className="hidden py-1.5 pr-2 text-right tabular-nums md:table-cell">{fmt$(c.cout)}</td>
                       <td className={`py-1.5 pr-2 text-right font-bold tabular-nums ${c.facture - c.cout < 0 ? "text-red-600" : "text-emerald-700"}`}>{fmt$(c.facture - c.cout)}</td>
                       <td className={`py-1.5 text-right font-extrabold tabular-nums ${classeMarge(c.marge)}`}>{c.marge == null ? "—" : `${c.marge.toFixed(0)} %`}</td>
                     </tr>
@@ -744,17 +749,17 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
               <table className="w-full text-xs">
                 <thead><tr className="border-b border-slate-200 text-left text-slate-400">
                   <th className="py-1 pr-2 font-semibold">Technicien</th><th className="py-1 pr-2 text-right font-semibold">Chantier</th>
-                  <th className="py-1 pr-2 text-right font-semibold">Transport</th><th className="py-1 pr-2 text-right font-semibold">👻 Admin/divers</th>
-                  <th className="py-1 pr-2 text-right font-semibold">Coût (MO+camion)</th><th className="py-1 text-right font-semibold">% facturable</th>
+                  <th className="hidden py-1 pr-2 text-right font-semibold md:table-cell">Transport</th><th className="py-1 pr-2 text-right font-semibold">👻 Admin/divers</th>
+                  <th className="hidden py-1 pr-2 text-right font-semibold md:table-cell">Coût (MO+camion)</th><th className="py-1 text-right font-semibold">% facturable</th>
                 </tr></thead>
                 <tbody>
                   {parTechnicien.map((t) => (
                     <tr key={t.nom} className="border-b border-slate-100 last:border-0">
                       <td className="py-1.5 pr-2 font-bold text-slate-800">{t.nom}</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums">{t.chantier.toFixed(1)} h</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums text-slate-500">{t.transport.toFixed(1)} h</td>
+                      <td className="hidden py-1.5 pr-2 text-right tabular-nums text-slate-500 md:table-cell">{t.transport.toFixed(1)} h</td>
                       <td className="py-1.5 pr-2 text-right tabular-nums text-purple-600">{t.invisible.toFixed(1)} h</td>
-                      <td className="py-1.5 pr-2 text-right tabular-nums">{fmt$(t.cout)}</td>
+                      <td className="hidden py-1.5 pr-2 text-right tabular-nums md:table-cell">{fmt$(t.cout)}</td>
                       <td className="py-1.5 text-right font-bold tabular-nums text-slate-700">{t.pctFacturable.toFixed(0)} %</td>
                     </tr>
                   ))}

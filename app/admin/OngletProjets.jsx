@@ -1597,6 +1597,8 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
   const [projetOuvertId, setProjetOuvertId] = useState(null);
   const [assignationManuelleId, setAssignationManuelleId] = useState(null);
   const [vueAffichage, setVueAffichage] = useState("liste"); // "liste" | "kanban"
+  // 📱 Kanban sur téléphone : la colonne affichée (null = la 1re non vide).
+  const [colonneMobile, setColonneMobile] = useState(null);
   const [colonneSurvolee, setColonneSurvolee] = useState(null);
 
   const projetOuvert = projets.find((p) => p.id === projetOuvertId) || null;
@@ -1924,7 +1926,70 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
           ))}
         </div>
       ) : (
-        <div className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0">
+        <>
+        {/* 📱 KANBAN AU DOIGT (2026-10-02, lot D) : glisser une carte ne
+            marche qu'à la souris, et 4 colonnes ne tiennent pas dans un
+            téléphone. Ici : UNE colonne à la fois (pastilles en haut) et
+            « Déplacer vers… » sous chaque carte — même changement de
+            statut que le glisser-déposer du bureau. */}
+        {(() => {
+          const colonne =
+            colonneMobile || STATUTS_PROJET.find((st) => projetsFiltres.some((p) => p.statut === st)) || STATUTS_PROJET[0];
+          const projetsColonne = projetsFiltres.filter((p) => p.statut === colonne);
+          return (
+            <div className="space-y-2 md:hidden">
+              <div className="onglets-mobile flex gap-1.5">
+                {STATUTS_PROJET.map((st) => {
+                  const n = projetsFiltres.filter((p) => p.statut === st).length;
+                  return (
+                    <button
+                      key={st}
+                      type="button"
+                      data-actif={st === colonne}
+                      onClick={() => setColonneMobile(st)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-bold ${st === colonne ? "bg-[#131B2E] text-white" : "bg-slate-100 text-slate-600"}`}
+                    >
+                      {st}
+                      <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${st === colonne ? "bg-white/20" : "bg-white"}`}>{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {projetsColonne.length === 0 && (
+                <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-400">
+                  Aucun projet « {colonne} ».
+                </p>
+              )}
+              {projetsColonne.map((p) => (
+                <div key={p.id} className="space-y-1">
+                  <CarteProjet
+                    p={p}
+                    client={clients.find((c) => c.id === p.clientId)}
+                    travaux={travaux}
+                    transactionsQb={transactionsQb}
+                    utilisateurs={utilisateurs}
+                    tauxMetiers={tauxMetiers}
+                    onOuvrir={setProjetOuvertId}
+                  />
+                  <label className="flex items-center justify-end gap-2 px-1 text-[11px] font-bold text-slate-500">
+                    Déplacer vers
+                    <select
+                      value=""
+                      onChange={(e) => { if (e.target.value) changerStatutProjet(p.id, e.target.value); }}
+                      className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700"
+                    >
+                      <option value="">Choisir…</option>
+                      {STATUTS_PROJET.filter((st) => st !== p.statut).map((st) => (
+                        <option key={st} value={st}>{st}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
+        <div className="-mx-4 hidden overflow-x-auto px-4 md:mx-0 md:block md:px-0">
           <div className="flex gap-3" style={{ minWidth: STATUTS_PROJET.length * 220 }}>
             {STATUTS_PROJET.map((statutColonne) => {
               const projetsColonne = projetsFiltres.filter((p) => p.statut === statutColonne);
@@ -1972,6 +2037,7 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
             })}
           </div>
         </div>
+        </>
       )}
 
       {nouveauProjetOuvert && (
