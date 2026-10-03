@@ -31,6 +31,7 @@ import { enregistrerTravailEffectue, travailDejaEnregistre, infoTravailEnregistr
 import { CONFIG_DEFAUT, chargerEntreprise } from "@/lib/supabase/entreprise";
 import { LangueProvider, useLangue } from "@/lib/i18n";
 import BoutonLangue from "@/components/BoutonLangue";
+import SansZoomAutoIos from "@/components/SansZoomAutoIos";
 import { enregistrerCommandeCamion, listerCommandesCamionPourEmploye, sAbonnerCommandesCamion } from "@/lib/supabase/materiel";
 import { ContexteEntreprise, useEntreprise } from "@/lib/contexteEntreprise";
 import { creerRetour, listerMesRetours, LIBELLES_STATUT_RETOUR } from "@/lib/supabase/retours";
@@ -6392,6 +6393,7 @@ export default function App() {
   return (
     <LangueProvider>
     <ContexteEntreprise.Provider value={configEntreprise}>
+      <SansZoomAutoIos />
       <AppTechnicien />
     </ContexteEntreprise.Provider>
     </LangueProvider>

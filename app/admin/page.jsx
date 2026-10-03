@@ -81,6 +81,7 @@ import TourGuide, { tourDejaFait } from "./TourGuide";
 import Toasts from "@/components/Toasts";
 import DeconnexionInactivite from "@/components/DeconnexionInactivite";
 import RaccourcisClavier from "@/components/RaccourcisClavier";
+import SansZoomAutoIos from "@/components/SansZoomAutoIos";
 import BarreNavigationBas from "./BarreNavigationBas";
 import { flushSync } from "react-dom";
 import { notifier } from "@/lib/toasts";
@@ -1147,6 +1148,7 @@ function JournalAutomatisation({ entrees }) {
 export default function App() {
   return (
     <LangueProvider>
+      <SansZoomAutoIos />
       <AppAdmin />
     </LangueProvider>
   );
