@@ -350,22 +350,79 @@ function chargerTachesDepuisStockage(email) {
   }
 }
 
+// 📱 MÉMOIRE DU TÉLÉPHONE LIMITÉE (2026-10-26, constat iPhone : « des fois
+// les photos et le texte ne s'enregistrent pas ») — Safari ne donne
+// qu'environ 5 Mo à une page. Tout l'historique de l'employé y était
+// gardé ; plein, plus RIEN ne s'enregistrait, en silence. On ne garde
+// maintenant que ce qui sert sur le terrain : les 21 derniers jours, plus
+// toute tâche encore ouverte ou qui a une photo en attente d'envoi.
+const JOURS_GARDES_LOCALEMENT = 21;
+function tacheUtileLocalement(t, limiteIso) {
+  if (!t?.date || t.date >= limiteIso) return true;
+  if (t.etat && t.etat !== "complete") return true;
+  const enAttente = (l) => (l || []).some((ph) => ph && !ph.urlDistante);
+  return enAttente(t.photosAvant) || enAttente(t.photosApres);
+}
+// Retourne false si la sauvegarde a ÉCHOUÉ (mémoire pleine) — l'appelant
+// avertit le technicien au lieu de se taire.
 function sauvegarderTaches(taches, email) {
   try {
-    if (typeof window === "undefined" || !window.localStorage || !email) return;
-    const allegees = taches.map((t) => ({
-      ...t,
-      // Ne pas persister d'éventuelles URL blob de photos (invalides
-      // après un rechargement) — seulement leurs métadonnées.
-      photosAvant: t.photosAvant ? allegerPhotosPourStockage(t.photosAvant) : undefined,
-      photosApres: t.photosApres ? allegerPhotosPourStockage(t.photosApres) : undefined,
-    }));
+    if (typeof window === "undefined" || !window.localStorage || !email) return true;
+    const limite = new Date();
+    limite.setDate(limite.getDate() - JOURS_GARDES_LOCALEMENT);
+    const limiteIso = isoLocal(limite);
+    const allegees = taches
+      .filter((t) => tacheUtileLocalement(t, limiteIso))
+      .map((t) => ({
+        ...t,
+        // Ne pas persister d'éventuelles URL blob de photos (invalides
+        // après un rechargement) — seulement leurs métadonnées.
+        photosAvant: t.photosAvant ? allegerPhotosPourStockage(t.photosAvant) : undefined,
+        photosApres: t.photosApres ? allegerPhotosPourStockage(t.photosApres) : undefined,
+      }));
     window.localStorage.setItem(cleStockagePour(email), JSON.stringify(allegees));
+    return true;
   } catch {
-    // Quota dépassé ou stockage indisponible — on continue sans
-    // bloquer l'utilisateur ; les données restent en mémoire pour la
-    // session en cours.
+    // Quota dépassé ou stockage indisponible — les données restent en
+    // mémoire pour la session en cours ; l'appelant AVERTIT.
+    return false;
   }
+}
+
+// 📮 ENVOIS « EN VOL » (2026-10-26, constat iPhone) : iOS gèle puis ferme
+// une PWA verrouillée PENDANT une requête — elle ne réussit pas, n'échoue
+// pas non plus : le bon (ou les heures) disparaissait sans aller en file.
+// Chaque envoi important est donc NOTÉ avant de partir et effacé une fois
+// arrivé ; au prochain démarrage, ce qui est resté noté repart par la file
+// (dont les gardes anti-doublon savent si le serveur l'avait reçu).
+const CLE_ENVOIS_EN_VOL = "fluxya_envois_en_vol_v1";
+function lireEnvoisEnVol() {
+  try {
+    const brut = typeof window !== "undefined" && window.localStorage ? window.localStorage.getItem(CLE_ENVOIS_EN_VOL) : null;
+    const l = brut ? JSON.parse(brut) : [];
+    return Array.isArray(l) ? l : [];
+  } catch {
+    return [];
+  }
+}
+function ecrireEnvoisEnVol(liste) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem(CLE_ENVOIS_EN_VOL, JSON.stringify(liste));
+  } catch {
+    // mémoire pleine — l'envoi direct reste tenté normalement
+  }
+}
+function noterEnvoiEnVol(action) {
+  ecrireEnvoisEnVol([...lireEnvoisEnVol().filter((a) => a.cle !== action.cle), { ...action, horodatage: Date.now() }]);
+}
+function retirerEnvoiEnVol(cle) {
+  ecrireEnvoisEnVol(lireEnvoisEnVol().filter((a) => a.cle !== cle));
+}
+
+// Une requête qui ne répond jamais (iOS suspendu) ne doit pas bloquer à
+// jamais un verrou : au-delà du délai, on abandonne et on réessaiera.
+function avecDelai(promesse, ms) {
+  return Promise.race([promesse, new Promise((_, rejeter) => setTimeout(() => rejeter(new Error("Délai dépassé")), ms))]);
 }
 
 // ------------------------------------------------------------
@@ -2871,7 +2928,7 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
   );
 }
 
-function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lectureSeule, coffreCle }) {
+function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lectureSeule, coffreCle, onPhotoTeleversee = null }) {
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState("");
   const [cameraOuverte, setCameraOuverte] = useState(false);
@@ -2934,7 +2991,14 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
     // IndexedDB AVANT même de tenter le réseau — un sous-sol sans
     // signal ne perd rien, même si la page est rechargée.
     if (nouvellePhoto.blob && coffreCle) {
-      coffrerPhoto({ id, blob: nouvellePhoto.blob, origine: nouvellePhoto.origine || "camera", coffreCle });
+      // 📱 (2026-10-26) La copie de secours peut échouer sur iPhone (base
+      // locale fermée par iOS après un passage en arrière-plan) — on le
+      // dit, au lieu de laisser croire que la photo est à l'abri.
+      Promise.resolve(coffrerPhoto({ id, blob: nouvellePhoto.blob, origine: nouvellePhoto.origine || "camera", coffreCle }))
+        .then((ok) => {
+          if (ok === false) setErreur("⚠️ Copie de secours de la photo impossible — garde l'app ouverte jusqu'à ce que la photo soit envoyée.");
+        })
+        .catch(() => setErreur("⚠️ Copie de secours de la photo impossible — garde l'app ouverte jusqu'à ce que la photo soit envoyée."));
     }
     // TÉLÉVERSEMENT EN ARRIÈRE-PLAN vers le stockage Supabase : l'URL
     // distante obtenue voyagera avec le travail complété (bureau, bon de
@@ -2943,7 +3007,11 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
     if (nouvellePhoto.blob) {
       televerserPhotoTravail(nouvellePhoto.blob, nouvellePhoto.origine || "camera")
         .then((urlDistante) => {
-          decoffrerPhoto(id);
+          // 📸 L'adresse va d'abord à la TÂCHE (état global — vit même si cet
+          // écran est fermé) ; la copie de secours n'est vidée QUE si la
+          // tâche l'a bien reçue. Sinon, la reprise automatique s'en charge.
+          const retenue = onPhotoTeleversee ? onPhotoTeleversee(id, urlDistante) : true;
+          if (retenue) decoffrerPhoto(id);
           setPhotos((prev) => {
             const maj = prev.map((p) => (p.id === id ? { ...p, urlDistante, enAttente: false } : p));
             if (onPhotosChange) setTimeout(() => onPhotosChange(maj), 0);
@@ -3935,7 +4003,7 @@ function HistoriqueAdresse({ tache, session, enLigne }) {
     </div>
   );
 }
-function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile, onChargeHeures }) {
+function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onRetour, onMajTache, tacheBloquante, inspectionFaite, role, enLigne, session, onMettreEnFile, onChargeHeures, onPhotoTeleversee = null }) {
   // 🌎 Version anglaise (tranche « bon de travail », 2026-09-04) —
   // interface seulement : le bon envoyé au client et les données
   // enregistrées restent en français.
@@ -4312,6 +4380,74 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const commettreNotesInternes = () => onMajTache(tache.id, { notesInternes });
   const commettreNomMoule = () => onMajTache(tache.id, { nomMoule });
 
+  // 💾 TEXTE SAUVEGARDÉ PENDANT LA FRAPPE (2026-10-26, constat iPhone : « le
+  // texte ne s'enregistre pas ») — il ne partait qu'en QUITTANT le champ ;
+  // or iOS ferme souvent la PWA (verrouillage, changement d'app, caméra)
+  // sans que le champ perde le focus. Le texte est maintenant commis une
+  // demi-seconde après la dernière frappe, ET dès que l'app passe en
+  // arrière-plan, ET quand l'écran se ferme. Une signature évite les
+  // écritures inutiles (rien ne change = rien n'est écrit).
+  const texteRef = useRef(null);
+  texteRef.current = { notesTerrain, notesInternes, nomMoule, lignes };
+  const dernierTexteRef = useRef(JSON.stringify({ notesTerrain, notesInternes, nomMoule, lignes }));
+  const majTacheRef = useRef(onMajTache);
+  majTacheRef.current = onMajTache;
+  const commettreTexte = () => {
+    const actuel = texteRef.current;
+    if (!actuel) return;
+    const signature = JSON.stringify(actuel);
+    if (signature === dernierTexteRef.current) return;
+    dernierTexteRef.current = signature;
+    majTacheRef.current(tache.id, { ...actuel });
+  };
+  useEffect(() => {
+    const minuterie = setTimeout(commettreTexte, 500);
+    return () => clearTimeout(minuterie);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notesTerrain, notesInternes, nomMoule, lignes]);
+  useEffect(() => {
+    const surCache = () => {
+      if (document.visibilityState === "hidden") commettreTexte();
+    };
+    document.addEventListener("visibilitychange", surCache);
+    window.addEventListener("pagehide", commettreTexte);
+    return () => {
+      document.removeEventListener("visibilitychange", surCache);
+      window.removeEventListener("pagehide", commettreTexte);
+      commettreTexte(); // l'écran se ferme : rien ne reste en suspens
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 📸 PHOTOS ENVOYÉES EN ARRIÈRE-PLAN (2026-10-26, constat iPhone) : la
+  // reprise automatique (ou l'envoi terminé ailleurs) écrit l'adresse de
+  // la photo dans la TÂCHE — cet écran, ouvert, ne la voyait pas, et son
+  // prochain geste pouvait écraser la bonne version. On fusionne donc les
+  // adresses connues de la tâche dans les photos affichées, par identifiant.
+  const fusionnerAdresses = (locales, globales) => {
+    const parId = new Map((globales || []).filter((p) => p?.id && p.urlDistante).map((p) => [p.id, p.urlDistante]));
+    if (parId.size === 0) return locales;
+    let change = false;
+    const resultat = (locales || []).map((p) => {
+      if (p?.id && !p.urlDistante && parId.has(p.id)) {
+        change = true;
+        return { ...p, urlDistante: parId.get(p.id), enAttente: false };
+      }
+      return p;
+    });
+    return change ? resultat : locales;
+  };
+  useEffect(() => {
+    setPhotosAvant((prev) => fusionnerAdresses(prev, tache.photosAvant));
+    setPhotosApres((prev) => fusionnerAdresses(prev, tache.photosApres));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [(tache.photosAvant || []).map((p) => p?.urlDistante || "").join("|"), (tache.photosApres || []).map((p) => p?.urlDistante || "").join("|")]);
+  // Photos encore en route vers le serveur (pour l'envoi du bon).
+  const photosRef = useRef({ avant: photosAvant, apres: photosApres });
+  photosRef.current = { avant: photosAvant, apres: photosApres };
+  const photosEnRoute = () =>
+    [...(photosRef.current.avant || []), ...(photosRef.current.apres || [])].filter((p) => p && !p.urlDistante && (p.enAttente || p.blob)).length;
+
   const marquerSignature = () => {
     // Ne s'exécute qu'une fois, au premier trait (transition
     // false → true), pas à chaque pixel dessiné.
@@ -4620,6 +4756,17 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       // Je suis en réalité le dernier : le code ci-dessous crée le bon,
       // exactement comme si l'app l'avait su du premier coup.
     }
+    // 📸 PHOTOS ENCORE EN ROUTE (2026-10-26, constat iPhone) : le bon partait
+    // avec les seules photos déjà envoyées — une photo « après » encore en
+    // téléversement passait la validation mais manquait au bon, pour de
+    // bon. En ligne, on laisse jusqu'à 20 secondes aux photos pour arriver.
+    if (photosEnRoute() > 0 && enLigne) {
+      const limite = Date.now() + 20000;
+      while (photosEnRoute() > 0 && Date.now() < limite) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+    const photosPasEncoreEnvoyees = photosEnRoute();
     const chargeBon = {
         tacheId: tache.tacheOrigineId || tache.id,
         titre: tache.titre || tache.clientNom || "Travail complété",
@@ -4634,8 +4781,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         devisNumero: tache.devisNumero || null,
         adresseTravaux: tache.adresseTravaux || null,
         projetId: tache.projetId || null,
-        photosAvant: (photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
-        photosApres: (photosApres || []).map((p) => p.urlDistante).filter(Boolean),
+        // (photosRef : l'état À JOUR après l'attente ci-dessus — pas celui
+        // capturé au clic.)
+        photosAvant: (photosRef.current.avant || []).map((p) => p.urlDistante).filter(Boolean),
+        photosApres: (photosRef.current.apres || []).map((p) => p.urlDistante).filter(Boolean),
         videos: (videos || []).map((v) => v.urlDistante).filter(Boolean),
         courrielsEnvoi: destinataires,
         signeParNom: clientAbsent || collegueAFaitSigner ? "" : nomMoule.trim(),
@@ -4682,10 +4831,36 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     // dans une transaction ; terminerTache() repasse ensuite (upsert
     // identique, sans danger) et garde son filet hors-ligne.
     const chargeHeures = onChargeHeures?.(tache.id) || null;
+    const actionBonEnFile = {
+      id: `sync-bon-${Date.now()}`,
+      type: "bon",
+      tacheLocaleId: tache.id,
+      tacheId: tache.tacheOrigineId || tache.id,
+      charge: { ...chargeBon, photosAvant: undefined, photosApres: undefined },
+      horodatage: Date.now(),
+    };
+    // 📸 Des photos n'ont toujours pas pu partir (réseau faible) : le bon ne
+    // part PAS sans elles — il va en file et partira dès qu'elles seront
+    // envoyées (la file attend les photos ; ses heures, elles, partent
+    // normalement). L'avis à l'équipe part tout de suite.
+    if (photosPasEncoreEnvoyees > 0) {
+      if (equipeTermineeRef.current && colleguesRestants.length > 0) {
+        declarerEquipeTerminee(tache.tacheOrigineId || tache.id, tache.date || null).catch(() => {});
+      }
+      onMettreEnFile?.(
+        actionBonEnFile,
+        `📸 ${photosPasEncoreEnvoyees} photo${photosPasEncoreEnvoyees > 1 ? "s" : ""} encore en route — le bon « ${tache.titre || tache.clientNom || "tâche"} » partira au bureau dès qu'elle${photosPasEncoreEnvoyees > 1 ? "s seront envoyées" : " sera envoyée"}. Garde l'app ouverte si tu peux.`
+      );
+    } else {
+    // 📮 Noté « en vol » AVANT de partir : si iOS ferme l'app pendant la
+    // requête, le bon repartira de la file au prochain démarrage.
+    const cleEnVol = `bon-${tache.id}`;
+    noterEnvoiEnVol({ cle: cleEnVol, type: "bon", tacheLocaleId: actionBonEnFile.tacheLocaleId, tacheId: actionBonEnFile.tacheId, charge: actionBonEnFile.charge });
     (chargeHeures
       ? fermerTravauxTechnicien(chargeBon, chargeHeures, session).then((r) => r.bonRowId)
       : enregistrerBonTravail(chargeBon, session)
     ).then(async (bonRowId) => {
+      retirerEnvoiEnVol(cleEnVol);
       // 🤝 FERMETURE D'ÉQUIPE : le bon est créé — on avertit maintenant
       // les coéquipiers qui n'avaient pas fermé. Leur téléphone leur
       // demandera de confirmer (ou d'ajuster) leurs heures. Si l'appel
@@ -4730,18 +4905,13 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       // sera recréé tout seul au retour du réseau. Les photos seront
       // recomposées AU MOMENT du rejeu (le coffre les aura téléversées
       // entre-temps) ; garde anti-doublon par bonExistePourTache.
+      retirerEnvoiEnVol(cleEnVol);
       onMettreEnFile?.(
-        {
-          id: `sync-bon-${Date.now()}`,
-          type: "bon",
-          tacheLocaleId: tache.id,
-          tacheId: tache.tacheOrigineId || tache.id,
-          charge: { ...chargeBon, photosAvant: undefined, photosApres: undefined },
-          horodatage: Date.now(),
-        },
+        actionBonEnFile,
         `📦 Bon « ${tache.titre || tache.clientNom || "tâche"} » en file — il partira au bureau dès le retour du réseau.`
       );
     });
+    }
     // Simule le temps d'envoi réseau — en prod, ce délai correspond à
     // l'appel réel vers Supabase / l'API de facturation.
     setTimeout(() => {
@@ -5616,6 +5786,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             onPhotosChange={(nouvelles) => commettrePhotos("photosAvant", nouvelles)}
             lectureSeule={lectureSeule}
             coffreCle={`${tache.id}|avant`}
+            onPhotoTeleversee={onPhotoTeleversee}
           />
           <ZonePhoto
             titre={t("Photos après")}
@@ -5625,6 +5796,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             obligatoire={!estVisiteSoumission}
             lectureSeule={lectureSeule}
             coffreCle={`${tache.id}|apres`}
+            onPhotoTeleversee={onPhotoTeleversee}
           />
         </div>
 
@@ -6539,6 +6711,35 @@ function AppTechnicien() {
   const tachesRef = useRef(taches);
   tachesRef.current = taches;
 
+  // 📸 L'ADRESSE D'UNE PHOTO TÉLÉVERSÉE VA À LA TÂCHE (2026-10-26, constat
+  // iPhone — cause n° 1 des photos perdues) : elle n'était écrite que dans
+  // l'écran du bon ; si le technicien l'avait quitté pendant l'envoi
+  // (réseau cellulaire lent), l'adresse n'allait nulle part et la copie de
+  // secours était déjà effacée. Retourne true si la photo a été trouvée
+  // dans une tâche — sinon l'appelant GARDE la copie de secours (la
+  // reprise automatique s'en chargera).
+  const marquerPhotoTeleversee = (photoId, urlDistante) => {
+    const presente = (tachesRef.current || []).some((tc) =>
+      ["photosAvant", "photosApres"].some((champ) => (tc[champ] || []).some((x) => x?.id === photoId))
+    );
+    if (!presente) return false;
+    setTaches((prev) =>
+      prev.map((tc) => {
+        let change = false;
+        const maj = { ...tc };
+        for (const champ of ["photosAvant", "photosApres"]) {
+          const liste = tc[champ];
+          if (Array.isArray(liste) && liste.some((x) => x?.id === photoId)) {
+            maj[champ] = liste.map((x) => (x?.id === photoId ? { ...x, urlDistante, enAttente: false } : x));
+            change = true;
+          }
+        }
+        return change ? maj : tc;
+      })
+    );
+    return true;
+  };
+
   // ============================================================
   // 📦 REJEU DU COFFRE PHOTOS (2026-08-27)
   // ------------------------------------------------------------
@@ -6572,10 +6773,16 @@ function AppTechnicien() {
             continue;
           }
           try {
-            const urlDistante = await televerserPhotoTravail(ph.blob, ph.origine || "camera");
-            await decoffrerPhoto(ph.id);
             const [cibleTache, type] = String(ph.coffreCle || "").split("|");
             const champ = type === "avant" ? "photosAvant" : type === "apres" ? "photosApres" : null;
+            // 🛡️ (2026-10-26) La tâche visée doit EXISTER avant qu'on vide la
+            // copie de secours — sinon la photo, envoyée mais rattachée à
+            // rien, était perdue. Tâche pas (encore) chargée : on réessaiera.
+            if (cibleTache && champ && !(tachesRef.current || []).some((tc) => tc.id === cibleTache)) continue;
+            // Délai maximal : une requête figée par iOS ne bloque plus la
+            // reprise jusqu'au redémarrage de l'app.
+            const urlDistante = await avecDelai(televerserPhotoTravail(ph.blob, ph.origine || "camera"), 90000);
+            await decoffrerPhoto(ph.id);
             if (cibleTache && champ) {
               setTaches((prev) =>
                 prev.map((tc) => {
@@ -6643,6 +6850,32 @@ function AppTechnicien() {
   // (réussie, échouée, ou abandonnée) VRAIMENT terminée.
   const syncEnCoursRef = useRef(false);
   const [erreurSync, setErreurSync] = useState("");
+
+  // 📮 REPRISE DES ENVOIS « EN VOL » (2026-10-26, constat iPhone) : au
+  // démarrage, ce qui était parti sans jamais recevoir de réponse (iOS a
+  // fermé l'app pendant la requête) passe dans la file — ses gardes anti-
+  // doublon (bon déjà créé ? heures déjà là ?) évitent tout double envoi.
+  const enVolReprisRef = useRef(false);
+  useEffect(() => {
+    if (!session || enVolReprisRef.current) return;
+    enVolReprisRef.current = true;
+    const restes = lireEnvoisEnVol().filter((a) => Date.now() - (Number(a.horodatage) || 0) > 5000);
+    if (restes.length === 0) return;
+    ecrireEnvoisEnVol(lireEnvoisEnVol().filter((a) => !restes.some((r) => r.cle === a.cle)));
+    setFileAttente((prev) => [
+      ...prev,
+      ...restes.map((a) => ({
+        id: `sync-reprise-${a.cle}-${Date.now()}`,
+        type: a.type,
+        tacheLocaleId: a.tacheLocaleId,
+        tacheId: a.tacheId,
+        charge: a.charge,
+        horodatage: Date.now(),
+      })),
+    ]);
+    setErreurSync(`📮 ${restes.length} envoi${restes.length > 1 ? "s" : ""} interrompu${restes.length > 1 ? "s" : ""} par la fermeture de l'app — repris automatiquement.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
   useEffect(() => {
     if (!enLigne || syncEnCoursRef.current || fileAttente.length === 0) return;
     let annule = false;
@@ -6663,6 +6896,24 @@ function AppTechnicien() {
           const deja = await travailDejaEnregistre(action.charge.tacheId, session?.user?.email);
           if (!deja) await enregistrerTravailEffectue(action.charge, session);
         } else if (action?.type === "bon" && action.charge) {
+          // 📸 (2026-10-26) Le bon attend ses photos encore en route — jusqu'à
+          // 15 minutes ; la reprise automatique des photos les envoie entre-
+          // temps. Au-delà, il part avec celles qui sont arrivées.
+          const tacheAttente = tachesRef.current.find((x) => x.id === action.tacheLocaleId);
+          const enRoute = (l) => (l || []).some((ph) => ph && !ph.urlDistante && (ph.enAttente || ph.blob));
+          if (
+            tacheAttente &&
+            (enRoute(tacheAttente.photosAvant) || enRoute(tacheAttente.photosApres)) &&
+            Date.now() - (Number(action.horodatage) || 0) < 15 * 60 * 1000
+          ) {
+            // Il ne bloque pas le reste de la file : il passe en dernier
+            // (s'il est seul, on repasse dans 20 s).
+            setTimeout(
+              () => setFileAttente((f) => (f.length > 1 && f[0]?.id === action.id ? [...f.slice(1), f[0]] : [...f])),
+              fileAttente.length > 1 ? 2000 : 20000
+            );
+            return;
+          }
           const existe = await bonExistePourTache(action.tacheId);
           if (!existe) {
             const tacheLocale = tachesRef.current.find((x) => x.id === action.tacheLocaleId);
@@ -6754,15 +7005,18 @@ function AppTechnicien() {
   // vide de départ écraserait l'horaire enregistré).
   useEffect(() => {
     if (!tachesChargeesRef.current) return;
-    sauvegarderTaches(taches, session?.user?.email);
+    // 📱 Mémoire pleine : on le DIT (avant : silence, et plus rien ne se
+    // gardait si iOS fermait l'app — « des fois rien ne s'enregistre »).
+    if (!sauvegarderTaches(taches, session?.user?.email)) {
+      setErreurSync("⚠️ Mémoire du téléphone pleine — tes changements ne seront pas gardés si l'app se ferme. Envoie tes bons maintenant et préviens le bureau.");
+    }
   }, [taches, session]);
 
+  // (2026-10-26) Une modification LOCALE n'ajoute plus d'entrée à la file
+  // de synchronisation : ces entrées n'envoyaient rien au serveur, mais
+  // une par frappe gonflait la mémoire du téléphone jusqu'à la remplir.
   const majTache = (id, champs) => {
     setTaches((prev) => prev.map((t) => (t.id === id ? { ...t, ...champs } : t)));
-    setFileAttente((prev) => [
-      ...prev,
-      { id: `sync-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, tacheId: id, champs, horodatage: Date.now() },
-    ]);
   };
 
   const demarrerTache = (id) => {
@@ -6888,9 +7142,17 @@ function AppTechnicien() {
     const fermeeParBureau = !!(t?.fermetureBureau && (!t.fermetureBureau.jour || t.fermetureBureau.jour === t.date));
     if (t && !fermeeParBureau) {
       const chargeTravail = chargeHeuresDepuisTache(t);
+      // 📮 Noté « en vol » avant de partir (iOS peut fermer l'app pendant la
+      // requête) — repart de la file au prochain démarrage si besoin.
+      const cleEnVolTravail = `travail-${chargeTravail.tacheId}-${chargeTravail.date || ""}`;
+      noterEnvoiEnVol({ cle: cleEnVolTravail, type: "travail", charge: chargeTravail });
       enregistrerTravailEffectue(chargeTravail, session)
-        .then(() => setErreurSync(""))
+        .then(() => {
+          retirerEnvoiEnVol(cleEnVolTravail);
+          setErreurSync("");
+        })
         .catch(() => {
+          retirerEnvoiEnVol(cleEnVolTravail);
           // 📦 HORS-LIGNE (2026-08-27) : les heures partent en FILE DE
           // REJEU — elles seront transmises toutes seules au retour du
           // réseau (garde anti-doublon par travailDejaEnregistre). Avant,
@@ -7641,6 +7903,7 @@ function AppTechnicien() {
               const t = taches.find((x) => x.id === id);
               return t ? chargeHeuresDepuisTache(t) : null;
             }}
+            onPhotoTeleversee={marquerPhotoTeleversee}
           />
         )}
       </div>
