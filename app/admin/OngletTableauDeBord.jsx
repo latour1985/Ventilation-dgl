@@ -357,7 +357,7 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
         />
       )}
 
-      <div id="encadres-devis-a-faire" className="grid gap-4 md:grid-cols-[1.5fr_1fr]">
+      <div id="encadres-devis-a-faire" className="grid grid-cols-1 gap-4 md:grid-cols-[1.5fr_1fr]">
         {/* VISITES DE SOUMISSION SANS DEVIS
             ------------------------------------------------------------
             Une visite faite mais jamais chiffrée, c'est une vente qui
