@@ -59,7 +59,7 @@ export default function ConnexionTechnicien() {
               onChange={(e) => setCourriel(e.target.value)}
               required
               placeholder="ton.courriel@ventilationdgl.com"
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-200"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-base sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-200"
             />
           </div>
           <div>
@@ -69,7 +69,7 @@ export default function ConnexionTechnicien() {
               onChange={(e) => setMotDePasse(e.target.value)}
               required
               placeholder="ton mot de passe"
-              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-200"
+              className="w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-base sm:text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-200"
             />
           </div>
 

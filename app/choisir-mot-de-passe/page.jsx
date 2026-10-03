@@ -141,7 +141,7 @@ export default function ChoisirMotDePasse() {
               <ChampMotDePasse
                 value={motDePasse}
                 onChange={(e) => setMotDePasse(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base sm:text-sm"
               />
             </div>
             <div>
@@ -149,7 +149,7 @@ export default function ChoisirMotDePasse() {
               <ChampMotDePasse
                 value={confirmation}
                 onChange={(e) => setConfirmation(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base sm:text-sm"
               />
             </div>
             {erreur && <p className="text-xs font-semibold text-red-600">{erreur}</p>}

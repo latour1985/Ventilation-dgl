@@ -23,9 +23,19 @@ export default function SansZoomAutoIos() {
     const meta = document.querySelector('meta[name="viewport"]');
     if (!meta) return;
     const avant = meta.getAttribute("content") || "";
-    if (/maximum-scale/i.test(avant)) return;
-    meta.setAttribute("content", `${avant}${avant ? ", " : ""}maximum-scale=1`);
-    return () => meta.setAttribute("content", avant);
+    const appliquer = () => {
+      const actuel = meta.getAttribute("content") || "";
+      if (!/maximum-scale/i.test(actuel)) meta.setAttribute("content", `${actuel}${actuel ? ", " : ""}maximum-scale=1`);
+    };
+    appliquer();
+    // Revue 2026-10-02 (vécu : page « zoomée » après la connexion) : si la
+    // page remet la balise d'origine, on réapplique aussitôt.
+    const observateur = new MutationObserver(appliquer);
+    observateur.observe(meta, { attributes: true, attributeFilter: ["content"] });
+    return () => {
+      observateur.disconnect();
+      meta.setAttribute("content", avant);
+    };
   }, []);
   return null;
 }

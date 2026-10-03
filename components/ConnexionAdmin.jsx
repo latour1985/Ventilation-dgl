@@ -60,7 +60,7 @@ export default function ConnexionAdmin() {
                 onChange={(e) => setCourriel(e.target.value)}
                 required
                 placeholder="ton.courriel@ventilationdgl.com"
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-100"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base sm:text-sm focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-100"
               />
             </div>
             <div>
@@ -70,7 +70,7 @@ export default function ConnexionAdmin() {
                 onChange={(e) => setMotDePasse(e.target.value)}
                 required
                 placeholder="ton mot de passe"
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-100"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base sm:text-sm focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-100"
               />
             </div>
 
