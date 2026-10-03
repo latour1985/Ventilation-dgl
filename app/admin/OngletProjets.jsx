@@ -227,6 +227,19 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onMajSui
           );
         })()}
         <div className="flex justify-between font-bold text-slate-800"><span>Budget initial</span><span className="tabular-nums">{projet.budgetTotal.toFixed(2)} $</span></div>
+        {/* ↩️ Crédits clients / ristournes rattachés (2026-10-26) — le profit
+            se calcule sur le revenu NET. */}
+        {r.totalCredits > 0 && (
+          <>
+            <div className="flex justify-between text-amber-700">
+              <span title={(r.creditsDuProjet || []).map((c) => `${c.numero ? `Crédit ${c.numero}` : "Crédit"}${c.factureLieeNumero ? ` sur la facture ${c.factureLieeNumero}` : ""} : ${Math.abs(Number(c.amountHT) || 0).toFixed(2)} $`).join("\n")}>
+                ↩️ Crédits / ristournes ({(r.creditsDuProjet || []).length})
+              </span>
+              <span className="tabular-nums">−{r.totalCredits.toFixed(2)} $</span>
+            </div>
+            <div className="flex justify-between font-bold text-slate-800"><span>Revenu net</span><span className="tabular-nums">{r.revenuNet.toFixed(2)} $</span></div>
+          </>
+        )}
         <div className={`flex justify-between border-t border-slate-200 pt-1 text-sm font-extrabold ${r.profitReel < 0 ? "text-red-600" : "text-emerald-600"}`}>
           <span>Profit réel ({r.pourcentageMarge.toFixed(1)}%)</span><span className="tabular-nums">{r.profitReel.toFixed(2)} $</span>
         </div>
@@ -1081,6 +1094,8 @@ export function OngletFacturationProjet({ r, devisDuClient }) {
                 <div className="flex items-center gap-2">
                   {t.type === "INVOICE" ? (
                     <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">VENTE</span>
+                  ) : t.type === "CREDIT" ? (
+                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">CRÉDIT CLIENT</span>
                   ) : (
                     <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold text-orange-700">DÉPENSE</span>
                   )}
@@ -1615,7 +1630,9 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
       }));
   }, [bonsTravail]);
 
-  const transactionsSansProjet = transactionsQb.filter((t) => !t.cible);
+  // Les CRÉDITS clients (ristournes) ne se rattachent qu'automatiquement —
+  // jamais dans la pile « à rattacher » (règle du propriétaire, 2026-10-26).
+  const transactionsSansProjet = transactionsQb.filter((t) => !t.cible && t.type !== "CREDIT");
   // 📦 FILTRE PAR BC (2026-08-31, demande du propriétaire : « une
   // compagnie qui a 200 transactions par mois autres que des matériaux
   // va passer son temps à faire ça pour rien ») : quand le réglage est

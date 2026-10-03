@@ -1008,7 +1008,8 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
   // Les factures de vente QuickBooks rattachées → suivies séparément
   // comme "facturé réel" (encaissements réels vs budget), sans changer le
   // calcul du profit (qui reste basé sur le budget initial vendu).
-  const transactionsDuProjet = (transactionsQb || []).filter((t) => t.projectId === projet.id);
+  // (Les CRÉDITS clients sont rattachés plus bas, par leur facture.)
+  const transactionsDuProjet = (transactionsQb || []).filter((t) => t.projectId === projet.id && t.type !== "CREDIT");
   const depensesQb = transactionsDuProjet.filter((t) => t.type === "EXPENSE");
   const facturesQb = transactionsDuProjet.filter((t) => t.type === "INVOICE");
   // ------------------------------------------------------------
@@ -1112,8 +1113,27 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
   // saisis à la main sur le projet, comptés dans le coût réel.
   const coutMateriauxReprise = (reprise.materiaux || []).reduce((s, m) => s + (Number(m.montant) || 0), 0);
   const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion + coutReprise + coutMateriauxReprise;
-  const profitReel = projet.budgetTotal - coutTotalReel;
-  const pourcentageMarge = projet.budgetTotal > 0 ? (profitReel / projet.budgetTotal) * 100 : 0;
+  // ↩️ CRÉDITS CLIENTS / RISTOURNES (2026-10-26, demande du propriétaire) :
+  // une note de crédit rattachée AUTOMATIQUEMENT au projet — directement,
+  // ou par la facture à laquelle elle a été appliquée — BAISSE le revenu
+  // du projet. Profit et % de marge se calculent sur le montant FINAL.
+  // Le crédit suit SA FACTURE, et seulement elle : une règle « projet en
+  // cours du client » le poserait parfois sur le mauvais projet. Sans
+  // facture liée, il ne touche aucun projet (il reste dans l'analyse
+  // globale, par client).
+  const toutes = transactionsQb || [];
+  const projetDuCredit = (t) => {
+    if (t.factureLieeQbId) {
+      const facture = toutes.find((f) => f.quickbooksId === t.factureLieeQbId);
+      if (facture) return facture.projectId || null;
+    }
+    return t.creditProjetId || null; // crédits maison (Sage / sans comptabilité)
+  };
+  const creditsDuProjet = toutes.filter((t) => t.type === "CREDIT" && projetDuCredit(t) === projet.id);
+  const totalCredits = Math.round(creditsDuProjet.reduce((s, t) => s + Math.abs(Number(t.amountHT) || 0), 0) * 100) / 100;
+  const revenuNet = (Number(projet.budgetTotal) || 0) - totalCredits;
+  const profitReel = revenuNet - coutTotalReel;
+  const pourcentageMarge = revenuNet > 0 ? (profitReel / revenuNet) * 100 : 0;
   const pourcentageDepense = projet.budgetTotal > 0 ? (coutTotalReel / projet.budgetTotal) * 100 : 0;
   return {
     travauxDuProjet,
@@ -1131,10 +1151,15 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
     coutMateriauxQb,
     coutMaterielStock,
     coutMateriaux,
-    transactionsDuProjet,
+    // La liste affichée montre aussi les crédits rattachés (badge CRÉDIT CLIENT).
+    transactionsDuProjet: [...transactionsDuProjet, ...creditsDuProjet],
     // Facturé réel = les factures QuickBooks du projet + ce qui avait
     // déjà été facturé avant Fluxya (reprise).
-    totalFactureReel: totalFactureReel + factureReprise,
+    // (net des crédits clients : ce que le client paie VRAIMENT)
+    totalFactureReel: totalFactureReel + factureReprise - totalCredits,
+    creditsDuProjet,
+    totalCredits,
+    revenuNet,
     heuresReprise,
     coutReprise,
     factureReprise,

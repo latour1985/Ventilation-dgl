@@ -2977,6 +2977,42 @@ function AppAdmin() {
   // transactions (même cadence) pour que l'analyse de rentabilité
   // soustraie les remboursements du facturé.
   const [creditsQb, setCreditsQb] = useState([]);
+  // ↩️ CRÉDITS MAISON → PROJETS (2026-10-26, Sage / sans comptabilité) : une
+  // note de crédit émise dans Fluxya sur la facture maison d'un bon rattaché
+  // à un projet entre dans les transactions comme un CRÉDIT de ce projet —
+  // la marge du projet se calcule sur le montant final (calculerRentabiliteProjet).
+  useEffect(() => {
+    if ((configEntreprise?.systemeComptable || "quickbooks") === "quickbooks") return;
+    let annule = false;
+    import("@/lib/supabase/facturesMaison")
+      .then((m) => m.listerFacturesMaison())
+      .then((liste) => {
+        if (annule) return;
+        const projetParFacture = new Map();
+        (bons || []).forEach((b) =>
+          (b.facturesEmises || []).forEach((f) => {
+            if (f.factureMaisonId && b.projetId) projetParFacture.set(f.factureMaisonId, b.projetId);
+          })
+        );
+        const creditsTx = (liste || [])
+          .filter((f) => f.type === "credit" && f.factureOrigineId && f.statut !== "annulee" && projetParFacture.has(f.factureOrigineId))
+          .map((f) => ({
+            quickbooksId: `MAISON-CR-${f.id}`,
+            type: "CREDIT",
+            numero: f.numero || "",
+            amountHT: -Math.abs(Number(f.sousTotal) || 0),
+            date: f.dateEmission || null,
+            creditProjetId: projetParFacture.get(f.factureOrigineId),
+            cible: { type: "projet", id: projetParFacture.get(f.factureOrigineId) },
+            projectId: null,
+          }));
+        setTransactionsQb((prev) => [...prev.filter((t) => !String(t.quickbooksId || "").startsWith("MAISON-CR-")), ...creditsTx]);
+      })
+      .catch(() => {});
+    return () => {
+      annule = true;
+    };
+  }, [bons, configEntreprise?.systemeComptable]);
   const [fraisPaiementQb, setFraisPaiementQb] = useState([]);
   // 🧭 UN SEUL CHEMIN DE FACTURATION (2026-09-03, demande du
   // propriétaire : « ne pas mettre l'option QuickBooks si le client n'en

@@ -107,14 +107,19 @@ export async function GET(request) {
   const aujourdhui = dateLocale(new Date());
 
   try {
-    const [factures, achats, facturesFournisseurs, creditsFournisseurs] = await Promise.all([
+    const [factures, achats, facturesFournisseurs, creditsFournisseurs, creditsClients] = await Promise.all([
       requeteQbo(acces, `select * from Invoice where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`),
       requeteQbo(acces, `select * from Purchase where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`),
       requeteQbo(acces, `select * from Bill where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`),
       // Notes de crédit fournisseurs : un échec ne doit jamais priver
       // l'écran des factures et des dépenses.
       requeteQbo(acces, `select * from VendorCredit where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`).catch(() => ({})),
+      // Notes de crédit CLIENTS (ristournes) — même règle : jamais bloquant.
+      requeteQbo(acces, `select * from CreditMemo where TxnDate >= '${borne}' orderby TxnDate desc maxresults 1000`).catch(() => ({})),
     ]);
+    // La facture de chaque note de crédit client (LinkedTxn) — son client
+    // et son projet QuickBooks sont REPRIS par le crédit.
+    const factureParId = new Map((factures.Invoice || []).map((f) => [String(f.Id), f]));
 
     const transactions = [
       // Factures de VENTE — reliées au client (Règle 1 côté admin).
@@ -182,6 +187,33 @@ export async function GET(request) {
         status: "PAID",
         date: c.TxnDate || null,
       })),
+      // ↩️ NOTES DE CRÉDIT CLIENTS — RISTOURNES (CreditMemo, 2026-10-26,
+      // demande du propriétaire : « ajuster les marges en fonction du
+      // montant final après les crédits »). Type « CREDIT » à part (jamais
+      // compté comme une vente ni une dépense ailleurs) ; montant NÉGATIF ;
+      // rattachement AUTOMATIQUE seulement : `factureLieeQbId` (la facture
+      // à laquelle le crédit a été appliqué dans QuickBooks) — le crédit
+      // suit le projet ou la job de cette facture.
+      ...(creditsClients.CreditMemo || []).map((c) => {
+        const lien = (c.Line || []).flatMap((l) => l?.LinkedTxn || []).find((lt) => lt?.TxnType === "Invoice")
+          || (c.LinkedTxn || []).find((lt) => lt?.TxnType === "Invoice");
+        const facture = lien ? factureParId.get(String(lien.TxnId)) : null;
+        return {
+          quickbooksId: `QBO-CM-${c.Id}`,
+          type: "CREDIT",
+          numero: c.DocNumber || "",
+          customerRefId: c.CustomerRef?.value || null,
+          clientNomQb: c.CustomerRef?.name || null,
+          qbProjectRef: facture?.ProjectRef?.value || c.ProjectRef?.value || null,
+          factureLieeQbId: lien ? `QBO-INV-${lien.TxnId}` : null,
+          factureLieeNumero: facture?.DocNumber || null,
+          poNumber: null,
+          amountHT: -montantHT(c),
+          amountTTC: -(Number(c.TotalAmt) || 0),
+          status: "PAID",
+          date: c.TxnDate || null,
+        };
+      }),
     ];
 
     return Response.json({ transactions });

@@ -15,10 +15,10 @@ import { useLangue } from "@/lib/i18n";
 import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
-import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo } from "@/lib/quickbooksClient";
+import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo, lireCreditsQbo } from "@/lib/quickbooksClient";
 import { creerFactureSage as creerFactureSageCopie } from "@/lib/sageClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
-import { creerFactureMaison, lienFactureMaison, finaliserFactureMaison, PREFIXE_SUIVI_FACTURE } from "@/lib/supabase/facturesMaison";
+import { creerFactureMaison, lienFactureMaison, finaliserFactureMaison, PREFIXE_SUIVI_FACTURE, listerFacturesMaison } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
 import { SectionFacturesMaison } from "./FacturesMaison";
 import { majFacturesEmises, poserFacturesEmisesLot, sauvegarderRevisionBon, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
@@ -2744,8 +2744,61 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // qui change la façon de facturer, affiché EN HAUT de la carte et de la
   // fenêtre Réviser : aide interne, tâche non facturable, garantie, dépôt
   // perçu. (Appelée au rendu — les fonctions plus bas sont prêtes.)
+  // ↩️ CRÉDITS CLIENTS / RISTOURNES (2026-10-26, demande du propriétaire) —
+  // rattachés AUTOMATIQUEMENT à la job par la facture qu'ils créditent :
+  // QuickBooks (note de crédit appliquée à la facture) ou, pour Sage et
+  // sans comptabilité, la note de crédit MAISON émise sur la facture.
+  // Lecture seule, une fois à l'ouverture de l'onglet.
+  const [creditsClients, setCreditsClients] = useState([]); // [{ numero, montantHT, factureQbId?, factureMaisonId? }]
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        if ((configEnt?.systemeComptable || "quickbooks") === "quickbooks") {
+          const r = await lireCreditsQbo();
+          if (!annule && Array.isArray(r?.credits)) {
+            setCreditsClients(
+              r.credits
+                .filter((c) => c.factureLieeId)
+                .map((c) => ({ numero: c.numero || "", montantHT: Math.abs(Number(c.montantHT) || 0), factureQbId: String(c.factureLieeId) }))
+            );
+          }
+        } else {
+          const liste = await listerFacturesMaison();
+          if (!annule) {
+            setCreditsClients(
+              (liste || [])
+                .filter((f) => f.type === "credit" && f.factureOrigineId && f.statut !== "annulee")
+                .map((f) => ({ numero: f.numero || "", montantHT: Math.abs(Number(f.sousTotal) || 0), factureMaisonId: f.factureOrigineId }))
+            );
+          }
+        }
+      } catch {
+        // lecture impossible — les cartes s'affichent sans crédit, comme avant
+      }
+    })();
+    return () => {
+      annule = true;
+    };
+  }, [configEnt?.systemeComptable]);
+  const creditsDuBon = (b) => {
+    const qb = new Set((b?.facturesEmises || []).filter((f) => f.qboInvoiceId).map((f) => String(f.qboInvoiceId)));
+    const maison = new Set((b?.facturesEmises || []).filter((f) => f.factureMaisonId).map((f) => f.factureMaisonId));
+    return creditsClients.filter((c) => (c.factureQbId && qb.has(c.factureQbId)) || (c.factureMaisonId && maison.has(c.factureMaisonId)));
+  };
   const indicateursBon = (b) => {
     const liste = [];
+    const credits = creditsDuBon(b);
+    if (credits.length > 0) {
+      const total = credits.reduce((s, c) => s + c.montantHT, 0);
+      const facture = (b?.facturesEmises || []).filter((f) => !f.annuleeQb).reduce((s, f) => s + (Number(f.montant) || 0), 0);
+      liste.push({
+        cle: "credit",
+        txt: `↩️ Crédit −${total.toFixed(2)} $${credits.map((c) => c.numero).filter(Boolean).length ? ` (${credits.map((c) => c.numero).filter(Boolean).join(", ")})` : ""}${facture > 0 ? ` · net ${(facture - total).toFixed(2)} $ HT` : ""}`,
+        cls: "border-amber-300 bg-amber-50 text-amber-800",
+        title: "Ristourne / note de crédit appliquée à une facture de cette job — rattachée automatiquement ; la marge se calcule sur le montant final.",
+      });
+    }
     if (b?.estDevisJoint) liste.push({ cle: "joint", txt: `📎 Devis joint — même visite que « ${String(b.projet || "").split(" — 📎")[0]} »`, cls: "border-blue-300 bg-blue-50 text-blue-800", title: "Une facture par devis : ce devis a sa propre carte. Les heures et la signature sont sur la carte principale." });
     const tache = b?.tacheId && tachePour ? tachePour(String(b.tacheId).split("::")[0]) : null;
     if (tache?.nonFacturable) liste.push({ cle: "nonfact", txt: "🚫 Tâche NON facturable", cls: "border-slate-400 bg-slate-100 text-slate-700", title: "La tâche a été marquée non facturable à l'agenda." });
