@@ -192,7 +192,7 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
 
           {/* 🍁 RÉGIME DE TAXES — chaque province canadienne est offerte
               (demande du propriétaire). Défaut : Québec. */}
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">Taxes appliquées</label>
               <select value={regime} onChange={(e) => setRegime(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-2 text-xs">

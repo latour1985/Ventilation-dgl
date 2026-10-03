@@ -634,7 +634,7 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
               // TUILES DE SURVEILLANCE — l'essentiel seulement, scannable
               // d'un coup d'œil. Le détail, les formulaires et le carnet
               // vivent dans la fenêtre « Dossier du véhicule » (au clic).
-              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                 {etats.map((e) => {
                   const alerte = e.anomaliesOuvertes[0];
                   return (

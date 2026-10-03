@@ -2020,7 +2020,7 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                   <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
                     {editionBc === p.id ? (
                       <div className="w-full space-y-2">
-                        <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <div>
                             <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Fournisseur</label>
                             <input

@@ -177,7 +177,7 @@ export default function GestionAcces({ utilisateurs, estAdminPrincipal = false }
 
       {formOuvert && (
         <div className="mt-3 space-y-3 rounded-xl bg-slate-50 p-3">
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Courriel de connexion</label>
               {(() => {

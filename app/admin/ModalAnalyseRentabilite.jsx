@@ -610,7 +610,7 @@ export function ModalAnalyseRentabilite({ analyse, travaux, bons, devisListe, in
 
         {/* 🏆 TOP / FLOP */}
         {jobs.length > 0 && (
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
             {[["🏆 Top 5 — meilleures marges", top5], ["🚨 Flop 5 — pires marges", flop5]].map(([titre, liste]) => (
               <div key={titre} className="rounded-xl border border-slate-200 p-3">
                 <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">{titre}</p>

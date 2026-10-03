@@ -108,7 +108,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                 placeholder="Votre question ou commentaire…"
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#FF6A13]"
               />
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <input
                   value={nomClient}
                   onChange={(e) => setNomClient(e.target.value)}

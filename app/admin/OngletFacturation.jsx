@@ -961,7 +961,7 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
             </div>
           );
         })()}
-        <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-2 lg:overflow-hidden">
+        <div className="grid grid-cols-1 min-h-0 flex-1 overflow-y-auto lg:grid-cols-2 lg:overflow-hidden">
         {/* ---- PANNEAU GAUCHE : LE DOSSIER (lecture) ---- */}
         <div className="p-5 pt-3 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-slate-100">
         {bon.prixNonListe ? (
@@ -1862,7 +1862,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
           </div>
 
           {/* RATTACHEMENT + RÉFÉRENCE */}
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-bold text-slate-500">🔗 Rattacher à un projet</label>
               <select

@@ -2122,7 +2122,7 @@ export function AdressesDocument({ clientNom, adresseFacturation, adresseTravaux
   const differente =
     adresseTravaux && adresseTravaux.trim() && adresseTravaux.trim() !== (adresseFacturation || "").trim();
   return (
-    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
       <div>
         <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Facturé à</p>
         <p className="text-sm font-bold text-slate-800">{clientNom || "—"}</p>

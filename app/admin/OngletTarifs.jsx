@@ -743,7 +743,7 @@ export function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }
             <input value={f.nom} onChange={(e) => maj("nom", e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs outline-none" />
           </div>
-          <div className="grid gap-2.5 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             <div className="sm:col-span-2">
               <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Catégorie</label>
               <input list="cats-catalogue" value={f.categorie} onChange={(e) => maj("categorie", e.target.value)}
@@ -766,7 +766,7 @@ export function ModalItemCatalogue({ item, categories, onFermer, onEnregistrer }
           {/* LES TROIS CHAMPS LIÉS — coûtant, vendant, marge */}
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="mb-2 text-[10px] font-extrabold uppercase tracking-wide text-slate-500">Prix et marge</p>
-            <div className="grid gap-2.5 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Prix coûtant</label>
                 <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2">
@@ -1487,7 +1487,7 @@ export function SectionCatalogue({ catalogue, onEnregistrerItem, onImporterItems
                   <p className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
                     🧭 Colonnes de ton fichier <span className="font-semibold normal-case text-slate-400">— corrige si une est mal devinée</span>
                   </p>
-                  <div className="grid gap-1.5 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                     {[
                       ["nom", "Nom du produit *"],
                       ["prix_vendant", "Prix de vente"],

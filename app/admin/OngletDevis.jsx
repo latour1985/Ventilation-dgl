@@ -3062,7 +3062,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         onEffacerErreur={effacerDemandeErreur}
       />
 
-      <div className="grid gap-6 md:grid-cols-5">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-5">
         {/* CONSTRUCTEUR DE DEVIS */}
         {editionEnFenetre && editionVersion ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-xs font-semibold text-slate-500 md:col-span-3">

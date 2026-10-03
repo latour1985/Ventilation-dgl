@@ -431,7 +431,7 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
       )}
       {formHeures ? (
         <div className="mb-1.5 rounded-lg border border-slate-200 p-2">
-          <div className="grid gap-1.5 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             <input value={formHeures.qui} onChange={(e) => setFormHeures({ ...formHeures, qui: e.target.value })}
               placeholder="Qui ? (ex. : Équipe, Dominic)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
             <input type="date" value={formHeures.date} onChange={(e) => setFormHeures({ ...formHeures, date: e.target.value })}
@@ -476,7 +476,7 @@ function BlocRepriseChantier({ projet, r, onMajReprise, ajouterJournal }) {
       )}
       {formMateriau ? (
         <div className="mb-1.5 rounded-lg border border-slate-200 p-2">
-          <div className="grid gap-1.5 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             <input value={formMateriau.fournisseur} onChange={(e) => setFormMateriau({ ...formMateriau, fournisseur: e.target.value })}
               placeholder="Fournisseur (ex. : Descair)" className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
             <input type="date" value={formMateriau.date} onChange={(e) => setFormMateriau({ ...formMateriau, date: e.target.value })}
