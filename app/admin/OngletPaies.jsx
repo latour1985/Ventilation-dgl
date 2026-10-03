@@ -173,6 +173,9 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   // Détail d'une JOURNÉE précise : { email, iso } — ouvert au clic sur
   // la cellule d'un jour (le clic sur le NOM montre toute la semaine).
   const [detailJour, setDetailJour] = useState(null);
+  // 📱 Téléphone : les alertes (journées bloquées, corrections) sont des
+  // bandeaux repliés qu'on touche pour ouvrir (maquette lot B, 2026-10-02).
+  const [alertesMobile, setAlertesMobile] = useState({ bloquees: false, corrections: false });
   const [copie, setCopie] = useState(false);
 
   const jours = Array.from({ length: 7 }, (_, i) => ajouterJours(dimancheAffiche, i));
@@ -445,6 +448,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       .sort((a, b) => a.nom.localeCompare(b.nom) || a.iso.localeCompare(b.iso));
   };
 
+  const isoAujourdhui = dateISO(new Date());
   const labelSemaine = `du ${jours[0].toLocaleDateString("fr-CA", { day: "numeric", month: "long" })} au ${jours[6].toLocaleDateString("fr-CA", { day: "numeric", month: "long" })}`;
 
   // TOTAUX DE LA SEMAINE (toute l'équipe) — une ligne de compilation en
@@ -493,6 +497,8 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     report: Math.abs(totauxEquipe.report) > 0.004,
   };
   const nbColonnes = 11 + Object.values(colVisibles).filter(Boolean).length;
+  // Cases des jours sur téléphone : « 8h30 » tient dans 1/7 d'écran.
+  const hCourt = (h) => hM(h).replace(" h ", "h");
 
   // Copie le tableau en format tabulé — prêt à coller dans Excel ou
   // dans le logiciel de paie.
@@ -562,10 +568,10 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
           <h2 className="text-lg font-extrabold text-slate-900">Heures de la semaine</h2>
           <p className="text-xs text-slate-400">Semaine de paie du dimanche au samedi · heures réelles enregistrées par les techniciens</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <button onClick={() => setDimancheAffiche(ajouterJours(dimancheAffiche, -7))} aria-label="Semaine précédente" className="rounded-lg border border-slate-200 p-1.5"><ChevronLeft size={16} /></button>
           {/* Largeur fixe : les flèches ne bougent jamais (même règle que l'agenda). */}
-          <span className="min-w-[190px] text-center text-sm font-extrabold text-slate-800">{labelSemaine}</span>
+          <span className="min-w-0 flex-1 text-center text-sm font-extrabold text-slate-800 sm:min-w-[190px] sm:flex-none">{labelSemaine}</span>
           <button onClick={() => setDimancheAffiche(ajouterJours(dimancheAffiche, 7))} aria-label="Semaine suivante" className="rounded-lg border border-slate-200 p-1.5"><ChevronRight size={16} /></button>
           <button
             onClick={() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); setDimancheAffiche(d); }}
@@ -583,7 +589,26 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
           appeler, corriger, débloquer — pour qu'aucun admin n'ait à
           deviner quoi faire. */}
       {journeesBloquees.length > 0 && (
-        <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-3">
+        <>
+        {/* 📱 Téléphone : bandeau replié — on le touche pour voir le détail. */}
+        <button
+          type="button"
+          onClick={() => setAlertesMobile((a) => ({ ...a, bloquees: !a.bloquees }))}
+          className="flex w-full items-center gap-2.5 rounded-xl border-2 border-red-300 bg-red-50 px-3 py-2.5 text-left md:hidden"
+        >
+          <span className="text-base">🔒</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-extrabold text-red-700">
+              {journeesBloquees.length} journée{journeesBloquees.length > 1 ? "s" : ""} bloquée{journeesBloquees.length > 1 ? "s" : ""} — pas comptée{journeesBloquees.length > 1 ? "s" : ""} dans la paie
+            </span>
+            <span className="block truncate text-[11px] text-red-900">
+              {nomPour(journeesBloquees[0].email)} · {new Date(`${journeesBloquees[0].date}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "short" })}
+              {journeesBloquees.length > 1 ? ` et ${journeesBloquees.length - 1} autre${journeesBloquees.length > 2 ? "s" : ""}` : ""}
+            </span>
+          </span>
+          <ChevronRight size={16} className={`shrink-0 text-red-700 transition-transform ${alertesMobile.bloquees ? "rotate-90" : ""}`} />
+        </button>
+        <div className={`${alertesMobile.bloquees ? "" : "hidden"} rounded-2xl border-2 border-red-300 bg-red-50 p-3 md:block`}>
           <p className="text-xs font-extrabold uppercase tracking-wide text-red-700">
             🔒 {journeesBloquees.length} journée{journeesBloquees.length > 1 ? "s" : ""} bloquée{journeesBloquees.length > 1 ? "s" : ""} — non comptée{journeesBloquees.length > 1 ? "s" : ""} dans la paie
           </p>
@@ -623,6 +648,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
             })}
           </div>
         </div>
+        </>
       )}
 
       {/* CONFIRMATION DU DÉBLOCAGE — geste volontaire : on ne veut pas
@@ -718,8 +744,27 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
           const g = t.groupeProposition || t.id;
           (groupes[g] = groupes[g] || []).push(t);
         });
+        const premiere = Object.values(groupes)[0][0];
         return (
-          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3">
+          <>
+          {/* 📱 Téléphone : bandeau replié — on le touche pour valider. */}
+          <button
+            type="button"
+            onClick={() => setAlertesMobile((a) => ({ ...a, corrections: !a.corrections }))}
+            className="flex w-full items-center gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-left md:hidden"
+          >
+            <span className="text-base">⏳</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-extrabold text-amber-700">
+                {Object.keys(groupes).length} correction{Object.keys(groupes).length > 1 ? "s" : ""}{" "}d&apos;heures à valider
+              </span>
+              <span className="block truncate text-[11px] text-amber-900">
+                {premiere.employeNom || premiere.employeEmail} · {premiere.date} · {hM(premiere.heures)} → {hM(premiere.heuresProposees)}
+              </span>
+            </span>
+            <ChevronRight size={16} className={`shrink-0 text-amber-700 transition-transform ${alertesMobile.corrections ? "rotate-90" : ""}`} />
+          </button>
+          <div className={`${alertesMobile.corrections ? "" : "hidden"} rounded-2xl border border-amber-300 bg-amber-50 p-3 md:block`}>
             <p className="text-xs font-extrabold uppercase tracking-wide text-amber-700">
               ⏳ {Object.keys(groupes).length} correction{Object.keys(groupes).length > 1 ? "s" : ""} d'heures en attente de validation
             </p>
@@ -841,6 +886,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
               ))}
             </div>
           </div>
+          </>
         );
       })()}
 
@@ -850,6 +896,155 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
         </p>
       ) : (
         <>
+          {/* 📱 TÉLÉPHONE — UNE CARTE PAR EMPLOYÉ (2026-10-02, maquette du
+              lot B validée par le propriétaire). Mêmes chiffres que le
+              tableau : total, bande des 7 jours, catégories. Un toucher sur
+              un jour ouvre la MÊME fenêtre de détail (corriger, ajouter des
+              heures). À partir de 768 px, le tableau reste tel quel. */}
+          <div className="space-y-2.5 md:hidden">
+            <div className="flex items-baseline justify-between px-0.5">
+              <p className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                {employesSemaine.length} personne{employesSemaine.length > 1 ? "s" : ""}
+              </p>
+              <p className="text-xs text-slate-500">
+                Équipe : <span className="font-extrabold tabular-nums text-slate-900">{hM(totauxEquipe.total + totauxEquipe.report)}</span>
+              </p>
+            </div>
+            {employesSemaine.map((e) => {
+              const nbBloquees = isoJours.filter((iso) => estBloque(e.email, iso)).length;
+              const nbJours = isoJours.filter((iso) => e.parJour[iso]).length;
+              const gris = "bg-slate-100 text-slate-700";
+              const residentiel = "bg-emerald-100 text-emerald-800";
+              const etiquettes = [
+                ...((e.residentielChantier || 0) > 0.001
+                  ? [
+                      { cle: "chantier", lib: "Chantier 🏢", h: hM(e.chantier - e.residentielChantier), cls: gris },
+                      { cle: "chantierRes", lib: "Chantier 🏠", h: hM(e.residentielChantier), cls: residentiel },
+                    ]
+                  : e.chantier > 0.004
+                    ? [{ cle: "chantier", lib: "Chantier", h: hM(e.chantier), cls: gris }]
+                    : []),
+                ...((e.residentielTransport || 0) > 0.001
+                  ? [
+                      { cle: "transport", lib: "Transport 🏢", h: hM(e.transport - e.residentielTransport), cls: gris },
+                      { cle: "transportRes", lib: "Transport 🏠", h: hM(e.residentielTransport), cls: residentiel },
+                    ]
+                  : e.transport > 0.004
+                    ? [{ cle: "transport", lib: "Transport", h: hM(e.transport), cls: gris }]
+                    : []),
+                ...(e.transportCcq > 0.004 ? [{ cle: "ccq", lib: "Transp. journalier", h: hM(e.transportCcq), cls: "bg-amber-100 text-amber-800" }] : []),
+                ...(e.administratif > 0 ? [{ cle: "admin", lib: "Administratif", h: hM(e.administratif), cls: "bg-sky-100 text-sky-700" }] : []),
+                ...(e.divers > 0 ? [{ cle: "divers", lib: "Divers", h: hM(e.divers), cls: "bg-stone-100 text-stone-600" }] : []),
+                ...(e.course > 0 ? [{ cle: "course", lib: "🚗 Course", h: hM(e.course), cls: "bg-violet-100 text-violet-700" }] : []),
+                ...(e.diner < 0 ? [{ cle: "diner", lib: "Dîner", h: hM(e.diner), cls: "bg-rose-100 text-rose-700" }] : []),
+                ...(e.nuit !== 0 ? [{ cle: "nuit", lib: "🌙 Nuit", h: hM(e.nuit), cls: "bg-indigo-100 text-indigo-700" }] : []),
+                ...(e.weekend !== 0 ? [{ cle: "weekend", lib: "Sam/Dim", h: hM(e.weekend), cls: "bg-sky-100 text-sky-700" }] : []),
+                ...(e.report !== 0 ? [{ cle: "report", lib: "Report ±", h: `${e.report > 0 ? "+" : ""}${hM(e.report)}`, cls: "bg-purple-100 text-purple-700" }] : []),
+              ];
+              return (
+                <div key={e.email} className="rounded-2xl border border-slate-200 bg-white p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-extrabold text-slate-800">{e.nom}</p>
+                      <p className="text-[11px] text-slate-400">
+                        {nbJours} jour{nbJours > 1 ? "s" : ""} travaillé{nbJours > 1 ? "s" : ""}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-xl font-extrabold tabular-nums text-slate-900">{hM(e.total + e.report)}</p>
+                      {e.supplementaires > 0 && (
+                        <p className="text-[10px] font-bold text-amber-600">
+                          {hM(seuilSupp)} rég. + {hM(e.supplementaires)} sup.
+                        </p>
+                      )}
+                      {e.report !== 0 && (
+                        <p className="text-[10px] font-bold tabular-nums text-purple-600">
+                          {hM(e.total)} trav. {e.report > 0 ? "+" : ""}{hM(e.report)} report
+                        </p>
+                      )}
+                      {nbBloquees > 0 && (
+                        <p className="text-[10px] font-bold text-red-700">
+                          + {nbBloquees} journée{nbBloquees > 1 ? "s" : ""} bloquée{nbBloquees > 1 ? "s" : ""}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {/* Bande des 7 jours (dimanche → samedi). Même règle que
+                      les cellules du tableau : une journée vide ne s'ouvre
+                      que pour ceux qui peuvent ajouter des heures. */}
+                  <div className="mt-2.5 grid grid-cols-7 gap-1">
+                    {isoJours.map((iso, i) => {
+                      const bloquee = estBloque(e.email, iso);
+                      const heures = e.parJour[iso];
+                      const ouvrable = bloquee || !!heures || droitHeures === "direct";
+                      return (
+                        <button
+                          key={iso}
+                          type="button"
+                          disabled={!ouvrable}
+                          onClick={() => setDetailJour({ email: e.email, iso })}
+                          className={`flex flex-col items-center gap-0.5 rounded-lg py-1.5 ${
+                            bloquee
+                              ? "border border-red-300 bg-red-100"
+                              : iso === isoAujourdhui
+                                ? "border-2 border-[#FF6A13] bg-orange-50"
+                                : heures
+                                  ? "border border-slate-200 bg-white"
+                                  : "border border-slate-100 bg-slate-50"
+                          }`}
+                        >
+                          <span className="text-[10px] font-bold capitalize text-slate-400">
+                            {jours[i].toLocaleDateString("fr-CA", { weekday: "narrow" })} {jours[i].getDate()}
+                          </span>
+                          <span
+                            className={`whitespace-nowrap text-[11px] tabular-nums ${
+                              bloquee ? "font-extrabold text-red-700" : heures ? "font-bold text-slate-700" : "text-slate-300"
+                            }`}
+                          >
+                            {bloquee ? "🔒" : heures ? hCourt(heures) : "—"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {etiquettes.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-1.5">
+                      {etiquettes.map((c) => (
+                        <span key={c.cle} className={`rounded-full px-2 py-1 text-[11px] ${c.cls}`}>
+                          {c.lib} <span className="font-extrabold tabular-nums">{c.h}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {e.details.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setDetailEmail(detailEmail === e.email ? null : e.email)}
+                      className="mt-2 text-[11px] font-bold text-slate-500"
+                    >
+                      {detailEmail === e.email ? "▲ Masquer les tâches de la semaine" : "▼ Tâches de la semaine"}
+                    </button>
+                  )}
+                  {detailEmail === e.email && (
+                    <div className="mt-1.5 space-y-1 rounded-xl bg-slate-50 p-2">
+                      {e.details
+                        .slice()
+                        .sort((a, b) => (a.date + (a.titre || "")).localeCompare(b.date + (b.titre || "")))
+                        .map((t) => (
+                          <p key={t.id} className="text-[11px] text-slate-600">
+                            <span className="tabular-nums text-slate-400">{t.date}</span> · {t.estTransport ? "🚚 " : ""}{t.titre || "Travail"}
+                            {t.clientNom ? ` — ${t.clientNom}` : ""} ·{" "}
+                            <span className="font-bold tabular-nums">{hM(t.heures)}</span>
+                          </p>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="hidden md:block">
           <DefilementHorizontal>
             <table className="w-full min-w-[1100px] text-xs">
               <thead>
@@ -1132,6 +1327,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
               </tfoot>
             </table>
           </DefilementHorizontal>
+          </div>
 
           {/* FENÊTRE — DÉTAIL D'UNE JOURNÉE (sortie du tableau le 2026-08-19). */}
                 {/* DÉTAIL D'UNE JOURNÉE — ouvert au clic sur la cellule
@@ -1230,8 +1426,8 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                   );
                   const labelJour = new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
                   return (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); setAjoutHeures(null); setAjoutErreur(""); })(); }}>
-                      <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
+                    <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => { setDetailJour(null); setEditionLigne(null); setErreurEdition(""); setAjoutHeures(null); setAjoutErreur(""); })(); }}>
+                      <div className="panneau-mobile max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5" onClick={(ev) => ev.stopPropagation()}>
                         <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-blue-700">
                           📅 <span className="capitalize">{labelJour}</span> — journée de {e.nom} ({hM(tj.total)})
                           {(() => {

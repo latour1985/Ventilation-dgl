@@ -116,6 +116,9 @@ select {
   /* 🪟 Fenêtres → plein écran. Le voile devient blanc (plus de bande
      noire sous l'encoche) et le panneau prend toute la place. */
   .fenetre-mobile {
+    /* Une fenêtre rendue dans un conteneur « space-y-* » hérite d'une
+       marge du bas : elle laissait une bande de 16 px sous le plein écran. */
+    margin: 0;
     align-items: stretch;
     justify-content: stretch;
     padding: env(safe-area-inset-top) 0 0;

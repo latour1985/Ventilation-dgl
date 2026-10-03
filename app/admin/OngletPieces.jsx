@@ -766,9 +766,11 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                   <p className={`inline-block rounded-md px-2 py-0.5 text-[10px] font-extrabold capitalize ${tons[g.ton]}`}>{g.titre} <span className="font-semibold opacity-70">· {g.lignes.length}</span></p>
                   <div className="mt-1 divide-y divide-slate-100">
                     {g.lignes.map((l) => (
-                      <div key={l.cle} className="flex items-center gap-2 py-1.5 text-[11px]">
+                      // 📱 Téléphone (2026-10-02) : le nº du bon et le fournisseur
+                      // gardent la ligne ; les badges et boutons passent dessous.
+                      <div key={l.cle} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1.5 text-[11px] sm:flex-nowrap">
                         {l.ramassage ? <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold ${l.ramassePar ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"}`} title={l.ramassePar ? "À ramasser chez le fournisseur — ne sera pas livré" : "Personne n'est encore désigné — glisse la carte dans l'agenda"}>{l.ramassePar ? "🚚 à ramasser" : "🚚 à attribuer"}</span> : null}
-                        <button type="button" onClick={l.ouvrir || undefined} className={`min-w-0 flex-1 truncate text-left ${l.ouvrir ? "hover:underline" : "cursor-default"}`} title={l.description}>
+                        <button type="button" onClick={l.ouvrir || undefined} className={`min-w-[60%] flex-1 truncate text-left sm:min-w-0 ${l.ouvrir ? "hover:underline" : "cursor-default"}`} title={l.description}>
                           <span className="font-bold text-slate-800">{l.numero}</span>
                           {l.fournisseur ? <span className="text-slate-600"> — {l.fournisseur}</span> : null}
                           <span className="ml-1.5 text-slate-500">{l.cible}</span>

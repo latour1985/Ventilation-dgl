@@ -354,12 +354,12 @@ export function OngletInspectionsVehicules({ inspections, setInspections, entret
                 )}
                 {(parcCamions || []).filter((c) => c.actif).map((c) => (
                   <div key={c.id}>
-                    <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2">
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-slate-800">{c.nom}</p>
                         <p className="text-[10px] text-slate-400">{[c.marqueModele, c.immatriculation].filter(Boolean).join(" · ") || "—"}</p>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
+                      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                         {/* ✏️ Renommer — Admin principal seulement. */}
                         {estAdminPrincipal && (
                           <button

@@ -2601,7 +2601,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           )}
 
           <div>
-            <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <label className="flex items-center gap-2 text-xs font-bold text-slate-500">
                 Lignes du devis
                 {/* 👁️ L'interrupteur des coûts — bien en vue : d'un tap,
@@ -2617,7 +2617,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
                   {coutsVisibles ? "👁️ Coûts visibles" : "🙈 Coûts masqués"}
                 </button>
               </label>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 <SelecteurItem catalogue={catalogue} onChoisir={(p) => ajouterLigne(p)} />
                 <Button variant="outline" onClick={ajouterLignePersonnalisee} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
                   <Plus size={12} /> Ligne sur mesure

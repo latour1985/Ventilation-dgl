@@ -903,14 +903,14 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
                     </div>
                   )}
                 </div>
-                <div className="mt-2 grid grid-cols-3 gap-2">
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   <Button variant="outline" onClick={() => setUtilisateurOuvertId(u.id)} className="min-h-0 py-1.5 text-xs">
                     <Pencil size={12} /> Modifier
                   </Button>
                   <Button variant="outline" onClick={() => reinitialiserMotDePasse(u.id)} className="min-h-0 py-1.5 text-xs">
                     <KeyRound size={12} /> Mot de passe
                   </Button>
-                  <Button onClick={() => envoyerLienConnexion(u)} className="min-h-0 py-1.5 text-xs">
+                  <Button onClick={() => envoyerLienConnexion(u)} className="col-span-2 min-h-0 py-1.5 text-xs sm:col-span-1">
                     <Send size={12} /> Lien
                   </Button>
                 </div>

@@ -1214,13 +1214,14 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
 
   return (
     <div className="mx-auto max-w-2xl space-y-3 p-4 md:p-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Clients</h2>
+      {/* 📱 Téléphone (2026-10-02) : les boutons passent sous le titre. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:flex-nowrap sm:gap-0">
+        <h2 className="basis-full text-sm font-extrabold uppercase tracking-wide text-slate-500 sm:basis-auto">Clients</h2>
         {/* 🔍 Doublons possibles → fusion VALIDÉE une à une (2026-09-22). */}
         <button
           type="button"
           onClick={() => setDoublonsOuverts(true)}
-          className="ml-auto mr-2 rounded-lg border border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
+          className="rounded-lg border sm:ml-auto sm:mr-2 border-slate-300 px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
           title="Trouver les fiches en double (même nom, téléphone ou courriel) et les fusionner après validation"
         >
           🔍 Doublons possibles
@@ -1591,9 +1592,9 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                         </div>
                       ) : (
                         <div key={cc.id} className="flex items-center justify-between gap-1.5 text-xs">
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex min-w-0 items-center gap-1.5">
                             <Mail size={11} className="shrink-0" />
-                            <span>{cc.email}</span>
+                            <span className="min-w-0 truncate">{cc.email}</span>
                             <span className="text-[10px] text-slate-400">({cc.label})</span>
                             {cc.defaut && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">Défaut</span>}
                           </div>

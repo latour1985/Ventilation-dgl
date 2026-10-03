@@ -1680,9 +1680,9 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-extrabold uppercase tracking-wide text-slate-500">Projets &amp; Rentabilité</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={() => setNouveauProjetOuvert(true)} className="min-h-0 gap-1 px-2.5 py-1.5 text-xs">
             <Plus size={12} /> Nouveau projet
           </Button>
