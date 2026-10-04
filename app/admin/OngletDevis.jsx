@@ -12,6 +12,7 @@ import { Briefcase, Check, CheckCircle2, ClipboardList, Copy, FileCheck2, FileTe
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { useLangue } from "@/lib/i18n";
+import { lienSelonLangue, langueDuClient, langueClient } from "@/lib/i18nPublic";
 import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
@@ -707,12 +708,12 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       );
     }
     try {
-      await navigator.clipboard?.writeText(lienDevisPublic(jeton));
+      await navigator.clipboard?.writeText(lienSelonLangue(lienDevisPublic(jeton), langueDuClient(clients, { id: devis.clientId, nom: devis.clientNom })));
       setLienCopie(devis.id);
       setTimeout(() => setLienCopie(null), 3000);
     } catch {
       // Presse-papier refusé — on montre le lien pour copie manuelle.
-      window.prompt("Copie ce lien et envoie-le au client :", lienDevisPublic(jeton));
+      window.prompt("Copie ce lien et envoie-le au client :", lienSelonLangue(lienDevisPublic(jeton), langueDuClient(clients, { id: devis.clientId, nom: devis.clientNom })));
     }
   };
 
@@ -907,7 +908,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         numero: devis.numero,
         clientNom: devis.clientNom,
         total: null,
-        lien: lienDevisPublic(jeton),
+        lien: lienSelonLangue(lienDevisPublic(jeton), langueDuClient(clients, { id: devis.clientId, nom: devis.clientNom })),
         dejaAccepte,
         relance: estRelance,
         pdfJoint: !!pdfJoint,
@@ -1584,7 +1585,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         numero,
         clientNom: client.nom,
         total: null,
-        lien: lienDevisPublic(jeton),
+        lien: lienSelonLangue(lienDevisPublic(jeton), langueClient(client)),
       }),
     });
     if (!r.envoye) {

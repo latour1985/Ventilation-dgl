@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
+import { lienSelonLangue, langueDuClient } from "@/lib/i18nPublic";
 import { envoyerCourriel, gabaritFactureMaison } from "@/lib/courriels";
 import { REGIMES_TAXES, calculerTaxesRegime } from "@/lib/taxesCanada";
 import {
@@ -320,7 +321,7 @@ export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJo
 
   const envoyerLien = async (f, destinataires) => {
     if (!destinataires || destinataires.length === 0) return false;
-    const lien = lienFactureMaison(f);
+    const lien = lienSelonLangue(lienFactureMaison(f), langueDuClient(clients, { id: f.clientId, nom: f.clientNom }));
     if (!lien) return false;
     const r = await envoyerCourriel({
       a: destinataires,

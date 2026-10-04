@@ -24,19 +24,38 @@ import { chargerBonPublic, JOURS_VALIDITE_BON, noterConsultationBon } from "@/li
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import ContactEntreprise from "@/components/ContactEntreprise";
+import { LangueProvider, useLangue } from "@/lib/i18n";
+import BoutonLangue from "@/components/BoutonLangue";
+
+function PreparationPDF() {
+  const { t } = useLangue();
+  return (
+    <div className="w-full rounded-xl bg-slate-200 py-3 text-center text-[13px] font-bold text-slate-400">
+      {t("Préparation du PDF…")}
+    </div>
+  );
+}
 
 // @react-pdf/renderer ne tourne que dans le navigateur.
 const BoutonPDFPublic = dynamic(() => import("@/components/pdf/BoutonPDFPublic"), {
   ssr: false,
-  loading: () => (
-    <div className="w-full rounded-xl bg-slate-200 py-3 text-center text-[13px] font-bold text-slate-400">
-      Préparation du PDF…
-    </div>
-  ),
+  loading: () => <PreparationPDF />,
 });
 
-export default function PageBonPublic({ params }) {
+// 🌎 LANGUE DU CLIENT (2026-10-03) : « ?lang=en » dans le lien quand sa
+// fiche est en anglais ; sinon le dernier choix de ce navigateur.
+export default function PageBonPublic({ params, searchParams }) {
+  const { lang } = use(searchParams) || {};
+  return (
+    <LangueProvider initiale={lang === "en" || lang === "fr" ? lang : null}>
+      <ContenuBon params={params} />
+    </LangueProvider>
+  );
+}
+
+function ContenuBon({ params }) {
   const { jeton } = use(params);
+  const { t } = useLangue();
   const [bon, setBon] = useState(null);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState("");
@@ -45,7 +64,7 @@ export default function PageBonPublic({ params }) {
   useEffect(() => {
     chargerBonPublic(jeton)
       .then((b) => {
-        if (!b) setErreur("Ce lien n'est pas valide. Vérifiez l'adresse ou communiquez avec nous.");
+        if (!b) setErreur("lien");
         else {
           setBon(b);
           // 👁️ Consultation notée (snippet 123) — jamais en aperçu bureau.
@@ -54,14 +73,14 @@ export default function PageBonPublic({ params }) {
           }
         }
       })
-      .catch(() => setErreur("Impossible de charger ce bon de travail. Réessayez dans quelques minutes."))
+      .catch(() => setErreur("chargement"))
       .finally(() => setChargement(false));
   }, [jeton]);
 
   if (chargement) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">
-        <Loader2 size={18} className="mr-2 animate-spin" /> Chargement du bon de travail…
+        <Loader2 size={18} className="mr-2 animate-spin" /> {t("Chargement du bon de travail…")}
       </div>
     );
   }
@@ -71,7 +90,9 @@ export default function PageBonPublic({ params }) {
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="max-w-sm rounded-2xl bg-white p-6 text-center">
           <AlertTriangle size={28} className="mx-auto text-amber-500" />
-          <p className="mt-3 text-sm font-bold text-slate-800">{erreur || "Ce lien n'est pas valide."}</p>
+          <p className="mt-3 text-sm font-bold text-slate-800">
+            {erreur === "chargement" ? t("Impossible de charger ce bon de travail. Réessayez dans quelques minutes.") : t("Ce lien n'est pas valide. Vérifiez l'adresse ou communiquez avec nous.")}
+          </p>
         </div>
       </div>
     );
@@ -82,10 +103,9 @@ export default function PageBonPublic({ params }) {
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="max-w-sm rounded-2xl bg-white p-6 text-center">
           <AlertTriangle size={28} className="mx-auto text-amber-500" />
-          <p className="mt-3 text-sm font-bold text-slate-800">Ce lien est expiré</p>
+          <p className="mt-3 text-sm font-bold text-slate-800">{t("Ce lien est expiré")}</p>
           <p className="mt-1 text-sm text-slate-500">
-            Le bon de travail reste disponible {JOURS_VALIDITE_BON} jours après son envoi.
-            Communiquez avec nous pour en recevoir une nouvelle copie.
+            {t("Le bon de travail reste disponible {n} jours après son envoi. Communiquez avec nous pour en recevoir une nouvelle copie.", { n: JOURS_VALIDITE_BON })}
           </p>
           {bon.entreprise?.telephone && (
             <p className="mt-2 text-sm font-bold text-slate-700">{bon.entreprise.telephone}</p>
@@ -98,8 +118,8 @@ export default function PageBonPublic({ params }) {
   const unites = (bon.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim() || (u.emplacement || "").trim());
   // La liste unique pour la visionneuse : avant puis après, étiquetées.
   const photos = [
-    ...bon.photosAvant.map((u, i) => ({ url: u, etiquette: `Avant ${i + 1}/${bon.photosAvant.length}` })),
-    ...bon.photosApres.map((u, i) => ({ url: u, etiquette: `Après ${i + 1}/${bon.photosApres.length}` })),
+    ...bon.photosAvant.map((u, i) => ({ url: u, etiquette: `${t("Avant")} ${i + 1}/${bon.photosAvant.length}` })),
+    ...bon.photosApres.map((u, i) => ({ url: u, etiquette: `${t("Après")} ${i + 1}/${bon.photosApres.length}` })),
   ];
 
   const grille = (titre, urls, decalage) =>
@@ -128,6 +148,9 @@ export default function PageBonPublic({ params }) {
   return (
     <div className="min-h-screen bg-slate-100 py-6 px-4">
       <div className="mx-auto max-w-2xl space-y-4">
+        <div className="flex justify-end">
+          <BoutonLangue />
+        </div>
         {/* EN-TÊTE ENTREPRISE */}
         <div className="rounded-2xl bg-white p-5">
           <div className="flex items-center gap-3">
@@ -158,14 +181,14 @@ export default function PageBonPublic({ params }) {
             </div>
           </div>
 
-          <h1 className="mt-4 text-2xl font-extrabold text-[#131B2E]">BON DE TRAVAIL</h1>
-          <p className="text-xs text-slate-500">Travaux réalisés le {bon.date}</p>
+          <h1 className="mt-4 text-2xl font-extrabold text-[#131B2E]">{t("BON DE TRAVAIL")}</h1>
+          <p className="text-xs text-slate-500">{t("Travaux réalisés le {date}", { date: bon.date })}</p>
           {/* LES DEUX ADRESSES — facturation (fiche client) et travaux.
               La facturation ne s'affiche que si elle existe : celle du
               client ou rien, jamais la nôtre (règle gelée). */}
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <div>
-              <p className="text-xs text-slate-500">Facturé à</p>
+              <p className="text-xs text-slate-500">{t("Facturé à")}</p>
               <p className="text-sm font-bold text-slate-800">{bon.clientNom}</p>
               {bon.adresseFacturation && (
                 <p className="text-xs text-slate-500">{bon.adresseFacturation}</p>
@@ -173,7 +196,7 @@ export default function PageBonPublic({ params }) {
             </div>
             {bon.adresseTravaux && (
               <div>
-                <p className="text-xs text-slate-500">Adresse des travaux</p>
+                <p className="text-xs text-slate-500">{t("Adresse des travaux")}</p>
                 <p className="mt-0.5 flex items-start gap-1 text-xs font-semibold text-slate-700">
                   <MapPin size={13} className="mt-0.5 shrink-0" /> {bon.adresseTravaux}
                 </p>
@@ -181,24 +204,23 @@ export default function PageBonPublic({ params }) {
             )}
           </div>
           <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
-            Ce lien est disponible pendant {JOURS_VALIDITE_BON} jours. Pour conserver le document,
-            utilisez le bouton « Télécharger (PDF) » au bas de la page.
+            {t("Ce lien est disponible pendant {n} jours. Pour conserver le document, utilisez le bouton « Télécharger (PDF) » au bas de la page.", { n: JOURS_VALIDITE_BON })}
           </p>
         </div>
 
         {/* DESCRIPTION */}
         <div className="rounded-2xl bg-white p-5">
-          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Description des travaux</p>
+          <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">{t("Description des travaux")}</p>
           <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-700">
-            {bon.description || bon.titre || "Voir les photos ci-dessous."}
+            {bon.description || bon.titre || t("Voir les photos ci-dessous.")}
           </p>
           {unites.length > 0 && (
             <div className="mt-3 border-t border-slate-100 pt-3">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Équipement vérifié</p>
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">{t("Équipement vérifié")}</p>
               {unites.map((u, i) => (
                 <p key={i} className="mt-1 flex items-center gap-1.5 text-xs text-slate-600">
                   <Wrench size={12} className="shrink-0 text-slate-400" />
-                  {u.emplacement ? `${u.emplacement} — ` : ""}{u.modele || "—"}{u.serie ? ` · Nº de série ${u.serie}` : ""}
+                  {u.emplacement ? `${u.emplacement} — ` : ""}{u.modele || "—"}{u.serie ? ` · ${t("Nº de série")} ${u.serie}` : ""}
                 </p>
               ))}
             </div>
@@ -206,25 +228,25 @@ export default function PageBonPublic({ params }) {
         </div>
 
         {/* PHOTOS — un clic ouvre la visionneuse (lecture seule) */}
-        {grille("Photos avant travaux", bon.photosAvant, 0)}
-        {grille("Photos après travaux", bon.photosApres, bon.photosAvant.length)}
+        {grille(t("Photos avant travaux"), bon.photosAvant, 0)}
+        {grille(t("Photos après travaux"), bon.photosApres, bon.photosAvant.length)}
 
         {/* SIGNATURE */}
         <div className="rounded-2xl bg-white p-5">
           {bon.clientAbsent ? (
             <p className="flex items-center gap-2 rounded-lg bg-slate-50 p-2.5 text-[12px] font-semibold text-slate-600">
-              <FileCheck2 size={15} className="shrink-0" /> Client absent à la fin des travaux — bon transmis sans signature.
+              <FileCheck2 size={15} className="shrink-0" /> {t("Client absent à la fin des travaux — bon transmis sans signature.")}
             </p>
           ) : bon.signeParNom ? (
             <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[12px] font-semibold text-emerald-700">
-              <FileCheck2 size={15} className="shrink-0" /> Signé électroniquement par : {bon.signeParNom}
+              <FileCheck2 size={15} className="shrink-0" /> {t("Signé électroniquement par : {nom}", { nom: bon.signeParNom })}
             </p>
           ) : bon.signeParCollegue ? (
             <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[12px] font-semibold text-emerald-700">
-              <FileCheck2 size={15} className="shrink-0" /> Signature recueillie sur place auprès de notre équipe à la fin de l&apos;intervention.
+              <FileCheck2 size={15} className="shrink-0" /> {t("Signature recueillie sur place auprès de notre équipe à la fin de l'intervention.")}
             </p>
           ) : (
-            <p className="text-[12px] text-slate-500">Bon transmis par notre équipe à la fin de l&apos;intervention.</p>
+            <p className="text-[12px] text-slate-500">{t("Bon transmis par notre équipe à la fin de l'intervention.")}</p>
           )}
 
           <div className="mt-4">
@@ -241,9 +263,9 @@ export default function PageBonPublic({ params }) {
           />
 
           <p className="mt-3 text-center text-[11px] text-slate-400">
-            Document descriptif des travaux réalisés — ne constitue ni une soumission ni une facture.
+            {t("Document descriptif des travaux réalisés — ne constitue ni une soumission ni une facture.")}
           </p>
-          <p className="mt-1 text-center text-[10px] text-slate-300">Propulsé par Fluxya</p>
+          <p className="mt-1 text-center text-[10px] text-slate-300">{t("Propulsé par Fluxya")}</p>
         </div>
       </div>
 

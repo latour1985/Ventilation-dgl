@@ -12,6 +12,7 @@
 
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import { BonTravailPublicPDF } from "./DocumentsPDF";
+import { useLangue } from "@/lib/i18n";
 
 const styleLien = {
   display: "block",
@@ -27,6 +28,7 @@ const styleLien = {
 };
 
 export default function BoutonPDFPublic({ bon }) {
+  const { t } = useLangue();
   const nomFichier = `Bon-de-travail-${String(bon?.clientNom || "client").replace(/[^a-zA-Z0-9]+/g, "-")}-${bon?.date || ""}.pdf`;
   return (
     <PDFDownloadLink
@@ -34,7 +36,7 @@ export default function BoutonPDFPublic({ bon }) {
       fileName={nomFichier}
       style={styleLien}
     >
-      {({ loading }) => (loading ? "Préparation du PDF…" : "⬇️ Télécharger (PDF)")}
+      {({ loading }) => (loading ? t("Préparation du PDF…") : t("⬇️ Télécharger (PDF)"))}
     </PDFDownloadLink>
   );
 }

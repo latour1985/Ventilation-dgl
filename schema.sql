@@ -7213,3 +7213,16 @@ alter table prix_depots add column if not exists territoire text;
 -- 162-B, garde « exactement 1 Charles et 1 Raphaël », taux figé de
 -- Raphaël, jours déjà couverts sautés) a été remis au propriétaire.
 -- ============================================================
+
+-- ============================================================
+-- 163 - LANGUE DE COMMUNICATION DU CLIENT (2026-10-03)
+-- ------------------------------------------------------------
+-- Demande du propriétaire : les pages envoyées au client (devis, bon de
+-- travail, facture en ligne) s'ouvrent en ANGLAIS quand sa fiche est en
+-- « English » (le lien porte « ?lang=en »). Colonne neuve, défaut
+-- français : aucune fiche existante ne change. Sans ce snippet, l'app
+-- fonctionne quand même (la langue ne s'enregistre simplement pas).
+-- ============================================================
+alter table clients_app add column if not exists langue text not null default 'fr';
+alter table clients_app drop constraint if exists clients_app_langue_check;
+alter table clients_app add constraint clients_app_langue_check check (langue in ('fr', 'en'));

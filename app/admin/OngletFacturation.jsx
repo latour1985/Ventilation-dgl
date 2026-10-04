@@ -12,6 +12,7 @@ import { AlertCircle, AlertTriangle, Check, CheckCircle2, Cloud, FileText, MapPi
 import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { useLangue } from "@/lib/i18n";
+import { lienSelonLangue, langueDuClient } from "@/lib/i18nPublic";
 import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
 import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
@@ -3423,7 +3424,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       ajouterJournal(`⚠️ Facture maison NON créée pour « ${b.projet} » : ${e?.message || "erreur"} — le bon reste en attente.`);
       return;
     }
-    const lien = lienFactureMaison(creee);
+    const lien = lienSelonLangue(lienFactureMaison(creee), langueDuClient(clients, { id: creee.clientId, nom: creee.clientNom }));
     let envoye = false;
     if (destinataires.length > 0 && lien) {
       const r = await envoyerCourriel({
@@ -3597,7 +3598,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         html: gabaritBonTravail({
           config: configEnt,
           clientNom: b.client,
-          lien: lienBonPublic(jeton),
+          lien: lienSelonLangue(lienBonPublic(jeton), langueDuClient(clients, { id: b.clientId, nom: b.client })),
           joursValidite: JOURS_VALIDITE_BON,
           // ⭐ Avis Google — jamais sur un retour sous garantie (retrait
           // demandé ou validé « garantie » sur ce bon).
@@ -3609,7 +3610,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         setBons((prev) => prev.map((x) => (x.id === b.id ? { ...x, envoyeClientLe: new Date().toISOString() } : x)));
         ajouterJournal(`📸 Bon de travail de ${b.client} ENVOYÉ à ${adresses.join(", ")} — descriptif avec photos, sans prix, lien valide ${JOURS_VALIDITE_BON} jours.`);
       } else if (r.simule) {
-        ajouterJournal(`🔧 Envoi SIMULÉ du bon au client (service de courriels non configuré) — le lien existe : ${lienBonPublic(jeton)}`);
+        ajouterJournal(`🔧 Envoi SIMULÉ du bon au client (service de courriels non configuré) — le lien existe : ${lienSelonLangue(lienBonPublic(jeton), langueDuClient(clients, { id: b.clientId, nom: b.client }))}`);
       } else {
         ajouterJournal(`⚠️ Bon de travail de ${b.client} NON envoyé — ${r.erreur}`);
       }

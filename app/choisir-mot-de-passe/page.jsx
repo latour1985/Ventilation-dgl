@@ -20,8 +20,21 @@ import { supabase } from "@/lib/supabase/client";
 import { deverrouillerApresReinitialisation } from "@/lib/connexionSurveillee";
 import Logo from "@/components/Logo";
 import ChampMotDePasse from "@/components/ChampMotDePasse";
+import BoutonLangue from "@/components/BoutonLangue";
+import { LangueProvider, useLangue } from "@/lib/i18n";
 
+// 🌎 La page vit hors des applications : elle porte son propre fournisseur
+// de langue (dernier choix du navigateur) et son bouton 🌎 (2026-10-03).
 export default function ChoisirMotDePasse() {
+  return (
+    <LangueProvider>
+      <ContenuChoisirMotDePasse />
+    </LangueProvider>
+  );
+}
+
+function ContenuChoisirMotDePasse() {
+  const { t } = useLangue();
   const [etat, setEtat] = useState("verification"); // verification | a_confirmer | pret | verification_en_cours | enregistrement | reussi | sans_session
   const [motDePasse, setMotDePasse] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -34,10 +47,10 @@ export default function ChoisirMotDePasse() {
     // 1) Un jeton dans l'adresse ? On attend le clic (anti-robot).
     const params = new URLSearchParams(window.location.search);
     const j = params.get("jeton");
-    const t = params.get("type") || "invite";
+    const typeLien = params.get("type") || "invite";
     if (j) {
       setJeton(j);
-      setTypeJeton(t);
+      setTypeJeton(typeLien);
       setEtat("a_confirmer");
       return () => {
         actif = false;
@@ -78,18 +91,18 @@ export default function ChoisirMotDePasse() {
   const enregistrer = async () => {
     setErreur("");
     if (motDePasse.length < 8) {
-      setErreur("Le mot de passe doit avoir au moins 8 caractères.");
+      setErreur(t("Le mot de passe doit avoir au moins 8 caractères."));
       return;
     }
     if (motDePasse !== confirmation) {
-      setErreur("Les deux mots de passe ne sont pas identiques.");
+      setErreur(t("Les deux mots de passe ne sont pas identiques."));
       return;
     }
     setEtat("enregistrement");
     const { error } = await supabase.auth.updateUser({ password: motDePasse });
     if (error) {
       setEtat("pret");
-      setErreur(error.message || "Enregistrement refusé — réessaie.");
+      setErreur(error.message || t("Enregistrement refusé — réessaie."));
       return;
     }
     // Réinitialisation réussie = le verrou de connexion (3 essais)
@@ -103,41 +116,43 @@ export default function ChoisirMotDePasse() {
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-sm">
         {/* FLUXYA — marque produit (oubli du rebranding, corrigé à
             l'audit du 2026-08-18). */}
-        <Logo variant="compact" />
+        <div className="flex items-start justify-between gap-2">
+          <Logo variant="compact" />
+          <BoutonLangue />
+        </div>
 
-        {etat === "verification" && <p className="mt-3 text-sm text-slate-500">Un instant…</p>}
+        {etat === "verification" && <p className="mt-3 text-sm text-slate-500">{t("Un instant…")}</p>}
 
         {etat === "a_confirmer" && (
           <div className="mt-3">
             <p className="text-sm text-slate-600">
-              Bienvenue ! Clique ci-dessous pour activer ton accès et choisir ton mot de passe.
+              {t("Bienvenue ! Clique ci-dessous pour activer ton accès et choisir ton mot de passe.")}
             </p>
             <button
               onClick={confirmerAcces}
               className="mt-4 min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
             >
-              Activer mon accès
+              {t("Activer mon accès")}
             </button>
           </div>
         )}
 
-        {etat === "verification_en_cours" && <p className="mt-3 text-sm text-slate-500">Activation en cours…</p>}
+        {etat === "verification_en_cours" && <p className="mt-3 text-sm text-slate-500">{t("Activation en cours…")}</p>}
 
         {etat === "sans_session" && (
           <div className="mt-3">
-            <p className="text-sm font-bold text-red-600">Ce lien n&apos;est plus valide.</p>
+            <p className="text-sm font-bold text-red-600">{t("Ce lien n'est plus valide.")}</p>
             <p className="mt-1 text-sm text-slate-600">
-              Il a peut-être expiré ou déjà servi. Demande une nouvelle invitation à l&apos;administration,
-              un nouveau lien te sera envoyé.
+              {t("Il a peut-être expiré ou déjà servi. Demande une nouvelle invitation à l'administration, un nouveau lien te sera envoyé.")}
             </p>
           </div>
         )}
 
         {(etat === "pret" || etat === "enregistrement") && (
           <div className="mt-3 space-y-3">
-            <p className="text-sm text-slate-600">Choisis ton mot de passe pour l&apos;application :</p>
+            <p className="text-sm text-slate-600">{t("Choisis ton mot de passe pour l'application :")}</p>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-500">Nouveau mot de passe (8 caractères et plus)</label>
+              <label className="mb-1 block text-xs font-bold text-slate-500">{t("Nouveau mot de passe (8 caractères et plus)")}</label>
               <ChampMotDePasse
                 value={motDePasse}
                 onChange={(e) => setMotDePasse(e.target.value)}
@@ -145,7 +160,7 @@ export default function ChoisirMotDePasse() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-bold text-slate-500">Répète le mot de passe</label>
+              <label className="mb-1 block text-xs font-bold text-slate-500">{t("Répète le mot de passe")}</label>
               <ChampMotDePasse
                 value={confirmation}
                 onChange={(e) => setConfirmation(e.target.value)}
@@ -158,21 +173,21 @@ export default function ChoisirMotDePasse() {
               disabled={etat === "enregistrement"}
               className="min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99] disabled:opacity-60"
             >
-              {etat === "enregistrement" ? "Enregistrement…" : "Enregistrer mon mot de passe"}
+              {etat === "enregistrement" ? t("Enregistrement…") : t("Enregistrer mon mot de passe")}
             </button>
           </div>
         )}
 
         {etat === "reussi" && (
           <div className="mt-3">
-            <p className="text-sm font-bold text-emerald-700">✅ Mot de passe enregistré !</p>
-            <p className="mt-1 text-sm text-slate-600">Tu peux maintenant ouvrir ton application :</p>
+            <p className="text-sm font-bold text-emerald-700">{t("✅ Mot de passe enregistré !")}</p>
+            <p className="mt-1 text-sm text-slate-600">{t("Tu peux maintenant ouvrir ton application :")}</p>
             <div className="mt-3 space-y-2">
               <a href="/technicien" className="block rounded-xl bg-[#131B2E] py-3 text-center text-sm font-extrabold text-white">
-                Application technicien
+                {t("Application technicien")}
               </a>
               <a href="/admin" className="block rounded-xl border border-slate-300 py-3 text-center text-sm font-bold text-slate-700">
-                Portail d&apos;administration
+                {t("Portail d'administration")}
               </a>
             </div>
           </div>

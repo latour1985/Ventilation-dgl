@@ -10,6 +10,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, BarChart3, Briefcase, Camera, Check, ChevronRight, Cloud, CreditCard, FileText, KeyRound, Lock, Mail, Phone, Plus, RefreshCw, Search, Trash2, UserPlus, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { lienSelonLangue, langueDuClient } from "@/lib/i18nPublic";
 import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { sauvegarderClient } from "@/lib/supabase/clients";
 import { listerFacturesLibres } from "@/lib/supabase/facturesLibres";
@@ -212,6 +213,29 @@ export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, 
 // passe par l'effet de persistance existant (clients modifiés =
 // réécrits automatiquement en base).
 // ============================================================
+// 🌎 LANGUE DE COMMUNICATION DU CLIENT (2026-10-03) — partagé par
+// « Modifier la fiche » et « Nouveau client ».
+function ChoixLangueClient({ langue, onChange }) {
+  return (
+    <div>
+      <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Langue de communication</label>
+      <div className="flex gap-1.5">
+        {[["fr", "Français"], ["en", "English"]].map(([v, l]) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => onChange(v)}
+            className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold ${langue === v ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 text-slate-600"}`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      <p className="mt-0.5 text-[10px] text-slate-400">Langue des devis, bons de travail et factures que ce client reçoit en ligne.</p>
+    </div>
+  );
+}
+
 export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   const [nom, setNom] = useState(client.nom || "");
   const [entreprise, setEntreprise] = useState(client.entreprise || "");
@@ -229,6 +253,9 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
   // noter » : libre, interne au bureau, jamais vue du client ni du
   // technicien.
   const [note, setNote] = useState(client.note || "");
+  // 🌎 Langue de communication (snippet 163) : celle des liens de devis,
+  // bons et factures que ce client reçoit.
+  const [langue, setLangue] = useState(client.langue === "en" ? "en" : "fr");
   const majContact = (id, champs) =>
     setContacts((prev) => prev.map((c) => (c.id === id ? { ...c, ...champs } : c)));
   const ajouterContact = () =>
@@ -251,6 +278,7 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
       nomAffichage: personneOk ? (entreprise.trim() ? nomAffichage : "nom") : "entreprise",
       telephone: telephone.trim(),
       note: note.trim(),
+      langue,
       // Lignes vides écartées (un contact sans nom ne sert à rien).
       contacts: contacts
         .map((c) => ({ ...c, nom: (c.nom || "").trim(), role: (c.role || "").trim(), telephone: (c.telephone || "").trim() }))
@@ -299,6 +327,7 @@ export function ModalEditionClient({ client, onFermer, onEnregistrer }) {
             <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Téléphone</label>
             <input value={telephone} onChange={(e) => setTelephone(e.target.value)} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
           </div>
+          <ChoixLangueClient langue={langue} onChange={setLangue} />
           <div>
             <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Adresse de facturation</label>
             {nouvelleAdresse ? (
@@ -651,6 +680,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
   const [nomFamille, setNomFamille] = useState("");
   const [courriel, setCourriel] = useState("");
   const [telephone, setTelephone] = useState("");
+  const [langueNouveau, setLangueNouveau] = useState("fr"); // 🌎 snippet 163
   const [termeFacturation, setTermeFacturation] = useState(TERMES_FACTURATION[0]);
   const [adresseFacturation, setAdresseFacturation] = useState(null);
   // 🚪 App./bureau/casier postal — certains clients fonctionnent ainsi.
@@ -914,7 +944,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
         html: gabaritBonTravail({
           config: configClients,
           clientNom: b.client,
-          lien: lienBonPublic(jeton),
+          lien: lienSelonLangue(lienBonPublic(jeton), langueDuClient(clients, { id: b.clientId, nom: b.client })),
           joursValidite: JOURS_VALIDITE_BON,
           // ⭐ Avis Google — jamais sur un retour sous garantie.
           lienAvis: b.retraitRaison === "garantie" || b.garantie ? null : String(configClients?.lienAvisGoogle || "").trim() || null,
@@ -924,7 +954,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
         marquerBonEnvoyeClient(rowId).catch(() => {});
         ajouterJournal(`📸 Bon de travail de ${b.client} (R)ENVOYÉ à ${adresses.join(", ")} depuis le dossier client — lien valide ${JOURS_VALIDITE_BON} jours.`);
       } else if (r.simule) {
-        ajouterJournal(`🔧 Envoi SIMULÉ du bon au client (service de courriels non configuré) — le lien existe : ${lienBonPublic(jeton)}`);
+        ajouterJournal(`🔧 Envoi SIMULÉ du bon au client (service de courriels non configuré) — le lien existe : ${lienSelonLangue(lienBonPublic(jeton), langueDuClient(clients, { id: b.clientId, nom: b.client }))}`);
       } else {
         ajouterJournal(`⚠️ Bon de travail de ${b.client} NON envoyé — ${r.erreur}`);
       }
@@ -1076,6 +1106,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
     setNomFamille("");
     setCourriel("");
     setTelephone("");
+    setLangueNouveau("fr");
     setTermeFacturation(TERMES_FACTURATION[0]);
     setAdresseFacturation(null);
     setAdresseFacturationApp("");
@@ -1114,6 +1145,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
       nom: personneRemplie ? `${prenom.trim()} ${nomFamille.trim()}` : entreprise.trim(),
       courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: courriel.trim(), defaut: true }],
       telephone: telephone.trim(),
+      langue: langueNouveau,
       termeFacturation,
       // 🚪 L'unité suit l'adresse partout : chaîne de facturation (QB et
       // documents) ET fiche d'adresse (champ appartement).
@@ -1371,6 +1403,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               </div>
+              <ChoixLangueClient langue={langueNouveau} onChange={setLangueNouveau} />
             </div>
 
             {(() => {
@@ -2500,6 +2533,7 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
   const [ncEntreprise, setNcEntreprise] = useState("");
   const [ncCourriel, setNcCourriel] = useState("");
   const [ncTelephone, setNcTelephone] = useState("");
+  const [ncLangue, setNcLangue] = useState("fr"); // 🌎 snippet 163
   const [ncAdresse, setNcAdresse] = useState(null);
   const [ncAdresseApp, setNcAdresseApp] = useState("");
   const [ncErreurs, setNcErreurs] = useState([]);
@@ -2539,6 +2573,7 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
       nom: ncPersonne ? `${ncPrenom.trim()} ${ncNomFamille.trim()}` : ncEntreprise.trim(),
       courriels: [{ id: `cc-${Date.now()}`, label: "Principal", email: ncCourriel.trim(), defaut: true }],
       telephone: ncTelephone.trim(),
+      langue: ncLangue,
       termeFacturation: TERMES_FACTURATION[0],
       adresseFacturation: ncAdresse
         ? [ncAdresse.label, ncAdresseApp.trim() ? `app. ${ncAdresseApp.trim()}` : ""].filter(Boolean).join(", ")
@@ -2607,6 +2642,7 @@ export function ModalNouveauClient({ clients, setClients, ajouterJournal, onFerm
             <input value={ncCourriel} onChange={(e) => setNcCourriel(e.target.value)} placeholder="Courriel *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
             <input value={ncTelephone} onChange={(e) => setNcTelephone(e.target.value)} placeholder="Téléphone *" className="rounded-lg border border-slate-300 px-2.5 py-2 text-sm" />
           </div>
+          <ChoixLangueClient langue={ncLangue} onChange={setNcLangue} />
           <div>
             <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse de facturation *</label>
             <AutocompleteAdresse onSelection={(place) => setNcAdresse(place)} />

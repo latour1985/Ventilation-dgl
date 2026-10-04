@@ -767,12 +767,9 @@ function compresserImage(file) {
 // PIED DE PAGE — COPYRIGHT
 // ============================================================
 function PiedCopyright() {
+  const { t } = useLangue();
   return (
-    <div className="py-3 text-center text-[11px] text-slate-400 tracking-wide">
-      Fluxya · © {ANNEE} Ventilation DGL inc. — Tous droits réservés.
-      <br />
-      Application confidentielle — usage interne uniquement.
-    </div>
+    <div className="py-3 text-center text-[11px] text-slate-400 tracking-wide">{t("Fluxya · ©")}{" "}{ANNEE}{" "}{t("Ventilation DGL inc. — Tous droits réservés.")}<br />{t("Application confidentielle — usage interne uniquement.")}</div>
   );
 }
 
@@ -1078,7 +1075,7 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
                       français (données du dossier véhicule). */}
                   <span className="text-sm font-semibold text-slate-700">{t(c)}</span>
                   <div className="flex overflow-hidden rounded-full border border-slate-200">
-                    <button onClick={() => setControles((p) => ({ ...p, [c]: "ok" }))} className={`px-3 py-1 text-[11px] font-bold ${controles[c] === "ok" ? "bg-emerald-500 text-white" : "text-slate-400"}`}>OK</button>
+                    <button onClick={() => setControles((p) => ({ ...p, [c]: "ok" }))} className={`px-3 py-1 text-[11px] font-bold ${controles[c] === "ok" ? "bg-emerald-500 text-white" : "text-slate-400"}`}>{t("OK")}</button>
                     <button onClick={() => setControles((p) => ({ ...p, [c]: "probleme" }))} className={`px-3 py-1 text-[11px] font-bold ${controles[c] === "probleme" ? "bg-red-500 text-white" : "text-slate-400"}`}>{t("Problème")}</button>
                   </div>
                 </div>
@@ -1147,6 +1144,7 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
 // gants, sur un écran de téléphone.
 // ============================================================
 function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer }) {
+  const { t } = useLangue();
   const estTransport = tache.type === "transport";
   const debut = tache.debutReel || tache.tempsDebutSegment;
   const [heureFin, setHeureFin] = useState("");
@@ -1161,11 +1159,11 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
 
   const valider = () => {
     if (!finTs) {
-      setErreur("Entre ton heure de fin.");
+      setErreur(t("Entre ton heure de fin."));
       return;
     }
     if (debut && finTs <= debut) {
-      setErreur(`Ton heure de fin doit être APRÈS ${heureHHMM(debut)}, l'heure de départ.`);
+      setErreur(t("Ton heure de fin doit être APRÈS {heure}, l'heure de départ.", { heure: heureHHMM(debut) }));
       return;
     }
     // Même seuil que le plafond automatique, transport compris : sinon
@@ -1173,12 +1171,12 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
     // lui, refuse — deux règles différentes pour la même question.
     const plafondSaisie = seuilPourTache(tache, HEURES_AVANT_PLAFOND, HEURES_AVANT_PLAFOND_TRANSPORT);
     if (debut && (finTs - debut) / 3600000 > plafondSaisie) {
-      setErreur(`Plus de ${plafondSaisie} h — vérifie l'heure. Si c'est exact, appelle l'administration.`);
+      setErreur(t("Plus de {n} h — vérifie l'heure. Si c'est exact, appelle l'administration.", { n: plafondSaisie }));
       return;
     }
     if (transportRetour && heureArrivee) {
       if (!arriveeTs || arriveeTs <= finTs) {
-        setErreur("Ton arrivée au bureau doit être après ton heure de fin sur le chantier.");
+        setErreur(t("Ton arrivée au bureau doit être après ton heure de fin sur le chantier."));
         return;
       }
     }
@@ -1188,11 +1186,11 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center">
       <div className="w-full max-w-sm rounded-2xl bg-white p-5">
-        <h3 className="text-base font-extrabold text-slate-900">🕐 Corriger ton heure de fin</h3>
+        <h3 className="text-base font-extrabold text-slate-900">{t("🕐 Corriger ton heure de fin")}</h3>
         <p className="mt-1 text-[13px] leading-snug text-slate-600">
-          « <span className="font-bold">{tache.titre || "Tâche"}</span> » roule depuis{" "}
+          « <span className="font-bold">{tache.titre || "Tâche"}</span>{" "}{t("» roule depuis")}{" "}
           <span className="font-extrabold">{heuresEcoulees} h</span>
-          {debut ? <> — parti à <span className="font-extrabold">{heureHHMM(debut)}</span></> : null}.
+          {debut ? <>{" "}{t("— parti à")}{" "}<span className="font-extrabold">{heureHHMM(debut)}</span></> : null}.
         </p>
 
         <label className="mt-4 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">
@@ -1207,18 +1205,14 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
 
         {transportRetour && (
           <>
-            <label className="mt-4 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">
-              Heure d&apos;arrivée au bureau
-            </label>
+            <label className="mt-4 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">{t("Heure d'arrivée au bureau")}</label>
             <input
               type="time"
               value={heureArrivee}
               onChange={(e) => { setHeureArrivee(e.target.value); setErreur(""); }}
               className="mt-1 min-h-[52px] w-full rounded-xl border-2 border-slate-300 px-3 text-center text-2xl font-extrabold tabular-nums text-slate-900 outline-none focus:border-[#FF6A13]"
             />
-            <p className="mt-1 text-[11px] leading-snug text-slate-400">
-              Ferme aussi ton « {transportRetour.titre} ». Laisse vide si tu n&apos;es pas retourné au bureau.
-            </p>
+            <p className="mt-1 text-[11px] leading-snug text-slate-400">{t("Ferme aussi ton «")}{" "}{transportRetour.titre}{" "}{t("». Laisse vide si tu n'es pas retourné au bureau.")}</p>
           </>
         )}
 
@@ -1226,23 +1220,18 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
           <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">{erreur}</p>
         )}
 
-        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">
-          Ta correction est envoyée au bureau et doit être <span className="font-bold">approuvée par un administrateur</span>.
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">{t("Ta correction est envoyée au bureau et doit être")}{" "}<span className="font-bold">{t("approuvée par un administrateur")}</span>.
         </p>
 
         <div className="mt-4 space-y-2">
           <button
             onClick={valider}
             className="min-h-[52px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
-          >
-            Corriger et terminer
-          </button>
+          >{t("Corriger et terminer")}</button>
           <button
             onClick={onAnnuler}
             className="min-h-[48px] w-full rounded-xl border border-slate-300 text-sm font-bold text-slate-600 active:scale-[0.99]"
-          >
-            Plus tard
-          </button>
+          >{t("Plus tard")}</button>
         </div>
       </div>
     </div>
@@ -1264,6 +1253,7 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
 // c'est LUI qui confirme ses heures, jamais son collègue à sa place.
 // ============================================================
 function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
+  const { t } = useLangue();
   const fermeTs = Date.parse(tache.fermetureEquipe?.a) || Date.now();
   // Heures pointées, arrêtées à l'instant où le bon a été fermé — pas à
   // « maintenant » : un chrono resté ouvert toute la nuit n'invente
@@ -1286,11 +1276,11 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
     const debutTs = horodatageDepuisHeure(tache.date, heureDebut);
     const finTs = horodatageDepuisHeure(tache.date, heureFin);
     if (!debutTs || !finTs) {
-      setErreur("Entre ton heure de début et ton heure de fin.");
+      setErreur(t("Entre ton heure de début et ton heure de fin."));
       return;
     }
     if (finTs <= debutTs) {
-      setErreur("Ton heure de fin doit être après ton heure de début.");
+      setErreur(t("Ton heure de fin doit être après ton heure de début."));
       return;
     }
     onAjuster({ debutTs, finTs });
@@ -1300,18 +1290,16 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center">
       <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
         <h3 className="text-base font-extrabold text-slate-900">
-          🤝 {tache.fermetureEquipe?.par || "Un coéquipier"} a fermé « {tache.titre || "la tâche"} »
+          🤝 {tache.fermetureEquipe?.par || "Un coéquipier"}{" "}{t("a fermé «")}{" "}{tache.titre || "la tâche"} »
         </h3>
-        <p className="mt-1 text-[13px] leading-snug text-slate-600">
-          Il a fait signer le client et indiqué que <span className="font-bold">toute l&apos;équipe avait terminé</span>{" "}
-          à <span className="font-extrabold">{heureHHMM(fermeTs)}</span>. Le bon est déjà parti — il reste seulement à
-          confirmer <span className="font-bold">tes heures</span>.
+        <p className="mt-1 text-[13px] leading-snug text-slate-600">{t("Il a fait signer le client et indiqué que")}{" "}<span className="font-bold">{t("toute l'équipe avait terminé")}</span>{" "}
+          à <span className="font-extrabold">{heureHHMM(fermeTs)}</span>{t(". Le bon est déjà parti — il reste seulement à confirmer")}{" "}<span className="font-bold">{t("tes heures")}</span>.
         </p>
 
         {!ajuste && (
           <>
             <div className="mt-3 rounded-xl bg-slate-50 p-3 text-center">
-              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Tes heures pointées</p>
+              <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{t("Tes heures pointées")}</p>
               <p className="text-2xl font-extrabold tabular-nums text-slate-900">{heuresPointees.toFixed(2)} h</p>
               {tache.debutReel && (
                 <p className="text-[11px] text-slate-500">
@@ -1323,18 +1311,13 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
               <button
                 onClick={onConfirmer}
                 className="min-h-[52px] w-full rounded-xl bg-[#FF6A13] px-3 text-sm font-extrabold text-white active:scale-[0.99]"
-              >
-                ✅ C&apos;est exact — confirmer mes {heuresPointees.toFixed(2)} h
+              >{t("✅ C'est exact — confirmer mes")}{" "}{heuresPointees.toFixed(2)} h
               </button>
-              <p className="text-[11px] leading-snug text-slate-500">
-                Tes heures partent au bureau et se cumulent automatiquement — rien d&apos;autre à faire.
-              </p>
+              <p className="text-[11px] leading-snug text-slate-500">{t("Tes heures partent au bureau et se cumulent automatiquement — rien d'autre à faire.")}</p>
               <button
                 onClick={() => setAjuste(true)}
                 className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
-              >
-                ✋ Non — ajuster mes heures
-              </button>
+              >{t("✋ Non — ajuster mes heures")}</button>
             </div>
           </>
         )}
@@ -1342,22 +1325,16 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
         {ajuste && (
           <>
             {jamaisPointe && (
-              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-800">
-                Ton chronomètre n&apos;a pas roulé sur cette tâche — déclare tes heures réelles.
-              </p>
+              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] leading-snug text-amber-800">{t("Ton chronomètre n'a pas roulé sur cette tâche — déclare tes heures réelles.")}</p>
             )}
-            <label className="mt-3 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">
-              À quelle heure as-tu commencé ?
-            </label>
+            <label className="mt-3 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">{t("À quelle heure as-tu commencé ?")}</label>
             <input
               type="time"
               value={heureDebut}
               onChange={(e) => { setHeureDebut(e.target.value); setErreur(""); }}
               className="mt-1 min-h-[52px] w-full rounded-xl border-2 border-slate-300 px-3 text-center text-2xl font-extrabold tabular-nums text-slate-900 outline-none focus:border-[#FF6A13]"
             />
-            <label className="mt-3 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">
-              À quelle heure as-tu terminé ?
-            </label>
+            <label className="mt-3 block text-[12px] font-extrabold uppercase tracking-wide text-slate-500">{t("À quelle heure as-tu terminé ?")}</label>
             <input
               type="time"
               value={heureFin}
@@ -1367,24 +1344,19 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
             {erreur && (
               <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">{erreur}</p>
             )}
-            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">
-              Tes heures ajustées partent au bureau et doivent être{" "}
-              <span className="font-bold">approuvées par un administrateur</span>.
+            <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-snug text-amber-800">{t("Tes heures ajustées partent au bureau et doivent être")}{" "}
+              <span className="font-bold">{t("approuvées par un administrateur")}</span>.
             </p>
             <div className="mt-4 space-y-2">
               <button
                 onClick={validerAjustement}
                 className="min-h-[52px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
-              >
-                Envoyer mes heures pour validation
-              </button>
+              >{t("Envoyer mes heures pour validation")}</button>
               {!jamaisPointe && (
                 <button
                   onClick={() => { setAjuste(false); setErreur(""); }}
                   className="min-h-[44px] w-full rounded-xl text-[13px] font-bold text-slate-500 active:scale-[0.99]"
-                >
-                  ← Revenir à mes heures pointées
-                </button>
+                >{t("← Revenir à mes heures pointées")}</button>
               )}
             </div>
           </>
@@ -1393,9 +1365,7 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
         <button
           onClick={onPlusTard}
           className="mt-2 min-h-[44px] w-full rounded-xl text-[13px] font-bold text-slate-400 active:scale-[0.99]"
-        >
-          Plus tard
-        </button>
+        >{t("Plus tard")}</button>
       </div>
     </div>
   );
@@ -1516,7 +1486,7 @@ function MesHeures({ courriel, onRetour }) {
   return (
     <div className="flex min-h-full flex-col bg-slate-50">
       <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3.5">
-        <button onClick={onRetour} aria-label="Retour" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
+        <button onClick={onRetour} aria-label={tr("Retour")} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
           <ChevronLeft size={18} />
         </button>
         <h1 className="text-base font-extrabold text-slate-900">{tr("🕐 Mes heures")}</h1>
@@ -1524,11 +1494,11 @@ function MesHeures({ courriel, onRetour }) {
 
       <div className="flex-1 space-y-4 px-4 py-4">
         <div className="flex items-center justify-center gap-2">
-          <button onClick={() => setDimancheAffiche(decalerDate(dimancheAffiche, -7))} aria-label="Semaine précédente" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
+          <button onClick={() => setDimancheAffiche(decalerDate(dimancheAffiche, -7))} aria-label={tr("Semaine précédente")} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
             <ChevronLeft size={18} />
           </button>
           <span className="min-w-[170px] text-center text-sm font-extrabold text-slate-800">{labelSemaine}</span>
-          <button onClick={() => setDimancheAffiche(decalerDate(dimancheAffiche, 7))} aria-label="Semaine suivante" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
+          <button onClick={() => setDimancheAffiche(decalerDate(dimancheAffiche, 7))} aria-label={tr("Semaine suivante")} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
             <ChevronRight size={18} />
           </button>
         </div>
@@ -1545,8 +1515,7 @@ function MesHeures({ courriel, onRetour }) {
             {datesBloquees.size > 0 && (
               <div className="rounded-2xl border-2 border-red-300 bg-red-50 p-4">
                 <p className="flex items-center gap-1.5 text-sm font-extrabold text-red-700">
-                  <AlertTriangle size={16} className="shrink-0" /> {datesBloquees.size} journée{datesBloquees.size > 1 ? "s" : ""} en attente de correction
-                </p>
+                  <AlertTriangle size={16} className="shrink-0" /> {datesBloquees.size}{" "}{tr("journée")}{datesBloquees.size > 1 ? "s" : ""}{" "}{tr("en attente de correction")}</p>
                 <ul className="mt-1.5 space-y-0.5">
                   {[...datesBloquees].sort().map((d) => (
                     <li key={d} className="text-[12px] font-bold capitalize text-red-800">
@@ -1554,13 +1523,8 @@ function MesHeures({ courriel, onRetour }) {
                     </li>
                   ))}
                 </ul>
-                <p className="mt-2 text-[12px] leading-snug text-red-900">
-                  Ton chrono a roulé trop longtemps — il a été arrêté automatiquement. Ces heures
-                  <span className="font-bold"> ne sont pas dans le total ci-dessous</span> tant que le bureau ne les a pas corrigées.
-                </p>
-                <p className="mt-1 text-[12px] font-bold leading-snug text-red-900">
-                  📞 L&apos;administration va t&apos;appeler pour connaître ton heure de fin réelle. Tu seras payé normalement une fois corrigé.
-                </p>
+                <p className="mt-2 text-[12px] leading-snug text-red-900">{tr("Ton chrono a roulé trop longtemps — il a été arrêté automatiquement. Ces heures")}<span className="font-bold">{" "}{tr("ne sont pas dans le total ci-dessous")}</span>{" "}{tr("tant que le bureau ne les a pas corrigées.")}</p>
+                <p className="mt-1 text-[12px] font-bold leading-snug text-red-900">{tr("📞 L'administration va t'appeler pour connaître ton heure de fin réelle. Tu seras payé normalement une fois corrigé.")}</p>
               </div>
             )}
 
@@ -1581,7 +1545,7 @@ function MesHeures({ courriel, onRetour }) {
                   <span className="rounded-full bg-rose-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-rose-700">{tr("Dîner")} {totaux.diner.toFixed(2)} h</span>
                 )}
                 {totaux.nuit !== 0 && (
-                  <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-indigo-700">🌙 Nuit {totaux.nuit.toFixed(2)} h</span>
+                  <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-indigo-700">{tr("🌙 Nuit")}{" "}{totaux.nuit.toFixed(2)} h</span>
                 )}
                 {totaux.weekend !== 0 && (
                   <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-bold tabular-nums text-sky-700">{tr("Sam/Dim")} {totaux.weekend.toFixed(2)} h</span>
@@ -1591,9 +1555,7 @@ function MesHeures({ courriel, onRetour }) {
 
             {/* DÉTAIL PAR JOURNÉE */}
             {Object.keys(parDate).length === 0 ? (
-              <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">
-                Aucune heure enregistrée cette semaine.
-              </p>
+              <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">{tr("Aucune heure enregistrée cette semaine.")}</p>
             ) : (
               isoJours
                 .filter((iso) => parDate[iso])
@@ -1612,8 +1574,8 @@ function MesHeures({ courriel, onRetour }) {
                           <span className="text-sm font-extrabold capitalize text-slate-800">
                             {new Date(`${iso}T00:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "short" })}
                           </span>
-                          {classe === "nuit" && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-bold text-indigo-700">🌙 NUIT</span>}
-                          {classe === "weekend" && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[9px] font-bold text-sky-700">SAM/DIM</span>}
+                          {classe === "nuit" && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[9px] font-bold text-indigo-700">{tr("🌙 NUIT")}</span>}
+                          {classe === "weekend" && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[9px] font-bold text-sky-700">{tr("SAM/DIM")}</span>}
                         </span>
                         <span className="flex items-center gap-1.5">
                           <span className="text-sm font-extrabold tabular-nums text-slate-900">{totalJour.toFixed(2)} h</span>
@@ -1648,9 +1610,7 @@ function MesHeures({ courriel, onRetour }) {
                 })
             )}
 
-            <p className="pb-2 text-center text-[10px] leading-relaxed text-slate-400">
-              Consultation seulement — pour toute correction, parle à ton répartiteur ou à l'administration.
-            </p>
+            <p className="pb-2 text-center text-[10px] leading-relaxed text-slate-400">{tr("Consultation seulement — pour toute correction, parle à ton répartiteur ou à l'administration.")}</p>
           </>
         )}
       </div>
@@ -1668,6 +1628,7 @@ function MesHeures({ courriel, onRetour }) {
 // besoin de savoir chez qui la commande est partie.
 // ============================================================
 function CarteCommandeCamion({ session }) {
+  const { t } = useLangue();
   const [ouvert, setOuvert] = useState(false);
   const [formOuvert, setFormOuvert] = useState(false);
   const [lignes, setLignes] = useState([{ article: "", quantite: 1 }]);
@@ -1707,10 +1668,8 @@ function CarteCommandeCamion({ session }) {
   return (
     <div className="mx-4 mb-4 rounded-2xl border border-slate-200 bg-white">
       <button onClick={() => setOuvert(!ouvert)} className="flex w-full items-center justify-between p-3.5 text-left">
-        <span className="text-sm font-extrabold text-slate-800">
-          🧰 Matériel de camion
-          {enAttente > 0 && (
-            <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{enAttente} en attente</span>
+        <span className="text-sm font-extrabold text-slate-800">{t("🧰 Matériel de camion")}{enAttente > 0 && (
+            <span className="ml-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">{enAttente}{" "}{t("en attente")}</span>
           )}
         </span>
         <span className="text-slate-400">{ouvert ? "▲" : "▼"}</span>
@@ -1718,9 +1677,7 @@ function CarteCommandeCamion({ session }) {
       {ouvert && (
         <div className="border-t border-slate-100 p-3.5 pt-2.5">
           {!formOuvert ? (
-            <Button variant="outline" onClick={() => setFormOuvert(true)} className="w-full">
-              ➕ Commander du matériel pour mon camion
-            </Button>
+            <Button variant="outline" onClick={() => setFormOuvert(true)} className="w-full">{t("➕ Commander du matériel pour mon camion")}</Button>
           ) : (
             <div className="space-y-2">
               {lignes.map((l, i) => (
@@ -1728,7 +1685,7 @@ function CarteCommandeCamion({ session }) {
                   <input
                     value={l.article}
                     onChange={(e) => setLignes((prev) => prev.map((x, j) => (j === i ? { ...x, article: e.target.value } : x)))}
-                    placeholder="Ex : ruban d'aluminium"
+                    placeholder={t("Ex : ruban d'aluminium")}
                     className="min-w-0 flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
                   />
                   <input
@@ -1739,27 +1696,23 @@ function CarteCommandeCamion({ session }) {
                     className="w-16 rounded-xl border border-slate-300 px-2 py-2.5 text-center text-sm tabular-nums"
                   />
                   {lignes.length > 1 && (
-                    <button onClick={() => setLignes((prev) => prev.filter((_, j) => j !== i))} aria-label="Retirer" className="px-1 text-slate-300">
+                    <button onClick={() => setLignes((prev) => prev.filter((_, j) => j !== i))} aria-label={t("Retirer")} className="px-1 text-slate-300">
                       <X size={16} />
                     </button>
                   )}
                 </div>
               ))}
-              <button onClick={() => setLignes((prev) => [...prev, { article: "", quantite: 1 }])} className="text-xs font-bold text-slate-500 underline underline-offset-2">
-                + Ajouter un article
-              </button>
+              <button onClick={() => setLignes((prev) => [...prev, { article: "", quantite: 1 }])} className="text-xs font-bold text-slate-500 underline underline-offset-2">{t("+ Ajouter un article")}</button>
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 rows={2}
-                placeholder="Note pour le bureau (optionnel)"
+                placeholder={t("Note pour le bureau (optionnel)")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               />
               <div className="flex gap-2">
-                <Button onClick={envoyer} loading={envoi} disabled={!lignes.some((l) => (l.article || "").trim())} className="flex-1">
-                  Envoyer au bureau
-                </Button>
-                <Button variant="outline" onClick={() => setFormOuvert(false)}>Annuler</Button>
+                <Button onClick={envoyer} loading={envoi} disabled={!lignes.some((l) => (l.article || "").trim())} className="flex-1">{t("Envoyer au bureau")}</Button>
+                <Button variant="outline" onClick={() => setFormOuvert(false)}>{t("Annuler")}</Button>
               </div>
             </div>
           )}
@@ -1773,9 +1726,9 @@ function CarteCommandeCamion({ session }) {
                       {c.lignes.map((l) => `${l.article} ×${l.quantite}`).join(" · ")}
                     </span>
                     {c.statut === "commandee" ? (
-                      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">✓ Commande passée</span>
+                      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">{t("✓ Commande passée")}</span>
                     ) : (
-                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-700">⏳ Envoyée</span>
+                      <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-700">{t("⏳ Envoyée")}</span>
                     )}
                   </div>
                   {c.statut === "commandee" && c.noteBureau && (
@@ -1952,17 +1905,16 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
 
   const badgeEtat = (tache) => {
     if (tache.etat === "complete")
-      return <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">TERMINÉ · {formatDuree(dureeEcoulee(tache))}</span>;
+      return <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">{t("TERMINÉ ·")}{" "}{formatDuree(dureeEcoulee(tache))}</span>;
     if (tache.etat === "en_cours")
       return (
         <span className="flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-          EN COURS · {formatDuree(dureeEcoulee(tache))}
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />{t("EN COURS ·")}{" "}{formatDuree(dureeEcoulee(tache))}
         </span>
       );
     if (tache.etat === "en_pause")
-      return <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">EN PAUSE · {formatDuree(dureeEcoulee(tache))}</span>;
-    return <span className="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-[#B14E0E]">À FAIRE</span>;
+      return <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">{t("EN PAUSE ·")}{" "}{formatDuree(dureeEcoulee(tache))}</span>;
+    return <span className="rounded-full bg-orange-100 px-2.5 py-1 text-[11px] font-bold text-[#B14E0E]">{t("À FAIRE")}</span>;
   };
 
   const rendreVignette = (tache) => {
@@ -2019,9 +1971,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           </div>
         )}
         {tache.supabase && (
-          <span className="mt-2 mr-1 inline-block rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">
-            Assignée par l'admin
-          </span>
+          <span className="mt-2 mr-1 inline-block rounded-full bg-blue-100 px-2.5 py-0.5 text-[11px] font-bold text-blue-700">{t("Assignée par l'admin")}</span>
         )}
         {tache.description && (
           <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-slate-500">{tache.description}</p>
@@ -2061,7 +2011,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 les voit. */}
             <button
               onClick={() => setNotesPersoOuvert(true)}
-              title="Mes notes"
+              title={t("Mes notes")}
               className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-sm"
             >
               📝
@@ -2073,8 +2023,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
             {nbEnAttente > 0 && (
               <span className="flex items-center gap-1 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-400">
                 {syncEnCours ? <Loader2 size={10} className="animate-spin" /> : <RotateCcw size={10} />}
-                {nbEnAttente} en attente
-              </span>
+                {nbEnAttente}{" "}{t("en attente")}</span>
             )}
             {/* 🖥️ RETOUR AU BUREAU (2026-08-20) : l'admin qui est sur un
                 chantier revient à sa console d'un tap — la session
@@ -2086,22 +2035,19 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                   transporterSessionPourBascule("bureau");
                   window.location.href = "/admin";
                 }}
-                title="Revenir à la console du bureau"
+                title={t("Revenir à la console du bureau")}
                 className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-slate-200"
-              >
-                🖥️ Bureau
-              </button>
+              >{t("🖥️ Bureau")}</button>
             )}
             {role === "admin" && (
               <>
-                <span className="rounded-full bg-[#FF6A13]/20 px-2 py-0.5 text-[10px] font-bold text-[#FF6A13]">ADMIN</span>
+                <span className="rounded-full bg-[#FF6A13]/20 px-2 py-0.5 text-[10px] font-bold text-[#FF6A13]">{t("ADMIN")}</span>
                 <button
                   onClick={onReinitialiser}
                   className="flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-slate-300"
-                  title="Réinitialise toutes les tâches à leur état de départ (mode test)"
+                  title={t("Réinitialise toutes les tâches à leur état de départ (mode test)")}
                 >
-                  <RotateCcw size={11} /> Réinitialiser
-                </button>
+                  <RotateCcw size={11} />{" "}{t("Réinitialiser")}</button>
               </>
             )}
             <BoutonLangue sombre />
@@ -2362,11 +2308,8 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">{t("✅ Course créée — elle apparaît dans ton horaire.")}</p>
               )}
               {courseMsg.startsWith("erreur") && (
-                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">
-                  Course NON créée — {courseMsg.slice(7) || "connexion impossible"}.
-                  <span className="mt-1 block font-normal">
-                    Regarde ton horaire avant de recommencer : si elle y est déjà, c&apos;est qu&apos;elle a bien été créée.
-                  </span>
+                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">{t("Course NON créée —")}{" "}{courseMsg.slice(7) || "connexion impossible"}.
+                  <span className="mt-1 block font-normal">{t("Regarde ton horaire avant de recommencer : si elle y est déjà, c'est qu'elle a bien été créée.")}</span>
                 </p>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -2421,9 +2364,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                     ))}
                   </select>
                   {shopProjetId && (
-                    <p className="mt-1 text-[11px] leading-snug text-slate-400">
-                      Le bureau confirmera le projet — tes heures y seront comptées après sa vérification.
-                    </p>
+                    <p className="mt-1 text-[11px] leading-snug text-slate-400">{t("Le bureau confirmera le projet — tes heures y seront comptées après sa vérification.")}</p>
                   )}
                 </>
               )}
@@ -2431,11 +2372,8 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                 <p className="mt-2 rounded-lg bg-emerald-50 p-2 text-xs font-bold text-emerald-700">{t("✅ Tâche créée — elle apparaît dans ton horaire, pèse Débuter en arrivant.")}</p>
               )}
               {shopMsg.startsWith("erreur") && (
-                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">
-                  Tâche NON créée — {shopMsg.slice(7) || "connexion impossible"}.
-                  <span className="mt-1 block font-normal">
-                    Regarde ton horaire avant de recommencer : si la tâche y est déjà, c&apos;est qu&apos;elle a bien été créée.
-                  </span>
+                <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs font-bold leading-snug text-red-700">{t("Tâche NON créée —")}{" "}{shopMsg.slice(7) || "connexion impossible"}.
+                  <span className="mt-1 block font-normal">{t("Regarde ton horaire avant de recommencer : si la tâche y est déjà, c'est qu'elle a bien été créée.")}</span>
                 </p>
               )}
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -2450,13 +2388,11 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           </div>
         )}
         <div className="flex items-center gap-2">
-          <button onClick={reculer} aria-label="Précédent" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
+          <button onClick={reculer} aria-label={t("Précédent")} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
             <ChevronLeft size={18} />
           </button>
-          <button onClick={() => setDateSelectionnee(new Date())} className="min-h-[44px] rounded-lg border border-slate-300 px-4 text-xs font-bold text-slate-700 active:bg-slate-100">
-            Aujourd'hui
-          </button>
-          <button onClick={avancer} aria-label="Suivant" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
+          <button onClick={() => setDateSelectionnee(new Date())} className="min-h-[44px] rounded-lg border border-slate-300 px-4 text-xs font-bold text-slate-700 active:bg-slate-100">{t("Aujourd'hui")}</button>
+          <button onClick={avancer} aria-label={t("Suivant")} className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 active:bg-slate-100">
             <ChevronRight size={18} />
           </button>
           <input
@@ -2475,32 +2411,22 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
 
       {suggestionChantier && (
         <div className="mx-4 mt-4 rounded-xl border border-blue-200 bg-blue-50 p-3.5">
-          <p className="text-sm font-bold text-blue-900">
-            Êtes-vous sur le chantier « {suggestionChantier.client.nom} » ?
+          <p className="text-sm font-bold text-blue-900">{t("Êtes-vous sur le chantier «")}{" "}{suggestionChantier.client.nom} » ?
           </p>
           <p className="mt-0.5 text-xs text-blue-700">
-            {suggestionChantier.adresse.nom} — {suggestionChantier.adresse.ligne1} (~{suggestionChantier.distanceKm.toFixed(1)} km)
-          </p>
+            {suggestionChantier.adresse.nom} — {suggestionChantier.adresse.ligne1} (~{suggestionChantier.distanceKm.toFixed(1)}{" "}{t("km)")}</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <Button onClick={onConfirmerChantier} className="min-h-0 py-2 text-xs">
-              Oui, m'y rendre
-            </Button>
-            <Button variant="outline" onClick={onIgnorerChantier} className="min-h-0 py-2 text-xs">
-              Ignorer
-            </Button>
+            <Button onClick={onConfirmerChantier} className="min-h-0 py-2 text-xs">{t("Oui, m'y rendre")}</Button>
+            <Button variant="outline" onClick={onIgnorerChantier} className="min-h-0 py-2 text-xs">{t("Ignorer")}</Button>
           </div>
         </div>
       )}
 
       {modeVue === "jour" ? (
         <div className="flex-1 space-y-3 px-4 py-5">
-          <h2 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500">
-            Horaire du jour
-          </h2>
+          <h2 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500">{t("Horaire du jour")}</h2>
           {tachesJourCourant.length === 0 ? (
-            <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-400">
-              Aucune tâche pour cette journée.
-            </p>
+            <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-400">{t("Aucune tâche pour cette journée.")}</p>
           ) : (
             tachesJourCourant.map((tache) => rendreVignette(tache))
           )}
@@ -2526,9 +2452,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
                   </span>
                 </button>
                 {liste.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-slate-200 bg-white/60 p-3 text-center text-xs text-slate-400">
-                    Aucune tâche
-                  </p>
+                  <p className="rounded-xl border border-dashed border-slate-200 bg-white/60 p-3 text-center text-xs text-slate-400">{t("Aucune tâche")}</p>
                 ) : (
                   <div className="space-y-2">{liste.map((tache) => rendreVignette(tache))}</div>
                 )}
@@ -2548,6 +2472,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
 // SÉLECTEUR CLIENT / ADRESSE
 // ============================================================
 function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId, lectureSeule, clientNomFallback, clientTelephone }) {
+  const { t } = useLangue();
   const client = CLIENTS.find((c) => c.id === clientId);
   const [choixTrajetOuvert, setChoixTrajetOuvert] = useState(false);
   const adresseActive = client?.adresses.find((a) => a.id === adresseId);
@@ -2557,7 +2482,7 @@ function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId
   if (!client) {
     return (
       <div>
-        <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Client</label>
+        <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Client")}</label>
         <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-bold text-slate-800">
           {clientNomFallback || "Client assigné par l'administration"}
         </p>
@@ -2573,10 +2498,10 @@ function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId
           >
             <Phone size={16} className="shrink-0 text-[#FF6A13]" />
             <span className="text-lg font-extrabold tabular-nums tracking-wide text-slate-900">{clientTelephone}</span>
-            <span className="ml-auto text-[11px] font-bold uppercase text-slate-400">Appeler</span>
+            <span className="ml-auto text-[11px] font-bold uppercase text-slate-400">{t("Appeler")}</span>
           </a>
         )}
-        <p className="mt-1 text-[11px] text-slate-400">Détails de la tâche dans la description ci-dessous.</p>
+        <p className="mt-1 text-[11px] text-slate-400">{t("Détails de la tâche dans la description ci-dessous.")}</p>
       </div>
     );
   }
@@ -2584,9 +2509,7 @@ function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId
   return (
     <div className="space-y-3">
       <div>
-        <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-          Client
-        </label>
+        <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Client")}</label>
         <div className="relative">
           <select
             value={clientId}
@@ -2610,9 +2533,7 @@ function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId
       </div>
 
       <div>
-        <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-          Adresse de livraison
-        </label>
+        <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Adresse de livraison")}</label>
         <div className="relative">
           <select
             value={adresseId}
@@ -2640,23 +2561,17 @@ function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId
 
       {!choixTrajetOuvert ? (
         <Button variant="outline" onClick={() => setChoixTrajetOuvert(true)} className="w-full">
-          <Navigation2 size={18} />
-          Trajet vers cette adresse
-        </Button>
+          <Navigation2 size={18} />{t("Trajet vers cette adresse")}</Button>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           <Button
             variant="outline"
             onClick={() => { ouvrirTrajet(adresseActive.ligne1, "google"); setChoixTrajetOuvert(false); }}
-          >
-            Google Maps
-          </Button>
+          >{t("Google Maps")}</Button>
           <Button
             variant="outline"
             onClick={() => { ouvrirTrajet(adresseActive.ligne1, "waze"); setChoixTrajetOuvert(false); }}
-          >
-            Waze
-          </Button>
+          >{t("Waze")}</Button>
         </div>
       )}
     </div>
@@ -2667,6 +2582,7 @@ function SelecteurClientAdresse({ clientId, adresseId, setClientId, setAdresseId
 // LIGNE PRODUIT
 // ============================================================
 function LigneProduit({ ligne, onChange, onSupprimer, lectureSeule }) {
+  const { t } = useLangue();
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3">
       <div className="flex items-start justify-between gap-2">
@@ -2674,7 +2590,7 @@ function LigneProduit({ ligne, onChange, onSupprimer, lectureSeule }) {
           {ligne.horsCatalogue ? (
             <input
               type="text"
-              placeholder="Description de l'item"
+              placeholder={t("Description de l'item")}
               value={ligne.nom}
               disabled={lectureSeule}
               onChange={(e) => onChange({ ...ligne, nom: e.target.value })}
@@ -2737,9 +2653,7 @@ function LigneProduit({ ligne, onChange, onSupprimer, lectureSeule }) {
             disabled={lectureSeule}
             onChange={(e) => onChange({ ...ligne, prixNonListe: e.target.checked })}
             className="h-4 w-4 accent-[#FF6A13]"
-          />
-          Prix non listé / spécial (nécessite révision)
-        </label>
+          />{t("Prix non listé / spécial (nécessite révision)")}</label>
       )}
     </div>
   );
@@ -2760,6 +2674,7 @@ function LigneProduit({ ligne, onChange, onSupprimer, lectureSeule }) {
 // ne se pose pas.
 // ============================================================
 function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
+  const { t } = useLangue();
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [erreur, setErreur] = useState("");
@@ -2822,7 +2737,7 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
         }
         if (!annule) setPret(true);
       } catch {
-        if (!annule) setErreur("Accès à la caméra refusé — active la permission dans les réglages de ton téléphone pour ajouter une photo.");
+        if (!annule) setErreur(t("Accès à la caméra refusé — active la permission dans les réglages de ton téléphone pour ajouter une photo."));
       }
     })();
     return () => {
@@ -2860,10 +2775,10 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black">
       <div className="flex items-center justify-between p-3">
-        <button onClick={onFermer} aria-label="Fermer la caméra" className="rounded-full bg-white/10 p-3 text-white active:scale-95">
+        <button onClick={onFermer} aria-label={t("Fermer la caméra")} className="rounded-full bg-white/10 p-3 text-white active:scale-95">
           <X size={22} />
         </button>
-        <span className="text-xs font-bold text-white">Prendre une photo</span>
+        <span className="text-xs font-bold text-white">{t("Prendre une photo")}</span>
         <div className="w-12" />
       </div>
 
@@ -2871,9 +2786,7 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <AlertTriangle size={32} className="text-amber-400" />
           <p className="text-sm text-white">{erreur}</p>
-          <Button variant="outline" onClick={onFermer} className="border-white text-white">
-            Fermer
-          </Button>
+          <Button variant="outline" onClick={onFermer} className="border-white text-white">{t("Fermer")}</Button>
         </div>
       ) : (
         <>
@@ -2895,7 +2808,7 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
                 value={zoomValeur}
                 onChange={(e) => appliquerZoom(Number(e.target.value))}
                 className="h-8 min-w-0 flex-1 accent-white"
-                aria-label="Zoom"
+                aria-label={t("Zoom")}
               />
               <span className="text-[11px] font-bold text-white/70">＋</span>
               <span className="w-10 text-right text-[11px] font-bold tabular-nums text-white/80">{Number(zoomValeur).toFixed(1)}×</span>
@@ -2905,7 +2818,7 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
             <button
               onClick={capturer}
               disabled={!pret}
-              aria-label="Capturer la photo"
+              aria-label={t("Capturer la photo")}
               className="h-16 w-16 rounded-full border-4 border-white bg-white/20 active:scale-95 disabled:opacity-40"
             />
             {/* 📷 L'appareil NATIF du téléphone : le seul chemin vers le
@@ -2919,7 +2832,7 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
                 className="absolute right-4 flex flex-col items-center gap-0.5 rounded-xl bg-white/10 px-3 py-2 text-white active:scale-95"
               >
                 <span className="text-lg">📷</span>
-                <span className="text-[9px] font-bold leading-tight">Caméra du tél.<br/>(0.5× · 3×)</span>
+                <span className="text-[9px] font-bold leading-tight">{t("Caméra du tél.")}<br/>(0.5× · 3×)</span>
               </button>
             )}
           </div>
@@ -2930,6 +2843,7 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
 }
 
 function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lectureSeule, coffreCle, onPhotoTeleversee = null }) {
+  const { t } = useLangue();
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState("");
   const [cameraOuverte, setCameraOuverte] = useState(false);
@@ -2997,9 +2911,9 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
       // dit, au lieu de laisser croire que la photo est à l'abri.
       Promise.resolve(coffrerPhoto({ id, blob: nouvellePhoto.blob, origine: nouvellePhoto.origine || "camera", coffreCle }))
         .then((ok) => {
-          if (ok === false) setErreur("⚠️ Copie de secours de la photo impossible — garde l'app ouverte jusqu'à ce que la photo soit envoyée.");
+          if (ok === false) setErreur(t("⚠️ Copie de secours de la photo impossible — garde l'app ouverte jusqu'à ce que la photo soit envoyée."));
         })
-        .catch(() => setErreur("⚠️ Copie de secours de la photo impossible — garde l'app ouverte jusqu'à ce que la photo soit envoyée."));
+        .catch(() => setErreur(t("⚠️ Copie de secours de la photo impossible — garde l'app ouverte jusqu'à ce que la photo soit envoyée.")));
     }
     // TÉLÉVERSEMENT EN ARRIÈRE-PLAN vers le stockage Supabase : l'URL
     // distante obtenue voyagera avec le travail complété (bureau, bon de
@@ -3063,7 +2977,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
       // Ne jamais laisser l'interface bloquée en "chargement" si la
       // compression échoue — le technicien voit un message clair et
       // peut réessayer immédiatement.
-      setErreur(`${echecs} photo${echecs > 1 ? "s" : ""} n'a pas pu être ajoutée — réessaie.`);
+      setErreur(echecs > 1 ? t("{n} photos n'ont pas pu être ajoutées — réessaie.", { n: echecs }) : t("1 photo n'a pas pu être ajoutée — réessaie."));
     }
     setEnCours(false);
     e.target.value = "";
@@ -3087,9 +3001,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
         {titre}
         {obligatoire && (
-          <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-600">
-            Obligatoire
-          </span>
+          <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-600">{t("Obligatoire")}</span>
         )}
       </p>
       <div className="flex flex-wrap gap-2">
@@ -3122,19 +3034,19 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
                 />
               ) : (
                 p.id && p.enAttente ? (
-                  <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-sky-50 px-1 text-center" title="La photo est en sécurité sur le téléphone — elle partira toute seule au retour du réseau.">
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-sky-50 px-1 text-center" title={t("La photo est en sécurité sur le téléphone — elle partira toute seule au retour du réseau.")}>
                     <span className="text-sm">📦</span>
-                    <span className="text-[8px] font-bold leading-tight text-sky-700">En file — partira avec le réseau</span>
+                    <span className="text-[8px] font-bold leading-tight text-sky-700">{t("En file — partira avec le réseau")}</span>
                   </div>
                 ) : (
                 <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 bg-amber-50 px-1 text-center">
                   <AlertTriangle size={14} className="text-amber-500" />
-                  <span className="text-[8px] font-bold leading-tight text-amber-700">Perdue — jamais téléversée</span>
+                  <span className="text-[8px] font-bold leading-tight text-amber-700">{t("Perdue — jamais téléversée")}</span>
                 </div>
                 )
               )}
               {p.origine === "galerie" && (
-                <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[9px] text-white" title="Importée de la galerie">📁</span>
+                <span className="absolute left-0.5 top-0.5 rounded bg-black/60 px-1 text-[9px] text-white" title={t("Importée de la galerie")}>📁</span>
               )}
               {/* (Le badge « -79 % » de compression a été retiré — info de
                   développement, du bruit pour le terrain. 2026-08-19.) */}
@@ -3142,7 +3054,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
                 <button
                   type="button"
                   onClick={() => retirerPhoto(i)}
-                  aria-label="Retirer la photo"
+                  aria-label={t("Retirer la photo")}
                   className="absolute right-0.5 top-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white active:scale-95"
                 >
                   <X size={16} />
@@ -3159,14 +3071,12 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
                 value={legendes[p.urlDistante] || ""}
                 onChange={(e) => setLegendes((prev) => ({ ...prev, [p.urlDistante]: e.target.value }))}
                 onBlur={(e) => sauvegarderLegende(p.urlDistante, e.target.value, null).catch(() => {})}
-                placeholder="Nom…"
+                placeholder={t("Nom…")}
                 disabled={lectureSeule}
                 className="mt-0.5 w-20 rounded border border-slate-200 px-1 py-0.5 text-[10px] text-slate-700"
               />
             ) : (
-              <p className="mt-0.5 w-20 truncate text-center text-[9px] text-slate-300" title="Le nom pourra s'ajouter une fois la photo téléversée">
-                envoi…
-              </p>
+              <p className="mt-0.5 w-20 truncate text-center text-[9px] text-slate-300" title={t("Le nom pourra s'ajouter une fois la photo téléversée")}>{t("envoi…")}</p>
             )}
           </div>
         ))}
@@ -3179,7 +3089,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
               className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-300 text-slate-400 active:scale-95 disabled:opacity-60"
             >
               {enCours ? <Loader2 size={20} className="animate-spin" /> : <Camera size={20} />}
-              <span className="text-[10px] font-semibold">Photo</span>
+              <span className="text-[10px] font-semibold">{t("Photo")}</span>
               <input
                 ref={inputRef}
                 type="file"
@@ -3201,7 +3111,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
               className="flex h-20 w-20 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-slate-200 text-slate-300 active:scale-95 disabled:opacity-60"
             >
               <span className="text-lg leading-none">📁</span>
-              <span className="text-[10px] font-semibold">Galerie</span>
+              <span className="text-[10px] font-semibold">{t("Galerie")}</span>
               <input
                 ref={inputGalerieRef}
                 type="file"
@@ -3215,7 +3125,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
         )}
       </div>
       {photos.length === 0 && lectureSeule && (
-        <p className="mt-1 text-[11px] text-slate-400">Aucune photo.</p>
+        <p className="mt-1 text-[11px] text-slate-400">{t("Aucune photo.")}</p>
       )}
       {/* (La ligne « 21097 Ko → 3797 Ko compressé » a été retirée —
           demande du propriétaire, 2026-08-19.) */}
@@ -3235,7 +3145,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
             // Une photo encore locale (hors-ligne) attendra sa mise en
             // ligne — le champ l'explique au lieu d'échouer en silence.
             if (!/^https?:/.test(url)) {
-              setErreur("Photo pas encore téléversée (connexion requise) — le détail pourra s'ajouter une fois en ligne.");
+              setErreur(t("Photo pas encore téléversée (connexion requise) — le détail pourra s'ajouter une fois en ligne."));
               return;
             }
             setLegendes((prev) => ({ ...prev, [url]: texte }));
@@ -3274,6 +3184,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
 // dormirait dans le téléphone).
 // ============================================================
 function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
+  const { t } = useLangue();
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState("");
   const inputRef = useRef(null);
@@ -3295,7 +3206,7 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
       } catch (err) {
         // La VRAIE raison (trop lourde, hors ligne…) — jamais un
         // échec muet : le technicien doit savoir quoi faire.
-        setErreur(err?.message || "Vidéo non envoyée — réessaie.");
+        setErreur(err?.message || t("Vidéo non envoyée — réessaie."));
       }
     }
     setEnCours(false);
@@ -3311,7 +3222,7 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
 
   return (
     <div>
-      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">🎥 Vidéos (facultatif)</p>
+      <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("🎥 Vidéos (facultatif)")}</p>
       <div className="space-y-2">
         {videos.map((v, i) => (
           <div key={i} className="rounded-xl border border-slate-200 bg-slate-50 p-2">
@@ -3321,9 +3232,7 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
                 type="button"
                 onClick={() => retirer(i)}
                 className="mt-1 min-h-[40px] w-full rounded-lg border border-red-200 text-[12px] font-bold text-red-600 active:scale-[0.99]"
-              >
-                Retirer cette vidéo
-              </button>
+              >{t("Retirer cette vidéo")}</button>
             )}
           </div>
         ))}
@@ -3347,10 +3256,7 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
           />
         </button>
       )}
-      <p className="mt-1 text-[10px] leading-snug text-slate-400">
-        Courtes séquences (environ 30 secondes, {Math.round(VIDEO_MAX_OCTETS / 1024 / 1024)} Mo maximum) — une vidéo ne se
-        compresse pas comme une photo. Envoyée tout de suite : reste sur le réseau le temps de l&apos;envoi.
-      </p>
+      <p className="mt-1 text-[10px] leading-snug text-slate-400">{t("Courtes séquences (environ 30 secondes,")}{" "}{Math.round(VIDEO_MAX_OCTETS / 1024 / 1024)}{" "}{t("Mo maximum) — une vidéo ne se compresse pas comme une photo. Envoyée tout de suite : reste sur le réseau le temps de l'envoi.")}</p>
       {erreur && (
         <p className="mt-1 flex items-start gap-1 text-[11px] font-semibold text-red-600">
           <AlertTriangle size={11} className="mt-0.5 shrink-0" /> {erreur}
@@ -3464,7 +3370,7 @@ function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommen
         style={{ height: 140 }}
       />
       {!aSignature && !lectureSeule && (
-        <p className="mt-1 text-[11px] text-slate-400">Signez avec le doigt dans la zone ci-dessus</p>
+        <p className="mt-1 text-[11px] text-slate-400">{t("Signez avec le doigt dans la zone ci-dessus")}</p>
       )}
     </div>
   );
@@ -3474,6 +3380,7 @@ function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommen
 // ÉCRAN TRANSPORT (début / fin de journée)
 // ============================================================
 function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, onMajTache, onRetour, tacheBloquante, inspectionFaite, toutesLesTaches }) {
+  const { t } = useLangue();
   const [kilometresLocal, setKilometresLocal] = useState(tache.kilometres);
   const [captureGpsEnCours, setCaptureGpsEnCours] = useState(null); // "depart" | "arrivee" | null
   const [messageGps, setMessageGps] = useState("");
@@ -3505,7 +3412,7 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
       onMajTache(tache.id, { latDepart: position.lat, lngDepart: position.lng, heureDepartGps: position.heure });
       setMessageGps("");
     } else {
-      setMessageGps("Position GPS indisponible au départ — le kilométrage devra être ajusté manuellement.");
+      setMessageGps(t("Position GPS indisponible au départ — le kilométrage devra être ajusté manuellement."));
     }
     if (destination) ouvrirTrajet(destination.ligne1, "google");
     setCaptureGpsEnCours(null);
@@ -3525,9 +3432,9 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
       onMajTache(tache.id, { latArrivee: position.lat, lngArrivee: position.lng, kilometres: distance });
       setMessageGps("");
     } else if (!position) {
-      setMessageGps("Position GPS indisponible à l'arrivée — ajuste le kilométrage manuellement ci-dessous.");
+      setMessageGps(t("Position GPS indisponible à l'arrivée — ajuste le kilométrage manuellement ci-dessous."));
     } else {
-      setMessageGps("Position de départ manquante — ajuste le kilométrage manuellement ci-dessous.");
+      setMessageGps(t("Position de départ manquante — ajuste le kilométrage manuellement ci-dessous."));
     }
     setCaptureGpsEnCours(null);
     onTerminer();
@@ -3557,9 +3464,9 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
       const dureeMin = Math.round((distance / VITESSE_MOYENNE_ESTIMATION_KMH) * 60);
       setEstimationRetour({ distanceKm: distance, dureeMin });
     } else if (position) {
-      setMessageGps("Estimation indisponible pour cette adresse — utilise « Lancer le guidage » (Google calcule le trajet réel).");
+      setMessageGps(t("Estimation indisponible pour cette adresse — utilise « Lancer le guidage » (Google calcule le trajet réel)."));
     } else {
-      setMessageGps("Position GPS indisponible pour l'estimation du retour.");
+      setMessageGps(t("Position GPS indisponible pour l'estimation du retour."));
     }
     setEstimationEnCours(false);
   };
@@ -3579,8 +3486,7 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
             <div className="flex items-start gap-2 text-xs">
               <MapPin size={14} className="mt-0.5 shrink-0 text-[#FF6A13]" />
               <div className="min-w-0 flex-1">
-                <p className="font-bold uppercase tracking-wide text-slate-400" style={{ fontSize: "10px" }}>
-                  Destination {estAller ? "(premier chantier du jour)" : "(entrepôt — fixe)"}
+                <p className="font-bold uppercase tracking-wide text-slate-400" style={{ fontSize: "10px" }}>{t("Destination")}{" "}{estAller ? "(premier chantier du jour)" : "(entrepôt — fixe)"}
                 </p>
                 <p className="font-semibold text-slate-800">{destination.nom}</p>
                 <p className="text-slate-500">{destination.ligne1}</p>
@@ -3594,16 +3500,14 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
               onClick={() => ouvrirTrajet(destination.ligne1)}
               className="mt-2.5 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-slate-300 text-xs font-extrabold text-slate-700 active:scale-[0.99]"
             >
-              <Navigation2 size={14} /> Ouvrir la navigation
-            </button>
+              <Navigation2 size={14} />{" "}{t("Ouvrir la navigation")}</button>
           </div>
         ) : (
           /* Sans destination, le technicien partirait à l'aveugle — on
              le dit franchement plutôt que de n'afficher rien du tout. */
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
             <p className="flex items-center gap-1.5 text-xs font-bold text-amber-800">
-              <AlertTriangle size={14} className="shrink-0" /> Aucune adresse de destination
-            </p>
+              <AlertTriangle size={14} className="shrink-0" />{" "}{t("Aucune adresse de destination")}</p>
             <p className="mt-1 text-[11px] leading-snug text-amber-700">
               {estAller
                 ? "Aucune tâche avec adresse n'est prévue aujourd'hui. Appelle le bureau avant de partir."
@@ -3628,25 +3532,16 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
 
         {!estAller && tache.etat === "a_faire" && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">Avant de partir</p>
-            <Button variant="outline" onClick={estimerRetour} loading={estimationEnCours} className="w-full">
-              Estimation temps de retour (Google Maps)
-            </Button>
+            <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("Avant de partir")}</p>
+            <Button variant="outline" onClick={estimerRetour} loading={estimationEnCours} className="w-full">{t("Estimation temps de retour (Google Maps)")}</Button>
             {estimationRetour && (
               <div className="mt-3 rounded-xl bg-slate-50 p-3">
                 <p className="text-sm font-bold text-slate-800">
-                  ~{estimationRetour.distanceKm} km · ~{estimationRetour.dureeMin} min (estimation)
-                </p>
-                <p className="mt-0.5 text-[11px] text-slate-400">
-                  Estimation à vol d'oiseau — le trajet réel et le trafic peuvent varier.
-                </p>
+                  ~{estimationRetour.distanceKm}{" "}{t("km · ~")}{estimationRetour.dureeMin}{" "}{t("min (estimation)")}</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">{t("Estimation à vol d'oiseau — le trajet réel et le trafic peuvent varier.")}</p>
                 <div className="mt-2 grid grid-cols-2 gap-2">
-                  <Button variant="outline" onClick={() => setEstimationRetour(null)} className="min-h-0 py-2 text-xs">
-                    Valider / fermer
-                  </Button>
-                  <Button onClick={() => ouvrirTrajet(destination?.ligne1 || DEPOT_ADRESSE.ligne1, "google")} className="min-h-0 py-2 text-xs">
-                    Lancer le guidage
-                  </Button>
+                  <Button variant="outline" onClick={() => setEstimationRetour(null)} className="min-h-0 py-2 text-xs">{t("Valider / fermer")}</Button>
+                  <Button onClick={() => ouvrirTrajet(destination?.ligne1 || DEPOT_ADRESSE.ligne1, "google")} className="min-h-0 py-2 text-xs">{t("Lancer le guidage")}</Button>
                 </div>
               </div>
             )}
@@ -3659,8 +3554,7 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
 
         {tache.latDepart != null && (
           <div className="flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-700">
-            <MapPin size={14} className="shrink-0" />
-            Position de départ capturée par GPS{tache.latArrivee != null ? " — arrivée aussi capturée, distance calculée automatiquement." : "."}
+            <MapPin size={14} className="shrink-0" />{t("Position de départ capturée par GPS")}{tache.latArrivee != null ? " — arrivée aussi capturée, distance calculée automatiquement." : "."}
           </div>
         )}
 
@@ -3671,12 +3565,8 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <label className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
-            Kilométrage parcouru
-            {tache.latDepart != null && tache.latArrivee != null && (
-              <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-emerald-700">
-                Calculé par GPS
-              </span>
+          <label className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("Kilométrage parcouru")}{tache.latDepart != null && tache.latArrivee != null && (
+              <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-emerald-700">{t("Calculé par GPS")}</span>
             )}
           </label>
           <div className="flex items-center gap-2">
@@ -3690,21 +3580,15 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
               className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-bold tabular-nums"
               placeholder="0"
             />
-            <span className="shrink-0 text-sm font-semibold text-slate-500">km</span>
+            <span className="shrink-0 text-sm font-semibold text-slate-500">{t("km")}</span>
           </div>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Calculé automatiquement à l'arrivée via GPS — modifiable au besoin (ex: si le GPS était indisponible).
-          </p>
+          <p className="mt-1 text-[11px] text-slate-400">{t("Calculé automatiquement à l'arrivée via GPS — modifiable au besoin (ex: si le GPS était indisponible).")}</p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-            Temps de transport
-          </label>
+          <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">{t("Temps de transport")}</label>
           <p className="text-2xl font-extrabold tabular-nums text-slate-900">{heures.toFixed(2)} h</p>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Calculé à partir du chronomètre ({formatDuree(duree)}), converti en heures/fractions pour la feuille de temps — imputé automatiquement au projet (voir ci-dessus).
-          </p>
+          <p className="mt-1 text-[11px] text-slate-400">{t("Calculé à partir du chronomètre (")}{formatDuree(duree)}{t("), converti en heures/fractions pour la feuille de temps — imputé automatiquement au projet (voir ci-dessus).")}</p>
         </div>
       </div>
 
@@ -3755,7 +3639,7 @@ function ListeRamassage({ tache, session, enLigne, lectureSeule }) {
       const url = await televerserPhotoTravail(blob, "camera");
       setPhotoPour((p) => ({ ...p, [numero]: url }));
     } catch {
-      setErreur(`${numero} : photo non téléversée — réessaie.`);
+      setErreur(t("{numero} : photo non téléversée — réessaie.", { numero }));
     }
   };
   const arrets = [];
@@ -3842,6 +3726,7 @@ function ListeRamassage({ tache, session, enLigne, lectureSeule }) {
 // tout seul ; hors ligne, la section ne s'affiche pas.
 // ============================================================
 function UnitesDejaNotees({ tache, session, enLigne, presentes, onChoisir }) {
+  const { t } = useLangue();
   const [unites, setUnites] = useState([]);
   const adresse = tache?.adresseIntervention || tache?.adresseTravaux || "";
   useEffect(() => {
@@ -3869,7 +3754,7 @@ function UnitesDejaNotees({ tache, session, enLigne, presentes, onChoisir }) {
   if (restantes.length === 0) return null;
   return (
     <div className="rounded-xl border border-sky-200 bg-sky-50 p-2.5">
-      <p className="text-[11px] font-extrabold text-sky-800">🔧 Déjà notées à cette adresse — touche celle que tu vérifies :</p>
+      <p className="text-[11px] font-extrabold text-sky-800">{t("🔧 Déjà notées à cette adresse — touche celle que tu vérifies :")}</p>
       <div className="mt-1.5 space-y-1.5">
         {restantes.map((u) => (
           <button
@@ -3883,7 +3768,7 @@ function UnitesDejaNotees({ tache, session, enLigne, presentes, onChoisir }) {
                 {u.modele || "Modèle ?"} · Nº {u.serie || "?"}
               </span>
               <span className="block truncate text-[10px] text-slate-500">
-                {u.emplacement ? `${u.emplacement} · ` : ""}vue le {u.vueLe}
+                {u.emplacement ? `${u.emplacement} · ` : ""}{t("vue le")}{" "}{u.vueLe}
               </span>
             </span>
             <span className="shrink-0 text-lg font-bold text-sky-700">＋</span>
@@ -4479,7 +4364,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
 
     const Reconnaissance = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Reconnaissance) {
-      setErreurDictee("La dictée vocale n'est pas prise en charge sur cet appareil.");
+      setErreurDictee(t("La dictée vocale n'est pas prise en charge sur cet appareil."));
       return;
     }
     setErreurDictee("");
@@ -4497,7 +4382,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         flux.getTracks().forEach((piste) => piste.stop());
       } catch {
         setEcoute(null);
-        setErreurDictee("Accès au microphone refusé — active la permission dans les réglages de ton téléphone pour dicter une note.");
+        setErreurDictee(t("Accès au microphone refusé — active la permission dans les réglages de ton téléphone pour dicter une note."));
         return;
       }
     }
@@ -4521,7 +4406,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     reco.onerror = () => {
       recoRef.current = null;
       setEcoute(null);
-      setErreurDictee("Micro indisponible ou permission refusée.");
+      setErreurDictee(t("Micro indisponible ou permission refusée."));
     };
     reco.onend = () => {
       recoRef.current = null;
@@ -4990,21 +4875,15 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
 
       {fermee && dansDelai && (
         <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700">
-          <Lock size={14} />
-          Déjà envoyé — modification encore possible pendant 10 minutes. Une 2e signature client sera demandée.
-        </div>
+          <Lock size={14} />{t("Déjà envoyé — modification encore possible pendant 10 minutes. Une 2e signature client sera demandée.")}</div>
       )}
       {fermee && !dansDelai && modifReactivee && (
         <div className="flex items-center gap-2 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-700">
-          <Lock size={14} />
-          Modification réactivée par un administrateur. Une 2e signature client sera demandée.
-        </div>
+          <Lock size={14} />{t("Modification réactivée par un administrateur. Une 2e signature client sera demandée.")}</div>
       )}
       {lectureSeule && (
         <div className="flex items-center gap-2 bg-slate-200 px-4 py-2 text-xs font-semibold text-slate-600">
-          <Lock size={14} />
-          Lecture seule — délai de modification (10 min) dépassé. Demande à un administrateur de réactiver la modification au besoin.
-        </div>
+          <Lock size={14} />{t("Lecture seule — délai de modification (10 min) dépassé. Demande à un administrateur de réactiver la modification au besoin.")}</div>
       )}
 
       <div className="flex-1 space-y-5 px-4 py-4">
@@ -5061,8 +4940,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                         onClick={() => texterEnRoute(min, numeroClient)}
                         className="rounded-lg border border-sky-400 bg-white py-2 text-sm font-extrabold text-sky-900 active:scale-95"
                       >
-                        {min} min
-                      </button>
+                        {min}{" "}{t("min")}</button>
                     ))}
                   </div>
                 </div>
@@ -5081,8 +4959,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                         onClick={() => envoyerEnRoute(min, cibles)}
                         className="rounded-lg border border-sky-300 bg-white py-1.5 text-xs font-bold text-sky-800 active:scale-95 disabled:opacity-40"
                       >
-                        {min} min
-                      </button>
+                        {min}{" "}{t("min")}</button>
                     ))}
                   </div>
                   {!enLigne && <p className="mt-1.5 text-[10px] font-bold text-amber-700">📶 {t("Courriel hors ligne — utilise le texto, ou réessaie dès que le réseau revient.")}</p>}
@@ -5121,25 +4998,21 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {equipe?.partage && (
           <div className={`rounded-2xl border-2 p-4 ${jeSuisLeDernier ? "border-[#FF6A13] bg-orange-50" : "border-slate-200 bg-white"}`}>
             <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500">
-              <User size={13} /> Vous êtes {equipe.equipe.length} sur ce travail
-            </p>
-            <p className="mt-1 text-[12px] text-slate-600">
-              Avec toi : {collegues.map((c) => c.nom).join(", ")}
+              <User size={13} />{" "}{t("Vous êtes")}{" "}{equipe.equipe.length}{" "}{t("sur ce travail")}</p>
+            <p className="mt-1 text-[12px] text-slate-600">{t("Avec toi :")}{" "}{collegues.map((c) => c.nom).join(", ")}
             </p>
 
             {jeSuisLeDernier ? (
               <>
               <div className="mt-2.5 rounded-xl bg-[#FF6A13] p-3">
-                <p className="text-sm font-extrabold text-white">✍️ C&apos;est toi qui fais signer</p>
+                <p className="text-sm font-extrabold text-white">{t("✍️ C'est toi qui fais signer")}</p>
                 <p className="mt-1 text-[12px] leading-snug text-white/90">
                   {termineSeul
                     ? "Tu as déclaré terminer seul."
                     : equipeTerminee
                       ? "Tu as déclaré que toute l'équipe avait terminé."
                       : "Tu es le dernier à fermer ce travail."}{" "}
-                  <span className="font-bold">Fais signer le bon de travail au client avant de partir</span> —
-                  c&apos;est le seul document qu&apos;il recevra pour cette job.
-                </p>
+                  <span className="font-bold">{t("Fais signer le bon de travail au client avant de partir")}</span>{" "}{t("— c'est le seul document qu'il recevra pour cette job.")}</p>
               </div>
               {!clientAbsent ? (
                 <label
@@ -5155,10 +5028,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                     className="mt-0.5 h-5 w-5 shrink-0 accent-emerald-600"
                   />
                   <span className="min-w-0 text-[12px] leading-snug text-slate-700">
-                    <span className="font-extrabold">✍️ {collegues.map((c) => c.nom).join(", ") || "Mon collègue"} a déjà fait signer le client</span>
-                    <span className="mt-0.5 block text-[11px] text-slate-500">
-                      Ta signature n&apos;est plus exigée et le client ne recevra PAS un deuxième bon — un seul document part pour cette job.
-                    </span>
+                    <span className="font-extrabold">✍️ {collegues.map((c) => c.nom).join(", ") || "Mon collègue"}{" "}{t("a déjà fait signer le client")}</span>
+                    <span className="mt-0.5 block text-[11px] text-slate-500">{t("Ta signature n'est plus exigée et le client ne recevra PAS un deuxième bon — un seul document part pour cette job.")}</span>
                   </span>
                 </label>
               ) : null}
@@ -5166,12 +5037,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             ) : (
               <div className="mt-2.5 rounded-xl bg-slate-100 p-3">
                 <p className="text-[12px] font-bold text-slate-700">
-                  {colleguesRestants.map((c) => c.nom).join(", ")} n&apos;a pas encore fermé sa part
-                </p>
-                <p className="mt-0.5 text-[12px] leading-snug text-slate-600">
-                  Si tout va bien, c&apos;est {colleguesRestants.length > 1 ? "eux" : "elle ou lui"} qui fera signer le client
-                  en partant. Tu peux fermer tes heures.
-                </p>
+                  {colleguesRestants.map((c) => c.nom).join(", ")}{" "}{t("n'a pas encore fermé sa part")}</p>
+                <p className="mt-0.5 text-[12px] leading-snug text-slate-600">{colleguesRestants.length > 1
+                ? t("Si tout va bien, ce sont eux qui feront signer le client en partant. Tu peux fermer tes heures.")
+                : t("Si tout va bien, c'est elle ou lui qui fera signer le client en partant. Tu peux fermer tes heures.")}</p>
                 {/* SORTIE DE SECOURS — le collègue n'est pas venu.
                     Sans ce bouton, le travail partait SANS signature du
                     client : l'application attendait quelqu'un qui ne
@@ -5179,13 +5048,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 <button
                   onClick={() => { setTermineSeul(true); onMajTache(tache.id, { termineSeul: true }); }}
                   className="mt-2 min-h-[44px] w-full rounded-lg border-2 border-[#FF6A13] text-[12px] font-extrabold text-[#FF6A13] active:scale-[0.99]"
-                >
-                  Je termine seul — {colleguesRestants.map((c) => c.nom).join(", ")} n&apos;est pas venu
-                </button>
-                <p className="mt-1 text-[10px] leading-snug text-slate-400">
-                  À utiliser seulement si tu es certain. Tu deviens alors responsable de faire signer le client, et le
-                  bureau en est informé.
-                </p>
+                >{t("Je termine seul —")}{" "}{colleguesRestants.map((c) => c.nom).join(", ")}{" "}{t("n'est pas venu")}</button>
+                <p className="mt-1 text-[10px] leading-snug text-slate-400">{t("À utiliser seulement si tu es certain. Tu deviens alors responsable de faire signer le client, et le bureau en est informé.")}</p>
               </div>
             )}
           </div>
@@ -5195,7 +5059,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             facture ni l'écran de signature que le client voit. */}
         {String(tache.noteBureau || "").trim() && (
           <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
-            <p className="text-[10px] font-extrabold uppercase tracking-wide text-amber-800">🔒 Note du bureau — ne pas montrer au client</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-amber-800">{t("🔒 Note du bureau — ne pas montrer au client")}</p>
             <p className="mt-1 whitespace-pre-wrap text-[13px] font-semibold leading-snug text-amber-950">{tache.noteBureau}</p>
           </div>
         )}
@@ -5219,13 +5083,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                     2026-08-19) — un technicien devant un immeuble doit
                     savoir à quelle porte frapper sans fouiller. */}
                 {tache.adresseUnite && (
-                  <p className="mt-0.5 text-[13px] font-extrabold text-[#FF6A13]">🚪 App. / local : {tache.adresseUnite}</p>
+                  <p className="mt-0.5 text-[13px] font-extrabold text-[#FF6A13]">{t("🚪 App. / local :")}{" "}{tache.adresseUnite}</p>
                 )}
                 {/* Sur un gros chantier, savoir QUI demander vaut autant
                     que l'adresse elle-même. */}
                 {tache.contactSurPlace?.nom && (
-                  <p className="mt-1 text-[12px] font-semibold text-[#FF6A13]">
-                    👤 Demander {tache.contactSurPlace.nom}
+                  <p className="mt-1 text-[12px] font-semibold text-[#FF6A13]">{t("👤 Demander")}{" "}{tache.contactSurPlace.nom}
                     {tache.contactSurPlace.role ? ` (${tache.contactSurPlace.role})` : ""}
                   </p>
                 )}
@@ -5239,7 +5102,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                       <p key={i} className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-[12px] font-semibold leading-snug text-sky-900">
                         🔧 {u.emplacement ? <span className="font-extrabold">{u.emplacement} — </span> : null}
                         {u.modele || "Unité"}
-                        {u.serie ? <span className="block text-[11px] font-normal text-sky-700">Nº série : {u.serie}</span> : null}
+                        {u.serie ? <span className="block text-[11px] font-normal text-sky-700">{t("Nº série :")}{" "}{u.serie}</span> : null}
                       </p>
                     ))}
                   </div>
@@ -5250,8 +5113,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               onClick={() => ouvrirTrajet(tache.adresseIntervention || tache.adresseTravaux)}
               className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
             >
-              <Navigation2 size={16} /> M&apos;y rendre
-            </button>
+              <Navigation2 size={16} />{" "}{t("M'y rendre")}</button>
           </div>
         )}
 
@@ -5323,7 +5185,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 </span>
               </span>
             </span>
-            <span className="rounded-full bg-purple-600 px-3 py-1 text-[11px] font-bold text-white">Voir le devis</span>
+            <span className="rounded-full bg-purple-600 px-3 py-1 text-[11px] font-bold text-white">{t("Voir le devis")}</span>
           </button>
         )}
 
@@ -5337,8 +5199,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {tache.description && !(Array.isArray(tache.ramassages) && tache.ramassages.length > 0) && (
           <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
             <p className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-blue-700">
-              <FileText size={13} /> Description des travaux — par l'administration
-            </p>
+              <FileText size={13} />{" "}{t("Description des travaux — par l'administration")}</p>
             <p className="whitespace-pre-wrap text-sm leading-relaxed text-blue-900">{tache.description}</p>
           </div>
         )}
@@ -5349,8 +5210,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             plus besoin d'appeler pour « c'est où déjà ? ». */}
         {(tache.piecesJointes || []).length > 0 && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
-              📎 Documents du bureau ({tache.piecesJointes.length})
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("📎 Documents du bureau (")}{tache.piecesJointes.length})
             </p>
             <div className="grid grid-cols-3 gap-2">
               {tache.piecesJointes.map((pj) => (
@@ -5384,7 +5244,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-900">{tache.devisNumero ? `Devis #${tache.devisNumero}` : "Devis liés"}</h3>
-                  <p className="text-[11px] text-slate-500">Items et quantités — les prix sont gérés par l'administration.</p>
+                  <p className="text-[11px] text-slate-500">{t("Items et quantités — les prix sont gérés par l'administration.")}</p>
                 </div>
                 <button onClick={() => setModaleDevis(false)} aria-label="Fermer">
                   <X size={18} className="text-slate-400" />
@@ -5413,7 +5273,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 const lignes = bloc?.lignes || [];
                 return (
                   <div key={n} className="mt-4">
-                    <h4 className="mb-1.5 text-sm font-extrabold text-slate-900">📎 Devis #{n}</h4>
+                    <h4 className="mb-1.5 text-sm font-extrabold text-slate-900">{t("📎 Devis #")}{n}</h4>
                     {lignes.length > 0 ? (
                       <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
                         {lignes.map((l, i) => (
@@ -5426,9 +5286,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                         ))}
                       </div>
                     ) : (
-                      <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                        Devis QuickBooks — son détail est dans la description des travaux.
-                      </p>
+                      <p className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">{t("Devis QuickBooks — son détail est dans la description des travaux.")}</p>
                     )}
                   </div>
                 );
@@ -5436,9 +5294,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               <button
                 onClick={() => setModaleDevis(false)}
                 className="mt-4 min-h-[48px] w-full rounded-xl bg-[#131B2E] py-3 text-sm font-bold text-white active:scale-[0.99]"
-              >
-                Fermer
-              </button>
+              >{t("Fermer")}</button>
             </div>
           </div>
         )}
@@ -5482,9 +5338,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                     defaultValue=""
                     className="w-full appearance-none rounded-xl border border-slate-300 bg-white py-2.5 pl-3 pr-8 text-xs font-bold text-slate-700"
                   >
-                    <option value="" disabled>
-                      + Ajouter du catalogue
-                    </option>
+                    <option value="" disabled>{t("+ Ajouter du catalogue")}</option>
                     {PRODUITS_CATALOGUE.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.nom} — {p.prix_vendant.toFixed(2)} $
@@ -5495,24 +5349,20 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 </div>
               )}
               <Button variant="outline" onClick={ajouterHorsCatalogue} className="min-h-0 py-2.5 text-xs">
-                <Plus size={14} /> Item hors catalogue
-              </Button>
+                <Plus size={14} />{" "}{t("Item hors catalogue")}</Button>
             </div>
           )}
 
           {lignes.length > 0 && (
             <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2 text-sm font-bold text-slate-900">
-              <span>Total</span>
+              <span>{t("Total")}</span>
               <span className="tabular-nums">{total.toFixed(2)} $</span>
             </div>
           )}
 
           {forceRevision && (
             <div className="mt-2 flex items-start gap-2 rounded-xl bg-orange-50 p-3 text-xs font-semibold text-[#B14E0E]">
-              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-              Un item à prix non listé a été ajouté. Ce bon sera marqué
-              « En attente de révision de prix » à l'envoi.
-            </div>
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />{t("Un item à prix non listé a été ajouté. Ce bon sera marqué « En attente de révision de prix » à l'envoi.")}</div>
           )}
         </div>
 
@@ -5527,7 +5377,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             ============================================================ */}
         {!lectureSeule && !estVisiteSoumission && (
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Unité vérifiée</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("Unité vérifiée")}</p>
 
             <label className="flex items-start gap-2 rounded-xl bg-slate-50 p-2.5">
               <input
@@ -5536,9 +5386,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 onChange={(e) => onMajTache(tache.id, { aucunNumero: e.target.checked })}
                 className="mt-0.5 h-5 w-5 shrink-0 accent-[#131B2E]"
               />
-              <span className="text-[13px] leading-snug text-slate-600">
-                Aucun numéro à prendre, ou déjà pris
-              </span>
+              <span className="text-[13px] leading-snug text-slate-600">{t("Aucun numéro à prendre, ou déjà pris")}</span>
             </label>
 
             {!tache.aucunNumero && (
@@ -5569,9 +5417,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                         <button
                           onClick={() => onMajTache(tache.id, { unites: tache.unites.filter((_, j) => j !== i) })}
                           className="text-[11px] font-bold text-slate-400"
-                        >
-                          Retirer
-                        </button>
+                        >{t("Retirer")}</button>
                       )}
                     </div>
                     <div className="grid grid-cols-2 gap-2">
@@ -5582,7 +5428,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                           liste[i] = { ...liste[i], modele: e.target.value };
                           onMajTache(tache.id, { unites: liste });
                         }}
-                        placeholder="Modèle"
+                        placeholder={t("Modèle")}
                         className="min-h-[48px] w-full rounded-xl border border-slate-300 px-3 text-sm"
                       />
                       <input
@@ -5592,7 +5438,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                           liste[i] = { ...liste[i], serie: e.target.value };
                           onMajTache(tache.id, { unites: liste });
                         }}
-                        placeholder="Nº de série"
+                        placeholder={t("Nº de série")}
                         className="min-h-[48px] w-full rounded-xl border border-slate-300 px-3 text-sm"
                       />
                     </div>
@@ -5608,7 +5454,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                         liste[i] = { ...liste[i], emplacement: e.target.value };
                         onMajTache(tache.id, { unites: liste });
                       }}
-                      placeholder="Emplacement / description (ex. : RTU toit côté nord)"
+                      placeholder={t("Emplacement / description (ex. : RTU toit côté nord)")}
                       className="mt-2 min-h-[48px] w-full rounded-xl border border-slate-300 px-3 text-sm"
                     />
                   </div>
@@ -5620,9 +5466,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                     })
                   }
                   className="min-h-[44px] w-full rounded-xl border-2 border-dashed border-slate-300 text-xs font-bold text-slate-500 active:scale-[0.99]"
-                >
-                  + Ajouter une unité
-                </button>
+                >{t("+ Ajouter une unité")}</button>
               </div>
             )}
 
@@ -5636,24 +5480,20 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 onChange={(e) => onMajTache(tache.id, { pieceACommander: e.target.checked })}
                 className="mt-0.5 h-5 w-5 shrink-0 accent-[#FF6A13]"
               />
-              <span className="text-[13px] font-bold leading-snug text-amber-900">
-                🔧 Pièce à commander — je ne peux pas terminer la réparation aujourd&apos;hui
-              </span>
+              <span className="text-[13px] font-bold leading-snug text-amber-900">{t("🔧 Pièce à commander — je ne peux pas terminer la réparation aujourd'hui")}</span>
             </label>
 
             {tache.pieceACommander && (
               <div>
-                <label className="mb-1 block text-[11px] font-bold text-slate-500">Pièce requise</label>
+                <label className="mb-1 block text-[11px] font-bold text-slate-500">{t("Pièce requise")}</label>
                 <textarea
                   rows={2}
                   value={tache.pieceRequise || ""}
                   onChange={(e) => onMajTache(tache.id, { pieceRequise: e.target.value })}
-                  placeholder="Ex. : carte de contrôle, moteur de ventilateur…"
+                  placeholder={t("Ex. : carte de contrôle, moteur de ventilateur…")}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 />
-                <p className="mt-1 text-[11px] leading-snug text-amber-700">
-                  Le bureau sera alerté pour commander. Une 2e visite sera planifiée dès la réception de la pièce.
-                </p>
+                <p className="mt-1 text-[11px] leading-snug text-amber-700">{t("Le bureau sera alerté pour commander. Une 2e visite sera planifiée dès la réception de la pièce.")}</p>
               </div>
             )}
           </div>
@@ -5676,8 +5516,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             fermeture ⇒ « travaux non terminés » (bouton pré-rempli). */}
         {etapesJob.length > 0 && (
           <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-              ✅ Étapes de la job{" "}
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("✅ Étapes de la job")}{" "}
               <span className="font-semibold normal-case text-slate-400">
                 ({etapesJob.length - etapesRestantes.length}/{etapesJob.length})
               </span>
@@ -5713,8 +5552,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             {etapesBloquent && !lectureSeule && (
               <div className="rounded-xl border border-orange-300 bg-orange-50 p-2.5">
                 <p className="text-[11px] font-bold leading-snug text-orange-900">
-                  ⚠️ {etapesRestantes.length} étape{etapesRestantes.length > 1 ? "s" : ""} pas cochée{etapesRestantes.length > 1 ? "s" : ""}. Si c&apos;est fait, coche — sinon :
-                </p>
+                  ⚠️ {etapesRestantes.length > 1 ? t("{n} étapes pas cochées. Si c'est fait, coche — sinon :", { n: etapesRestantes.length }) : t("1 étape pas cochée. Si c'est fait, coche — sinon :")}</p>
                 <button
                   onClick={() =>
                     onMajTache(tache.id, {
@@ -5725,9 +5563,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                     })
                   }
                   className="mt-1.5 w-full rounded-lg bg-orange-600 px-3 py-2 text-xs font-extrabold text-white active:scale-[0.99]"
-                >
-                  🚧 Marquer « travaux non terminés » (le reste à faire se pré-remplit)
-                </button>
+                >{t("🚧 Marquer « travaux non terminés » (le reste à faire se pré-remplit)")}</button>
               </div>
             )}
           </div>
@@ -5735,7 +5571,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
 
         {!lectureSeule && !estVisiteSoumission && (
           <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">État des travaux</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("État des travaux")}</p>
             <label
               className={`flex items-start gap-2 rounded-xl border-2 p-3 ${
                 tache.travauxNonTermines ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-slate-50"
@@ -5747,31 +5583,22 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 onChange={(e) => onMajTache(tache.id, { travauxNonTermines: e.target.checked })}
                 className="mt-0.5 h-5 w-5 shrink-0 accent-[#FF6A13]"
               />
-              <span className={`text-[13px] font-bold leading-snug ${tache.travauxNonTermines ? "text-orange-900" : "text-slate-600"}`}>
-                🚧 Les travaux ne sont PAS terminés — il faut revenir
-              </span>
+              <span className={`text-[13px] font-bold leading-snug ${tache.travauxNonTermines ? "text-orange-900" : "text-slate-600"}`}>{t("🚧 Les travaux ne sont PAS terminés — il faut revenir")}</span>
             </label>
 
             {tache.travauxNonTermines && (
               <div>
-                <label className="mb-1 block text-[11px] font-bold text-slate-500">
-                  Ce qui reste à faire *
-                </label>
+                <label className="mb-1 block text-[11px] font-bold text-slate-500">{t("Ce qui reste à faire *")}</label>
                 <textarea
                   rows={4}
                   value={tache.resteAFaire || ""}
                   onChange={(e) => onMajTache(tache.id, { resteAFaire: e.target.value })}
-                  placeholder="Ex. : reste à raccorder le drain et à isoler le haut de la hotte. Prévoir 3 h et une échelle de 24 pi."
+                  placeholder={t("Ex. : reste à raccorder le drain et à isoler le haut de la hotte. Prévoir 3 h et une échelle de 24 pi.")}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm leading-relaxed"
                 />
-                <p className="mt-1 text-[11px] leading-snug text-orange-700">
-                  Sois précis : c&apos;est ce texte que le bureau lira pour planifier le retour. Tes heures d&apos;aujourd&apos;hui
-                  se comptent normalement — seule la facturation attend.
-                </p>
+                <p className="mt-1 text-[11px] leading-snug text-orange-700">{t("Sois précis : c'est ce texte que le bureau lira pour planifier le retour. Tes heures d'aujourd'hui se comptent normalement — seule la facturation attend.")}</p>
                 {(tache.resteAFaire || "").trim().length < 5 && (
-                  <p className="mt-1 text-[11px] font-bold leading-snug text-orange-800">
-                    ⚠️ Écris ce qui reste à faire avant d&apos;envoyer le bon.
-                  </p>
+                  <p className="mt-1 text-[11px] font-bold leading-snug text-orange-800">{t("⚠️ Écris ce qui reste à faire avant d'envoyer le bon.")}</p>
                 )}
               </div>
             )}
@@ -5814,14 +5641,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         <div className="space-y-3">
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
-                Notes de terrain
-                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-emerald-700">
-                  Visible au client
-                </span>
-                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-600">
-                  Obligatoire
-                </span>
+              <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("Notes de terrain")}<span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-emerald-700">{t("Visible au client")}</span>
+                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-600">{t("Obligatoire")}</span>
               </label>
               {!lectureSeule && (
                 <button
@@ -5848,7 +5669,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               onBlur={commettreNotesTerrain}
               disabled={lectureSeule}
               rows={3}
-              placeholder="Observations, travaux effectués, recommandations..."
+              placeholder={t("Observations, travaux effectués, recommandations...")}
               className="w-full rounded-xl border border-slate-300 bg-white p-3 text-sm disabled:bg-slate-100 disabled:text-slate-500"
             />
             {/* ✍️ NOTE DE FIN PRÉPARÉE (2026-09-22, idée retenue par le
@@ -5870,19 +5691,16 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                   onClick={ajouter}
                   className="mt-1.5 w-full rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-left text-xs font-bold text-emerald-800 active:scale-[0.99]"
                 >
-                  ✍️ {notesTerrain.trim() ? "Ajouter" : "Partir des"} {faites.length} étape{faites.length > 1 ? "s" : ""} faite{faites.length > 1 ? "s" : ""} — tu complètes ensuite
-                </button>
+                  ✍️ {faites.length > 1
+                    ? t(notesTerrain.trim() ? "Ajouter les {n} étapes faites — tu complètes ensuite" : "Partir des {n} étapes faites — tu complètes ensuite", { n: faites.length })
+                    : t(notesTerrain.trim() ? "Ajouter l'étape faite — tu complètes ensuite" : "Partir de l'étape faite — tu complètes ensuite")}</button>
               );
             })()}
           </div>
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">
-                Notes internes
-                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-slate-600">
-                  Non visible au client
-                </span>
+              <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("Notes internes")}<span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-slate-600">{t("Non visible au client")}</span>
               </label>
               {!lectureSeule && (
                 <button
@@ -5909,7 +5727,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               onBlur={commettreNotesInternes}
               disabled={lectureSeule}
               rows={3}
-              placeholder="Notes pour l'équipe seulement (accès difficile, comportement client, à surveiller...)"
+              placeholder={t("Notes pour l'équipe seulement (accès difficile, comportement client, à surveiller...)")}
               className="w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 p-3 text-sm disabled:bg-slate-100 disabled:text-slate-500"
             />
           </div>
@@ -5932,10 +5750,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {!jeSuisLeDernier && (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-[12px] leading-snug text-slate-600">
-              <span className="font-bold text-slate-700">Signature facultative pour toi</span> —{" "}
-              {colleguesRestants.map((c) => c.nom).join(", ")} doit fermer après toi. Si le client est devant toi et
-              que le travail est fini, tu peux quand même la faire signer : ça ne nuit jamais.
-            </p>
+              <span className="font-bold text-slate-700">{t("Signature facultative pour toi")}</span> —{" "}
+              {colleguesRestants.map((c) => c.nom).join(", ")}{" "}{t("doit fermer après toi. Si le client est devant toi et que le travail est fini, tu peux quand même la faire signer : ça ne nuit jamais.")}</p>
           </div>
         )}
         <div ref={refSignature} className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -5944,8 +5760,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             onClick={() => setModaleConditions(true)}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-slate-700 active:bg-slate-100"
           >
-            <FileText size={16} /> Consulter les termes et conditions générales
-          </button>
+            <FileText size={16} />{" "}{t("Consulter les termes et conditions générales")}</button>
           <label className="mt-3 flex items-start gap-2.5">
             <input
               type="checkbox"
@@ -5957,8 +5772,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               disabled={lectureSeule}
               className="mt-0.5 h-5 w-5 shrink-0 accent-[#131B2E]"
             />
-            <span className="text-sm text-slate-700">
-              J'ai lu et j'accepte les termes et conditions générales de Ventilation DGL inc. <span className="text-red-500">*</span>
+            <span className="text-sm text-slate-700">{t("J'ai lu et j'accepte les termes et conditions générales de Ventilation DGL inc.")}{" "}<span className="text-red-500">*</span>
             </span>
           </label>
         </div>
@@ -5980,16 +5794,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               className="mt-0.5 h-5 w-5 shrink-0 accent-[#131B2E]"
             />
             <span className="text-sm text-slate-700">
-              <span className="font-bold">Le client n&apos;était pas sur place à la fin des travaux</span> — impossible
-              de faire signer le bon.
-            </span>
+              <span className="font-bold">{t("Le client n'était pas sur place à la fin des travaux")}</span>{" "}{t("— impossible de faire signer le bon.")}</span>
           </label>
           {clientAbsent && (
-            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">
-              La signature n&apos;est plus exigée : selon la clause 10 des conditions, les travaux sont
-              réputés reçus tels qu&apos;exécutés. La mention sera inscrite au dossier et visible au bureau.
-              Assure-toi que tes photos « après » montrent bien le travail terminé — c&apos;est ta preuve.
-            </p>
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-800">{t("La signature n'est plus exigée : selon la clause 10 des conditions, les travaux sont réputés reçus tels qu'exécutés. La mention sera inscrite au dossier et visible au bureau. Assure-toi que tes photos « après » montrent bien le travail terminé — c'est ta preuve.")}</p>
           )}
         </div>
 
@@ -6004,13 +5812,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             onChange={(e) => setNomMoule(e.target.value)}
             onBlur={commettreNomMoule}
             disabled={lectureSeule || !accepteConditions || clientAbsent}
-            placeholder="Ex: JEAN TREMBLAY"
+            placeholder={t("Ex: JEAN TREMBLAY")}
             className="mb-4 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-bold uppercase tracking-wide disabled:bg-slate-100 disabled:text-slate-500"
           />
           {!accepteConditions && !lectureSeule && !clientAbsent && (
             <p className="mb-3 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-              <Lock size={13} className="shrink-0" /> Accepte les termes et conditions ci-dessus pour débloquer la signature.
-            </p>
+              <Lock size={13} className="shrink-0" />{" "}{t("Accepte les termes et conditions ci-dessus pour débloquer la signature.")}</p>
           )}
           <ZoneSignature
             aSignature={aSignature}
@@ -6029,26 +5836,18 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {confirmation === "tropTot" && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-xs rounded-2xl bg-white p-5">
-              <p className="text-base font-extrabold text-slate-900">⚠️ Il reste des jours prévus</p>
-              <p className="mt-1.5 text-[13px] leading-snug text-slate-600">
-                Ce chantier est prévu sur <span className="font-bold">{tache.nbJoursPrevus} jours</span> et tu es au
-                jour {tache.jourNumero}. Fermer les travaux maintenant fait signer le client et envoie le bon au bureau
-                pour facturation.
-              </p>
-              <p className="mt-2 text-[13px] font-bold text-slate-800">Les travaux sont-ils vraiment terminés ?</p>
+              <p className="text-base font-extrabold text-slate-900">{t("⚠️ Il reste des jours prévus")}</p>
+              <p className="mt-1.5 text-[13px] leading-snug text-slate-600">{t("Ce chantier est prévu sur")}{" "}<span className="font-bold">{tache.nbJoursPrevus}{" "}{t("jours")}</span>{" "}{t("et tu es au jour")}{" "}{tache.jourNumero}{t(". Fermer les travaux maintenant fait signer le client et envoie le bon au bureau pour facturation.")}</p>
+              <p className="mt-2 text-[13px] font-bold text-slate-800">{t("Les travaux sont-ils vraiment terminés ?")}</p>
               <div className="mt-4 space-y-2">
                 <button
                   onClick={() => { setConfirmation(null); verifierEquipePuisFermer(); }}
                   className="min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
-                >
-                  Oui, les travaux sont terminés
-                </button>
+                >{t("Oui, les travaux sont terminés")}</button>
                 <button
                   onClick={() => setConfirmation(null)}
                   className="min-h-[48px] w-full rounded-xl border border-slate-300 text-sm font-bold text-slate-600 active:scale-[0.99]"
-                >
-                  Non, je reviens demain
-                </button>
+                >{t("Non, je reviens demain")}</button>
               </div>
             </div>
           </div>
@@ -6057,18 +5856,13 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {confirmation === "dernierJour" && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="w-full max-w-xs rounded-2xl bg-white p-5">
-              <p className="text-base font-extrabold text-slate-900">C&apos;est le dernier jour prévu</p>
-              <p className="mt-1.5 text-[13px] leading-snug text-slate-600">
-                Si les travaux sont finis, ferme-les : sans ça, le bureau ne pourra pas facturer et le chantier restera
-                ouvert.
-              </p>
+              <p className="text-base font-extrabold text-slate-900">{t("C'est le dernier jour prévu")}</p>
+              <p className="mt-1.5 text-[13px] leading-snug text-slate-600">{t("Si les travaux sont finis, ferme-les : sans ça, le bureau ne pourra pas facturer et le chantier restera ouvert.")}</p>
               <div className="mt-4 space-y-2">
                 <button
                   onClick={() => { setConfirmation(null); verifierEquipePuisFermer(); }}
                   className="min-h-[48px] w-full rounded-xl bg-[#FF6A13] text-sm font-extrabold text-white active:scale-[0.99]"
-                >
-                  ✓ Les travaux sont terminés
-                </button>
+                >{t("✓ Les travaux sont terminés")}</button>
                 {/* PAS DE JOURNÉE SUPPLÉMENTAIRE EN AUTONOMIE : le
                     technicien ne connaît pas les contraintes d'horaire
                     du bureau — on ne peut pas nécessairement revenir
@@ -6076,13 +5870,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 <button
                   onClick={() => { setConfirmation(null); onTerminer(); onRetour(); }}
                   className="min-h-[48px] w-full rounded-xl border-2 border-amber-400 bg-amber-50 text-sm font-bold text-amber-800 active:scale-[0.99]"
-                >
-                  📞 Pas fini — j&apos;appelle le bureau
-                </button>
+                >{t("📞 Pas fini — j'appelle le bureau")}</button>
               </div>
-              <p className="mt-2 text-[11px] leading-snug text-slate-400">
-                Aucune journée ne se rajoute toute seule : c&apos;est le bureau qui décide de la suite de l&apos;horaire.
-              </p>
+              <p className="mt-2 text-[11px] leading-snug text-slate-400">{t("Aucune journée ne se rajoute toute seule : c'est le bureau qui décide de la suite de l'horaire.")}</p>
             </div>
           </div>
         )}
@@ -6097,7 +5887,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3">
-                <h3 className="text-sm font-extrabold text-slate-900">Termes et conditions générales</h3>
+                <h3 className="text-sm font-extrabold text-slate-900">{t("Termes et conditions générales")}</h3>
                 <button onClick={() => setModaleConditions(false)} aria-label="Fermer">
                   <X size={20} className="text-slate-400" />
                 </button>
@@ -6106,9 +5896,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                 <TermesConditions />
               </div>
               <div className="shrink-0 border-t border-slate-200 p-3">
-                <Button onClick={accepterConditions} className="w-full">
-                  J'ai lu et j'accepte
-                </Button>
+                <Button onClick={accepterConditions} className="w-full">{t("J'ai lu et j'accepte")}</Button>
               </div>
             </div>
           </div>
@@ -6117,16 +5905,13 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         {necessiteDeuxiemeSignature && !lectureSeule && (
           <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
             <p className="mb-1.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-amber-700">
-              <Lock size={13} /> 2e signature client — validation de la modification
-            </p>
-            <p className="mb-3 text-xs text-amber-700">
-              Ce bon a déjà été fermé. Le client doit revalider la modification pour qu'elle soit envoyée.
-            </p>
+              <Lock size={13} />{" "}{t("2e signature client — validation de la modification")}</p>
+            <p className="mb-3 text-xs text-amber-700">{t("Ce bon a déjà été fermé. Le client doit revalider la modification pour qu'elle soit envoyée.")}</p>
             <input
               type="text"
               value={nomMoule2}
               onChange={(e) => setNomMoule2(e.target.value)}
-              placeholder="Ex: JEAN TREMBLAY"
+              placeholder={t("Ex: JEAN TREMBLAY")}
               className="mb-4 w-full rounded-xl border border-amber-300 bg-white px-3 py-2.5 text-sm font-bold uppercase tracking-wide"
             />
             <ZoneSignature
@@ -6142,9 +5927,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       {/* BARRE D'ACTION FIXE */}
       <div className="sticky bottom-0 border-t border-slate-200 bg-white px-4 py-3">
         {lectureSeule ? (
-          <p className="text-center text-xs font-semibold text-slate-400">
-            Consultation seulement — envoi désactivé.
-          </p>
+          <p className="text-center text-xs font-semibold text-slate-400">{t("Consultation seulement — envoi désactivé.")}</p>
         ) : (
           <>
             {!peutEnvoyer && (
@@ -6155,7 +5938,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                   <li>{t("Tu as coché « travaux non terminés » — écris ce qui reste à faire.")}</li>
                 )}
                 {etapesBloquent && (
-                  <li>{etapesRestantes.length} étape{etapesRestantes.length > 1 ? "s" : ""} de la job pas cochée{etapesRestantes.length > 1 ? "s" : ""} — coche-{etapesRestantes.length > 1 ? "les" : "la"}, ou marque « travaux non terminés » (bouton dans la section Étapes).</li>
+                  <li>{etapesRestantes.length > 1
+                  ? t("{n} étapes de la job pas cochées — coche-les, ou marque « travaux non terminés » (bouton dans la section Étapes).", { n: etapesRestantes.length })
+                  : t("1 étape de la job pas cochée — coche-la, ou marque « travaux non terminés » (bouton dans la section Étapes).")}</li>
                 )}
                 {(nomMoule.trim().length <= 2 || !aSignature) && <li>{t("Le nom en lettres moulées et la signature sont requis.")}</li>}
                 {necessiteDeuxiemeSignature && (nomMoule2.trim().length <= 2 || !aSignature2) && (
@@ -6180,9 +5965,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               <button
                 onClick={() => { setPartirRefus(""); setModalPartirPremier(true); }}
                 className="mb-2 min-h-[52px] w-full rounded-xl border-2 border-sky-300 bg-sky-50 text-sm font-extrabold text-sky-800 active:scale-[0.99]"
-              >
-                🚪 Je pars en premier — {colleguesRestants.map((c) => c.nom).join(", ")} fera signer le client
-              </button>
+              >{t("🚪 Je pars en premier —")}{" "}{colleguesRestants.map((c) => c.nom).join(", ")}{" "}{t("fera signer le client")}</button>
             )}
             {tache.nbJoursPrevus > 1 && (
               <button
@@ -6196,10 +5979,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               {tache.envoye ? t("METTRE À JOUR L'ENVOI") : tache.nbJoursPrevus > 1 ? t("✓ TRAVAUX TERMINÉS") : t("TERMINER ET ENVOYER")}
             </Button>
             {tache.nbJoursPrevus > 1 && (
-              <p className="mt-1.5 text-center text-[11px] leading-snug text-slate-400">
-                Jour {tache.jourNumero} sur {tache.nbJoursPrevus}. « Travaux terminés » fait signer le client et envoie
-                le bon — une seule fois pour tout le chantier.
-              </p>
+              <p className="mt-1.5 text-center text-[11px] leading-snug text-slate-400">{t("Jour")}{" "}{tache.jourNumero}{" "}{t("sur")}{" "}{tache.nbJoursPrevus}{t(". « Travaux terminés » fait signer le client et envoie le bon — une seule fois pour tout le chantier.")}</p>
             )}
           </>
         )}
@@ -6211,10 +5991,8 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       {modalCourriels && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; (() => setModalCourriels(false))(); }}>
           <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-extrabold text-slate-900">📧 Envoyer le bon au client</h3>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Coche une ou plusieurs adresses — le client reçoit tout de suite le détail des travaux, avec les photos.
-            </p>
+            <h3 className="text-base font-extrabold text-slate-900">{t("📧 Envoyer le bon au client")}</h3>
+            <p className="mt-0.5 text-xs text-slate-500">{t("Coche une ou plusieurs adresses — le client reçoit tout de suite le détail des travaux, avec les photos.")}</p>
             <div className="mt-3 space-y-2">
               {courrielsClient.map((c) => (
                 <label
@@ -6239,30 +6017,27 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             {/* ✍️ AUTRE ADRESSE (2026-09-09, demande №9b) — le client la
                 dicte sur place ; elle s'ajoute aux cases cochées. */}
             <div className="mt-3">
-              <label className="mb-1 block text-[11px] font-bold text-slate-500">✍️ Autre adresse (dictée par le client)</label>
+              <label className="mb-1 block text-[11px] font-bold text-slate-500">{t("✍️ Autre adresse (dictée par le client)")}</label>
               <input
                 type="email"
                 inputMode="email"
                 autoCapitalize="off"
                 value={courrielLibre}
                 onChange={(e) => setCourrielLibre(e.target.value)}
-                placeholder="courriel@exemple.com (virgule entre plusieurs)"
+                placeholder={t("courriel@exemple.com (virgule entre plusieurs)")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none"
               />
               {courrielLibre.trim() && courrielsLibresValides().length === 0 && (
-                <p className="mt-1 text-[10px] font-bold text-red-600">Adresse incomplète — vérifie le @ et le point.</p>
+                <p className="mt-1 text-[10px] font-bold text-red-600">{t("Adresse incomplète — vérifie le @ et le point.")}</p>
               )}
             </div>
             {(() => {
               const tous = [...new Set([...courrielsChoisis, ...courrielsLibresValides()])];
               return (
             <div className="mt-4 space-y-2">
-              <Button onClick={() => envoyer(tous)} disabled={tous.length === 0} className="w-full">
-                Envoyer le bon{tous.length > 1 ? ` (${tous.length} adresses)` : ""}
+              <Button onClick={() => envoyer(tous)} disabled={tous.length === 0} className="w-full">{t("Envoyer le bon")}{tous.length > 1 ? ` (${tous.length} adresses)` : ""}
               </Button>
-              <Button variant="outline" onClick={() => envoyer([])} className="w-full">
-                Terminer sans envoyer de courriel
-              </Button>
+              <Button variant="outline" onClick={() => envoyer([])} className="w-full">{t("Terminer sans envoyer de courriel")}</Button>
             </div>
               );
             })()}
@@ -6277,25 +6052,19 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       {modalPartirPremier && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5">
-            <h3 className="text-base font-extrabold text-slate-900">🚪 Tu pars en premier du chantier ?</h3>
+            <h3 className="text-base font-extrabold text-slate-900">{t("🚪 Tu pars en premier du chantier ?")}</h3>
             {partirRefus ? (
               <>
                 <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[13px] leading-snug text-amber-800">⚠️ {partirRefus}</p>
                 <button
                   onClick={() => setModalPartirPremier(false)}
                   className="mt-3 min-h-[48px] w-full rounded-xl bg-[#FF6A13] text-sm font-extrabold text-white active:scale-[0.99]"
-                >
-                  Compris
-                </button>
+                >{t("Compris")}</button>
               </>
             ) : (
               <>
-                <p className="mt-1.5 text-[13px] leading-snug text-slate-600">
-                  Tes <span className="font-extrabold">{(dureeEcoulee(tache) / 3600).toFixed(2)} h</span> partent au bureau et ta
-                  carte se ferme — sans description, photo ni signature.{" "}
-                  <span className="font-bold">{colleguesRestants.map((c) => c.nom).join(", ")}</span> reste sur place : c&apos;est
-                  lui qui remplit le bon, fait signer le client et l&apos;envoie. Il reçoit l&apos;avis sur son téléphone.
-                </p>
+                <p className="mt-1.5 text-[13px] leading-snug text-slate-600">{t("Tes")}{" "}<span className="font-extrabold">{(dureeEcoulee(tache) / 3600).toFixed(2)} h</span>{" "}{t("partent au bureau et ta carte se ferme — sans description, photo ni signature.")}{" "}
+                  <span className="font-bold">{colleguesRestants.map((c) => c.nom).join(", ")}</span>{" "}{t("reste sur place : c'est lui qui remplit le bon, fait signer le client et l'envoie. Il reçoit l'avis sur son téléphone.")}</p>
                 <div className="mt-4 space-y-2">
                   <button
                     onClick={confirmerPartirPremier}
@@ -6307,9 +6076,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
                   <button
                     onClick={() => setModalPartirPremier(false)}
                     className="min-h-[48px] w-full rounded-xl border-2 border-slate-300 px-3 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
-                  >
-                    Non, je reste
-                  </button>
+                  >{t("Non, je reste")}</button>
                 </div>
               </>
             )}
@@ -6326,38 +6093,28 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       {modalEquipe && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-3 sm:items-center">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5">
-            <h3 className="text-base font-extrabold text-slate-900">🤝 Est-ce que toute l&apos;équipe a terminé ?</h3>
+            <h3 className="text-base font-extrabold text-slate-900">{t("🤝 Est-ce que toute l'équipe a terminé ?")}</h3>
             <div className="mt-3 space-y-1.5">
               {colleguesRestants.map((c) => (
                 <p key={c.email} className="rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
-                  ⏱️ <span className="font-bold">{c.nom}</span> n&apos;a pas encore fermé sa tâche sur son téléphone.
-                </p>
+                  ⏱️ <span className="font-bold">{c.nom}</span>{" "}{t("n'a pas encore fermé sa tâche sur son téléphone.")}</p>
               ))}
             </div>
             <div className="mt-4 space-y-2">
               <button
                 onClick={() => repondreEquipe(true)}
                 className="min-h-[52px] w-full rounded-xl bg-[#FF6A13] px-3 text-sm font-extrabold text-white active:scale-[0.99]"
-              >
-                ✅ Oui, on a tous terminé
-              </button>
-              <p className="text-[11px] leading-snug text-slate-500">
-                Tu fais signer le client et le bon part une seule fois.{" "}
-                {colleguesRestants.map((c) => c.nom).join(", ")} recevra une demande de confirmation de ses heures —
-                s&apos;il les ajuste, un administrateur devra valider.
-              </p>
+              >{t("✅ Oui, on a tous terminé")}</button>
+              <p className="text-[11px] leading-snug text-slate-500">{t("Tu fais signer le client et le bon part une seule fois.")}{" "}
+                {colleguesRestants.map((c) => c.nom).join(", ")}{" "}{t("recevra une demande de confirmation de ses heures — s'il les ajuste, un administrateur devra valider.")}</p>
               <button
                 onClick={() => repondreEquipe(false)}
                 className="min-h-[52px] w-full rounded-xl border-2 border-slate-300 px-3 text-sm font-extrabold text-slate-700 active:scale-[0.99]"
-              >
-                Non, d&apos;autres continuent — je ferme seulement ma partie
-              </button>
+              >{t("Non, d'autres continuent — je ferme seulement ma partie")}</button>
               <button
                 onClick={() => setModalEquipe(false)}
                 className="min-h-[44px] w-full rounded-xl text-[13px] font-bold text-slate-400 active:scale-[0.99]"
-              >
-                Annuler
-              </button>
+              >{t("Annuler")}</button>
             </div>
           </div>
         </div>
@@ -6401,6 +6158,9 @@ export default function App() {
 }
 
 function AppTechnicien() {
+  const { t, langue } = useLangue();
+  // « tx » = le traducteur, sans ambiguïté : plus bas, « t » est parfois une tâche.
+  const tx = t;
   // Config entreprise (contexte) — lue EN TÊTE : les hooks doivent
   // précéder tout retour conditionnel (règle des hooks React).
   const configTech = useEntreprise();
@@ -6875,7 +6635,7 @@ function AppTechnicien() {
         horodatage: Date.now(),
       })),
     ]);
-    setErreurSync(`📮 ${restes.length} envoi${restes.length > 1 ? "s" : ""} interrompu${restes.length > 1 ? "s" : ""} par la fermeture de l'app — repris automatiquement.`);
+    setErreurSync(restes.length > 1 ? tx("📮 {n} envois interrompus par la fermeture de l'app — repris automatiquement.", { n: restes.length }) : tx("📮 1 envoi interrompu par la fermeture de l'app — repris automatiquement."));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
   useEffect(() => {
@@ -6944,7 +6704,7 @@ function AppTechnicien() {
         // l'action reste en tête de file pour une prochaine tentative ;
         // un message informe le technicien sans bloquer le reste de
         // l'app. Pas de retrait de la file, donc pas de perte de données.
-        setErreurSync("Synchronisation interrompue — nouvelle tentative dès que la connexion sera stable.");
+        setErreurSync(t("Synchronisation interrompue — nouvelle tentative dès que la connexion sera stable."));
       } finally {
         // Le verrou se libère TOUJOURS ici, que l'opération ait été
         // annulée ou non — c'est le seul endroit où l'on sait que
@@ -7010,7 +6770,7 @@ function AppTechnicien() {
     // 📱 Mémoire pleine : on le DIT (avant : silence, et plus rien ne se
     // gardait si iOS fermait l'app — « des fois rien ne s'enregistre »).
     if (!sauvegarderTaches(taches, session?.user?.email)) {
-      setErreurSync("⚠️ Mémoire du téléphone pleine — tes changements ne seront pas gardés si l'app se ferme. Envoie tes bons maintenant et préviens le bureau.");
+      setErreurSync(t("⚠️ Mémoire du téléphone pleine — tes changements ne seront pas gardés si l'app se ferme. Envoie tes bons maintenant et préviens le bureau."));
     }
   }, [taches, session]);
 
@@ -7164,7 +6924,7 @@ function AppTechnicien() {
             { id: `sync-travail-${Date.now()}`, type: "travail", charge: chargeTravail, horodatage: Date.now() },
           ]);
           setErreurSync(
-            `📦 Heures de « ${t.titre || "tâche"} » en file — elles partiront au bureau dès le retour du réseau.`
+            tx("📦 Heures de « {titre} » en file — elles partiront au bureau dès le retour du réseau.", { titre: t.titre || tx("tâche") })
           );
         });
       // ⏱️ AGENDA EN DIRECT : la carte se ferme — le bloc du bureau
@@ -7256,7 +7016,7 @@ function AppTechnicien() {
       session
     ).catch((e) => {
       setErreurSync(
-        `⚠️ Journée bloquée (chrono oublié sur « ${titreOriginal} ») mais NON transmise au bureau — ${e?.message || "connexion impossible"}. Appelle l'administration.`
+        tx("⚠️ Journée bloquée (chrono oublié sur « {titre} ») mais NON transmise au bureau — {raison}. Appelle l'administration.", { titre: titreOriginal, raison: e?.message || tx("connexion impossible") })
       );
     });
     setTaches((prev) =>
@@ -7325,7 +7085,7 @@ function AppTechnicien() {
       .then(() => setErreurSync(""))
       .catch((e) =>
         setErreurSync(
-          `⚠️ Ta correction n'a PAS été transmise au bureau — ${e?.message || "connexion impossible"}. Réessaie une fois connecté.`
+          tx("⚠️ Ta correction n'a PAS été transmise au bureau — {raison}. Réessaie une fois connecté.", { raison: e?.message || tx("connexion impossible") })
         )
       );
 
@@ -7439,7 +7199,7 @@ function AppTechnicien() {
       .then(() => setErreurSync(""))
       .catch((e) =>
         setErreurSync(
-          `⚠️ Tes heures n'ont PAS été transmises au bureau — ${e?.message || "connexion impossible"}. Rouvre l'app une fois connecté.`
+          tx("⚠️ Tes heures n'ont PAS été transmises au bureau — {raison}. Rouvre l'app une fois connecté.", { raison: e?.message || tx("connexion impossible") })
         )
       );
     // ⏱️ Le bloc du bureau quitte le « en cours » (2026-08-21, vécu :
@@ -7487,7 +7247,7 @@ function AppTechnicien() {
       .then(() => setErreurSync(""))
       .catch((e) =>
         setErreurSync(
-          `⚠️ Ton ajustement n'a PAS été transmis au bureau — ${e?.message || "connexion impossible"}. Réessaie une fois connecté.`
+          tx("⚠️ Ton ajustement n'a PAS été transmis au bureau — {raison}. Réessaie une fois connecté.", { raison: e?.message || tx("connexion impossible") })
         )
       );
     // Même raison que ci-dessus : la carte est fermée, le bureau doit
@@ -7662,7 +7422,7 @@ function AppTechnicien() {
       )
         .then(() => setErreurSync(""))
         .catch((e) => {
-          setErreurSync(`⚠️ Dîner NON transmis au bureau — ${e?.message || "connexion impossible"}. La déduction de ${minutesDiner} min n'apparaîtra pas dans les heures de la semaine.`);
+          setErreurSync(tx("⚠️ Dîner NON transmis au bureau — {raison}. La déduction de {n} min n'apparaîtra pas dans les heures de la semaine.", { raison: e?.message || tx("connexion impossible"), n: minutesDiner }));
         });
     }
     demarrerTache(t.id);
@@ -7813,9 +7573,9 @@ function AppTechnicien() {
   if (!sectionsTech.includes("technicien") || !moduleTechnicienActif) {
     return (
       <div className="flex min-h-screen w-full flex-col sm:mx-auto items-center justify-center gap-3 sm:h-[844px] sm:min-h-0 sm:max-w-sm sm:overflow-hidden sm:rounded-[2.5rem] sm:border-8 sm:border-slate-900 bg-white p-6 text-center shadow-2xl">
-        <p className="text-lg font-extrabold text-slate-800">Accès refusé</p>
-        <p className="text-sm text-slate-500">Ton compte ({roleTech}) n'a pas accès à l'application technicien.</p>
-        <button onClick={() => supabase.auth.signOut()} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50">Se déconnecter</button>
+        <p className="text-lg font-extrabold text-slate-800">{t("Accès refusé")}</p>
+        <p className="text-sm text-slate-500">{t("Ton compte (")}{roleTech}{t(") n'a pas accès à l'application technicien.")}</p>
+        <button onClick={() => supabase.auth.signOut()} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50">{t("Se déconnecter")}</button>
       </div>
     );
   }
@@ -7931,19 +7691,13 @@ function AppTechnicien() {
           (oubli) : ses heures sont déjà écrites, transparence complète. */}
       {avisFermetureBureau && (
         <div className="fixed inset-x-3 top-3 z-50 rounded-2xl border-2 border-amber-400 bg-amber-50 p-3 shadow-lg sm:inset-x-auto sm:left-1/2 sm:w-full sm:max-w-sm sm:-translate-x-1/2">
-          <p className="text-[13px] font-bold leading-snug text-amber-900">
-            🏢 Le bureau a fermé « {avisFermetureBureau.titre} » pour toi
-            {avisFermetureBureau.debut ? ` (${avisFermetureBureau.debut} → ${avisFermetureBureau.fin})` : ""}.
+          <p className="text-[13px] font-bold leading-snug text-amber-900">{t("🏢 Le bureau a fermé «")}{" "}{avisFermetureBureau.titre}{" "}{t("» pour toi")}{avisFermetureBureau.debut ? ` (${avisFermetureBureau.debut} → ${avisFermetureBureau.fin})` : ""}.
           </p>
-          <p className="mt-0.5 text-[11px] leading-snug text-amber-800">
-            Tes heures sont déjà enregistrées au bureau. Si c&apos;est inexact, appelle l&apos;administration.
-          </p>
+          <p className="mt-0.5 text-[11px] leading-snug text-amber-800">{t("Tes heures sont déjà enregistrées au bureau. Si c'est inexact, appelle l'administration.")}</p>
           <button
             onClick={() => setAvisFermetureBureau(null)}
             className="mt-2 min-h-[40px] w-full rounded-xl bg-amber-500 text-[12px] font-extrabold text-white active:scale-[0.99]"
-          >
-            OK, compris
-          </button>
+          >{t("OK, compris")}</button>
         </div>
       )}
 
@@ -7967,23 +7721,23 @@ function AppTechnicien() {
       })()}
 
       {autreJourPour && (() => {
-        const t = taches.find((x) => x.id === autreJourPour.id);
-        if (!t) return null;
+        const tacheAJ = taches.find((x) => x.id === autreJourPour.id);
+        if (!tacheAJ) return null;
         const aujourdhui = isoLocal(new Date());
-        const jourLong = (iso) => dateDepuisIso(iso).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
+        const jourLong = (iso) => dateDepuisIso(iso).toLocaleDateString(langue === "en" ? "en-CA" : "fr-CA", { weekday: "long", day: "numeric", month: "long" });
         // Transport : celui d'AUJOURD'HUI, même moment (début/fin), s'il existe.
         const transportDuJour =
-          t.type === "transport"
-            ? taches.find((x) => x.type === "transport" && x.momentTransport === t.momentTransport && x.date === aujourdhui && x.id !== t.id)
+          tacheAJ.type === "transport"
+            ? taches.find((x) => x.type === "transport" && x.momentTransport === tacheAJ.momentTransport && x.date === aujourdhui && x.id !== tacheAJ.id)
             : null;
         const fermer = () => setAutreJourPour(null);
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="w-full max-w-sm rounded-2xl bg-white p-5">
-              <h3 className="text-base font-extrabold text-slate-900">📅 Cette {t.type === "transport" ? "carte de transport" : "tâche"} n&apos;est pas pour aujourd&apos;hui</h3>
+              <h3 className="text-base font-extrabold text-slate-900">{tacheAJ.type === "transport" ? t("📅 Cette carte de transport n'est pas pour aujourd'hui") : t("📅 Cette tâche n'est pas pour aujourd'hui")}</h3>
               <p className="mt-2 text-sm text-slate-600">
-                « {t.titre || "Tâche"} » est prévue le <strong className="capitalize">{jourLong(t.date)}</strong>.
-                Aujourd&apos;hui, c&apos;est le <span className="capitalize">{jourLong(aujourdhui)}</span>.
+                « {tacheAJ.titre || t("Tâche")} » {t("est prévue le")} <strong className="capitalize">{jourLong(tacheAJ.date)}</strong>.{" "}
+                {t("Aujourd'hui, c'est le")} <span className="capitalize">{jourLong(aujourdhui)}</span>.
               </p>
               <div className="mt-4 space-y-2">
                 {transportDuJour ? (
@@ -7994,7 +7748,7 @@ function AppTechnicien() {
                     }}
                     className="min-h-[52px] w-full rounded-xl bg-[#131B2E] text-sm font-bold text-white"
                   >
-                    🚗 Ouvrir le transport d&apos;aujourd&apos;hui
+                    {t("🚗 Ouvrir le transport d'aujourd'hui")}
                   </button>
                 ) : (
                   <button
@@ -8002,13 +7756,13 @@ function AppTechnicien() {
                       const suite = autreJourPour.suite;
                       fermer();
                       journaliserBureau(
-                        `📅 ${nomTechnicien || session?.user?.email || "Un technicien"} a démarré AUJOURD'HUI (${aujourdhui}) « ${t.titre || "tâche"} »${t.clientNom ? ` (${t.clientNom})` : ""}, prévue le ${t.date} — ses heures seront datées d'aujourd'hui ; déplacer le bloc à l'agenda au besoin.`
+                        `📅 ${nomTechnicien || session?.user?.email || "Un technicien"} a démarré AUJOURD'HUI (${aujourdhui}) « ${tacheAJ.titre || "tâche"} »${tacheAJ.clientNom ? ` (${tacheAJ.clientNom})` : ""}, prévue le ${tacheAJ.date} — ses heures seront datées d'aujourd'hui ; déplacer le bloc à l'agenda au besoin.`
                       );
                       suite();
                     }}
                     className="min-h-[52px] w-full rounded-xl bg-[#FF6A13] text-sm font-bold text-white"
                   >
-                    Oui, je la commence aujourd&apos;hui
+                    {t("Oui, je la commence aujourd'hui")}
                   </button>
                 )}
                 <button
@@ -8019,19 +7773,19 @@ function AppTechnicien() {
                   }}
                   className="min-h-[48px] w-full rounded-xl border border-slate-300 text-sm font-bold text-slate-700"
                 >
-                  ← Voir mes tâches d&apos;aujourd&apos;hui
+                  {t("← Voir mes tâches d'aujourd'hui")}
                 </button>
                 {transportDuJour && (
                   <button
                     onClick={() => {
                       const suite = autreJourPour.suite;
                       fermer();
-                      journaliserBureau(`📅 ${nomTechnicien || session?.user?.email || "Un technicien"} a démarré AUJOURD'HUI (${aujourdhui}) le « ${t.titre || "transport"} » prévu le ${t.date}.`);
+                      journaliserBureau(`📅 ${nomTechnicien || session?.user?.email || "Un technicien"} a démarré AUJOURD'HUI (${aujourdhui}) le « ${tacheAJ.titre || "transport"} » prévu le ${tacheAJ.date}.`);
                       suite();
                     }}
                     className="w-full py-1 text-[11px] font-semibold text-slate-400 underline"
                   >
-                    Démarrer celui-ci quand même
+                    {t("Démarrer celui-ci quand même")}
                   </button>
                 )}
               </div>
@@ -8043,23 +7797,17 @@ function AppTechnicien() {
       {modalLunchPour && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-xs rounded-2xl bg-white p-5">
-            <h3 className="text-base font-extrabold text-slate-900">🍴 As-tu dîné aujourd'hui ?</h3>
-            <p className="mt-1 text-xs text-slate-500">
-              Réponse demandée une fois par journée, avant le retour. « Lunch » retire {minutesDiner} minutes (pause non payée) de ta journée.
-            </p>
+            <h3 className="text-base font-extrabold text-slate-900">{t("🍴 As-tu dîné aujourd'hui ?")}</h3>
+            <p className="mt-1 text-xs text-slate-500">{t("Réponse demandée une fois par journée, avant le retour. « Lunch » retire")}{" "}{minutesDiner}{" "}{t("minutes (pause non payée) de ta journée.")}</p>
             <div className="mt-4 space-y-2">
               <button
                 onClick={() => repondreLunch(modalLunchPour, "lunch")}
                 className="min-h-[48px] w-full rounded-xl bg-[#131B2E] text-sm font-extrabold text-white active:scale-[0.99]"
-              >
-                🍴 Lunch — j&apos;ai pris ma pause dîner (−{minutesDiner} min)
-              </button>
+              >{t("🍴 Lunch — j'ai pris ma pause dîner (−")}{minutesDiner}{" "}{t("min)")}</button>
               <button
                 onClick={() => repondreLunch(modalLunchPour, "no_lunch")}
                 className="min-h-[48px] w-full rounded-xl border border-slate-300 text-sm font-extrabold text-slate-800 active:scale-[0.99]"
-              >
-                🚫 No lunch — j'ai travaillé sans pause
-              </button>
+              >{t("🚫 No lunch — j'ai travaillé sans pause")}</button>
             </div>
           </div>
         </div>

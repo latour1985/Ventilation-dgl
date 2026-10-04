@@ -17,11 +17,26 @@ import { chargerFactureMaisonPublique, noterConsultationFactureMaison, separerSu
 import ContactEntreprise from "@/components/ContactEntreprise";
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import { numeroPourTaxe } from "@/lib/taxesCanada";
+import { LangueProvider, useLangue } from "@/lib/i18n";
+import BoutonLangue from "@/components/BoutonLangue";
+import { argentSelonLangue, nomTaxe } from "@/lib/i18nPublic";
 
-const argent = (n) => `${(Number(n) || 0).toFixed(2)} $`;
+// 🌎 LANGUE DU CLIENT (2026-10-03) : « ?lang=en » dans le lien quand sa
+// fiche est en anglais ; sinon le dernier choix de ce navigateur. Le
+// client bascule lui-même avec le bouton 🌎.
+export default function PageFacturePublique({ params, searchParams }) {
+  const { lang } = use(searchParams) || {};
+  return (
+    <LangueProvider initiale={lang === "en" || lang === "fr" ? lang : null}>
+      <ContenuFacture params={params} />
+    </LangueProvider>
+  );
+}
 
-export default function PageFacturePublique({ params }) {
+function ContenuFacture({ params }) {
   const { jeton } = use(params);
+  const { t, langue } = useLangue();
+  const argent = (n) => argentSelonLangue(n, langue);
   const [facture, setFacture] = useState(null);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState("");
@@ -30,7 +45,7 @@ export default function PageFacturePublique({ params }) {
     if (!jeton) return;
     chargerFactureMaisonPublique(jeton)
       .then((f) => {
-        if (!f) setErreur("Ce lien n'est pas valide. Vérifie l'adresse, ou demande un nouveau lien.");
+        if (!f) setErreur("lien");
         else {
           setFacture(f);
           // 👁️ Consultation notée (snippet 123) — jamais en aperçu bureau.
@@ -39,14 +54,14 @@ export default function PageFacturePublique({ params }) {
           }
         }
       })
-      .catch(() => setErreur("La facture n'a pas pu être chargée. Réessaie dans un moment."))
+      .catch(() => setErreur("chargement"))
       .finally(() => setChargement(false));
   }, [jeton]);
 
   if (chargement) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">
-        <Loader2 size={18} className="mr-2 animate-spin" /> Chargement de la facture…
+        <Loader2 size={18} className="mr-2 animate-spin" /> {t("Chargement de la facture…")}
       </div>
     );
   }
@@ -55,7 +70,9 @@ export default function PageFacturePublique({ params }) {
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="max-w-sm rounded-2xl bg-white p-6 text-center">
           <AlertTriangle size={28} className="mx-auto text-amber-500" />
-          <p className="mt-3 text-sm font-bold text-slate-800">{erreur}</p>
+          <p className="mt-3 text-sm font-bold text-slate-800">
+            {erreur === "chargement" ? t("La facture n'a pas pu être chargée. Réessayez dans un moment.") : t("Ce lien n'est pas valide. Vérifiez l'adresse, ou demandez un nouveau lien.")}
+          </p>
         </div>
       </div>
     );
@@ -71,6 +88,9 @@ export default function PageFacturePublique({ params }) {
   return (
     <div className="min-h-screen bg-slate-100 py-6 px-4 print:bg-white print:p-0">
       <div className="mx-auto max-w-2xl space-y-4 print:space-y-3">
+        <div className="flex justify-end print:hidden">
+          <BoutonLangue />
+        </div>
         {/* EN-TÊTE ENTREPRISE — identité complète, comme du papier à en-tête. */}
         <div className="rounded-2xl bg-white p-5 print:rounded-none print:p-0">
           <div className="flex items-start justify-between gap-3">
@@ -86,25 +106,25 @@ export default function PageFacturePublique({ params }) {
               </div>
             </div>
             {/* STATUT bien en évidence — payée en vert, annulée barrée. */}
-            {payee && <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-700">PAYÉE ✓</span>}
-            {annulee && <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-extrabold text-slate-500">ANNULÉE</span>}
+            {payee && <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-700">{t("PAYÉE ✓")}</span>}
+            {annulee && <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-extrabold text-slate-500">{t("ANNULÉE")}</span>}
           </div>
 
           <h1 className="mt-4 text-2xl font-extrabold text-[#131B2E]">
-            {estCredit ? "NOTE DE CRÉDIT" : "FACTURE"} {facture.numero}
+            {estCredit ? t("NOTE DE CRÉDIT") : t("FACTURE")} {facture.numero}
           </h1>
           {estCredit && facture.numeroOrigine && (
-            <p className="text-xs font-semibold text-slate-500">S'applique à la facture {facture.numeroOrigine}</p>
+            <p className="text-xs font-semibold text-slate-500">{t("S'applique à la facture {numero}", { numero: facture.numeroOrigine })}</p>
           )}
           <div className="mt-1 flex flex-wrap gap-x-6 text-xs text-slate-500">
-            <span>Date : {facture.dateEmission}</span>
-            {!estCredit && facture.dateEcheance && <span>Échéance : {facture.dateEcheance}</span>}
-            {facture.terme && <span>Conditions : {facture.terme}</span>}
+            <span>{t("Date : {date}", { date: facture.dateEmission })}</span>
+            {!estCredit && facture.dateEcheance && <span>{t("Échéance : {date}", { date: facture.dateEcheance })}</span>}
+            {facture.terme && <span>{t("Conditions : {terme}", { terme: facture.terme })}</span>}
           </div>
           {numeroSuivi && (
-            <p className="mt-1 text-sm font-bold text-slate-800">Votre Nº de suivi : {numeroSuivi}</p>
+            <p className="mt-1 text-sm font-bold text-slate-800">{t("Votre Nº de suivi : {numero}", { numero: numeroSuivi })}</p>
           )}
-          <p className="mt-3 text-xs text-slate-500">{estCredit ? "Émise à" : "Facturé à"}</p>
+          <p className="mt-3 text-xs text-slate-500">{estCredit ? t("Émise à") : t("Facturé à")}</p>
           <p className="text-sm font-bold text-slate-800">{facture.clientNom}</p>
           {facture.clientAdresse && <p className="text-xs text-slate-600">{facture.clientAdresse}</p>}
         </div>
@@ -114,10 +134,10 @@ export default function PageFacturePublique({ params }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-left text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                <th className="py-1.5 pr-2">Description</th>
-                <th className="py-1.5 pr-2 text-right">Qté</th>
-                <th className="py-1.5 pr-2 text-right">Prix</th>
-                <th className="py-1.5 text-right">Montant</th>
+                <th className="py-1.5 pr-2">{t("Description")}</th>
+                <th className="py-1.5 pr-2 text-right">{t("Qté")}</th>
+                <th className="py-1.5 pr-2 text-right">{t("Prix")}</th>
+                <th className="py-1.5 text-right">{t("Montant")}</th>
               </tr>
             </thead>
             <tbody>
@@ -133,15 +153,15 @@ export default function PageFacturePublique({ params }) {
           </table>
 
           <div className="ml-auto mt-3 max-w-[260px] space-y-1 text-xs">
-            <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">{argent(facture.sousTotal)}</span></div>
+            <div className="flex justify-between text-slate-500"><span>{t("Sous-total")}</span><span className="tabular-nums">{argent(facture.sousTotal)}</span></div>
             {/* Les lignes de taxes du RÉGIME de la facture, chacune avec
                 son numéro d'inscription (obligation fiscale). */}
-            {facture.taxes.map((t, i) => {
-              const no = numeroPourTaxe(t.code, { numeroTps: e.numeroTps, numeroTvq: e.numeroTvq });
+            {facture.taxes.map((taxe, i) => {
+              const no = numeroPourTaxe(taxe.code, { numeroTps: e.numeroTps, numeroTvq: e.numeroTvq });
               return (
                 <div key={i} className="flex justify-between text-slate-500">
-                  <span>{t.code} {t.taux} %{no ? ` (nº ${no})` : ""}</span>
-                  <span className="tabular-nums">{argent(t.montant)}</span>
+                  <span>{nomTaxe(taxe.code, langue)} {taxe.taux} %{no ? ` (${langue === "en" ? "No." : "nº"} ${no})` : ""}</span>
+                  <span className="tabular-nums">{argent(taxe.montant)}</span>
                 </div>
               );
             })}
@@ -149,7 +169,7 @@ export default function PageFacturePublique({ params }) {
               <span>Total</span><span className="tabular-nums">{argent(facture.total)}</span>
             </div>
             {payee && facture.payeeLe && (
-              <p className="text-right text-[10px] font-bold text-emerald-600">Payée le {String(facture.payeeLe).slice(0, 10)}</p>
+              <p className="text-right text-[10px] font-bold text-emerald-600">{t("Payée le {date}", { date: String(facture.payeeLe).slice(0, 10) })}</p>
             )}
           </div>
         </div>
@@ -172,12 +192,12 @@ export default function PageFacturePublique({ params }) {
             onClick={() => window.print()}
             className="inline-flex items-center gap-2 rounded-xl bg-[#131B2E] px-5 py-2.5 text-sm font-bold text-white active:scale-[0.99]"
           >
-            <Printer size={15} /> Imprimer / Enregistrer en PDF
+            <Printer size={15} /> {t("Imprimer / Enregistrer en PDF")}
           </button>
         </div>
 
         <p className="pb-4 text-center text-[10px] text-slate-400 print:hidden">
-          {e.nom} — document émis par Fluxya.
+          {t("{nom} — document émis par Fluxya.", { nom: e.nom })}
         </p>
       </div>
     </div>

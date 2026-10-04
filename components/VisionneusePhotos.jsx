@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { useLangue } from "@/lib/i18n";
 
 export default function VisionneusePhotos({
   photos, // [{ url, etiquette }] — etiquette ex. « Avant 2/5 »
@@ -26,6 +27,7 @@ export default function VisionneusePhotos({
   onLegende = null, // (url, texte) => void — null = lecture seule
   nomFichier = null, // (photo, index) => "client-avant-02.jpg"
 }) {
+  const { t } = useLangue();
   const [index, setIndex] = useState(indexDepart);
   const [brouillonLegende, setBrouillonLegende] = useState("");
   const [editionLegende, setEditionLegende] = useState(false);
@@ -113,13 +115,13 @@ export default function VisionneusePhotos({
           <span className="tabular-nums">{index + 1} / {photos.length}</span>
           {photo.etiquette && <span className="rounded-full bg-white/15 px-2 py-0.5">{photo.etiquette}</span>}
           {importee && (
-            <span className="rounded-full bg-amber-500/90 px-2 py-0.5 text-[10px] text-black" title="Importée de la galerie du téléphone — pas prise en direct dans l'application">
-              📁 importée
+            <span className="rounded-full bg-amber-500/90 px-2 py-0.5 text-[10px] text-black" title={t("Importée de la galerie du téléphone — pas prise en direct dans l'application")}>
+              📁 {t("importée")}
             </span>
           )}
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={telecharger} aria-label="Télécharger la photo" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white active:scale-95">
+          <button onClick={telecharger} aria-label={t("Télécharger la photo")} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white active:scale-95">
             <Download size={18} />
           </button>
           <button onClick={onFermer} aria-label="Fermer" className="flex h-11 w-11 items-center justify-center rounded-full bg-white/20 text-white active:scale-95">
@@ -133,7 +135,7 @@ export default function VisionneusePhotos({
         {photos.length > 1 && (
           <button
             onClick={precedente}
-            aria-label="Photo précédente"
+            aria-label={t("Photo précédente")}
             className="absolute left-1 z-10 flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white active:scale-95"
           >
             <ChevronLeft size={30} />
@@ -143,7 +145,7 @@ export default function VisionneusePhotos({
         {photos.length > 1 && (
           <button
             onClick={suivante}
-            aria-label="Photo suivante"
+            aria-label={t("Photo suivante")}
             className="absolute right-1 z-10 flex h-14 w-14 items-center justify-center rounded-full bg-white/10 text-white active:scale-95"
           >
             <ChevronRight size={30} />

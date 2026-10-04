@@ -9,6 +9,7 @@
 // à importer en `dynamic(..., { ssr: false })`).
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import { DevisPDF } from "./DocumentsPDF";
+import { useLangue } from "@/lib/i18n";
 
 const styleLien = {
   display: "inline-block",
@@ -23,10 +24,11 @@ const styleLien = {
 };
 
 export default function BoutonPDFDevisPublic({ devis, config }) {
+  const { t } = useLangue();
   const nomFichier = `Devis-${String(devis?.numero || "").replace(/[^a-zA-Z0-9-]+/g, "-")}.pdf`;
   return (
     <PDFDownloadLink document={<DevisPDF devis={devis} config={config} />} fileName={nomFichier} style={styleLien}>
-      {({ loading }) => (loading ? "Préparation du PDF…" : "⬇️ Télécharger en PDF")}
+      {({ loading }) => (loading ? t("Préparation du PDF…") : t("⬇️ Télécharger en PDF"))}
     </PDFDownloadLink>
   );
 }

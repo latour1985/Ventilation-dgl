@@ -27,14 +27,30 @@ import { CONDITIONS_TEXTE, VERSION_CONDITIONS } from "@/lib/conditionsTexte";
 import { CONFIG_DEFAUT, calculerTaxes } from "@/lib/supabase/entreprise";
 import ContactEntreprise from "@/components/ContactEntreprise";
 import dynamic from "next/dynamic";
+import { LangueProvider, useLangue } from "@/lib/i18n";
+import BoutonLangue from "@/components/BoutonLangue";
+import { argentSelonLangue, nomTaxe } from "@/lib/i18nPublic";
 
 // ⬇️ PDF du devis, généré dans le navigateur du client (2026-09-16).
 const BoutonPDFDevisPublic = dynamic(() => import("@/components/pdf/BoutonPDFDevisPublic"), { ssr: false, loading: () => null });
 
-const argent = (n) => `${(Number(n) || 0).toFixed(2)} $`;
+// 🌎 LANGUE DU CLIENT (2026-10-03) : « ?lang=en » dans le lien quand sa
+// fiche est en anglais ; sinon le dernier choix de ce navigateur. Les
+// TERMES ET CONDITIONS restent en français (texte juridique — c'est la
+// version signée qui fait foi), avec une mention en anglais.
+export default function PageDevisPublic({ params, searchParams }) {
+  const { lang } = use(searchParams) || {};
+  return (
+    <LangueProvider initiale={lang === "en" || lang === "fr" ? lang : null}>
+      <ContenuDevis params={params} />
+    </LangueProvider>
+  );
+}
 
-export default function PageDevisPublic({ params }) {
+function ContenuDevis({ params }) {
   const { jeton } = use(params);
+  const { t, langue } = useLangue();
+  const argent = (n) => argentSelonLangue(n, langue);
   const [devis, setDevis] = useState(null);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState("");
@@ -60,7 +76,7 @@ export default function PageDevisPublic({ params }) {
     // l'identité DGL pour TOUTES les compagnies.
     chargerDevisPublic(jeton)
       .then((d) => {
-        if (!d) setErreur("Ce lien n'est pas valide. Vérifie l'adresse ou communique avec nous.");
+        if (!d) setErreur("lien");
         else {
           setDevis(d);
           setNumeroActif(d.numero);
@@ -75,7 +91,7 @@ export default function PageDevisPublic({ params }) {
           chargerOptionsDevis(jeton).then(setOptions).catch(() => {});
         }
       })
-      .catch(() => setErreur("Impossible de charger ce devis. Réessaie dans quelques minutes."))
+      .catch(() => setErreur("chargement"))
       .finally(() => setChargement(false));
   }, [jeton]);
 
@@ -150,7 +166,7 @@ export default function PageDevisPublic({ params }) {
       if (numeroActif && devis.numero !== numeroActif) {
         const choisi = await choisirVersionDevis(jeton, devis.numero);
         if (!choisi) {
-          setErreur("Cette option ne peut plus être choisie (déjà répondue ou lien expiré). Recharge la page.");
+          setErreur("option");
           setEnvoi("");
           return;
         }
@@ -166,21 +182,30 @@ export default function PageDevisPublic({ params }) {
         texte: reponse === "accepte" ? CONDITIONS_TEXTE : null,
       });
       if (!ok) {
-        setErreur("Ce devis a déjà reçu une réponse, ou le lien est expiré. Communique avec nous.");
+        setErreur("deja");
         setEnvoi("");
         return;
       }
       setFait(reponse);
     } catch {
-      setErreur("L'envoi a échoué. Vérifie ta connexion et réessaie.");
+      setErreur("envoi");
       setEnvoi("");
     }
   };
 
+  const MESSAGES_ERREUR = {
+    lien: "Ce lien n'est pas valide. Vérifiez l'adresse ou communiquez avec nous.",
+    chargement: "Impossible de charger ce devis. Réessayez dans quelques minutes.",
+    option: "Cette option ne peut plus être choisie (déjà répondue ou lien expiré). Rechargez la page.",
+    deja: "Ce devis a déjà reçu une réponse, ou le lien est expiré. Communiquez avec nous.",
+    envoi: "L'envoi a échoué. Vérifiez votre connexion et réessayez.",
+  };
+  const texteErreur = erreur ? t(MESSAGES_ERREUR[erreur] || erreur) : "";
+
   if (chargement) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-400">
-        <Loader2 size={18} className="mr-2 animate-spin" /> Chargement du devis…
+        <Loader2 size={18} className="mr-2 animate-spin" /> {t("Chargement du devis…")}
       </div>
     );
   }
@@ -190,7 +215,7 @@ export default function PageDevisPublic({ params }) {
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="max-w-sm rounded-2xl bg-white p-6 text-center">
           <AlertTriangle size={28} className="mx-auto text-amber-500" />
-          <p className="mt-3 text-sm font-bold text-slate-800">{erreur}</p>
+          <p className="mt-3 text-sm font-bold text-slate-800">{texteErreur}</p>
           {/* Lien invalide = on ne sait pas de QUELLE entreprise il
               s'agit — aucun téléphone plutôt que celui d'une autre. */}
         </div>
@@ -210,6 +235,9 @@ export default function PageDevisPublic({ params }) {
   return (
     <div className="min-h-screen bg-slate-100 py-6 px-4">
       <div className="mx-auto max-w-2xl space-y-4">
+        <div className="flex justify-end">
+          <BoutonLangue />
+        </div>
         {/* EN-TÊTE ENTREPRISE */}
         <div className="rounded-2xl bg-white p-5">
           <div className="flex items-center gap-3">
@@ -242,17 +270,19 @@ export default function PageDevisPublic({ params }) {
               propriétaire) : le client doit savoir qu'il SIGNE un contrat,
               et qu'il n'est en vigueur qu'à sa signature. */}
           <h1 className="mt-4 text-2xl font-extrabold text-[#131B2E]">
-            {devis.estContrat ? `CONTRAT D'ENTRETIEN PÉRIODIQUE ${devis.numero}` : `DEVIS ${devis.numero}`}
+            {devis.estContrat ? `${t("CONTRAT D'ENTRETIEN PÉRIODIQUE")} ${devis.numero}` : `${t("DEVIS")} ${devis.numero}`}
           </h1>
-          <p className="text-xs text-slate-500">Date : {devis.date}</p>
+          <p className="text-xs text-slate-500">{t("Date : {date}", { date: devis.date })}</p>
           {devis.estContrat && (
             <p className="mt-2 rounded-xl bg-purple-50 px-3 py-2 text-[12px] font-semibold leading-snug text-purple-900">
-              📄 Ce contrat entre en vigueur à la date de votre signature électronique ci-dessous
-              {devis.frequenceFacturation ? ` — facturé en ${devis.frequenceFacturation === 1 ? "1 versement par année" : `${devis.frequenceFacturation} versements par année`}` : ""}.
-              Tant qu&apos;il n&apos;est pas signé, aucun entretien n&apos;est planifié ni facturé.
+              📄 {t("Ce contrat entre en vigueur à la date de votre signature électronique ci-dessous")}
+              {devis.frequenceFacturation
+                ? ` — ${devis.frequenceFacturation === 1 ? t("facturé en 1 versement par année") : t("facturé en {n} versements par année", { n: devis.frequenceFacturation })}`
+                : ""}
+              . {t("Tant qu'il n'est pas signé, aucun entretien n'est planifié ni facturé.")}
             </p>
           )}
-          <p className="mt-2 text-xs text-slate-500">Préparé pour</p>
+          <p className="mt-2 text-xs text-slate-500">{t("Préparé pour")}</p>
           <p className="text-sm font-bold text-slate-800">{devis.clientNom}</p>
         </div>
 
@@ -262,10 +292,10 @@ export default function PageDevisPublic({ params }) {
         {options.length > 1 && !dejaRepondu && (
           <div className="rounded-2xl bg-white p-4">
             <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
-              🧾 {options.length} options à comparer
+              🧾 {t("{n} options à comparer", { n: options.length })}
             </p>
             <p className="mt-0.5 text-[11px] text-slate-400">
-              Feuillette les options ci-dessous — celle que tu acceptes deviendra ton devis.
+              {t("Feuilletez les options ci-dessous — celle que vous acceptez deviendra votre devis.")}
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {options.map((o) => {
@@ -277,7 +307,7 @@ export default function PageDevisPublic({ params }) {
                     disabled={!modeComparaison && chargeOption !== ""}
                     className={`rounded-xl border px-3 py-2 text-left text-xs font-bold ${sel ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-700"}`}
                   >
-                    {o.version === 0 ? "Option originale" : `Option ${o.version}`}
+                    {o.version === 0 ? t("Option originale") : t("Option {n}", { n: o.version })}
                     <span className={`block text-[10px] font-semibold ${sel ? "text-slate-300" : "text-slate-400"}`}>
                       {argent(o.totalVendant)}
                       {o.noteVersion ? ` · ${o.noteVersion.slice(0, 40)}` : ""}
@@ -295,22 +325,22 @@ export default function PageDevisPublic({ params }) {
               }}
               className="mt-2 text-[11px] font-bold text-slate-500 underline underline-offset-2"
             >
-              {modeComparaison ? "✕ Fermer la comparaison" : "⚖️ Comparer 2 options côte à côte"}
+              {modeComparaison ? t("✕ Fermer la comparaison") : t("⚖️ Comparer 2 options côte à côte")}
             </button>
             {modeComparaison && choixComparaison.length < 2 && (
-              <p className="mt-1 text-[11px] text-slate-400">Touche {choixComparaison.length === 0 ? "deux options" : "une deuxième option"} ci-dessus pour les voir côte à côte.</p>
+              <p className="mt-1 text-[11px] text-slate-400">{choixComparaison.length === 0 ? t("Touchez deux options ci-dessus pour les voir côte à côte.") : t("Touchez une deuxième option ci-dessus pour les voir côte à côte.")}</p>
             )}
             {modeComparaison && choixComparaison.length === 2 && (() => {
               const [nA, nB] = choixComparaison;
               const cA = contenusComparaison[nA];
               const cB = contenusComparaison[nB];
-              if (!cA || !cB) return <p className="mt-2 text-[11px] text-slate-400">Chargement des deux options…</p>;
+              if (!cA || !cB) return <p className="mt-2 text-[11px] text-slate-400">{t("Chargement des deux options…")}</p>;
               const clesA = new Set((cA.lignes || []).map(cleLigne));
               const clesB = new Set((cB.lignes || []).map(cleLigne));
               const colonne = (c, clesAutre) => (
                 <div className="rounded-xl border border-slate-200 p-2.5">
                   <p className="text-xs font-extrabold text-slate-800">
-                    {c.version === 0 ? "Option originale" : `Option ${c.version}`}
+                    {c.version === 0 ? t("Option originale") : t("Option {n}", { n: c.version })}
                     <span className="ml-1.5 font-bold tabular-nums text-slate-600">{argent(c.totalVendant)}</span>
                   </p>
                   {c.noteVersion && <p className="text-[10px] text-slate-400">{c.noteVersion}</p>}
@@ -344,13 +374,13 @@ export default function PageDevisPublic({ params }) {
                     }}
                     className="mt-2 w-full rounded-lg bg-[#131B2E] py-2 text-[11px] font-bold text-white active:scale-[0.99]"
                   >
-                    Continuer avec celle-ci
+                    {t("Continuer avec celle-ci")}
                   </button>
                 </div>
               );
               return (
                 <div className="mt-2">
-                  <p className="text-[10px] text-slate-400">Ce qui est <span className="rounded bg-amber-50 px-1 font-semibold text-amber-900">surligné</span> diffère de l&apos;autre option.</p>
+                  <p className="text-[10px] text-slate-400">{t("Ce qui est surligné diffère de l'autre option.")}</p>
                   <div className="mt-1.5 grid gap-2 md:grid-cols-2">
                     {colonne(cA, clesB)}
                     {colonne(cB, clesA)}
@@ -392,16 +422,16 @@ export default function PageDevisPublic({ params }) {
           ))}
 
           <div className="mt-3 space-y-1 border-t border-slate-200 pt-3 text-sm">
-            <div className="flex justify-between text-slate-500"><span>Sous-total</span><span className="tabular-nums">{argent(devis.totalVendant)}</span></div>
+            <div className="flex justify-between text-slate-500"><span>{t("Sous-total")}</span><span className="tabular-nums">{argent(devis.totalVendant)}</span></div>
             {/* 🍁 Les numéros d'inscription TPS/TVQ (snippet 99) sont
                 OBLIGATOIRES sur un document qui charge les taxes — ils
                 s'affichent à côté de chaque ligne, comme le veut l'usage. */}
             <div className="flex justify-between text-slate-500">
-              <span>TPS{devis?.entrepriseNumeroTps ? ` (nº ${devis.entrepriseNumeroTps})` : ""}</span>
+              <span>{nomTaxe("TPS", langue)}{devis?.entrepriseNumeroTps ? ` (${langue === "en" ? "No." : "nº"} ${devis.entrepriseNumeroTps})` : ""}</span>
               <span className="tabular-nums">{argent(taxes.tps)}</span>
             </div>
             <div className="flex justify-between text-slate-500">
-              <span>TVQ{devis?.entrepriseNumeroTvq ? ` (nº ${devis.entrepriseNumeroTvq})` : ""}</span>
+              <span>{nomTaxe("TVQ", langue)}{devis?.entrepriseNumeroTvq ? ` (${langue === "en" ? "No." : "nº"} ${devis.entrepriseNumeroTvq})` : ""}</span>
               <span className="tabular-nums">{argent(taxes.tvq)}</span>
             </div>
             <div className="flex justify-between border-t border-slate-200 pt-1.5 text-lg font-extrabold text-slate-900">
@@ -415,8 +445,13 @@ export default function PageDevisPublic({ params }) {
             prouve rien ; le texte doit être sous ses yeux. */}
         <div className="rounded-2xl bg-white p-5">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500">
-            <FileText size={13} /> Termes et conditions générales
+            <FileText size={13} /> {t("Termes et conditions générales")}
           </p>
+          {langue === "en" && (
+            <p className="mb-2 rounded-lg bg-blue-50 px-3 py-2 text-[11px] leading-snug text-blue-900">
+              {t("Les termes et conditions sont rédigés en français ; c'est cette version qui s'applique. Communiquez avec nous pour toute question.")}
+            </p>
+          )}
           <div className="max-h-72 overflow-y-auto whitespace-pre-line rounded-xl bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-600">
             {CONDITIONS_TEXTE}
           </div>
@@ -428,23 +463,25 @@ export default function PageDevisPublic({ params }) {
             {dejaRepondu === "accepte" ? (
               <>
                 <CheckCircle2 size={34} className="mx-auto text-emerald-500" />
-                <p className="mt-3 text-lg font-extrabold text-slate-900">{devis.estContrat ? "Contrat signé" : "Devis accepté"}</p>
+                <p className="mt-3 text-lg font-extrabold text-slate-900">{devis.estContrat ? t("Contrat signé") : t("Devis accepté")}</p>
                 <p className="mt-1 text-sm text-slate-500">
                   {devis.estContrat
-                    ? `Merci ! Votre contrat d'entretien est en vigueur${devis.reponduLe ? ` depuis le ${new Date(devis.reponduLe).toLocaleDateString("fr-CA", { day: "numeric", month: "long", year: "numeric" })}` : " à compter d'aujourd'hui"}. Nous communiquerons avec vous pour planifier le premier entretien.`
-                    : "Merci ! Nous avons reçu votre acceptation et communiquerons avec vous pour la suite."}
+                    ? devis.reponduLe
+                      ? t("Merci ! Votre contrat d'entretien est en vigueur depuis le {date}. Nous communiquerons avec vous pour planifier le premier entretien.", { date: new Date(devis.reponduLe).toLocaleDateString(langue === "en" ? "en-CA" : "fr-CA", { day: "numeric", month: "long", year: "numeric" }) })
+                      : t("Merci ! Votre contrat d'entretien est en vigueur à compter d'aujourd'hui. Nous communiquerons avec vous pour planifier le premier entretien.")
+                    : t("Merci ! Nous avons reçu votre acceptation et communiquerons avec vous pour la suite.")}
                 </p>
               </>
             ) : (
               <>
                 <CheckCircle2 size={34} className="mx-auto text-blue-500" />
                 <p className="mt-3 text-lg font-extrabold text-slate-900">
-                  {dejaRepondu === "refuse" ? "Réponse enregistrée" : "Demande transmise"}
+                  {dejaRepondu === "refuse" ? t("Réponse enregistrée") : t("Demande transmise")}
                 </p>
                 <p className="mt-1 text-sm text-slate-500">
                   {dejaRepondu === "refuse"
-                    ? "Merci de nous avoir répondu."
-                    : "Nous avons reçu votre demande et vous reviendrons avec une version révisée."}
+                    ? t("Merci de nous avoir répondu.")
+                    : t("Nous avons reçu votre demande et vous reviendrons avec une version révisée.")}
                 </p>
               </>
             )}
@@ -452,9 +489,9 @@ export default function PageDevisPublic({ params }) {
         ) : devis.expire ? (
           <div className="rounded-2xl bg-white p-6 text-center">
             <AlertTriangle size={28} className="mx-auto text-amber-500" />
-            <p className="mt-3 text-sm font-bold text-slate-800">Ce lien est expiré</p>
+            <p className="mt-3 text-sm font-bold text-slate-800">{t("Ce lien est expiré")}</p>
             <p className="mt-1 text-sm text-slate-500">
-              Communiquez avec nous — nous vous renverrons votre devis, mis à jour au besoin.
+              {t("Communiquez avec nous — nous vous renverrons votre devis, mis à jour au besoin.")}
             </p>
             {config.telephone && <p className="mt-2 text-sm font-bold text-slate-700">{config.telephone}</p>}
           </div>
@@ -468,33 +505,33 @@ export default function PageDevisPublic({ params }) {
               if (!oSel) return null;
               return (
                 <p className="mb-3 rounded-xl border border-[#131B2E]/20 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800">
-                  🧾 Tu réponds sur : {oSel.version === 0 ? "l'option originale" : `l'option ${oSel.version}`} — {argent(oSel.totalVendant)}
+                  🧾 {oSel.version === 0 ? t("Vous répondez sur : l'option originale") : t("Vous répondez sur : l'option {n}", { n: oSel.version })} — {argent(oSel.totalVendant)}
                   <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
-                    Pour en choisir une autre, remonte aux options et touche-la — la page suit.
+                    {t("Pour en choisir une autre, remontez aux options et touchez-la — la page suit.")}
                   </span>
                 </p>
               );
             })()}
             <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">
-              Votre nom {modeModif ? "" : "(signature électronique)"}
+              {modeModif ? t("Votre nom") : t("Votre nom (signature électronique)")}
             </label>
             <input
               value={nom}
               onChange={(e) => setNom(e.target.value)}
-              placeholder="Prénom et nom"
+              placeholder={t("Prénom et nom")}
               className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#FF6A13]"
             />
 
             {modeModif ? (
               <>
                 <label className="mb-1.5 mt-3 block text-xs font-bold uppercase tracking-wide text-slate-500">
-                  Ce que vous aimeriez changer
+                  {t("Ce que vous aimeriez changer")}
                 </label>
                 <textarea
                   rows={4}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  placeholder="Ex. : retirer le thermostat, ajouter une sortie au sous-sol…"
+                  placeholder={t("Ex. : retirer le thermostat, ajouter une sortie au sous-sol…")}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#FF6A13]"
                 />
                 <div className="mt-3 grid grid-cols-2 gap-2">
@@ -502,14 +539,14 @@ export default function PageDevisPublic({ params }) {
                     onClick={() => setModeModif(false)}
                     className="min-h-[48px] rounded-xl border border-slate-300 text-sm font-bold text-slate-600"
                   >
-                    Retour
+                    {t("Retour")}
                   </button>
                   <button
                     onClick={() => repondre("modification")}
                     disabled={nom.trim().length < 3 || envoi === "envoi"}
                     className="min-h-[48px] rounded-xl bg-[#131B2E] text-sm font-extrabold text-white disabled:opacity-40"
                   >
-                    {envoi === "envoi" ? "Envoi…" : "Envoyer ma demande"}
+                    {envoi === "envoi" ? t("Envoi…") : t("Envoyer ma demande")}
                   </button>
                 </div>
               </>
@@ -522,10 +559,10 @@ export default function PageDevisPublic({ params }) {
                 {prixPerimes ? (
                   <div className="mt-3 rounded-xl border-2 border-amber-200 bg-amber-50 p-3">
                     <p className="text-[13px] font-bold leading-snug text-amber-800">
-                      ⏳ Ce devis date de plus de {JOURS_VALIDITE_PRIX_DEVIS} jours — nos prix sont valides {JOURS_VALIDITE_PRIX_DEVIS} jours.
+                      ⏳ {t("Ce devis date de plus de {n} jours — nos prix sont valides {n} jours.", { n: JOURS_VALIDITE_PRIX_DEVIS })}
                     </p>
                     <p className="mt-1 text-[12px] leading-snug text-amber-700">
-                      Vous pouvez le consulter et nous demander une mise à jour ci-dessous — nous vous reviendrons avec une version à jour.
+                      {t("Vous pouvez le consulter et nous demander une mise à jour ci-dessous — nous vous reviendrons avec une version à jour.")}
                     </p>
                   </div>
                 ) : (
@@ -539,8 +576,8 @@ export default function PageDevisPublic({ params }) {
                       />
                       <span className="text-[13px] font-semibold leading-snug text-slate-700">
                         {devis.estContrat
-                          ? "J'ai lu et j'accepte le contrat d'entretien ci-dessus ainsi que les termes et conditions générales. Je comprends qu'il entre en vigueur à la date de ma signature."
-                          : "J'ai lu et j'accepte les termes et conditions générales ci-dessus."}
+                          ? t("J'ai lu et j'accepte le contrat d'entretien ci-dessus ainsi que les termes et conditions générales. Je comprends qu'il entre en vigueur à la date de ma signature.")
+                          : t("J'ai lu et j'accepte les termes et conditions générales ci-dessus.")}
                       </span>
                     </label>
 
@@ -549,17 +586,17 @@ export default function PageDevisPublic({ params }) {
                       disabled={!accepte || nom.trim().length < 3 || envoi === "envoi"}
                       className="mt-3 min-h-[54px] w-full rounded-xl bg-emerald-600 text-base font-extrabold text-white active:scale-[0.99] disabled:opacity-40"
                     >
-                      {envoi === "envoi" ? "Envoi…" : devis.estContrat ? "✓ Signer le contrat" : "✓ Accepter ce devis"}
+                      {envoi === "envoi" ? t("Envoi…") : devis.estContrat ? t("✓ Signer le contrat") : t("✓ Accepter ce devis")}
                     </button>
                     {/* L'aide nomme TOUJOURS ce qui manque (vécu : « JF »
                         cochée mais 2 lettres — bouton grisé sans un mot). */}
                     {(!accepte || nom.trim().length < 3) && (
                       <p className="mt-1.5 text-center text-[11px] text-slate-400">
                         {!accepte && nom.trim().length < 3
-                          ? "Coche la case et écris ton nom complet (au moins 3 lettres) pour accepter."
+                          ? t("Cochez la case et écrivez votre nom complet (au moins 3 lettres) pour accepter.")
                           : !accepte
-                          ? "Coche la case ci-dessus pour accepter."
-                          : "Écris ton nom complet (au moins 3 lettres) — c'est ta signature."}
+                          ? t("Cochez la case ci-dessus pour accepter.")
+                          : t("Écrivez votre nom complet (au moins 3 lettres) — c'est votre signature.")}
                       </p>
                     )}
                   </>
@@ -570,7 +607,7 @@ export default function PageDevisPublic({ params }) {
                     onClick={() => setModeModif(true)}
                     className="min-h-[44px] rounded-xl border border-slate-300 text-xs font-bold text-slate-700"
                   >
-                    {prixPerimes ? "Demander une mise à jour" : "Demander une modification"}
+                    {prixPerimes ? t("Demander une mise à jour") : t("Demander une modification")}
                   </button>
                   {/* Plus FONCÉ (2026-09-04, retour du propriétaire : le
                       bouton se perdait dans le blanc) — lisible même
@@ -580,7 +617,7 @@ export default function PageDevisPublic({ params }) {
                     disabled={nom.trim().length < 3 || envoi === "envoi"}
                     className="min-h-[44px] rounded-xl border border-red-300 bg-red-50 text-xs font-bold text-red-700 disabled:border-slate-400 disabled:bg-slate-100 disabled:text-slate-600 disabled:opacity-100"
                   >
-                    Refuser ce devis
+                    {t("Refuser ce devis")}
                   </button>
                 </div>
                 {/* Règle maison : un bouton grisé SANS explication laisse
@@ -589,14 +626,14 @@ export default function PageDevisPublic({ params }) {
                     c'est une réponse signée, comme l'acceptation. */}
                 {nom.trim().length < 3 && (
                   <p className="mt-1.5 text-center text-[11px] text-slate-400">
-                    Pour refuser, écris d&apos;abord ton nom plus haut — un refus est une réponse signée, comme une acceptation.
+                    {t("Pour refuser, écrivez d'abord votre nom plus haut — un refus est une réponse signée, comme une acceptation.")}
                   </p>
                 )}
               </>
             )}
 
             {erreur && (
-              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{erreur}</p>
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-bold text-red-700">{texteErreur}</p>
             )}
           </div>
         )}

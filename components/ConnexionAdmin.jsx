@@ -10,8 +10,11 @@ import { useState } from "react";
 import { seConnecterSurveille, demanderReinitialisation } from "@/lib/connexionSurveillee";
 import Logo from "@/components/Logo";
 import ChampMotDePasse from "@/components/ChampMotDePasse";
+import BoutonLangue from "@/components/BoutonLangue";
+import { useLangue } from "@/lib/i18n";
 
 export default function ConnexionAdmin() {
+  const { t } = useLangue();
   const [courriel, setCourriel] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [erreur, setErreur] = useState("");
@@ -43,44 +46,49 @@ export default function ConnexionAdmin() {
           <div className="bg-[#131B2E] px-6 pb-6 pt-7 text-white">
             {/* FLUXYA — marque produit neutre (brief 2026-08-18) :
                 aucune mention d'entreprise sur l'écran de connexion. */}
-            <div>
-              <Logo variant="compact" sombre />
-              <p className="mt-0.5 text-[11px] text-slate-400">Portail d'administration</p>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <Logo variant="compact" sombre />
+                <p className="mt-0.5 text-[11px] text-slate-400">{t("Portail d'administration")}</p>
+              </div>
+              <BoutonLangue sombre />
             </div>
-            <h1 className="mt-5 text-xl font-extrabold">Connexion</h1>
-            <p className="mt-0.5 text-xs text-slate-300">Accède à la gestion de tes projets, devis et véhicules.</p>
+            <h1 className="mt-5 text-xl font-extrabold">{t("Connexion")}</h1>
+            <p className="mt-0.5 text-xs text-slate-300">{t("Accède à la gestion de tes projets, devis et véhicules.")}</p>
           </div>
 
           <form onSubmit={seConnecter} className="space-y-3 p-6">
             <div>
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">Courriel</label>
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">{t("Courriel")}</label>
               <input
                 type="email"
                 value={courriel}
                 onChange={(e) => setCourriel(e.target.value)}
                 required
-                placeholder="ton.courriel@ventilationdgl.com"
+                placeholder={t("ton.courriel@ventilationdgl.com")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base sm:text-sm focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-100"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">Mot de passe</label>
+              <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-slate-500">{t("Mot de passe")}</label>
               <ChampMotDePasse
                 value={motDePasse}
                 onChange={(e) => setMotDePasse(e.target.value)}
                 required
-                placeholder="ton mot de passe"
+                placeholder={t("ton mot de passe")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base sm:text-sm focus:border-[#FF6A13] focus:outline-none focus:ring-2 focus:ring-orange-100"
               />
             </div>
 
             {verrouMinutes != null && (
               <div className="rounded-lg bg-red-50 px-3 py-2.5 text-xs text-red-800">
-                <p className="font-extrabold">🔒 Compte verrouillé après 3 essais.</p>
-                <p className="mt-0.5">Réessaie dans {verrouMinutes} minute{verrouMinutes > 1 ? "s" : ""} — ou réinitialise ton mot de passe tout de suite :</p>
+                <p className="font-extrabold">{t("🔒 Compte verrouillé après 3 essais.")}</p>
+                <p className="mt-0.5">{verrouMinutes > 1
+                  ? t("Réessaie dans {n} minutes — ou réinitialise ton mot de passe tout de suite :", { n: verrouMinutes })
+                  : t("Réessaie dans 1 minute — ou réinitialise ton mot de passe tout de suite :")}</p>
                 {reinitEnvoyee ? (
                   <p className="mt-1.5 rounded bg-emerald-50 px-2 py-1.5 font-bold text-emerald-700">
-                    📧 Courriel envoyé à {courriel.trim()} — clique le lien pour choisir un nouveau mot de passe (le verrou saute aussitôt).
+                    {t("📧 Courriel envoyé à {courriel} — clique le lien pour choisir un nouveau mot de passe (le verrou saute aussitôt).", { courriel: courriel.trim() })}
                   </p>
                 ) : (
                   <button
@@ -92,16 +100,20 @@ export default function ConnexionAdmin() {
                     }}
                     className="mt-1.5 w-full rounded-lg bg-red-600 px-3 py-2 font-extrabold text-white active:scale-[0.99]"
                   >
-                    📧 Recevoir un courriel de réinitialisation
+                    {t("📧 Recevoir un courriel de réinitialisation")}
                   </button>
                 )}
               </div>
             )}
             {erreur && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                {erreur}
+                {t(erreur)}
                 {essaisRestants != null && essaisRestants > 0 && (
-                  <span className="mt-0.5 block font-bold">⚠️ {essaisRestants} essai{essaisRestants > 1 ? "s" : ""} restant{essaisRestants > 1 ? "s" : ""} avant le verrouillage (15 min).</span>
+                  <span className="mt-0.5 block font-bold">
+                    {essaisRestants > 1
+                      ? t("⚠️ {n} essais restants avant le verrouillage (15 min).", { n: essaisRestants })
+                      : t("⚠️ 1 essai restant avant le verrouillage (15 min).")}
+                  </span>
                 )}
               </p>
             )}
@@ -111,12 +123,12 @@ export default function ConnexionAdmin() {
               disabled={chargement}
               className="w-full rounded-xl bg-[#131B2E] py-3 text-sm font-extrabold text-white hover:bg-[#0b1220] disabled:opacity-60"
             >
-              {chargement ? "Connexion…" : "Se connecter"}
+              {chargement ? t("Connexion…") : t("Se connecter")}
             </button>
           </form>
         </div>
         <p className="mt-4 text-center text-[10px] text-slate-400">
-          Fluxya · application confidentielle — usage autorisé seulement.
+          {t("Fluxya · application confidentielle — usage autorisé seulement.")}
         </p>
       </div>
     </div>

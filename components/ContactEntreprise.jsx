@@ -20,8 +20,10 @@
 // document officiel.
 
 import { useState } from "react";
+import { useLangue } from "@/lib/i18n";
 
 export default function ContactEntreprise({ nom, telephone, courriel, jeton, type }) {
+  const { t, langue } = useLangue();
   const tel = String(telephone || "").trim();
   const mail = String(courriel || "").trim();
   const [ouvert, setOuvert] = useState(false);
@@ -37,7 +39,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
   const envoyer = async () => {
     setErreur("");
     if (message.trim().length < 5) {
-      setErreur("Écris ton message d'abord (au moins quelques mots).");
+      setErreur(t("Écrivez votre message d'abord (au moins quelques mots)."));
       return;
     }
     setEnvoiEnCours(true);
@@ -51,22 +53,22 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
       if (r.ok && res?.envoye) {
         setEnvoye(true);
       } else {
-        setErreur(res?.erreur || "Envoi impossible pour l'instant — réessaie, ou appelle-nous.");
+        setErreur(langue === "fr" && res?.erreur ? res.erreur : t("Envoi impossible pour l'instant — réessayez, ou appelez-nous."));
       }
     } catch {
-      setErreur("Envoi impossible pour l'instant — réessaie, ou appelle-nous.");
+      setErreur(t("Envoi impossible pour l'instant — réessayez, ou appelez-nous."));
     }
     setEnvoiEnCours(false);
   };
 
   return (
     <div className="mt-4 rounded-2xl bg-white p-4 text-center print:hidden">
-      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Une question ? Contactez-nous</p>
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{t("Une question ? Contactez-nous")}</p>
       {nom ? <p className="mt-1 text-sm font-extrabold text-[#131B2E]">{nom}</p> : null}
 
       {envoye ? (
         <p className="mt-3 rounded-xl bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-700">
-          ✅ Message envoyé — nous vous répondrons rapidement{repondreA.trim() ? ` à ${repondreA.trim()}` : ""}.
+          {repondreA.trim() ? t("✅ Message envoyé — nous vous répondrons rapidement à {courriel}.", { courriel: repondreA.trim() }) : t("✅ Message envoyé — nous vous répondrons rapidement.")}
         </p>
       ) : (
         <>
@@ -76,7 +78,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                 href={`tel:${tel.replace(/[^\d+]/g, "")}`}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#131B2E] px-5 py-2.5 text-sm font-bold text-white active:scale-[0.99]"
               >
-                📞 Appeler — {tel}
+                📞 {t("Appeler")} — {tel}
               </a>
             )}
             {mail && formulairePossible && (
@@ -85,7 +87,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                 onClick={() => setOuvert((o) => !o)}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-800 active:scale-[0.99]"
               >
-                ✉️ {ouvert ? "Fermer le message" : "Écrire un message"}
+                ✉️ {ouvert ? t("Fermer le message") : t("Écrire un message")}
               </button>
             )}
             {mail && !formulairePossible && (
@@ -93,7 +95,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                 href={`mailto:${mail}`}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-800 active:scale-[0.99]"
               >
-                ✉️ Écrire un courriel
+                ✉️ {t("Écrire un courriel")}
               </a>
             )}
           </div>
@@ -105,7 +107,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                 onChange={(e) => setMessage(e.target.value)}
                 rows={4}
                 maxLength={2000}
-                placeholder="Votre question ou commentaire…"
+                placeholder={t("Votre question ou commentaire…")}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#FF6A13]"
               />
               <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -113,7 +115,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                   value={nomClient}
                   onChange={(e) => setNomClient(e.target.value)}
                   maxLength={120}
-                  placeholder="Votre nom"
+                  placeholder={t("Votre nom")}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#FF6A13]"
                 />
                 <input
@@ -121,7 +123,7 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                   onChange={(e) => setRepondreA(e.target.value)}
                   type="email"
                   maxLength={160}
-                  placeholder="Votre courriel (pour la réponse)"
+                  placeholder={t("Votre courriel (pour la réponse)")}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#FF6A13]"
                 />
               </div>
@@ -132,10 +134,10 @@ export default function ContactEntreprise({ nom, telephone, courriel, jeton, typ
                 disabled={envoiEnCours}
                 className="mt-2 w-full rounded-xl bg-[#FF6A13] px-5 py-2.5 text-sm font-bold text-white active:scale-[0.99] disabled:opacity-60"
               >
-                {envoiEnCours ? "Envoi…" : "Envoyer le message"}
+                {envoiEnCours ? t("Envoi…") : t("Envoyer le message")}
               </button>
               <p className="mt-1.5 text-center text-[10px] text-slate-400">
-                Votre message part par courriel à {nom || "l'entreprise"} — laissez votre courriel pour recevoir la réponse directement.
+                {nom ? t("Votre message part par courriel à {nom} — laissez votre courriel pour recevoir la réponse directement.", { nom }) : t("Votre message part par courriel à l'entreprise — laissez votre courriel pour recevoir la réponse directement.")}
               </p>
             </div>
           )}
