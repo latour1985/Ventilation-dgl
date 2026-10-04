@@ -18,7 +18,7 @@ import { EncadreTauxFacturable } from "./EncadreTauxFacturable";
 import { FileDuMatin } from "./FileDuMatin";
 import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap, estCommissionnaire } from "./partage";
 
-export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, tachesDevisAFaire = [], tachesAttente = [], facturablesAssignations = {}, onPlanifierRetour = null, onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [] }) {
+export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, tachesDevisAFaire = [], tachesAttente = [], facturablesAssignations = {}, onPlanifierRetour = null, onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [], peutCorrigerHeures = false, onBasculerFacturable = null, onReclasserHeures = null }) {
   // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
   // commandées : cette semaine, et en retard (date passée, rien reçu).
   const livraisons = (() => {
@@ -370,7 +370,16 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
           <EncadreCoutEmploye key={u.id} utilisateur={u} travaux={travaux} inspections={inspections} achatsLibres={achatsLibres} onOuvrirParametres={() => setOnglet("parametres")} />
         ))}
         {/* 📊 Taux d'heures facturables par technicien (2026-09-22). */}
-        <EncadreTauxFacturable travaux={travaux} planning={planning} tachesAttente={tachesAttente} facturables={facturablesAssignations} />
+        <EncadreTauxFacturable
+          travaux={travaux}
+          planning={planning}
+          tachesAttente={tachesAttente}
+          facturables={facturablesAssignations}
+          bons={bons}
+          peutCorriger={peutCorrigerHeures}
+          onBasculerFacturable={onBasculerFacturable}
+          onReclasserHeures={onReclasserHeures}
+        />
         {(soumissionsSansDevis || []).length > 0 && (
           <div className="rounded-2xl border-2 border-indigo-300 bg-indigo-50 p-4">
             <h3 className="mb-2 flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-indigo-700">

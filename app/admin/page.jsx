@@ -24,7 +24,7 @@ import { erreursClientPourQuickBooks } from "@/lib/validationQuickBooks";
 import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, majFacturableAssignation, majDonneesAssignation, sAbonnerTachesAssignees, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
-import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA, deplacerLigneHeures, rattacherTacheLot } from "@/lib/supabase/travauxEffectues";
+import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA, deplacerLigneHeures, rattacherTacheLot, reclasserHeures } from "@/lib/supabase/travauxEffectues";
 import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock, creerBonDevisJoint } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
@@ -3923,6 +3923,32 @@ function AppAdmin() {
       {vue === "tableau-de-bord" && (
         <OngletTableauDeBord
           reponsesClients={reponsesClientsATraiter}
+          // 📊 CORRIGER UN CLASSEMENT depuis « Heures facturables »
+          // (2026-10-03, demande du propriétaire) — admins seulement, comme
+          // l'ajustement des heures. Même écriture que l'agenda et la
+          // révision de facture pour 💰/🤝 ; chaque correction au journal.
+          peutCorrigerHeures={role === "Admin principal" || role === "Admin régulier"}
+          onBasculerFacturable={async (tacheId, courriel, val, infos = {}) => {
+            await majFacturableAssignation(tacheId, courriel, val);
+            setFacturablesAssignations((prev) => ({ ...prev, [`${tacheId}|${(courriel || "").toLowerCase()}`]: val }));
+            ajouterJournal(
+              `${val ? "💰" : "🤝"} ${infos.nom || courriel} ${val ? "rendu FACTURABLE" : "passé en aide NON facturable"} sur « ${infos.titre || tacheId} » (correction depuis le tableau de bord)`
+            );
+          }}
+          onReclasserHeures={async (lignes, categorie, infos = {}) => {
+            const r = await reclasserHeures(lignes, categorie, { projetId: infos.projetId || null });
+            const ids = new Set((lignes || []).map((l) => l.id));
+            setTravaux((prev) =>
+              prev.map((t) =>
+                ids.has(t.id)
+                  ? { ...t, categorieHeures: categorie, projetId: t.projetId || (categorie === "projet" ? infos.projetId || null : null) }
+                  : t
+              )
+            );
+            ajouterJournal(
+              `🔁 Heures reclassées : ${infos.nom || "?"} — ${(Number(infos.heures) || 0).toFixed(2)} h sur « ${infos.titre || "?"} » : ${infos.depuis || "?"} → ${categorie === "projet" ? "chantier" : "administratif"} (${r.nb} ligne${r.nb > 1 ? "s" : ""}${r.projetPose ? `, projet rattaché sur ${r.projetPose}` : ""}) — correction depuis le tableau de bord`
+            );
+          }}
           nomAdmin={session?.user?.user_metadata?.nom || session?.user?.email}
           depots={depots}
           ajouterJournal={ajouterJournal}
