@@ -12,10 +12,10 @@ import { AlertCircle, AlertTriangle, Check, CheckCircle2, Cloud, FileText, MapPi
 import TermesConditions from "@/components/TermesConditions";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { useLangue } from "@/lib/i18n";
-import { lienSelonLangue, langueDuClient } from "@/lib/i18nPublic";
+import { lienSelonLangue, langueDuClient, argentSelonLangue } from "@/lib/i18nPublic";
 import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
-import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison } from "@/lib/courriels";
+import { envoyerCourriel, gabaritBonTravail, gabaritFactureMaison, sujetCourrielClient } from "@/lib/courriels";
 import { creerFactureQbo, annulerFactureQbo, envoyerFactureQbo, verifierEnvoisQbo, ouvrirFacturePdfQbo, lireEstimateQbo, lireSoldesQbo, lireComptesARecevoirQbo, lireDelaisPaiementQbo, lireCreditsQbo } from "@/lib/quickbooksClient";
 import { creerFactureSage as creerFactureSageCopie } from "@/lib/sageClient";
 import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, majFactureLibre, supprimerFactureLibreEnCreation } from "@/lib/supabase/facturesLibres";
@@ -3491,19 +3491,27 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       ajouterJournal(`⚠️ Facture maison NON créée pour « ${b.projet} » : ${e?.message || "erreur"} — le bon reste en attente.`);
       return;
     }
-    const lien = lienSelonLangue(lienFactureMaison(creee), langueDuClient(clients, { id: creee.clientId, nom: creee.clientNom }));
+    // 🌎 Courriel, objet et lien dans la langue du client (2026-10-05).
+    const langueFact = langueDuClient(clients, { id: creee.clientId, nom: creee.clientNom });
+    const lien = lienSelonLangue(lienFactureMaison(creee), langueFact);
     let envoye = false;
     if (destinataires.length > 0 && lien) {
+      const suiviF = suiviChoisi(choixCourriels, suiviPourBon(b));
       const r = await envoyerCourriel({
         a: destinataires,
-        sujet: `Facture ${creee.numero}${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviChoisi(choixCourriels, suiviPourBon(b)) ? ` — Suivi ${suiviChoisi(choixCourriels, suiviPourBon(b))}` : ""} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
+        sujet: sujetCourrielClient("facture", langueFact, {
+          numero: creee.numero,
+          precision: [b.adresseTravaux, suiviF ? `${langueFact === "en" ? "Ref." : "Suivi"} ${suiviF}` : ""].filter(Boolean).join(" — "),
+          entreprise: configEnt?.nomCommercial || configEnt?.nomLegal || "",
+        }),
         html: gabaritFactureMaison({
           config: configEnt,
           numero: creee.numero,
           clientNom: creee.clientNom,
-          total: `${creee.total.toFixed(2)} $`,
+          total: argentSelonLangue(creee.total, langueFact),
           lien,
           echeance: creee.dateEcheance,
+          langue: langueFact,
         }),
       }).catch(() => ({}));
       if (r?.envoye || r?.simule) {
@@ -3659,14 +3667,19 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     }
     try {
       const jeton = await assurerJetonBon(rowId);
+      const langueBon = langueDuClient(clients, { id: b.clientId, nom: b.client });
       const r = await envoyerCourriel({
         a: adresses,
-        sujet: `Vos travaux sont terminés — bon de travail${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""}${suiviPourBon(b) ? ` — Suivi ${suiviPourBon(b)}` : ""} (${configEnt.nomCommercial || configEnt.nomLegal})`,
+        sujet: sujetCourrielClient("bonTravail", langueBon, {
+          precision: [b.adresseTravaux, suiviPourBon(b) ? `${langueBon === "en" ? "Ref." : "Suivi"} ${suiviPourBon(b)}` : ""].filter(Boolean).join(" — "),
+          entreprise: configEnt.nomCommercial || configEnt.nomLegal,
+        }),
         html: gabaritBonTravail({
           config: configEnt,
           clientNom: b.client,
-          lien: lienSelonLangue(lienBonPublic(jeton), langueDuClient(clients, { id: b.clientId, nom: b.client })),
+          lien: lienSelonLangue(lienBonPublic(jeton), langueBon),
           joursValidite: JOURS_VALIDITE_BON,
+          langue: langueBon,
           // ⭐ Avis Google — jamais sur un retour sous garantie (retrait
           // demandé ou validé « garantie » sur ce bon).
           lienAvis: b.retraitRaison === "garantie" || b.garantie ? null : String(configEnt?.lienAvisGoogle || "").trim() || null,

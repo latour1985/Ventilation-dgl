@@ -28,11 +28,11 @@ const styleLien = {
 };
 
 export default function BoutonPDFPublic({ bon }) {
-  const { t } = useLangue();
+  const { t, langue } = useLangue();
   const nomFichier = `Bon-de-travail-${String(bon?.clientNom || "client").replace(/[^a-zA-Z0-9]+/g, "-")}-${bon?.date || ""}.pdf`;
   return (
     <PDFDownloadLink
-      document={<BonTravailPublicPDF bon={bon} config={bon?.entreprise} />}
+      document={<BonTravailPublicPDF bon={bon} config={bon?.entreprise} langue={langue} />}
       fileName={nomFichier}
       style={styleLien}
     >

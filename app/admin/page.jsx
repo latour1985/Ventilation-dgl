@@ -49,7 +49,8 @@ import { listerCommandesCamion, marquerCommandeCamionPassee, sAbonnerCommandesCa
 import { televerserPieceJointeTache, listerLegendes, sauvegarderLegende } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee, gabaritBcSimple, conditionsDepotAppel } from "@/lib/courriels";
+import { envoyerCourriel, gabaritDevis, gabaritBonCommande, gabaritDemandePaiement, gabaritBonTravail, gabaritCommandeGroupee, gabaritBcSimple, conditionsDepotAppel, sujetCourrielClient } from "@/lib/courriels";
+import { langueDuClient } from "@/lib/i18nPublic";
 import { termesHtmlCourriel } from "@/lib/termes";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ententePourStatut } from "@/lib/ententeTexte";
@@ -2356,7 +2357,15 @@ function AppAdmin() {
     // sous 2 jours, « N jours » au-delà.
     const heuresDelai = Number(configEntreprise?.delaiDepotHeures) || 24;
     const joursDelai = infos.joursLimite != null ? Number(infos.joursLimite) : heuresDelai / 24;
-    const libelleDelai = joursDelai >= 2 ? `${Math.round(joursDelai)} jours` : `${Math.round(joursDelai * 24)} h`;
+    // 🌎 LANGUE DU CLIENT (2026-10-05, étape A) : la demande — facture
+    // QuickBooks ET notre courriel — parle la langue de sa fiche.
+    const langueDepot = langueDuClient(clients, { id: infos.clientId, nom: infos.clientNom });
+    const en = langueDepot === "en";
+    const libelleDelai =
+      joursDelai >= 2 ? `${Math.round(joursDelai)} ${en ? "days" : "jours"}` : `${Math.round(joursDelai * 24)} ${en ? "hours" : "h"}`;
+    const zoneTexte = infos.zone ? (en && infos.zone === "hors zone" ? "outside zone" : infos.zone) : "";
+    const libelleLigneDepot = (objet) =>
+      `${en ? "Deposit — service call" : "Dépôt — appel de service"}${zoneTexte ? ` (${zoneTexte})` : ""}${objet ? ` — ${objet}` : ""}`;
     const repli = {
       tacheId,
       statut: "en_attente_paiement",
@@ -2407,7 +2416,7 @@ function AppAdmin() {
       typeof window !== "undefined"
         ? `${window.location.origin}/conditions?e=${encodeURIComponent(configEntreprise?.id || "dgl")}`
         : null;
-    const conditionsDepot = conditionsDepotAppel(configEntreprise, lienConditions);
+    const conditionsDepot = conditionsDepotAppel(configEntreprise, lienConditions, langueDepot);
     // 📝 L'OBJET DE LA VISITE — « pourquoi on vient » — sur la facture
     // ET dans le courriel. « Dépôt — appel de service » tout court
     // disait au client qu'il paie, jamais pour quoi. Depuis le
@@ -2422,8 +2431,11 @@ function AppAdmin() {
     const noteCorrection = String(infos.noteCorrection || "").trim();
     const messageClientDepot =
       (noteCorrection ? `${noteCorrection}\n\n` : "") +
-      `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
-      `Dès sa réception, votre rendez-vous est confirmé.\n\n${conditionsDepot}`;
+      (en
+        ? `To book your service call${zoneTexte ? ` (${zoneTexte})` : ""}, a deposit is required within ${libelleDelai}. ` +
+          `Your appointment is confirmed as soon as it is received.\n\n${conditionsDepot}`
+        : `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
+          `Dès sa réception, votre rendez-vous est confirmé.\n\n${conditionsDepot}`);
     const r = await creerFactureDepot({
       tacheId,
       clientId: infos.clientId || null,
@@ -2433,9 +2445,7 @@ function AppAdmin() {
       joursLimite: joursDelai,
       // La ligne de la facture QuickBooks porte l'OBJET DE LA VISITE —
       // le client lit ce qu'il réserve, pas seulement qu'il paie.
-      description:
-        `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}${objetVisite ? ` — ${objetVisite}` : ""}` +
-        (detailVisite ? `\n${detailVisite}` : ""),
+      description: libelleLigneDepot(objetVisite) + (detailVisite ? `\n${detailVisite}` : ""),
       envoyerA: adressesDepot,
       messageClient: messageClientDepot,
       envoyerAuto: configEntreprise?.envoiAutoFactureQb === true,
@@ -2476,18 +2486,26 @@ function AppAdmin() {
     }
     const rc = await envoyerCourriel({
       a: adresses,
-      sujet: `${noteCorrection ? "Dépôt corrigé" : "Dépôt requis"} — réservation de votre appel de service (${configEntreprise.nomCommercial || configEntreprise.nomLegal})`,
+      sujet: sujetCourrielClient(noteCorrection ? "depotCorrige" : "depot", langueDepot, {
+        entreprise: configEntreprise.nomCommercial || configEntreprise.nomLegal,
+      }),
       html: gabaritDemandePaiement({
         config: configEntreprise,
         clientNom: infos.clientNom,
-        description:
-          (noteCorrection ? `${noteCorrection} ` : "") +
-          `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ` +
-          `${libelleDelai}. ` +
-          `${facture?.docNumber ? `Référence : facture Nº ${facture.docNumber}. ` : ""}` +
-          `Dès sa réception, votre rendez-vous est confirmé.` +
-          `${objetVisite ? ` Objet de la visite : ${[objetVisite, detailVisite].filter(Boolean).join(" — ")}.` : ""}`,
-        lignes: [{ etiquette: `Dépôt — appel de service${infos.zone ? ` (${infos.zone})` : ""}${objetVisite ? ` — ${objetVisite}` : ""}`, montant: t.ht }],
+        langue: langueDepot,
+        description: en
+          ? (noteCorrection ? `${noteCorrection} ` : "") +
+            `To book your service call${zoneTexte ? ` (${zoneTexte})` : ""}, a deposit is required within ${libelleDelai}. ` +
+            `${facture?.docNumber ? `Reference: invoice No. ${facture.docNumber}. ` : ""}` +
+            `Your appointment is confirmed as soon as it is received.` +
+            `${objetVisite ? ` Purpose of the visit: ${[objetVisite, detailVisite].filter(Boolean).join(" — ")}.` : ""}`
+          : (noteCorrection ? `${noteCorrection} ` : "") +
+            `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ` +
+            `${libelleDelai}. ` +
+            `${facture?.docNumber ? `Référence : facture Nº ${facture.docNumber}. ` : ""}` +
+            `Dès sa réception, votre rendez-vous est confirmé.` +
+            `${objetVisite ? ` Objet de la visite : ${[objetVisite, detailVisite].filter(Boolean).join(" — ")}.` : ""}`,
+        lignes: [{ etiquette: libelleLigneDepot(objetVisite), montant: t.ht }],
         tps: t.tps,
         tvq: t.tvq,
         total: t.total,

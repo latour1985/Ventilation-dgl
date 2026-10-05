@@ -14,7 +14,8 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { territoireDe, CLE_NOTE_ZONES } from "@/lib/supabase/prixDepots";
 import { devisDepuisQbo } from "./partage";
 import { useEntreprise } from "@/lib/contexteEntreprise";
-import { envoyerCourriel, gabaritConfirmationRdv, gabaritCorrectionZone } from "@/lib/courriels";
+import { envoyerCourriel, gabaritConfirmationRdv, gabaritCorrectionZone, sujetCourrielClient, dateCourriel } from "@/lib/courriels";
+import { langueClient } from "@/lib/i18nPublic";
 import { supabase } from "@/lib/supabase/client";
 import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, majDonneesTousLesTechniciens, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { estCourrielST } from "@/lib/supabase/sousTraitants";
@@ -510,18 +511,21 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     const adresses = [...new Set([...coches, ...(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(extraCourriel) ? [extraCourriel] : [])])];
     if (adresses.length === 0 || !t.datePrevue) return;
     setConfirmationRdv((p) => ({ ...p, enCours: true }));
-    const dateLisible = new Date(`${t.datePrevue}T12:00:00`).toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    // 🌎 Dans la langue du client (2026-10-05) — la date aussi.
+    const langueRdv = langueClient((clients || []).find((c) => c.id === t.clientId || c.nom === t.clientNom));
+    const dateLisible = dateCourriel(t.datePrevue, "fr");
     const technicienNom = t.technicienPrevu ? employes.find((e) => e.id === t.technicienPrevu)?.nom || "" : "";
     const r = await envoyerCourriel({
       a: adresses,
-      sujet: `Votre rendez-vous est confirmé — ${dateLisible} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
+      sujet: sujetCourrielClient("rdv", langueRdv, { date: dateCourriel(t.datePrevue, langueRdv), entreprise: configEnt?.nomCommercial || configEnt?.nomLegal || "" }),
       html: gabaritConfirmationRdv({
         config: configEnt,
         clientNom: t.clientNom || "",
-        date: dateLisible,
+        date: dateCourriel(t.datePrevue, langueRdv),
         adresse: t.adresseIntervention || t.adresseTravaux || "",
         technicien: technicienNom,
         depotRecu: true,
+        langue: langueRdv,
       }),
     });
     ajouterJournal(
@@ -1377,6 +1381,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       // ainsi choisir à quelles adresses envoyer le bon de travail signé
       // (choix multiple) sans avoir accès au dossier client complet.
       clientCourriels: (client?.courriels || []).map((c) => ({ id: c.id, email: c.email, label: c.label, defaut: !!c.defaut })),
+      // 🌎 Langue du client — le téléphone du technicien écrit au client
+      // (« en route », bon de travail) dans SA langue (2026-10-05).
+      clientLangue: langueClient(client),
       // Téléphone du client transmis aussi (retour de tests 2026-08-17) :
       // le technicien sur place doit pouvoir appeler sans passer par le
       // bureau — bouton d'appel direct dans sa fiche de tâche.
@@ -2428,8 +2435,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     if (!choix.remplacer && adresses.length > 0) {
       const rc = await envoyerCourriel({
         a: adresses,
-        sujet: `Correction de votre appel de service (${configEnt?.nomCommercial || configEnt?.nomLegal || ""})`,
+        sujet: sujetCourrielClient("correctionZone", langueClient(fiche), { entreprise: configEnt?.nomCommercial || configEnt?.nomLegal || "" }),
         html: gabaritCorrectionZone({
+          langue: langueClient(fiche),
           config: configEnt,
           clientNom: fiche?.nom || tache.clientNom || "",
           ancienneZone: ancienne === "hors_zone" ? "Hors zone" : ancienne || "Aucune zone",
@@ -2502,9 +2510,13 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
         courriels: adresses,
         titre: tache.titre || "",
         descriptionTravaux: tache.description || "",
+        // 🌎 Dans la langue du client (2026-10-05).
         noteCorrection:
-          `Correction : votre appel de service a été reclassé de ${libZone(ancienne)} à ${libZone(choix.zone)}.` +
-          (depot?.qboDocNumber ? ` Cette demande remplace la facture Nº ${depot.qboDocNumber}, qui est annulée.` : ""),
+          langueClient(fiche) === "en"
+            ? `Correction: your service call has been reclassified from ${libZone(ancienne).replace("hors zone", "outside zone").replace("aucune zone", "no zone")} to ${libZone(choix.zone).replace("hors zone", "outside zone")}.` +
+              (depot?.qboDocNumber ? ` This request replaces invoice No. ${depot.qboDocNumber}, which is cancelled.` : "")
+            : `Correction : votre appel de service a été reclassé de ${libZone(ancienne)} à ${libZone(choix.zone)}.` +
+              (depot?.qboDocNumber ? ` Cette demande remplace la facture Nº ${depot.qboDocNumber}, qui est annulée.` : ""),
       });
     }
 

@@ -31,7 +31,7 @@ function syncClientComptable(config, options) {
 function nomCompta(config) {
   return (config?.systemeComptable || "quickbooks") === "sage" ? "Sage" : "QuickBooks";
 }
-import { envoyerCourriel, gabaritBonTravail } from "@/lib/courriels";
+import { envoyerCourriel, gabaritBonTravail, sujetCourrielClient } from "@/lib/courriels";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ModalDetailProjet } from "./OngletProjets";
 import { ModalDoublonsClients } from "./ModalDoublonsClients";
@@ -938,14 +938,19 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
     try {
       const rowId = String(b.id).slice(4);
       const jeton = await assurerJetonBon(rowId);
+      const langueBon = langueDuClient(clients, { id: b.clientId, nom: b.client });
       const r = await envoyerCourriel({
         a: adresses,
-        sujet: `Vos travaux sont terminés — bon de travail${b.adresseTravaux ? ` — ${b.adresseTravaux}` : ""} (${configClients.nomCommercial || configClients.nomLegal})`,
+        sujet: sujetCourrielClient("bonTravail", langueBon, {
+          precision: b.adresseTravaux || "",
+          entreprise: configClients.nomCommercial || configClients.nomLegal,
+        }),
         html: gabaritBonTravail({
           config: configClients,
           clientNom: b.client,
-          lien: lienSelonLangue(lienBonPublic(jeton), langueDuClient(clients, { id: b.clientId, nom: b.client })),
+          lien: lienSelonLangue(lienBonPublic(jeton), langueBon),
           joursValidite: JOURS_VALIDITE_BON,
+          langue: langueBon,
           // ⭐ Avis Google — jamais sur un retour sous garantie.
           lienAvis: b.retraitRaison === "garantie" || b.garantie ? null : String(configClients?.lienAvisGoogle || "").trim() || null,
         }),

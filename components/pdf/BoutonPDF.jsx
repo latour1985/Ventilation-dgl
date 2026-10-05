@@ -10,6 +10,7 @@
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import { DevisPDF, FacturePDF, BonTravailPDF } from "./DocumentsPDF";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { langueClient } from "@/lib/i18nPublic";
 
 const styleLien = {
   display: "block",
@@ -38,16 +39,17 @@ export default function BoutonPDF({ type, devis, bon, travail, clients }) {
   let fichier = "document.pdf";
 
   if (type === "devis") {
-    doc = <DevisPDF devis={{ ...devis, adresseFacturation: ficheDevis?.adresseFacturation, adresseTravaux: devis?.adresseTravaux || ficheDevis?.adresses?.[0]?.ligne1 }} config={config} />;
+    // 🌎 Le PDF parle la langue du CLIENT (sa fiche), pas celle du bureau.
+    doc = <DevisPDF devis={{ ...devis, adresseFacturation: ficheDevis?.adresseFacturation, adresseTravaux: devis?.adresseTravaux || ficheDevis?.adresses?.[0]?.ligne1 }} config={config} langue={langueClient(ficheDevis)} />;
     fichier = `Devis-${devis?.numero || ""}.pdf`;
   } else if (type === "facture") {
     const factures = bon?.facturesEmises || [];
     const num = factures[factures.length - 1]?.numeroFactureQb || bon?.client || "facture";
-    doc = <FacturePDF bon={{ ...bon, adresseFacturation: ficheBon?.adresseFacturation }} config={config} />;
+    doc = <FacturePDF bon={{ ...bon, adresseFacturation: ficheBon?.adresseFacturation }} config={config} langue={langueClient(ficheBon)} />;
     fichier = `Facture-${num}.pdf`;
   } else if (type === "bon-travail") {
-    doc = <BonTravailPDF travail={travail} clients={clients} config={config} />;
     const client = (clients || []).find((c) => c.id === travail?.clientId);
+    doc = <BonTravailPDF travail={travail} clients={clients} config={config} langue={langueClient(client)} />;
     fichier = `Bon-de-travail-${client?.nom || ""}.pdf`;
   }
 

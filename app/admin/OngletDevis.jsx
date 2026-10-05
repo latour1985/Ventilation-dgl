@@ -16,7 +16,7 @@ import { lienSelonLangue, langueDuClient, langueClient } from "@/lib/i18nPublic"
 import { poserGarde, retirerGarde } from "@/lib/gardeNonEnregistre";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { calculerTaxes } from "@/lib/supabase/entreprise";
-import { envoyerCourriel, gabaritDevis } from "@/lib/courriels";
+import { envoyerCourriel, gabaritDevis, sujetCourrielClient } from "@/lib/courriels";
 import { rejeterEstimateQbo } from "@/lib/quickbooksClient";
 import { genererJeton, lienDevisPublic, JOURS_VALIDITE_LIEN_DEVIS } from "@/lib/supabase/devisPublic";
 import { activerVersionDevis, basculerVersionDevis, annulerDevisAccepte, supprimerDevis, reponsesClientATraiter, classerReponseDevis, rouvrirReponseDevis } from "@/lib/supabase/devis";
@@ -758,6 +758,13 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   const ficheClientDe = (devis) =>
     clients.find((c) => c.id === devis.clientId) ||
     clients.find((c) => (c.nom || "").trim().toLowerCase() === (devis.clientNom || "").trim().toLowerCase());
+  // 🌎 Objet d'un courriel de devis dans la langue du client (2026-10-05).
+  const sujetDevis = (devis, type) =>
+    sujetCourrielClient(type, langueDuClient(clients, { id: devis.clientId, nom: devis.clientNom }), {
+      numero: devis.numero,
+      precision: devis.adresseTravaux || devis.titre || "",
+      entreprise: configEnt.nomCommercial || configEnt.nomLegal,
+    });
   const ouvrirEnvoiDevis = (devis) => {
     const fiche = ficheClientDe(devis);
     const tous = (fiche?.courriels || []).map((c) => (typeof c === "string" ? c : c.email)).filter(Boolean);
@@ -777,10 +784,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // 📎 Fichiers ajoutés à la main pour CET envoi (dépliants ponctuels,
       // fiche technique) — en plus des dépliants joints d'office.
       piecesAdHoc: [],
-      objet:
-        devis.reponseClient === "accepte"
-          ? `Votre copie du devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
-          : `Devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      objet: sujetDevis(devis, devis.reponseClient === "accepte" ? "devisCopie" : "devis"),
     });
   };
   // 🔔 RELANCE EN UN CLIC (2026-09-04, chantier approuvé — JAMAIS
@@ -791,7 +795,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     setEnvoiDevis((prev) => ({
       ...prev,
       relance: true,
-      objet: `Rappel — Devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      objet: sujetDevis(devis, "devisRappel"),
     }));
   };
   // 📎 PIÈCES JOINTES D'UN DEVIS — le PDF du devis, puis les dépliants des
@@ -805,9 +809,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       const [{ pdf }, { DevisPDF }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/pdf/DocumentsPDF")]);
       const ficheP = ficheClientDe(devisCourant);
       const blob = await pdf(
-        <DevisPDF devis={{ ...devisCourant, adresseFacturation: devisCourant.adresseFacturation || adresseFacturationClient(ficheP) }} config={configEnt} />
+        <DevisPDF devis={{ ...devisCourant, adresseFacturation: devisCourant.adresseFacturation || adresseFacturationClient(ficheP) }} config={configEnt} langue={langueClient(ficheP)} />
       ).toBlob();
-      const nomPdf = `Devis-${String(devisCourant.numero || "").replace(/[^a-zA-Z0-9-]+/g, "-")}.pdf`;
+      const nomPdf = `${langueClient(ficheP) === "en" ? "Quote" : "Devis"}-${String(devisCourant.numero || "").replace(/[^a-zA-Z0-9-]+/g, "-")}.pdf`;
       const url = await televerserPieceJointeTache(new File([blob], nomPdf, { type: "application/pdf" }));
       pdfJoint = { nom: nomPdf, url };
     } catch {
@@ -900,9 +904,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       // L'objet ajusté dans le panneau d'envoi fait foi ; sinon le défaut.
       sujet:
         (envoiDevis?.objet || "").trim() ||
-        (dejaAccepte
-          ? `Votre copie du devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`
-          : `Devis ${devis.numero}${(devis.adresseTravaux || devis.titre) ? ` — ${devis.adresseTravaux || devis.titre}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`),
+        sujetDevis(devis, dejaAccepte ? "devisCopie" : "devis"),
       html: gabaritDevis({
         config: configEnt,
         numero: devis.numero,
@@ -912,6 +914,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         dejaAccepte,
         relance: estRelance,
         pdfJoint: !!pdfJoint,
+        langue: langueDuClient(clients, { id: devis.clientId, nom: devis.clientNom }),
       }),
     });
     setEnvoiDevisEnCours(false);
@@ -1579,13 +1582,18 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
     const r = await envoyerCourriel({
       piecesJointes: piecesCreation,
       a: destinataires.map((c) => c.email),
-      sujet: `Devis ${numero}${(adresseTravauxDevis || titreDevis.trim()) ? ` — ${adresseTravauxDevis || titreDevis.trim()}` : ""} — ${configEnt.nomCommercial || configEnt.nomLegal}`,
+      sujet: sujetCourrielClient("devis", langueClient(client), {
+        numero,
+        precision: adresseTravauxDevis || titreDevis.trim() || "",
+        entreprise: configEnt.nomCommercial || configEnt.nomLegal,
+      }),
       html: gabaritDevis({
         config: configEnt,
         numero,
         clientNom: client.nom,
         total: null,
         lien: lienSelonLangue(lienDevisPublic(jeton), langueClient(client)),
+        langue: langueClient(client),
       }),
     });
     if (!r.envoye) {

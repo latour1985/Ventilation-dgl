@@ -20,7 +20,8 @@ import { SqueletteTechnicien } from "@/components/EcranSquelette";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import { enregistrerBonTravail, bonExistePourTache, apportEquipePourBon } from "@/lib/supabase/bonsTravail";
 import { fermerTravauxTechnicien } from "@/lib/supabase/fermetureTechnicien";
-import { envoyerCourriel, gabaritBonTravail, gabaritEnRoute } from "@/lib/courriels";
+import { envoyerCourriel, gabaritBonTravail, gabaritEnRoute, sujetCourrielClient } from "@/lib/courriels";
+import { lienSelonLangue } from "@/lib/i18nPublic";
 import PanneauNotesPerso from "@/components/PanneauNotesPerso";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, bonDejaEnvoyeAuClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { listerCamions, camionIndisponible } from "@/lib/supabase/camions";
@@ -3910,13 +3911,15 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     try {
       const r = await envoyerCourriel({
         a: cibles,
-        sujet: `${prenom} est en route — arrivée dans ~${delaiMinutes} min (${nomEnt})`,
+        // 🌎 Dans la langue du CLIENT (sa fiche), pas celle du téléphone.
+        sujet: sujetCourrielClient("enRoute", tache.clientLangue, { technicien: prenom, minutes: delaiMinutes, entreprise: nomEnt }),
         html: gabaritEnRoute({
           config: configEntRoute,
           clientNom: tache.clientNom || "",
           technicien: prenom,
           delaiMinutes,
           adresse: tache.adresseTravaux || tache.adresseIntervention || "",
+          langue: tache.clientLangue,
         }),
       });
       if (r?.erreur) {
@@ -4770,11 +4773,12 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         const jetonBon = await assurerJetonBon(bonRowId);
         const r = await envoyerCourriel({
           a: destinataires,
-          sujet: `Vos travaux sont terminés — bon de travail (${configEnt?.nomCommercial || configEnt?.nomLegal || ""})`,
+          sujet: sujetCourrielClient("bonTravail", tache.clientLangue, { entreprise: configEnt?.nomCommercial || configEnt?.nomLegal || "" }),
           html: gabaritBonTravail({
             config: configEnt,
             clientNom: tache.clientNom || "",
-            lien: lienBonPublic(jetonBon),
+            lien: lienSelonLangue(lienBonPublic(jetonBon), tache.clientLangue),
+            langue: tache.clientLangue,
             joursValidite: JOURS_VALIDITE_BON,
             // ⭐ Demande d'avis Google — JAMAIS sur un retour sous
             // garantie (décision du propriétaire : la pièce est parfois
@@ -6243,6 +6247,7 @@ function AppTechnicien() {
                   adresseIntervention: d.adresseIntervention,
                   adresseTravaux: d.adresseTravaux,
                   clientCourriels: d.clientCourriels,
+                  clientLangue: d.clientLangue, // 🌎 suit la fiche du client (2026-10-05)
                   clientTelephone: d.clientTelephone,
                   contactSurPlace: d.contactSurPlace,
                   piecesJointes: d.piecesJointes,

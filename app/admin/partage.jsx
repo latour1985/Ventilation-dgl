@@ -1218,6 +1218,10 @@ export function completerTacheDepuisFiche(tache, clients = []) {
     ...(!(tache.clientCourriels || []).length && (fiche.courriels || []).length
       ? { clientCourriels: fiche.courriels.map((c) => ({ id: c.id, email: c.email, label: c.label, defaut: !!c.defaut })) }
       : {}),
+    // 🌎 Langue du client — TOUJOURS celle de la fiche (2026-10-05) : une
+    // fiche passée en English l'est aussi pour les tâches déjà créées dès
+    // leur prochaine mise à jour.
+    clientLangue: fiche.langue === "en" ? "en" : "fr",
   };
 }
 

@@ -24,10 +24,10 @@ const styleLien = {
 };
 
 export default function BoutonPDFDevisPublic({ devis, config }) {
-  const { t } = useLangue();
+  const { t, langue } = useLangue();
   const nomFichier = `Devis-${String(devis?.numero || "").replace(/[^a-zA-Z0-9-]+/g, "-")}.pdf`;
   return (
-    <PDFDownloadLink document={<DevisPDF devis={devis} config={config} />} fileName={nomFichier} style={styleLien}>
+    <PDFDownloadLink document={<DevisPDF devis={devis} config={config} langue={langue} />} fileName={nomFichier} style={styleLien}>
       {({ loading }) => (loading ? t("Préparation du PDF…") : t("⬇️ Télécharger en PDF"))}
     </PDFDownloadLink>
   );

@@ -27,7 +27,11 @@ const sPhotos = {
 // Repli si aucune configuration n'est fournie (voir lib/supabase/entreprise.js).
 const CONFIG_REPLI = { nomLegal: "Ventilation DGL inc.", tauxTps: 5, tauxTvq: 9.975 };
 const tauxAffiche = (t) => String(t ?? 0).replace(".", ",");
-const argent = (n) => `${Number(n || 0).toFixed(2)} $`;
+// 🌎 LANGUE DU CLIENT (2026-10-05, étape A) : chaque document reçoit
+// `langue` (« fr » par défaut). Les termes et conditions restent en
+// français (texte juridique) — l'anglais le dit dans le titre.
+const L = (langue, fr, en) => (langue === "en" ? en : fr);
+const argent = (n, langue = "fr") => (langue === "en" ? `$${Number(n || 0).toFixed(2)}` : `${Number(n || 0).toFixed(2)} $`);
 
 const sAdr = { rangee: { flexDirection: "row", marginTop: 6 }, col: { width: "50%", paddingRight: 8 } };
 
@@ -95,15 +99,15 @@ const CLAUSES = [
 
 // `config` vient des Paramètres de l'entreprise (transmis par
 // BoutonPDF) : plus rien n'est écrit en dur ici.
-function EnTetePDF({ config }) {
+function EnTetePDF({ config, langue = "fr" }) {
   const e = config || CONFIG_REPLI;
   // Ligne RBQ + CMMTQ : chaque morceau ne s'affiche que s'il existe.
   const assoc = Array.isArray(e.associations) ? e.associations : e.membreCmmtq ? ["cmmtq"] : [];
   const ligneRbq = [
     e.numeroRbq ? `RBQ# ${e.numeroRbq}` : null,
-    assoc.includes("cmmtq") ? "Membre de la CMMTQ" : null,
-    assoc.includes("cetaf") ? "Membre de la CETAF" : null,
-    assoc.includes("cmeq") ? "Membre de la CMEQ" : null,
+    assoc.includes("cmmtq") ? L(langue, "Membre de la CMMTQ", "Member of the CMMTQ") : null,
+    assoc.includes("cetaf") ? L(langue, "Membre de la CETAF", "Member of the CETAF") : null,
+    assoc.includes("cmeq") ? L(langue, "Membre de la CMEQ", "Member of the CMEQ") : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -120,8 +124,8 @@ function EnTetePDF({ config }) {
           <Text style={s.company}>{e.nomLegal}</Text>
           {e.adresse ? <Text style={s.small}>{e.adresse}</Text> : null}
           {(e.telephone || e.courriel) ? <Text style={s.small}>{[e.telephone, e.courriel].filter(Boolean).join(" · ")}</Text> : null}
-          {e.numeroTps ? <Text style={s.small}>Nº d'inscription TPS/TVH : {e.numeroTps}</Text> : null}
-          {e.numeroTvq ? <Text style={s.small}>Nº d'enregistrement TVQ : {e.numeroTvq}</Text> : null}
+          {e.numeroTps ? <Text style={s.small}>{L(langue, "Nº d'inscription TPS/TVH : ", "GST/HST registration no.: ")}{e.numeroTps}</Text> : null}
+          {e.numeroTvq ? <Text style={s.small}>{L(langue, "Nº d'enregistrement TVQ : ", "QST registration no.: ")}{e.numeroTvq}</Text> : null}
           {ligneRbq ? <Text style={s.small}>{ligneRbq}</Text> : null}
           {/* NEQ (2026-08-28) : saisi dans les Paramètres, jamais affiché. */}
           {e.numeroNeq ? <Text style={s.small}>NEQ {e.numeroNeq}</Text> : null}
@@ -140,19 +144,19 @@ function EnTetePDF({ config }) {
 // Une facture sans adresse de facturation se fait retourner par la
 // comptabilité du client. L'adresse des travaux ne s'affiche que si
 // elle diffère : la répéter n'ajoute rien et allonge le document.
-function AdressesPDF({ clientNom, adresseFacturation, adresseTravaux }) {
+function AdressesPDF({ clientNom, adresseFacturation, adresseTravaux, langue = "fr" }) {
   const differente =
     adresseTravaux && adresseTravaux.trim() && adresseTravaux.trim() !== (adresseFacturation || '').trim();
   return (
     <View style={sAdr.rangee}>
       <View style={sAdr.col}>
-        <Text style={s.meta}>Facturé à :</Text>
+        <Text style={s.meta}>{L(langue, "Facturé à :", "Billed to:")}</Text>
         <Text style={s.clientName}>{clientNom || '—'}</Text>
         {adresseFacturation ? <Text style={s.small}>{adresseFacturation}</Text> : null}
       </View>
       {differente ? (
         <View style={sAdr.col}>
-          <Text style={s.meta}>Adresse des travaux :</Text>
+          <Text style={s.meta}>{L(langue, "Adresse des travaux :", "Work address:")}</Text>
           <Text style={s.small}>{adresseTravaux}</Text>
         </View>
       ) : null}
@@ -160,11 +164,14 @@ function AdressesPDF({ clientNom, adresseFacturation, adresseTravaux }) {
   );
 }
 
-function TermesPDF({ config }) {
+function TermesPDF({ config, langue = "fr" }) {
   const e = config || CONFIG_REPLI;
   return (
     <View>
-      <Text style={s.termsTitle}>TERMES ET CONDITIONS GÉNÉRALES — {(e.nomLegal || "").toUpperCase()}</Text>
+      <Text style={s.termsTitle}>
+        {L(langue, "TERMES ET CONDITIONS GÉNÉRALES", "GENERAL TERMS AND CONDITIONS")} — {(e.nomLegal || "").toUpperCase()}
+        {L(langue, "", " (in French; the French version governs)")}
+      </Text>
       {CLAUSES.map((cl, i) => (
         <View key={i}>
           <Text style={s.clause}>
@@ -179,35 +186,35 @@ function TermesPDF({ config }) {
           ))}
         </View>
       ))}
-      <Text style={s.merci}>Merci de votre collaboration et de votre confiance.</Text>
+      <Text style={s.merci}>{L(langue, "Merci de votre collaboration et de votre confiance.", "Thank you for your business and your trust.")}</Text>
     </View>
   );
 }
 
-function LigneTotaux({ sousTotal, config }) {
+function LigneTotaux({ sousTotal, config, langue = "fr" }) {
   const e = config || CONFIG_REPLI;
   const tps = sousTotal * ((e.tauxTps ?? 5) / 100);
   const tvq = sousTotal * ((e.tauxTvq ?? 9.975) / 100);
   const total = sousTotal + tps + tvq;
   return (
     <View style={s.totals}>
-      <View style={s.tRow}><Text style={s.tLabel}>Sous-total</Text><Text style={s.tVal}>{argent(sousTotal)}</Text></View>
-      <View style={s.tRow}><Text style={s.tLabel}>TPS ({tauxAffiche(e.tauxTps)}%)</Text><Text style={s.tVal}>{argent(tps)}</Text></View>
-      <View style={s.tRow}><Text style={s.tLabel}>TVQ ({tauxAffiche(e.tauxTvq)}%)</Text><Text style={s.tVal}>{argent(tvq)}</Text></View>
-      <View style={s.grand}><Text style={s.grandLabel}>Total</Text><Text style={s.grandVal}>{argent(total)}</Text></View>
+      <View style={s.tRow}><Text style={s.tLabel}>{L(langue, "Sous-total", "Subtotal")}</Text><Text style={s.tVal}>{argent(sousTotal, langue)}</Text></View>
+      <View style={s.tRow}><Text style={s.tLabel}>{L(langue, "TPS", "GST")} ({langue === "en" ? String(e.tauxTps ?? 0) : tauxAffiche(e.tauxTps)}%)</Text><Text style={s.tVal}>{argent(tps, langue)}</Text></View>
+      <View style={s.tRow}><Text style={s.tLabel}>{L(langue, "TVQ", "QST")} ({langue === "en" ? String(e.tauxTvq ?? 0) : tauxAffiche(e.tauxTvq)}%)</Text><Text style={s.tVal}>{argent(tvq, langue)}</Text></View>
+      <View style={s.grand}><Text style={s.grandLabel}>Total</Text><Text style={s.grandVal}>{argent(total, langue)}</Text></View>
     </View>
   );
 }
 
-function PiedPage({ config }) {
+function PiedPage({ config, langue = "fr" }) {
   const e = config || CONFIG_REPLI;
   const ligne = [
     `© ${new Date().getFullYear()} ${e.nomLegal}`,
     e.numeroRbq ? `RBQ# ${e.numeroRbq}` : null,
-    e.membreCmmtq ? "Membre de la CMMTQ" : null,
+    e.membreCmmtq ? L(langue, "Membre de la CMMTQ", "Member of the CMMTQ") : null,
     // La marque PRODUIT, discrète — les documents restent ceux de
     // L'ENTREPRISE (c'est elle qui facture ses clients).
-    "Propulsé par Fluxya",
+    L(langue, "Propulsé par Fluxya", "Powered by Fluxya"),
   ].filter(Boolean).join(" · ");
   return (
     <View style={sLogo.rangeePied}>
@@ -219,22 +226,24 @@ function PiedPage({ config }) {
   );
 }
 
-export function DevisPDF({ devis, config }) {
+export function DevisPDF({ devis, config, langue = "fr" }) {
   const lignes = devis?.lignes || [];
   return (
     <Document>
       <Page size="A4" style={s.page}>
-        <EnTetePDF config={config} />
-        <Text style={s.title}>{devis?.estContrat ? "CONTRAT D'ENTRETIEN PÉRIODIQUE" : "DEVIS"} {devis?.numero}</Text>
-        {devis?.titre ? <Text style={s.meta}>Objet : {devis.titre}</Text> : null}
-        <Text style={s.meta}>Date : {devis?.date}</Text>
-        <AdressesPDF clientNom={devis?.clientNom} adresseFacturation={devis?.adresseFacturation} adresseTravaux={devis?.adresseTravaux} />
+        <EnTetePDF config={config} langue={langue} />
+        <Text style={s.title}>
+          {devis?.estContrat ? L(langue, "CONTRAT D'ENTRETIEN PÉRIODIQUE", "PERIODIC MAINTENANCE CONTRACT") : L(langue, "DEVIS", "QUOTE")} {devis?.numero}
+        </Text>
+        {devis?.titre ? <Text style={s.meta}>{L(langue, "Objet : ", "Subject: ")}{devis.titre}</Text> : null}
+        <Text style={s.meta}>Date{L(langue, " : ", ": ")}{devis?.date}</Text>
+        <AdressesPDF clientNom={devis?.clientNom} adresseFacturation={devis?.adresseFacturation} adresseTravaux={devis?.adresseTravaux} langue={langue} />
 
         <View style={s.tableHead}>
           <Text style={[s.th, s.cDesc]}>Description</Text>
-          <Text style={[s.th, s.cQte]}>Qté</Text>
-          <Text style={[s.th, s.cPrix]}>Prix</Text>
-          <Text style={[s.th, s.cMont]}>Montant</Text>
+          <Text style={[s.th, s.cQte]}>{L(langue, "Qté", "Qty")}</Text>
+          <Text style={[s.th, s.cPrix]}>{L(langue, "Prix", "Price")}</Text>
+          <Text style={[s.th, s.cMont]}>{L(langue, "Montant", "Amount")}</Text>
         </View>
         {lignes.map((l) => (
           <View style={s.row} key={l.uid} wrap={false}>
@@ -248,51 +257,51 @@ export function DevisPDF({ devis, config }) {
               {l.description ? <Text style={s.cellDesc}>{l.description}</Text> : null}
             </View>
             <Text style={[s.cell, s.cQte]}>{l.quantite}</Text>
-            <Text style={[s.cell, s.cPrix]}>{argent(l.prix_vendant)}</Text>
-            <Text style={[s.cellStrong, s.cMont]}>{argent(l.prix_vendant * l.quantite)}</Text>
+            <Text style={[s.cell, s.cPrix]}>{argent(l.prix_vendant, langue)}</Text>
+            <Text style={[s.cellStrong, s.cMont]}>{argent(l.prix_vendant * l.quantite, langue)}</Text>
           </View>
         ))}
 
-        <LigneTotaux sousTotal={devis?.totalVendant || 0} config={config} />
-        <TermesPDF config={config} />
+        <LigneTotaux sousTotal={devis?.totalVendant || 0} config={config} langue={langue} />
+        <TermesPDF config={config} langue={langue} />
 
         <View style={s.sigRow}>
-          <View style={s.sigField}><View style={s.sigLine} /><Text style={s.sigLabel}>Signature du client</Text></View>
+          <View style={s.sigField}><View style={s.sigLine} /><Text style={s.sigLabel}>{L(langue, "Signature du client", "Client signature")}</Text></View>
           <View style={s.sigField}><View style={s.sigLine} /><Text style={s.sigLabel}>Date</Text></View>
         </View>
 
-        <PiedPage config={config} />
+        <PiedPage config={config} langue={langue} />
       </Page>
     </Document>
   );
 }
 
-export function FacturePDF({ bon, config }) {
+export function FacturePDF({ bon, config, langue = "fr" }) {
   const factures = bon?.facturesEmises || [];
   const derniere = factures[factures.length - 1];
   const montant = derniere?.montant ?? bon?.montant ?? 0;
-  const numero = derniere?.numeroFactureQb || "À émettre";
+  const numero = derniere?.numeroFactureQb || L(langue, "À émettre", "To be issued");
   const date = derniere?.date || bon?.date;
   const lignes = bon?.lignesNonListees || [];
   return (
     <Document>
       <Page size="A4" style={s.page}>
-        <EnTetePDF config={config} />
-        <Text style={s.title}>FACTURE {numero}</Text>
-        <Text style={s.meta}>Date : {date}</Text>
-        {bon?.adresseTravaux ? <Text style={s.meta}>Adresse des travaux : {bon.adresseTravaux}</Text> : null}
-        <AdressesPDF clientNom={bon?.client} adresseFacturation={bon?.adresseFacturation} adresseTravaux={bon?.adresseTravaux} />
+        <EnTetePDF config={config} langue={langue} />
+        <Text style={s.title}>{L(langue, "FACTURE", "INVOICE")} {numero}</Text>
+        <Text style={s.meta}>Date{L(langue, " : ", ": ")}{date}</Text>
+        {bon?.adresseTravaux ? <Text style={s.meta}>{L(langue, "Adresse des travaux : ", "Work address: ")}{bon.adresseTravaux}</Text> : null}
+        <AdressesPDF clientNom={bon?.client} adresseFacturation={bon?.adresseFacturation} adresseTravaux={bon?.adresseTravaux} langue={langue} />
 
         {lignes.length > 0 ? (
           <View>
             <View style={s.tableHead}>
               <Text style={[s.th, { width: "80%" }]}>Description</Text>
-              <Text style={[s.th, { width: "20%", textAlign: "right" }]}>Montant</Text>
+              <Text style={[s.th, { width: "20%", textAlign: "right" }]}>{L(langue, "Montant", "Amount")}</Text>
             </View>
             {lignes.map((it) => (
               <View style={s.row} key={it.id}>
                 <Text style={[s.cell, { width: "80%" }]}>{it.description}</Text>
-                <Text style={[s.cellStrong, { width: "20%", textAlign: "right" }]}>{argent(parseFloat(it.prix))}</Text>
+                <Text style={[s.cellStrong, { width: "20%", textAlign: "right" }]}>{argent(parseFloat(it.prix), langue)}</Text>
               </View>
             ))}
           </View>
@@ -302,37 +311,37 @@ export function FacturePDF({ bon, config }) {
           </View>
         )}
 
-        <LigneTotaux sousTotal={montant} config={config} />
-        <TermesPDF config={config} />
-        <PiedPage config={config} />
+        <LigneTotaux sousTotal={montant} config={config} langue={langue} />
+        <TermesPDF config={config} langue={langue} />
+        <PiedPage config={config} langue={langue} />
       </Page>
     </Document>
   );
 }
 
-export function BonTravailPDF({ travail, clients, config }) {
+export function BonTravailPDF({ travail, clients, config, langue = "fr" }) {
   const client = (clients || []).find((c) => c.id === travail?.clientId);
   const adresse = travail?.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${client.adresses[0].ligne1}` : null);
   return (
     <Document>
       <Page size="A4" style={s.page}>
-        <EnTetePDF config={config} />
-        <Text style={s.title}>BON DE TRAVAIL</Text>
-        <Text style={s.meta}>Date : {travail?.date}</Text>
-        {adresse ? <Text style={s.meta}>Adresse des travaux : {adresse}</Text> : null}
-        <Text style={[s.meta, { marginTop: 4 }]}>Client :</Text>
+        <EnTetePDF config={config} langue={langue} />
+        <Text style={s.title}>{L(langue, "BON DE TRAVAIL", "WORK ORDER")}</Text>
+        <Text style={s.meta}>Date{L(langue, " : ", ": ")}{travail?.date}</Text>
+        {adresse ? <Text style={s.meta}>{L(langue, "Adresse des travaux : ", "Work address: ")}{adresse}</Text> : null}
+        <Text style={[s.meta, { marginTop: 4 }]}>{L(langue, "Client :", "Client:")}</Text>
         <Text style={s.clientName}>{client?.nom || "—"}</Text>
 
         <View style={s.block}>
-          <Text style={[s.th, { marginBottom: 2 }]}>DESCRIPTION DES TRAVAUX</Text>
-          <Text style={s.descBox}>{travail?.noteTerrain || travail?.titre || "Détails à venir."}</Text>
+          <Text style={[s.th, { marginBottom: 2 }]}>{L(langue, "DESCRIPTION DES TRAVAUX", "WORK DESCRIPTION")}</Text>
+          <Text style={s.descBox}>{travail?.noteTerrain || travail?.titre || L(langue, "Détails à venir.", "Details to come.")}</Text>
         </View>
 
         {/* PHOTOS DU CHANTIER (avant/après) — les vraies images prises par
             le technicien, intégrées au document envoyé au client. */}
         {travail?.photosAvantUrls?.length > 0 ? (
           <View style={s.block}>
-            <Text style={[s.th, { marginBottom: 2 }]}>PHOTOS AVANT TRAVAUX</Text>
+            <Text style={[s.th, { marginBottom: 2 }]}>{L(langue, "PHOTOS AVANT TRAVAUX", "BEFORE PHOTOS")}</Text>
             <View style={sPhotos.rangee}>
               {travail.photosAvantUrls.map((u, i) => (
                 <Image key={i} src={u} style={sPhotos.photo} />
@@ -342,7 +351,7 @@ export function BonTravailPDF({ travail, clients, config }) {
         ) : null}
         {travail?.photosApresUrls?.length > 0 ? (
           <View style={s.block}>
-            <Text style={[s.th, { marginBottom: 2 }]}>PHOTOS APRES TRAVAUX</Text>
+            <Text style={[s.th, { marginBottom: 2 }]}>{L(langue, "PHOTOS APRES TRAVAUX", "AFTER PHOTOS")}</Text>
             <View style={sPhotos.rangee}>
               {travail.photosApresUrls.map((u, i) => (
                 <Image key={i} src={u} style={sPhotos.photo} />
@@ -352,13 +361,13 @@ export function BonTravailPDF({ travail, clients, config }) {
         ) : null}
 
         {travail?.montant != null ? (
-          <View style={s.grand}><Text style={s.grandLabel}>Montant</Text><Text style={s.grandVal}>{argent(travail.montant)}</Text></View>
+          <View style={s.grand}><Text style={s.grandLabel}>{L(langue, "Montant", "Amount")}</Text><Text style={s.grandVal}>{argent(travail.montant, langue)}</Text></View>
         ) : null}
 
-        <TermesPDF config={config} />
+        <TermesPDF config={config} langue={langue} />
 
-        <Text style={s.signed}>Signé électroniquement par le client à la fin de l'intervention.</Text>
-        <PiedPage config={config} />
+        <Text style={s.signed}>{L(langue, "Signé électroniquement par le client à la fin de l'intervention.", "Signed electronically by the client at the end of the service call.")}</Text>
+        <PiedPage config={config} langue={langue} />
       </Page>
     </Document>
   );
@@ -393,14 +402,14 @@ function GrillePhotosPDF({ titre, urls, legendes }) {
   );
 }
 
-export function BonTravailPublicPDF({ bon, config }) {
+export function BonTravailPublicPDF({ bon, config, langue = "fr" }) {
   const unites = (bon?.unites || []).filter((u) => (u.modele || "").trim() || (u.serie || "").trim() || (u.emplacement || "").trim());
   return (
     <Document>
       <Page size="A4" style={s.page}>
-        <EnTetePDF config={config} />
-        <Text style={s.title}>BON DE TRAVAIL — TRAVAUX RÉALISÉS</Text>
-        <Text style={s.meta}>Date des travaux : {bon?.date || "—"}</Text>
+        <EnTetePDF config={config} langue={langue} />
+        <Text style={s.title}>{L(langue, "BON DE TRAVAIL — TRAVAUX RÉALISÉS", "WORK ORDER — COMPLETED WORK")}</Text>
+        <Text style={s.meta}>{L(langue, "Date des travaux : ", "Date of work: ")}{bon?.date || "—"}</Text>
         {/* Les DEUX adresses : facturation (fiche client — jamais la
             nôtre, règle gelée) et travaux, côte à côte comme sur les
             autres documents. */}
@@ -408,39 +417,40 @@ export function BonTravailPublicPDF({ bon, config }) {
           clientNom={bon?.clientNom}
           adresseFacturation={bon?.adresseFacturation}
           adresseTravaux={bon?.adresseTravaux}
+          langue={langue}
         />
 
         <View style={s.block}>
-          <Text style={[s.th, { marginBottom: 2 }]}>DESCRIPTION DES TRAVAUX</Text>
-          <Text style={s.descBox}>{bon?.description || bon?.titre || "Voir les photos ci-dessous."}</Text>
+          <Text style={[s.th, { marginBottom: 2 }]}>{L(langue, "DESCRIPTION DES TRAVAUX", "WORK DESCRIPTION")}</Text>
+          <Text style={s.descBox}>{bon?.description || bon?.titre || L(langue, "Voir les photos ci-dessous.", "See the photos below.")}</Text>
         </View>
 
         {unites.length > 0 ? (
           <View style={s.block}>
-            <Text style={[s.th, { marginBottom: 2 }]}>ÉQUIPEMENT VÉRIFIÉ</Text>
+            <Text style={[s.th, { marginBottom: 2 }]}>{L(langue, "ÉQUIPEMENT VÉRIFIÉ", "EQUIPMENT CHECKED")}</Text>
             {unites.map((u, i) => (
               <Text key={i} style={s.cell}>
-                {u.emplacement ? `${u.emplacement} — ` : ""}{u.modele || "—"}{u.serie ? ` · Nº de série ${u.serie}` : ""}
+                {u.emplacement ? `${u.emplacement} — ` : ""}{u.modele || "—"}{u.serie ? ` · ${L(langue, "Nº de série", "Serial no.")} ${u.serie}` : ""}
               </Text>
             ))}
           </View>
         ) : null}
 
-        <GrillePhotosPDF titre="PHOTOS AVANT TRAVAUX" urls={bon?.photosAvant} legendes={bon?.legendes} />
-        <GrillePhotosPDF titre="PHOTOS APRES TRAVAUX" urls={bon?.photosApres} legendes={bon?.legendes} />
+        <GrillePhotosPDF titre={L(langue, "PHOTOS AVANT TRAVAUX", "BEFORE PHOTOS")} urls={bon?.photosAvant} legendes={bon?.legendes} />
+        <GrillePhotosPDF titre={L(langue, "PHOTOS APRES TRAVAUX", "AFTER PHOTOS")} urls={bon?.photosApres} legendes={bon?.legendes} />
 
         {bon?.clientAbsent ? (
-          <Text style={s.signed}>Client absent à la fin des travaux — bon transmis sans signature.</Text>
+          <Text style={s.signed}>{L(langue, "Client absent à la fin des travaux — bon transmis sans signature.", "Client absent at the end of the work — work order sent without a signature.")}</Text>
         ) : bon?.signeParNom ? (
-          <Text style={s.signed}>Signé électroniquement par : {bon.signeParNom}</Text>
+          <Text style={s.signed}>{L(langue, "Signé électroniquement par : ", "Signed electronically by: ")}{bon.signeParNom}</Text>
         ) : bon?.signeParCollegue ? (
-          <Text style={s.signed}>Signature recueillie sur place aupres de notre equipe a la fin de l'intervention.</Text>
+          <Text style={s.signed}>{L(langue, "Signature recueillie sur place aupres de notre equipe a la fin de l'intervention.", "Signature collected on site by our team at the end of the service call.")}</Text>
         ) : null}
 
         <Text style={[s.footer, { marginTop: 12 }]}>
-          Document descriptif des travaux réalisés — ne constitue ni une soumission ni une facture.
+          {L(langue, "Document descriptif des travaux réalisés — ne constitue ni une soumission ni une facture.", "Description of the work performed — this is neither a quote nor an invoice.")}
         </Text>
-        <PiedPage config={config} />
+        <PiedPage config={config} langue={langue} />
       </Page>
     </Document>
   );

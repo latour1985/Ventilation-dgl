@@ -13,8 +13,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
-import { lienSelonLangue, langueDuClient } from "@/lib/i18nPublic";
-import { envoyerCourriel, gabaritFactureMaison } from "@/lib/courriels";
+import { lienSelonLangue, langueDuClient, argentSelonLangue } from "@/lib/i18nPublic";
+import { envoyerCourriel, gabaritFactureMaison, sujetCourrielClient } from "@/lib/courriels";
 import { REGIMES_TAXES, calculerTaxesRegime } from "@/lib/taxesCanada";
 import {
   creerFactureMaison,
@@ -321,19 +321,25 @@ export function SectionFacturesMaison({ clients, catalogue, configEnt, ajouterJo
 
   const envoyerLien = async (f, destinataires) => {
     if (!destinataires || destinataires.length === 0) return false;
-    const lien = lienSelonLangue(lienFactureMaison(f), langueDuClient(clients, { id: f.clientId, nom: f.clientNom }));
+    // 🌎 Courriel, objet et lien dans la langue du client (2026-10-05).
+    const langue = langueDuClient(clients, { id: f.clientId, nom: f.clientNom });
+    const lien = lienSelonLangue(lienFactureMaison(f), langue);
     if (!lien) return false;
     const r = await envoyerCourriel({
       a: destinataires,
-      sujet: `${f.type === "credit" ? "Note de crédit" : "Facture"} ${f.numero} — ${configEnt?.nomCommercial || configEnt?.nomLegal || ""}`,
+      sujet: sujetCourrielClient(f.type === "credit" ? "noteCredit" : "facture", langue, {
+        numero: f.numero,
+        entreprise: configEnt?.nomCommercial || configEnt?.nomLegal || "",
+      }),
       html: gabaritFactureMaison({
         config: configEnt,
         numero: f.numero,
         clientNom: f.clientNom,
-        total: `${Math.abs(f.total).toFixed(2)} $`,
+        total: argentSelonLangue(Math.abs(f.total), langue),
         lien,
         echeance: f.dateEcheance,
         credit: f.type === "credit",
+        langue,
       }),
     }).catch(() => ({ envoye: false }));
     // Journal HONNÊTE : « envoyée » seulement si l'envoi a réussi.

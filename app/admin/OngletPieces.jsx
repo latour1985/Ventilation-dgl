@@ -11,6 +11,7 @@ import { Check, ChevronDown, ChevronUp, Lock, Pencil, Plus, Search, Trash2, X } 
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritBonCommande, gabaritDemandePaiement, gabaritCommandeGroupee, gabaritBcSimple } from "@/lib/courriels";
+import { langueClient } from "@/lib/i18nPublic";
 import { sauvegarderFournisseur, supprimerFournisseur } from "@/lib/supabase/fournisseurs";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { ZONES_DEPOTS } from "@/lib/supabase/prixDepots";
@@ -469,6 +470,20 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
     setDemandeExtra("");
     setDemandeDeplacement(deplacementSeul);
     if (deplacementSeul) choisirZone(demandeZone);
+    // 🌎 Texte pré-rempli dans la langue du client (2026-10-05) — toujours
+    // modifiable par le bureau avant l'envoi.
+    if (langueClient(fiche) === "en") {
+      const unite = p.modele ? `${p.modele} unit` : "equipment";
+      setDemandeDescription(
+        deplacementSeul
+          ? `Good news: the part for your ${unite} (${p.pieceRequise}) has arrived. As soon as we receive the travel fees below, we will call you to schedule the installation visit.`
+          : `A part is required to repair your ${unite}: ${p.pieceRequise}. ` +
+              (p.paiementAvantCommande
+                ? "Payment is required before we can order it from the supplier."
+                : "Payment is required before we can schedule the installation visit.")
+      );
+      return;
+    }
     setDemandeDescription(
       deplacementSeul
         ? `Bonne nouvelle : la pièce pour votre ${p.modele ? `unité ${p.modele}` : "équipement"} (${p.pieceRequise}) est arrivée. Dès la réception des frais de déplacement ci-dessous, nous vous appelons pour fixer la visite d'installation.`
@@ -487,9 +502,11 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
     // (si coché). Le total taxé se calcule sur l'ensemble.
     const montantPiece = pieceEncoreAPayer(p) ? parseFloat(demandeMontant) || 0 : 0;
     const montantDepl = demandeDeplacement ? parseFloat(demandeMontantDeplacement) || 0 : 0;
+    const langueDemande = langueClient(ficheClientPiece(p));
+    const en = langueDemande === "en";
     const lignes = [
-      ...(montantPiece > 0 ? [{ etiquette: `Pièce — ${p.pieceRequise}`, montant: montantPiece }] : []),
-      ...(montantDepl > 0 ? [{ etiquette: `Frais de déplacement — ${demandeZone}`, montant: montantDepl }] : []),
+      ...(montantPiece > 0 ? [{ etiquette: `${en ? "Part" : "Pièce"} — ${p.pieceRequise}`, montant: montantPiece }] : []),
+      ...(montantDepl > 0 ? [{ etiquette: `${en ? "Travel fees" : "Frais de déplacement"} — ${demandeZone}`, montant: montantDepl }] : []),
     ];
     const totalHT = montantPiece + montantDepl;
     if (adresses.length === 0 || totalHT <= 0) return;
@@ -523,13 +540,16 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
         ? { envoye: true, viaQb: true }
         : await envoyerCourriel({
       a: adresses,
-      sujet: `Demande de paiement — ${montantPiece > 0 ? "pièce pour votre réparation" : "frais de déplacement"} (${configEnt.nomCommercial || configEnt.nomLegal})`,
+      sujet: en
+        ? `Payment request — ${montantPiece > 0 ? "part for your repair" : "travel fees"} (${configEnt.nomCommercial || configEnt.nomLegal})`
+        : `Demande de paiement — ${montantPiece > 0 ? "pièce pour votre réparation" : "frais de déplacement"} (${configEnt.nomCommercial || configEnt.nomLegal})`,
       html: gabaritDemandePaiement({
         config: configEnt,
         clientNom: p.clientNom,
+        langue: langueDemande,
         description:
           demandeDescription +
-          (factureQb?.docNumber ? ` Référence : facture Nº ${factureQb.docNumber}.` : ""),
+          (factureQb?.docNumber ? (en ? ` Reference: invoice No. ${factureQb.docNumber}.` : ` Référence : facture Nº ${factureQb.docNumber}.`) : ""),
         lignes,
         tps: t.tps,
         tvq: t.tvq,
