@@ -12,9 +12,10 @@ import { useEntreprise } from "@/lib/contexteEntreprise";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
+import { FenetreCorrectionZone, libelleZone, resumeAvisZone } from "./FenetreCorrectionZone";
 import { EditeurDevisJoints, lignesSansPrixDevis, devisDepuisQbo, AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
-export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null, onChangerJoursTechnicien = null }) {
+export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null, onChangerJoursTechnicien = null, prixDepots = null, onCorrigerZone = null, dejaFacture = false }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -24,6 +25,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   // du propriétaire : « pouvoir ouvrir les BC pour savoir ce qui a été
   // commandé »).
   const [commandeOuverte, setCommandeOuverte] = useState(null);
+  // 🔁 Correction de la zone d'un appel (2026-10-05) — sa propre fenêtre.
+  const [correctionZoneOuverte, setCorrectionZoneOuverte] = useState(false);
   const [etapeAnnulation, setEtapeAnnulation] = useState(null); // null | "raison" | "confirmation"
   const [raisonAnnulation, setRaisonAnnulation] = useState("");
   const [date, setDate] = useState(dateInitiale || todayISO());
@@ -765,6 +768,53 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
                 </p>
               )}
             </div>
+          )}
+          {/* 🗺️ ZONE DE TARIFICATION — corrigeable après coup (2026-10-05,
+              demande du propriétaire). La correction a SA fenêtre : elle
+              touche au dépôt et avise le client, elle s'applique tout de
+              suite (pas au bouton « Enregistrer » plus bas). */}
+          {!estConge && typeActuel === "appel_service" && (
+            <div className="rounded-xl border border-slate-200 bg-white p-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-bold text-slate-500">
+                  🗺️ Zone de tarification :{" "}
+                  <span className="font-extrabold text-slate-800">{libelleZone(tache.zoneAppel)}</span>
+                  {tache.zoneAppel && tache.zoneAppel !== "hors_zone" && Number(prixDepots?.[tache.zoneAppel]) > 0
+                    ? ` — ${Number(prixDepots[tache.zoneAppel]).toFixed(2)} $ HT`
+                    : ""}
+                </p>
+                {onCorrigerZone && !dejaFacture && (
+                  <button
+                    type="button"
+                    onClick={() => setCorrectionZoneOuverte(true)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 active:scale-95"
+                  >
+                    🔁 {tache.zoneAppel ? "Corriger la zone…" : "Choisir la zone…"}
+                  </button>
+                )}
+              </div>
+              {onCorrigerZone && dejaFacture && (
+                <p className="mt-1 text-[10px] text-slate-400">
+                  Appel déjà facturé — la zone ne se corrige plus ici (une correction passerait par une note de crédit).
+                </p>
+              )}
+              {(tache.correctionsZone || []).map((c, i) => (
+                <p key={i} className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[10px] font-semibold leading-snug text-amber-800">
+                  🔁 Corrigée de {libelleZone(c.de)} à {libelleZone(c.a)} le {String(c.le || "").slice(0, 10)}
+                  {c.par ? ` par ${c.par}` : ""} — {resumeAvisZone(c)}
+                </p>
+              ))}
+            </div>
+          )}
+          {correctionZoneOuverte && (
+            <FenetreCorrectionZone
+              tache={tache}
+              depot={depot}
+              client={client}
+              prixDepots={prixDepots}
+              onFermer={() => setCorrectionZoneOuverte(false)}
+              onConfirmer={(choix) => onCorrigerZone(tache, choix)}
+            />
           )}
           <div className="grid grid-cols-2 gap-2">
             <div>

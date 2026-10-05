@@ -14,12 +14,13 @@ import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { territoireDe, CLE_NOTE_ZONES } from "@/lib/supabase/prixDepots";
 import { devisDepuisQbo } from "./partage";
 import { useEntreprise } from "@/lib/contexteEntreprise";
-import { envoyerCourriel, gabaritConfirmationRdv } from "@/lib/courriels";
+import { envoyerCourriel, gabaritConfirmationRdv, gabaritCorrectionZone } from "@/lib/courriels";
+import { supabase } from "@/lib/supabase/client";
 import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, majDonneesAssignation, majDonneesTousLesTechniciens, traiterPropositionProjetShop } from "@/lib/supabase/tachesAssignees";
 import { estCourrielST } from "@/lib/supabase/sousTraitants";
 import { estFerieCcq, marqueurCcq } from "@/lib/calendrierCcq";
 import { useLangue } from "@/lib/i18n";
-import { taxesDepot } from "@/lib/supabase/depots";
+import { taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
 import { pieceBloqueLaTache } from "@/lib/supabase/piecesCommandees";
@@ -460,6 +461,10 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // Statut du dépôt d'une tâche : bloque la planification tant que le
   // dépôt n'est pas payé (ou payé manuellement) — annulé après 24 h.
   const depotDe = (tacheId) => depots?.[tacheId];
+  // 🧾 Appel déjà facturé (une facture émise sur son bon) : sa zone ne se
+  // corrige plus depuis l'agenda.
+  const appelDejaFacture = (tacheId) =>
+    !!tacheId && (bons || []).some((b) => String(b.tacheId || "").split("::")[0] === tacheId && (b.facturesEmises || []).length > 0);
   // 🧾 Commandes rattachées à une tâche (2026-09-04) : bons de commande
   // libres + pièces commandées — affichées dans les repères de la fiche.
   const commandesPourTache = (tacheId) => {
@@ -2370,6 +2375,146 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       setTachesAttente((prev) => [tacheMiseAJour, ...prev]);
       ajouterJournal(`↩️ "${tache.titre || tache.clientNom}" retirée de l'horaire — retour dans les tâches en attente`);
     }
+  };
+
+  // 🔁 CORRECTION DE LA ZONE D'UN APPEL (2026-10-05, demande du
+  // propriétaire) — appelée par FenetreCorrectionZone. Ordre voulu :
+  //  1) l'ancienne demande de dépôt est annulée D'ABORD (si remplacée) —
+  //     jamais si le client vient de la payer ; en cas d'échec, RIEN ne
+  //     change ;
+  //  2) l'avis par courriel part (hors remplacement) — s'il échoue, rien
+  //     ne change non plus : « client avisé » doit rester vrai ;
+  //  3) la nouvelle zone + la trace vont partout où vit la tâche (grille,
+  //     file d'attente, téléphones, fiche ouverte) ;
+  //  4) la nouvelle demande de dépôt part, avec la mention de la correction.
+  // Retourne { erreur } pour que la fenêtre l'affiche, sinon {}.
+  const corrigerZoneTache = async (tache, choix) => {
+    if (lectureSeule || !tache || !choix?.zone) return { erreur: "Correction impossible en lecture seule." };
+    const depot = depotDe(tache.id);
+    const fiche = clients.find((c) => c.id === tache.clientId) || clients.find((c) => c.nom === tache.clientNom) || null;
+    const ancienne = tache.zoneAppel || null;
+    const libZone = (z) => (z === "hors_zone" ? "hors zone" : z || "aucune zone");
+    const titre = tache.titre || tache.clientNom || "Appel de service";
+    const adresses = choix.avis?.mode === "courriel" ? choix.avis.adresses || [] : [];
+
+    if (choix.remplacer && depot?.qboInvoiceId) {
+      const rv = await annulerFactureDepot(depot.qboInvoiceId, { siImpayee: true });
+      if (rv?.dejaPayee) {
+        return { erreur: "Le client vient de payer ce dépôt dans QuickBooks — rien n'a été changé. Recharge la page : le dépôt s'affichera payé, puis refais la correction." };
+      }
+      if (rv?.erreur) return { erreur: `QuickBooks n'a pas annulé l'ancienne facture (${rv.erreur}) — rien n'a été changé.` };
+      // Déconnecté : l'ancienne facture resterait payable à côté de la
+      // nouvelle demande — on n'avance pas.
+      if (rv?.nonConnecte) {
+        return { erreur: `QuickBooks n'est pas connecté : l'ancienne facture${depot.qboDocNumber ? ` nº ${depot.qboDocNumber}` : ""} ne peut pas être annulée — rien n'a été changé. Reconnecte QuickBooks (Paramètres → Connexions), ou décoche « Remplacer la demande ».` };
+      }
+      if (rv?.annulee) {
+        // L'id de la facture annulée quitte le dépôt TOUT DE SUITE : le
+        // sondage des paiements la prendrait sinon pour un désistement.
+        await majDepotFactureQbo(tache.id, { factureId: null, docNumber: null }).catch(() => {});
+        ajouterJournal(`🧾 Ancienne facture de dépôt${depot.qboDocNumber ? ` Nº ${depot.qboDocNumber}` : ""} annulée par VOID (zone corrigée)`);
+      }
+    }
+
+    let courriel = null;
+    if (!choix.remplacer && adresses.length > 0) {
+      const rc = await envoyerCourriel({
+        a: adresses,
+        sujet: `Correction de votre appel de service (${configEnt?.nomCommercial || configEnt?.nomLegal || ""})`,
+        html: gabaritCorrectionZone({
+          config: configEnt,
+          clientNom: fiche?.nom || tache.clientNom || "",
+          ancienneZone: ancienne === "hors_zone" ? "Hors zone" : ancienne || "Aucune zone",
+          nouvelleZone: choix.zone === "hors_zone" ? "Hors zone" : choix.zone,
+          prixAncien: choix.prixAncien,
+          prixNouveau: choix.prixNouveau,
+          depot: choix.etatDepot === "aucun" ? null : { montantHT: Number(depot?.montantHT) || 0, paye: choix.etatDepot === "paye" },
+          choixSurplus: choix.choixSurplus,
+          minutesHorsZone: Number(prixDepots?.minutes_incluses_hors_zone) || 180,
+        }),
+      });
+      if (!rc.envoye && !rc.simule) {
+        return { erreur: `Le courriel n'est pas parti (${rc.erreur || "erreur"}) — rien n'a été changé. Réessaie, ou choisis « avisé par téléphone ».` };
+      }
+      courriel = rc.simule ? "simulé" : "envoyé";
+    }
+
+    let par = "bureau";
+    try {
+      const { data } = await supabase.auth.getSession();
+      par = data?.session?.user?.user_metadata?.nom || data?.session?.user?.email || par;
+    } catch {
+      // nom introuvable — « bureau » suffit pour la trace
+    }
+    const trace = {
+      le: new Date().toISOString(),
+      par,
+      de: ancienne,
+      a: choix.zone,
+      prixDe: choix.prixAncien,
+      prixA: choix.prixNouveau,
+      depot:
+        choix.etatDepot === "aucun"
+          ? null
+          : { etat: choix.etatDepot, montantHT: Number(depot?.montantHT) || 0, docNumber: depot?.qboDocNumber || null },
+      remplace: !!choix.remplacer,
+      ...(choix.remplacer ? { montantRemplacement: choix.montantRemplacement } : {}),
+      choixSurplus: choix.choixSurplus || null,
+      avis: { ...choix.avis, ...(courriel ? { courriel } : {}) },
+    };
+    const complement = {
+      zoneAppel: choix.zone,
+      correctionsZone: [...(Array.isArray(tache.correctionsZone) ? tache.correctionsZone : []), trace],
+      ...(choix.remplacer ? { depotMontant: choix.montantRemplacement } : {}),
+    };
+    setPlanning((prev) => {
+      const copie = { ...prev };
+      Object.keys(copie).forEach((cle) => {
+        const liste = listeCellule(copie[cle]);
+        if (liste.some((x) => x.id === tache.id)) copie[cle] = liste.map((x) => (x.id === tache.id ? { ...x, ...complement } : x));
+      });
+      return copie;
+    });
+    setTachesAttente((prev) => prev.map((t) => (t.id === tache.id ? { ...t, ...complement } : t)));
+    // La fiche OUVERTE suit aussi — sinon « Enregistrer les modifications »
+    // réécrirait l'ancienne zone par-dessus.
+    setTacheDetailOuverte((prev) => (prev && prev.tache?.id === tache.id ? { ...prev, tache: { ...prev.tache, ...complement } } : prev));
+    majDonneesTousLesTechniciens(tache.id, complement).catch(() =>
+      ajouterJournal(`⚠️ Zone de « ${titre} » corrigée ici, mais NON transmise à tous les téléphones — réessaie.`)
+    );
+
+    if (choix.remplacer) {
+      onCreerDepot?.(tache.id, {
+        montantHT: choix.montantRemplacement,
+        isProspect: false,
+        prospect: null,
+        clientId: tache.clientId || null,
+        clientNom: fiche?.nom || tache.clientNom || "",
+        zone: libZone(choix.zone),
+        courriels: adresses,
+        titre: tache.titre || "",
+        descriptionTravaux: tache.description || "",
+        noteCorrection:
+          `Correction : votre appel de service a été reclassé de ${libZone(ancienne)} à ${libZone(choix.zone)}.` +
+          (depot?.qboDocNumber ? ` Cette demande remplace la facture Nº ${depot.qboDocNumber}, qui est annulée.` : ""),
+      });
+    }
+
+    const avisTexte =
+      choix.avis?.mode === "courriel"
+        ? `client avisé par courriel${courriel === "simulé" ? " (SIMULÉ ici)" : ""} à ${adresses.join(", ")}${choix.remplacer ? " avec la nouvelle demande de dépôt" : ""}`
+        : choix.avis?.mode === "telephone"
+          ? `client avisé par téléphone — « ${choix.avis.note} »`
+          : "aucun avis (pas de dépôt)";
+    ajouterJournal(`🔁 Zone de « ${titre} » corrigée : ${libZone(ancienne)} → ${libZone(choix.zone)} — ${avisTexte}.`);
+    if (choix.etatDepot === "paye" && choix.choixSurplus) {
+      ajouterJournal(
+        `💰 Dépôt payé de ${(Number(depot?.montantHT) || 0).toFixed(2)} $ conservé — surplus éventuel : ${
+          choix.choixSurplus === "credit" ? "CRÉDIT au dossier" : choix.choixSurplus === "remboursement" ? "REMBOURSEMENT" : "à demander au client à la facturation"
+        }.`
+      );
+    }
+    return {};
   };
 
   // Enregistrement depuis la modale d'édition rapide (clic sur une
@@ -6265,6 +6410,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                 }
           }
           depot={depotDe(tacheDetailOuverte.tache.id) || null}
+          prixDepots={prixDepots}
+          onCorrigerZone={lectureSeule ? null : corrigerZoneTache}
+          dejaFacture={appelDejaFacture(tacheDetailOuverte.tache.id)}
           commandes={commandesPourTache(tacheDetailOuverte.tache.id)}
           facturables={facturablesAssignations}
           onBasculerFacturable={
@@ -6480,6 +6628,10 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           devisListe={devisListe}
           projets={projets}
           commandes={commandesPourTache(tacheEnEditionId)}
+          depot={depotDe(tacheEnEditionId) || null}
+          prixDepots={prixDepots}
+          onCorrigerZone={lectureSeule ? null : corrigerZoneTache}
+          dejaFacture={appelDejaFacture(tacheEnEditionId)}
           onFermer={() => setTacheEnEditionId(null)}
           onEnregistrer={(champs) => enregistrerEditionRapide(tacheEnEditionId, champs)}
           annulation={contexteAnnulation(tachesAttente.find((t) => t.id === tacheEnEditionId))}

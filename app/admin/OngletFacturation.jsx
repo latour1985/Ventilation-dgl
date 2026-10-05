@@ -27,6 +27,8 @@ import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
 import { AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, devisAJourPourNumero, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
+import { taxesDepot } from "@/lib/supabase/depots";
+import { libelleZone, resumeAvisZone } from "./FenetreCorrectionZone";
 import { enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 
 export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
@@ -599,7 +601,7 @@ export function ModalFacturationDevis({ bon, devis, onFermer, onEmettre, tousLes
 // devienne éligible à l'envoi au client (fenêtre contextuelle de
 // confirmation obligatoire — pas de déblocage silencieux).
 // ============================================================
-export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null, descriptionTache = null, calculerFacturationDevis = null, indicateurs = [], historique = [] }) {
+export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye, piecePrepayee, lignesSuggerees, bonEnrichi = null, nbFacturables = null, onCouvertParDepot = null, onRetirerFacturation = null, facturables = {}, onBasculerFacturable = null, adresseRepli = null, descriptionTache = null, calculerFacturationDevis = null, indicateurs = [], historique = [], correctionsZone = [], noteClient = "" }) {
   // Config entreprise (contexte) — la tranche de facturation s'affiche
   // dans le texte d'aide du temps supplémentaire.
   const configEnt = useEntreprise();
@@ -648,6 +650,13 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
     return base;
   });
   const [attestation, setAttestation] = useState(false);
+  // 💳/💸 SURPLUS DU DÉPÔT (2026-10-05, choix du propriétaire : « on pose
+  // la question à chaque fois ») — pré-coché si la préférence du client a
+  // été notée à la correction de zone.
+  const [choixSurplus, setChoixSurplus] = useState(() => {
+    const c = (correctionsZone || [])[(correctionsZone || []).length - 1]?.choixSurplus;
+    return c === "credit" || c === "remboursement" ? c : "";
+  });
   // 🏷️ Ligne dont on choisit le Produit/service QuickBooks (id | null).
   const [choixProduitPour, setChoixProduitPour] = useState(null);
 
@@ -858,7 +867,11 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
   // exactement là-dessus que le propriétaire a buté le 24 août).
   const raisonsBlocage = [
     descriptionVide ? "Une ligne n'a pas de description — le client verrait un montant sans explication." : null,
-    total <= 0 ? "Le total doit être positif : au moins une ligne doit porter un montant à facturer." : null,
+    total <= 0
+      ? depotPaye && total < -0.005
+        ? "Le dépôt dépasse le travail : utilise « Rien à facturer » plus bas et dis si le surplus va en crédit ou en remboursement."
+        : "Le total doit être positif : au moins une ligne doit porter un montant à facturer."
+      : null,
     !attestation ? "Coche la case de confirmation ci-dessus." : null,
   ].filter(Boolean);
 
@@ -1113,6 +1126,34 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
             La ligne de déduction a été ajoutée automatiquement — ne l'enlève pas, sinon le client paierait deux fois.
           </div>
         )}
+        {/* 🔁 ZONE CORRIGÉE APRÈS COUP (2026-10-05) — et comment le client
+            a été avisé : la personne qui facture le sait avant d'envoyer. */}
+        {(correctionsZone || []).length > 0 && (
+          <div className="mb-3 space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900">
+            {correctionsZone.map((c, i) => (
+              <p key={i}>
+                🔁 Zone corrigée de {libelleZone(c.de)} à {libelleZone(c.a)} le {String(c.le || "").slice(0, 10)}
+                {c.par ? ` par ${c.par}` : ""} — {resumeAvisZone(c)}.
+                {c.choixSurplus === "credit" ? " Surplus éventuel : le client préfère un CRÉDIT." : ""}
+                {c.choixSurplus === "remboursement" ? " Surplus éventuel : le client préfère un REMBOURSEMENT." : ""}
+                {c.choixSurplus === "a_decider" ? " Surplus éventuel : à demander au client." : ""}
+              </p>
+            ))}
+            <p className="font-normal">Le prix de base suggéré est déjà celui de la nouvelle zone.</p>
+          </div>
+        )}
+        {/* 💳 CRÉDIT AU DOSSIER DU CLIENT (surplus d'un dépôt précédent). */}
+        {String(noteClient || "")
+          .split("\n")
+          .filter((l) => l.includes("CRÉDIT AU DOSSIER"))
+          .map((l, i) => (
+            <div key={i} className="mb-3 rounded-xl border border-violet-200 bg-violet-50 p-3 text-xs font-semibold text-violet-900">
+              {l}
+              <span className="mt-1 block font-normal">
+                Pour l&apos;appliquer : ajoute une ligne de déduction ici, puis efface cette ligne dans la note de sa fiche (onglet Clients).
+              </span>
+            </div>
+          ))}
         {piecePrepayee && (
           <div className="mb-3 rounded-xl bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
             💰 La pièce « {piecePrepayee.pieceRequise} » a DÉJÀ été payée par le client
@@ -1356,12 +1397,33 @@ export function ModalReviserPrixNonListe({ bon, onFermer, onConfirmer, depotPaye
               facturer : la facture de dépôt déjà payée dans QuickBooks
               EST la facture officielle. Ce bouton ferme le bon sans
               créer quoi que ce soit — zéro crédit, zéro doublon. */}
+          {depotPaye && onCouvertParDepot && total < -0.005 && (
+            <div className="space-y-1.5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs">
+              <p className="font-bold text-amber-900">
+                {`Le dépôt dépasse le travail de ${(-total).toFixed(2)} $ HT (${taxesDepot(-total, configEnt).total.toFixed(2)} $ taxes incl.). Que veut le client pour ce surplus ?`}
+              </p>
+              {[
+                ["credit", "💳 Un crédit à son dossier (déduit de sa prochaine facture)"],
+                ["remboursement", "💸 Un remboursement (à faire dans QuickBooks)"],
+              ].map(([v, lib]) => (
+                <label key={v} className="flex items-center gap-2 font-semibold text-amber-900">
+                  <input type="radio" name="surplus-depot" checked={choixSurplus === v} onChange={() => setChoixSurplus(v)} className="h-4 w-4 accent-[#FF6A13]" />
+                  {lib}
+                </label>
+              ))}
+            </div>
+          )}
           {depotPaye && onCouvertParDepot && (
             <button
-              onClick={onCouvertParDepot}
-              className="w-full rounded-xl border-2 border-emerald-500 bg-emerald-50 py-2.5 text-xs font-extrabold text-emerald-800 active:scale-[0.99]"
+              disabled={total < -0.005 && !choixSurplus}
+              onClick={() => {
+                effacerBrouillon();
+                onCouvertParDepot(total < -0.005 ? { surplus: Math.round(-total * 100) / 100, choix: choixSurplus } : {});
+              }}
+              className="w-full rounded-xl border-2 border-emerald-500 bg-emerald-50 py-2.5 text-xs font-extrabold text-emerald-800 active:scale-[0.99] disabled:opacity-40"
             >
               ✅ Rien à facturer — le dépôt de {(Number(depotPaye.montantHT) || 0).toFixed(2)} $ couvre le travail au complet
+              {total < -0.005 ? ` (surplus de ${(-total).toFixed(2)} $ : ${choixSurplus === "credit" ? "crédit" : choixSurplus === "remboursement" ? "remboursement" : "choisis ci-dessus"})` : ""}
             </button>
           )}
 
@@ -1959,7 +2021,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, tachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, onNoterAuDossierClient = null, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, tachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
   // 🌎 Traduction (tranche facturation, 2026-09-14) — nommée `tr` car le
   // fichier utilise `t` comme variable de boucle (bons/travaux).
   const { t: tr } = useLangue();
@@ -2082,6 +2144,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           .filter((k) => k.startsWith(`${tacheId}|`))
           .map((k) => k.slice(String(tacheId).length + 1))
           .filter((c) => c && !c.startsWith("st::"));
+  // 🔁 Corrections de zone notées sur la tâche (2026-10-05).
+  const correctionsZonePour = (tacheId) => {
+    const t = tacheId && tachePour ? tachePour(String(tacheId).split("::")[0]) : null;
+    return Array.isArray(t?.correctionsZone) ? t.correctionsZone : [];
+  };
   const depotPayePour = (tacheId) => {
     if (!tacheId) return null;
     const d = depots?.[tacheId];
@@ -5075,6 +5142,14 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                     {depotPayePour(b.tacheId).payeLe ? ` le ${new Date(depotPayePour(b.tacheId).payeLe).toLocaleDateString("fr-CA")}` : ""} · sera déduit de la facture
                   </p>
                 )}
+                {correctionsZonePour(b.tacheId).length > 0 && (() => {
+                  const c = correctionsZonePour(b.tacheId).slice(-1)[0];
+                  return (
+                    <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                      🔁 Zone corrigée : {libelleZone(c.de)} → {libelleZone(c.a)} · {resumeAvisZone(c)}
+                    </p>
+                  );
+                })()}
                 <p className="mt-1 text-xs font-semibold">
                   {b.prixNonListe ? (
                     <span className="text-red-600">À facturer – Prix non listé</span>
@@ -5506,10 +5581,21 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           bon={bonAReviser}
           indicateurs={indicateursBon(bonsGroupes.find((b) => (b.tacheId || b.id) === (bonAReviser.tacheId || bonAReviser.id)) || bonAReviser)}
           historique={historiqueClientPour(bonAReviser)}
-          onCouvertParDepot={() => {
+          correctionsZone={correctionsZonePour(bonAReviser.tacheId)}
+          noteClient={trouverClientDuBon(bonAReviser)?.note || ""}
+          onCouvertParDepot={({ surplus = 0, choix = null } = {}) => {
             const b = bonAReviser;
             const depot = depotPayePour(b.tacheId);
             if (!depot) return;
+            // 💳/💸 Surplus du dépôt (2026-10-05) : le choix du client suit le
+            // bon (détail) et le journal ; un crédit va au dossier du client.
+            const docDepot = depot.qboDocNumber ? ` nº ${depot.qboDocNumber}` : "";
+            const texteSurplus =
+              surplus > 0
+                ? choix === "credit"
+                  ? ` — surplus de ${surplus.toFixed(2)} $ HT porté en CRÉDIT au dossier du client`
+                  : ` — surplus de ${surplus.toFixed(2)} $ HT à REMBOURSER au client (dans QuickBooks)`
+                : "";
             setBonAReviserId(null);
             // La facture de dépôt DÉJÀ PAYÉE dans QuickBooks devient la
             // preuve de facturation du bon — aucune nouvelle facture,
@@ -5518,7 +5604,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
               id: `fact-${Date.now()}-${b.id}`,
               montant: 0,
               type: "complete",
-              detail: `Couverte par le dépôt payé d'avance de ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT${depot.qboDocNumber ? ` (facture nº ${depot.qboDocNumber})` : ""}`,
+              detail: `Couverte par le dépôt payé d'avance de ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT${depot.qboDocNumber ? ` (facture nº ${depot.qboDocNumber})` : ""}${texteSurplus}`,
               date: dateISO(new Date()),
               numeroFactureQb: depot.qboDocNumber || null,
               qboInvoiceId: depot.qboInvoiceId || null,
@@ -5539,8 +5625,27 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
               })
             );
             ajouterJournal(
-              `✅ « ${b.projet} » (${b.client}) : RIEN à facturer — couvert au complet par le dépôt payé d'avance de ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT${depot.qboDocNumber ? ` (facture nº ${depot.qboDocNumber})` : ""}. Aucune facture créée, aucun crédit.`
+              `✅ « ${b.projet} » (${b.client}) : RIEN à facturer — couvert au complet par le dépôt payé d'avance de ${(Number(depot.montantHT) || 0).toFixed(2)} $ HT${depot.qboDocNumber ? ` (facture nº ${depot.qboDocNumber})` : ""}. Aucune facture créée${surplus > 0 ? "" : ", aucun crédit"}.`
             );
+            if (surplus > 0) {
+              const ttc = taxesDepot(surplus, configEnt).total;
+              if (choix === "credit") {
+                const fiche = trouverClientDuBon(b);
+                onNoterAuDossierClient?.(
+                  fiche?.id,
+                  `💳 CRÉDIT AU DOSSIER : ${surplus.toFixed(2)} $ HT (${ttc.toFixed(2)} $ taxes incl.) — surplus du dépôt${docDepot} (« ${b.projet} », ${dateISO(new Date())}). À déduire de sa prochaine facture.`
+                );
+                ajouterJournal(
+                  fiche
+                    ? `💳 Crédit de ${surplus.toFixed(2)} $ HT noté au dossier de ${b.client} — la révision de sa prochaine facture le rappellera.`
+                    : `⚠️ Crédit de ${surplus.toFixed(2)} $ HT pour ${b.client} : fiche client introuvable — note-le à la main dans sa fiche.`
+                );
+              } else {
+                ajouterJournal(
+                  `💸 À FAIRE dans QuickBooks : rembourser ${surplus.toFixed(2)} $ HT (${ttc.toFixed(2)} $ taxes incl.) à ${b.client} — surplus du dépôt${docDepot}.`
+                );
+              }
+            }
           }}
           onRetirerFacturation={() => {
             const id = bonAReviser.id;

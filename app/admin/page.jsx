@@ -2416,7 +2416,12 @@ function AppAdmin() {
     // client (déjà sur la facture).
     const objetVisite = String(infos.titre || "").trim();
     const detailVisite = String(infos.descriptionTravaux || "").trim();
+    // 🔁 ZONE CORRIGÉE (2026-10-05) : la nouvelle demande dit au client
+    // pourquoi il la reçoit et quelle facture elle remplace — sur la
+    // facture QuickBooks ET dans notre courriel.
+    const noteCorrection = String(infos.noteCorrection || "").trim();
     const messageClientDepot =
+      (noteCorrection ? `${noteCorrection}\n\n` : "") +
       `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ${libelleDelai}. ` +
       `Dès sa réception, votre rendez-vous est confirmé.\n\n${conditionsDepot}`;
     const r = await creerFactureDepot({
@@ -2471,11 +2476,12 @@ function AppAdmin() {
     }
     const rc = await envoyerCourriel({
       a: adresses,
-      sujet: `Dépôt requis — réservation de votre appel de service (${configEntreprise.nomCommercial || configEntreprise.nomLegal})`,
+      sujet: `${noteCorrection ? "Dépôt corrigé" : "Dépôt requis"} — réservation de votre appel de service (${configEntreprise.nomCommercial || configEntreprise.nomLegal})`,
       html: gabaritDemandePaiement({
         config: configEntreprise,
         clientNom: infos.clientNom,
         description:
+          (noteCorrection ? `${noteCorrection} ` : "") +
           `Pour réserver votre appel de service${infos.zone ? ` (${infos.zone})` : ""}, un dépôt est requis sous ` +
           `${libelleDelai}. ` +
           `${facture?.docNumber ? `Référence : facture Nº ${facture.docNumber}. ` : ""}` +
@@ -4441,6 +4447,15 @@ function AppAdmin() {
               }
             }
             return (tachesAttente || []).find((t) => t.id === tacheId)?.zoneAppel || null;
+          }}
+          // 💳 Surplus de dépôt laissé en CRÉDIT (2026-10-05) : une ligne
+          // s'ajoute à la note du dossier — la révision de la prochaine
+          // facture de ce client l'affiche.
+          onNoterAuDossierClient={(clientId, ligne) => {
+            if (!clientId || !ligne) return;
+            setClients((prev) =>
+              prev.map((c) => (c.id === clientId ? { ...c, note: [String(c.note || "").trim(), ligne].filter(Boolean).join("\n") } : c))
+            );
           }}
           onAjouterCourrielClient={(clientId, email) => {
             if (!clientId || !email) return;

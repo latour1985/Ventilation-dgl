@@ -76,9 +76,15 @@ export async function POST(request) {
     const factureId = String(corps?.factureId || "").trim();
     if (!factureId) return Response.json({ erreur: "factureId requis." }, { status: 400 });
     try {
-      const lu = await requeteQbo(acces, `select Id, SyncToken from Invoice where Id = '${echapperQbo(factureId)}' maxresults 1`);
+      const lu = await requeteQbo(acces, `select Id, SyncToken, Balance, TotalAmt from Invoice where Id = '${echapperQbo(factureId)}' maxresults 1`);
       const facture = lu?.Invoice?.[0];
       if (!facture) return Response.json({ annulee: true, note: "Facture introuvable — probablement déjà annulée." });
+      // 🔁 Correction de zone (2026-10-05) : une facture qui a reçu un
+      // paiement n'est JAMAIS annulée ici — le VOID détacherait le
+      // paiement du client dans QuickBooks.
+      if (corps?.siImpayee && (Number(facture.Balance) || 0) < (Number(facture.TotalAmt) || 0) - 0.005) {
+        return Response.json({ dejaPayee: true });
+      }
       await ecrireQbo(acces, "invoice?operation=void", { Id: facture.Id, SyncToken: facture.SyncToken });
       return Response.json({ annulee: true });
     } catch (e) {
