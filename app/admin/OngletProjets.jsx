@@ -7,7 +7,7 @@
 // MÉCANIQUE : aucun comportement ne change, le code est déplacé tel
 // quel — seuls des export/import s'ajoutent.
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 import { AlertCircle, AlertTriangle, BarChart3, Car, CheckCircle2, Clock, Cloud, LayoutGrid, List, Lock, MapPin, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
@@ -18,6 +18,7 @@ import { sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { poserCopieBc } from "@/lib/supabase/entreprise";
 import { AutocompleteAdresse, Button, ChampPhotosBc, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
 import { lireEstimateQbo } from "@/lib/quickbooksClient";
+import { listerAssignationsSousTraitants } from "@/lib/supabase/sousTraitants";
 
 // Projets / chantiers au long cours — lient un client, des tâches de
 // terrain (via `travaux[].projetId`), des bons de commande fournisseur
@@ -1237,6 +1238,7 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
                   </div>
                 );
               })()}
+              <SousTraitantsDuProjet projetId={projet.id} />
             </>
           )}
           {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} onMajMateriel={onMajMateriel} r={r} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
@@ -1247,6 +1249,75 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
           {ongletActif === "facturation" && <OngletFacturationProjet r={r} devisDuClient={devisDuClient} />}
         </div>
       </div>
+    </div>
+  );
+}
+
+// 🤝 SOUS-TRAITANTS DU PROJET (2026-10-05, demande du propriétaire :
+// voir les pièces justificatives dans le projet). Chaque visite d'un
+// sous-traitant sur une tâche du projet : date, présence, montant noté et
+// pièces (facture, bon de commande…) à ouvrir. INFORMATIF : le coût réel
+// du projet reste celui de sa facture QuickBooks — jamais compté deux fois.
+// Lu à l'ouverture de la fiche (petit ensemble : les lignes « st:: »).
+function SousTraitantsDuProjet({ projetId }) {
+  const [visites, setVisites] = useState(null);
+  useEffect(() => {
+    let actif = true;
+    listerAssignationsSousTraitants()
+      .then((rows) => {
+        if (!actif) return;
+        setVisites((rows || []).filter((a) => a.projet_id === projetId || a.donnees?.projetId === projetId));
+      })
+      .catch(() => actif && setVisites([]));
+    return () => {
+      actif = false;
+    };
+  }, [projetId]);
+  if (!visites || visites.length === 0) return null;
+  const icone = (st) => (st === "present" ? "✅" : st === "absent" ? "❌" : "⏳");
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
+      <p className="mb-1.5 text-xs font-extrabold uppercase tracking-wide text-slate-500">🤝 Sous-traitants ({visites.length})</p>
+      <div className="space-y-1.5">
+        {visites.map((a) => {
+          const d = a.donnees || {};
+          const pieces = Array.isArray(d.stPieces) ? d.stPieces : [];
+          return (
+            <div key={a.id || `${a.tache_id}|${a.employe_email}`} className="rounded-lg border border-slate-100 px-2.5 py-1.5 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="min-w-0 font-bold text-slate-800">
+                  {icone(d.stStatut)} {a.employe_nom || "Sous-traitant"}
+                  <span className="ml-1.5 font-normal text-slate-500">
+                    {a.titre || a.client_nom || ""}{a.date_debut ? ` · ${a.date_debut}` : ""}
+                  </span>
+                </span>
+                {Number(d.stMontant) > 0 && (
+                  <span className="shrink-0 font-bold tabular-nums text-slate-700">{Number(d.stMontant).toFixed(2)} $ noté</span>
+                )}
+              </div>
+              {d.stNote && <p className="mt-0.5 text-[11px] text-slate-500">{d.stNote}</p>}
+              {pieces.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {pieces.map((pc, i) => (
+                    <a
+                      key={pc.url + i}
+                      href={pc.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="max-w-full truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700"
+                    >
+                      📎 {pc.nom}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-1.5 text-[10px] text-slate-400">
+        Montants notés à titre indicatif — le coût réel du projet vient des factures des sous-traitants entrées dans QuickBooks.
+      </p>
     </div>
   );
 }

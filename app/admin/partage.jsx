@@ -2043,8 +2043,21 @@ export function GalerieAvantApres({ travail, enMarge = false }) {
 // y a lieu, et confirmation de signature. Aucune information de coût
 // interne ni note réservée à l'équipe n'apparaît ici.
 // ============================================================
-export function ApercuBonTravailClient({ travail, clients, onFermer }) {
-  const client = (clients || []).find((c) => c.id === travail.clientId);
+export function ApercuBonTravailClient({ travail: travailBrut, clients, onFermer, bon = null }) {
+  // 📄 LE VRAI BON D'ABORD (2026-10-05, vécu du propriétaire : bon de
+  // Climat 360 sans adresse des travaux ni toutes les photos). Le dossier
+  // client ouvre les heures d'UN technicien : elles ne gardent pas
+  // l'adresse et n'ont que SES photos. Le bon — ce que le client reçoit
+  // par le lien — porte l'adresse et les photos de toute l'équipe.
+  const travail = bon
+    ? {
+        ...travailBrut,
+        adresseTravaux: bon.adresseTravaux || travailBrut.adresseTravaux || null,
+        photosAvantUrls: [...new Set([...(bon.photosAvantUrls || []), ...(travailBrut.photosAvantUrls || [])])],
+        photosApresUrls: [...new Set([...(bon.photosApresUrls || []), ...(travailBrut.photosApresUrls || [])])],
+      }
+    : travailBrut;
+  const client = (clients || []).find((c) => c.id === travail.clientId) || (clients || []).find((c) => c.nom === travail.clientNom);
   // Repli final : l'adresse de FACTURATION — les clients descendus de
   // QuickBooks n'ont pas d'adresses de chantier (2026-09-01).
   const adresse = travail.adresseTravaux || (client?.adresses?.[0] ? `${client.adresses[0].nom} — ${libelleAdresse(client.adresses[0])}` : null) || (client?.adresseFacturation ? String(client.adresseFacturation).trim() : null);

@@ -441,6 +441,12 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     const a = (assignationsST || []).find((x) => x.tache_id === tacheId && x.employe_email === courrielSt);
     return a?.donnees?.stStatut || "prevu";
   };
+  // 📎 Pièces justificatives d'un sous-traitant (2026-10-05) — « 📎 2 » sur son bloc.
+  const piecesBlocST = (tacheId, courrielSt) => {
+    const a = (assignationsST || []).find((x) => x.tache_id === tacheId && x.employe_email === courrielSt);
+    const n = Array.isArray(a?.donnees?.stPieces) ? a.donnees.stPieces.length : 0;
+    return n > 0 ? ` 📎${n}` : "";
+  };
   // 💰/🤝 Le choix « facturable » en attente de réponse — { tacheId, titre, employe }.
   const [choixFacturable, setChoixFacturable] = useState(null);
   // 🏗️ « Créer un projet à partir de cette tâche » — la tâche visée.
@@ -1405,7 +1411,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       // facturation. Transmise à QuickBooks au moment de la facturation
       // (champ "Ship To" / adresse de livraison de la facture).
       // Une COURSE n'a pas de client : son adresse est tapée librement.
-      adresseTravaux: nouveauType === "course" ? adresseCourseLibre.trim() || null : null,
+      // 📍 Une tâche DIVERS aussi (2026-10-05, demande du propriétaire :
+      // formation chez un fournisseur…) — même champ que la course.
+      adresseTravaux: nouveauType === "course" || nouveauType === "divers" ? adresseCourseLibre.trim() || null : null,
       // ---- COMPTABILISATION DES HEURES ----
       // `nonFacturable` : rien ne partira en facturation à la fin.
       // `sansHeures`    : congé — aucun chronomètre, aucune heure.
@@ -2869,12 +2877,15 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   return (
     <div className="p-4 md:p-6">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        {/* 📱 Sur téléphone (2026-10-05, vécu du propriétaire : la boîte
+            « livraisons à recevoir » coupée à droite) : les boutons passent
+            à la ligne au lieu de déborder. */}
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           <button onClick={reculer} aria-label="Précédent" className="rounded-lg border border-slate-200 p-1.5"><ChevronLeft size={16} /></button>
           {/* Largeur FIXE + texte centré : la longueur de la date varie
               (« mardi 28 juillet » vs « mercredi 24 septembre ») et sans
               largeur fixe, les flèches se déplaçaient à chaque clic. */}
-          <h2 className="min-w-[230px] text-center text-sm font-extrabold capitalize text-slate-800">{vue === "mois" ? moisLabel : jourLabel}</h2>
+          <h2 className="min-w-0 flex-1 text-center text-sm font-extrabold capitalize text-slate-800 md:min-w-[230px] md:flex-none">{vue === "mois" ? moisLabel : jourLabel}</h2>
           <button onClick={avancer} aria-label="Suivant" className="rounded-lg border border-slate-200 p-1.5"><ChevronRight size={16} /></button>
           {/* 📅 « Aujourd'hui » (2026-09-17) — retour rapide à la période
               actuelle après avoir avancé/reculé ; caché quand on y est déjà
@@ -3443,9 +3454,11 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
               </div>
               )}
 
-              {nouveauType === "course" && (
+              {(nouveauType === "course" || nouveauType === "divers") && (
                 <div>
-                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">Adresse de la course (facultatif)</label>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
+                    {nouveauType === "divers" ? "Adresse (facultatif)" : "Adresse de la course (facultatif)"}
+                  </label>
                   {/* La MÊME autocomplétion Google que partout ailleurs —
                       une adresse proprement choisie fait un vrai lien de
                       navigation sur le téléphone du technicien. */}
@@ -5418,7 +5431,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                             {!emp.estSousTraitant && !estTerminee(tache, emp) && estEnCours(tache, emp) && (
                               <span className="ml-1.5 rounded-full bg-fuchsia-100 px-1.5 py-0.5 text-[9px] font-bold text-fuchsia-700">EN COURS</span>
                             )}
-                            {emp.estSousTraitant && <span className="ml-1.5">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}</span>}
+                            {emp.estSousTraitant && <span className="ml-1.5">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}{piecesBlocST(tache.id, emp.courriel)}</span>}
                           </p>
                           {tache.clientNom && tache.titre && <p className="text-[11px] text-slate-500">{tache.clientNom}</p>}
                           {(tache.adresseTravaux || tache.adresseIntervention) && (
@@ -5551,7 +5564,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                                 <span className="flex items-center gap-2">
                                   <span className="text-xs font-extrabold tabular-nums text-slate-500">{heure}</span>
                                   {emp.estSousTraitant ? (
-                                    <span className="text-[10px]">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}</span>
+                                    <span className="text-[10px]">{ST_ICONES[statutBlocST(tache.id, emp.courriel)]}{piecesBlocST(tache.id, emp.courriel)}</span>
                                   ) : estTerminee(tache, emp) ? (
                                     <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">TERMINÉ</span>
                                   ) : estEnCours(tache, emp) ? (
@@ -5801,7 +5814,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                           >
                             {emp.estSousTraitant && (
                               <span className="mt-px shrink-0 text-[9px]">
-                                {ST_ICONES[statutBlocST(seg.tache.id, emp.courriel)]}
+                                {ST_ICONES[statutBlocST(seg.tache.id, emp.courriel)]}{piecesBlocST(seg.tache.id, emp.courriel)}
                                 {stAConfirmer(seg.tache.id, emp.courriel, jourKey) && (
                                   <span className="ml-1 animate-pulse rounded bg-amber-200 px-1 text-[8px] font-extrabold text-amber-800">à confirmer</span>
                                 )}
@@ -6036,7 +6049,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                               <span className="flex items-start gap-1">
                                 {emp.estSousTraitant && (
                                   <span className="mt-px shrink-0 text-[9px]">
-                                    {ST_ICONES[statutBlocST(tache.id, emp.courriel)]}
+                                    {ST_ICONES[statutBlocST(tache.id, emp.courriel)]}{piecesBlocST(tache.id, emp.courriel)}
                                     {stAConfirmer(tache.id, emp.courriel, dateISO(d)) && (
                                       <span className="ml-1 animate-pulse rounded bg-amber-200 px-1 text-[8px] font-extrabold text-amber-800">à confirmer</span>
                                     )}
@@ -6849,6 +6862,38 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
         const montant = modalStatutST.montant ?? (d.stMontant || "");
         const ficheSt = (sousTraitants || []).find((x) => `st-${x.id}` === employe.id);
         const projetLie = (projets || []).find((p) => p.id === tache.projetId);
+        // 📎 PIÈCES JUSTIFICATIVES (2026-10-05, demande du propriétaire :
+        // facture du sous-traitant, bon de commande…). Téléversées dès le
+        // choix et enregistrées TOUT DE SUITE sur sa visite — sans attendre
+        // « Présent » : fermer la fenêtre ne les perd jamais. Elles se
+        // revoient ici, sur le bloc (📎) et dans le projet lié.
+        const pieces = Array.isArray(d.stPieces) ? d.stPieces : [];
+        const titreTache = tache.titre || tache.clientNom || "tâche";
+        const enregistrerPieces = (liste, resume) =>
+          onStatutST?.(tache.id, employe.courriel, { stPieces: liste }, resume);
+        const ajouterPieces = async (fichiers) => {
+          const choisis = Array.from(fichiers || []);
+          if (choisis.length === 0) return;
+          setModalStatutST((m) => (m ? { ...m, envoiPieces: true, erreurPieces: "" } : m));
+          const nouvelles = [];
+          try {
+            for (const f of choisis) {
+              const url = await televerserPieceJointeTache(f);
+              nouvelles.push({ nom: f.name || "pièce justificative", url, le: new Date().toISOString() });
+            }
+          } catch {
+            setModalStatutST((m) => (m ? { ...m, erreurPieces: "Une pièce n'a pas pu être envoyée — vérifie la connexion et réessaie." } : m));
+          }
+          if (nouvelles.length > 0) {
+            await enregistrerPieces(
+              [...pieces, ...nouvelles],
+              nouvelles.length > 1
+                ? `📎 ${nouvelles.length} pièces justificatives ajoutées — ${employe.nom}, « ${titreTache} » (${date})`
+                : `📎 Pièce justificative ajoutée (${nouvelles[0].nom}) — ${employe.nom}, « ${titreTache} » (${date})`
+            );
+          }
+          setModalStatutST((m) => (m ? { ...m, envoiPieces: false } : m));
+        };
         const valider = (nouveau) => {
           const montantNum = Math.max(0, Number(montant) || 0);
           onStatutST?.(
@@ -6894,9 +6939,54 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                   />
                   <p className="mt-1 text-[10px] leading-snug text-slate-400">
                     {projetLie
-                      ? `S'ajoute aux coûts réels du projet « ${projetLie.nom} » en marquant Présent.`
+                      ? `Noté sur sa visite et affiché dans le projet « ${projetLie.nom} » (Aperçu → Sous-traitants). Le coût réel du projet vient de sa facture entrée dans QuickBooks.`
                       : "Aucun projet lié à cette tâche — le montant est noté sur le bloc, sans coût de projet."}
                   </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-2.5">
+                  <p className="text-xs font-bold text-slate-500">📎 Pièces justificatives <span className="font-normal text-slate-400">(facture, bon de commande…)</span></p>
+                  {pieces.length > 0 && (
+                    <ul className="mt-1.5 space-y-1">
+                      {pieces.map((pc, i) => (
+                        <li key={pc.url + i} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1 text-xs">
+                          <a href={pc.url} target="_blank" rel="noopener noreferrer" className="min-w-0 truncate font-semibold text-blue-700 underline underline-offset-2">
+                            {pc.nom}
+                          </a>
+                          {!lectureSeule && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                enregistrerPieces(
+                                  pieces.filter((_, j) => j !== i),
+                                  `📎 Pièce retirée (${pc.nom}) — ${employe.nom}, « ${titreTache} »`
+                                )
+                              }
+                              aria-label="Retirer la pièce"
+                              className="shrink-0 rounded px-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {!lectureSeule && (
+                    <label className={`mt-1.5 flex min-h-[40px] cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs font-bold text-slate-600 ${modalStatutST.envoiPieces ? "pointer-events-none opacity-50" : ""}`}>
+                      {modalStatutST.envoiPieces ? "Envoi en cours…" : "➕ Ajouter une photo ou un fichier (PDF)"}
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          ajouterPieces(e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                  )}
+                  {modalStatutST.erreurPieces && <p className="mt-1 text-[10px] font-semibold text-red-600">⚠️ {modalStatutST.erreurPieces}</p>}
                 </div>
                 <button onClick={() => valider("present")} className="min-h-[48px] w-full rounded-xl bg-emerald-600 text-sm font-extrabold text-white active:scale-[0.99]">
                   ✅ Présent — il est venu faire les travaux

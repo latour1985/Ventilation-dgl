@@ -593,7 +593,7 @@ export function DetailTravail({ travail, clients, onFermer, onReactiver, bonLie 
           Cette réactivation doit se synchroniser vers l'app technicien (via Supabase Realtime en prod) pour que l'employé y ait accès de son côté.
         </p>
       </div>
-      {apercuClientOuvert && <ApercuBonTravailClient travail={travail} clients={clients} onFermer={() => setApercuClientOuvert(false)} />}
+      {apercuClientOuvert && <ApercuBonTravailClient travail={travail} bon={bonLie} clients={clients} onFermer={() => setApercuClientOuvert(false)} />}
     </div>
   );
 }
