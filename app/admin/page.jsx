@@ -2096,6 +2096,81 @@ function AppAdmin() {
     );
     return true;
   };
+  // ✏️ BC D'UN PROJET : MODIFIER OU DÉMÉNAGER (2026-10-06, demande du
+  // propriétaire : « je ne peux pas modifier un bon de commande, ex. si je
+  // me suis trompé de devis »). `cible` = "p:<id>" (même projet = simple
+  // modification, autre projet = déménagement), "t:<id>" / "c:<id>" (devient
+  // un BC libre rattaché à la job ou au client) ou "" (stock / achat
+  // général). Le NUMÉRO du BC ne change jamais : la facture du fournisseur
+  // dans QuickBooks le suit au nouvel endroit.
+  const modifierBcProjet = async (projetId, bcId, champs, cible) => {
+    const source = projets.find((px) => px.id === projetId);
+    const bc0 = (source?.bonsCommande || []).find((x) => x.id === bcId);
+    if (!source || !bc0) return false;
+    const bc = { ...bc0, ...champs };
+    const resume = `${(Number(bc.montantHT) || 0).toFixed(2)} $ HT`;
+    if (cible === `p:${projetId}`) {
+      setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: (px.bonsCommande || []).map((x) => (x.id === bcId ? bc : x)) } : px)));
+      ajouterJournal(`✏️ BC ${bc.numeroBC || "?"} modifié dans le projet « ${source.nom} » — ${resume}.`);
+      return true;
+    }
+    if (cible.startsWith("p:")) {
+      const dest = projets.find((px) => px.id === cible.slice(2));
+      if (!dest) return false;
+      setProjets((prev) =>
+        prev.map((px) =>
+          px.id === projetId
+            ? { ...px, bonsCommande: (px.bonsCommande || []).filter((x) => x.id !== bcId) }
+            : px.id === dest.id
+              ? { ...px, bonsCommande: [...(px.bonsCommande || []), bc] }
+              : px
+        )
+      );
+      ajouterJournal(`🏗️ BC ${bc.numeroBC || "?"} déménagé : projet « ${source.nom} » → projet « ${dest.nom} » — ${resume}.`);
+      return true;
+    }
+    // Vers une tâche, un client ou le stock : il devient un BC libre.
+    const tache = cible.startsWith("t:") ? tacheParId(cible.slice(2)) : null;
+    const client = cible.startsWith("c:") ? clients.find((c) => c.id === cible.slice(2)) : null;
+    await creerAchatLibre(
+      {
+        numeroBc: bc.numeroBC || null,
+        fournisseurNom: bc.fournisseur || "",
+        description: bc.description || "",
+        montantHT: Number(bc.montantHT) || 0,
+        dateAchat: bc.date || todayISO(),
+        tacheId: tache?.id || null,
+        tacheTitre: tache ? tache.titre || tache.clientNom || null : null,
+        clientId: tache?.clientId || client?.id || null,
+        clientNom: tache?.clientNom || client?.nom || null,
+        montantAttribue: Number(bc.montantHT) || 0,
+        livraisonSouhaitee: bc.livraison || null,
+        ramassePar: bc.ramassePar || null,
+        depotA: bc.depotA || null,
+      },
+      session
+    );
+    // Ce que le bon savait SUIT (envoi, réception, réception partielle).
+    try {
+      const liste = await listerAchatsLibres();
+      const neuf = liste.find((a) => a.numeroBc === bc.numeroBC && !a.recuLe && !a.bcEnvoyeLe) || liste.find((a) => a.numeroBc === bc.numeroBC);
+      if (neuf) {
+        await majAchatLibre(neuf.id, {
+          ...(bc.envoyeLe ? { bcEnvoyeLe: bc.envoyeLe, bcEnvoyeA: bc.envoyeA || [] } : {}),
+          ...(bc.recuLe || bc.statut === "Reçu" ? { recuLe: bc.recuLe || new Date().toISOString() } : {}),
+          ...(bc.partielLe ? { partielLe: bc.partielLe, manquant: bc.manquant || "", restePromisLe: bc.restePromisLe || null, reclameLe: bc.reclameLe || null } : {}),
+        });
+      }
+      setAchatsLibres(await listerAchatsLibres());
+    } catch {
+      // le bon existe ; seules ses traces d'envoi/réception sont à refaire
+    }
+    setProjets((prev) => prev.map((px) => (px.id === projetId ? { ...px, bonsCommande: (px.bonsCommande || []).filter((x) => x.id !== bcId) } : px)));
+    ajouterJournal(
+      `🏗️ BC ${bc.numeroBC || "?"} déménagé : projet « ${source.nom} » → ${tache ? `job « ${tache.titre || tache.clientNom} »` : client ? `client « ${client.nom} »` : "achat général (stock)"} — ${resume}.`
+    );
+    return true;
+  };
   // Retrouve une tâche par id, peu importe où elle vit (grille ou file
   // d'attente) — pour recopier titre et client sur un achat rattaché.
   const tacheParId = (id) => {
@@ -4964,6 +5039,7 @@ function AppAdmin() {
           onMarquerBcEnvoye={marquerBcEnvoye}
           onSupprimerBcLibre={supprimerBcLibre}
           onDemenagerBcVersProjet={demenagerBcVersProjet}
+          onModifierBcProjet={modifierBcProjet}
           projets={projets}
           // Tâches offertes au rattachement d'un achat : celles de la
           // grille + la file d'attente, dédupliquées, sans les tâches
@@ -4972,11 +5048,11 @@ function AppAdmin() {
             const vues = new Map();
             for (const valeur of Object.values(planning)) {
               for (const t of listeCellule(valeur)) {
-                if (t && !t.est_tache_systeme && !vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "", adresse: t.adresseIntervention || t.adresseTravaux || "" });
+                if (t && !t.est_tache_systeme && !vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "", adresse: t.adresseIntervention || t.adresseTravaux || "", devisNumero: [t.devisNumero, ...(Array.isArray(t.devisJoints) ? t.devisJoints : [])].filter(Boolean).join(" · ") });
               }
             }
             (tachesAttente || []).forEach((t) => {
-              if (!vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "", adresse: t.adresseIntervention || t.adresseTravaux || "" });
+              if (!vues.has(t.id)) vues.set(t.id, { id: t.id, titre: t.titre || t.clientNom || t.id, clientNom: t.clientNom || "", adresse: t.adresseIntervention || t.adresseTravaux || "", devisNumero: [t.devisNumero, ...(Array.isArray(t.devisJoints) ? t.devisJoints : [])].filter(Boolean).join(" · ") });
             });
             return [...vues.values()].sort((a, b) => (a.clientNom || "").localeCompare(b.clientNom || "", "fr"));
           })()}

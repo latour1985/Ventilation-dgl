@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronUp, Lock, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
+import { useLangue } from "@/lib/i18n";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { envoyerCourriel, gabaritBonCommande, gabaritDemandePaiement, gabaritCommandeGroupee, gabaritBcSimple } from "@/lib/courriels";
 import { langueClient } from "@/lib/i18nPublic";
@@ -21,7 +22,7 @@ import { listerInventaire, sauvegarderArticleInventaire, supprimerArticleInventa
 import { creerFactureQbo } from "@/lib/quickbooksClient";
 import { STATUTS_PIECE, genererNumeroSecours, ITEMS_PAR_PAGE, BarrePagination, ChampPhotosBc, ChampFichiersBc, SelecteurCibleAchat, Button, AutocompleteAdresse, libelleAdresse, descriptionAvecLivraison, bcEstAsap, bcEstRamassage } from "./partage";
 
-export function OngletPieces({ employesRamassage = [], pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onMarquerBcEnvoye = null, onPartielPiece = null, onMajBcProjet = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
+export function OngletPieces({ employesRamassage = [], pieces, peutCommander, onMaj, onRecue, onAnnuler, fournisseurs, setFournisseurs, ajouterJournal, nomUtilisateur, clients, depots, prixDepots, onCreerDepot, commandesCamion, onCommandePassee, achatsLibres, onCreerBcLibre, onMajBcLibre, onSupprimerBcLibre, onDemenagerBcVersProjet, onModifierBcProjet = null, onMarquerBcEnvoye = null, onPartielPiece = null, onMajBcProjet = null, projets, tachesPourAchat = [], transactionsQb = [] }) {
   // 🧰 Commandes camion : note d'achat en cours de saisie (par demande).
   const camionEnAttente = (commandesCamion || []).filter((c) => c.statut === "envoyee");
   const configEnt = useEntreprise();
@@ -283,6 +284,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
   // suppression en deux clics. `bcOuvert` = l'achat ; `bcEdit` = la
   // copie de travail ; `bcSupprEtape` = confirmation armée ou non.
   const [bcOuvert, setBcOuvert] = useState(null);
+  // ✏️ BC d'un PROJET ouvert pour modification / déménagement (2026-10-06) :
+  // { projetId, bc, cible, fournisseur, description, montantHT, livraison, erreur, enCours }.
+  const [bcProjetOuvert, setBcProjetOuvert] = useState(null);
+  const { t: trP } = useLangue();
   const [bcEdit, setBcEdit] = useState(null);
   const [bcSupprEtape, setBcSupprEtape] = useState(false);
   // 📄 Pagination (2026-08-26) — 10 pièces par page, 10 BC par page.
@@ -704,7 +709,9 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
               // Date : le champ, sinon la ligne « Livraison souhaitée » du texte ; envoyé : la trace
               // posée par Pièces OU la liste d'envoi de l'onglet Projets (revue 2026-09-22).
               cle: `bc-${pr.id}-${bc.id}`, numero: bc.numeroBC || "(sans nº)", fournisseur: bc.fournisseur || "", date: bc.livraison || livraisonDepuisTexte(bc.description) || null,
-              cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe || (bc.courrielsEnvoi || []).length > 0, telephone: (bc.envoyeA || []).includes("manuel"), nonEnvoye: false, ouvrir: null,
+              cible: `🏗️ ${pr.nom}`, description: (bc.description || "").split("\n")[0], asap: bcEstAsap(bc.description), ramassage: bcEstRamassage(bc.description), ramassePar: bc.ramassePar || null, envoye: !!bc.envoyeLe || (bc.courrielsEnvoi || []).length > 0, telephone: (bc.envoyeA || []).includes("manuel"), nonEnvoye: false,
+              // ✏️ Fiche du BC de projet (2026-10-06) : modifier ou déménager (bureau seulement).
+              ouvrir: peutCommander && onModifierBcProjet ? () => setBcProjetOuvert({ projetId: pr.id, projetNom: pr.nom, bc, cible: `p:${pr.id}`, fournisseur: bc.fournisseur || "", description: bc.description || "", montantHT: Number(bc.montantHT) || 0, livraison: bc.livraison || "", erreur: "", enCours: false }) : null,
               // 🏗️ Reçu / partiel / réclamation aussi pour les BC de projets (2026-09-22) — le bon vit dans le JSON du projet.
               recevoir: peutCommander && onMajBcProjet ? () => onMajBcProjet(bc.numeroBC, { statut: "Reçu", recuLe: new Date().toISOString() }, "📦 reçu") : null,
               manquant: bc.manquant || "", restePromisLe: bc.restePromisLe || null, reclameLe: bc.reclameLe || null, partielLe: bc.partielLe || null,
@@ -1688,6 +1695,86 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
           re-rattachement (général / job / client / projet), suppression
           en deux clics. Un projet choisi = DÉMÉNAGEMENT : le bon rejoint
           la fiche du projet et quitte cette liste (tracé au journal). */}
+      {bcProjetOuvert && (() => {
+        const f = bcProjetOuvert;
+        const maj = (champs) => setBcProjetOuvert((x) => ({ ...x, ...champs, erreur: "" }));
+        const memeProjet = f.cible === `p:${f.projetId}`;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget && !f.enCours) setBcProjetOuvert(null); }}>
+            <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">🧾 {f.bc.numeroBC || trP("Bon de commande")}</h3>
+                  <p className="text-xs text-slate-500">{trP("Projet : {nom}", { nom: f.projetNom })}</p>
+                </div>
+                <button onClick={() => !f.enCours && setBcProjetOuvert(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
+              </div>
+              <div className="space-y-2.5">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">{trP("Fournisseur")}</label>
+                  <input value={f.fournisseur} onChange={(e) => maj({ fournisseur: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">{trP("Description")}</label>
+                  <textarea value={f.description} onChange={(e) => maj({ description: e.target.value })} rows={4} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">{trP("Montant HT ($)")}</label>
+                    <InputNombreDecimal valeur={f.montantHT} onChange={(v) => maj({ montantHT: v })} className="w-28 rounded-lg border border-slate-300 px-2 py-1.5 text-xs tabular-nums" />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">{trP("Livraison souhaitée")}</label>
+                    <input type="date" value={f.livraison || ""} onChange={(e) => maj({ livraison: e.target.value })} className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs" />
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">{trP("Rattachement (où va le coût ?)")}</label>
+                  <SelecteurCibleAchat
+                    valeur={f.cible}
+                    onChoisir={(v) => maj({ cible: v })}
+                    taches={tachesPourAchat || []}
+                    clients={clients || []}
+                    projets={projets || []}
+                    libelleRepli={trP("Projet : {nom}", { nom: f.projetNom })}
+                  />
+                  {!memeProjet && (
+                    <p className="mt-1 rounded-lg border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] leading-snug text-blue-800">
+                      {trP("Le bon quitte le projet « {nom} » et va au nouveau rattachement, avec le même numéro : la facture du fournisseur dans QuickBooks le suit.", { nom: f.projetNom })}
+                    </p>
+                  )}
+                </div>
+                {f.erreur && <p className="rounded-lg bg-red-50 px-2 py-1.5 text-[11px] font-bold text-red-700">⚠️ {f.erreur}</p>}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <Button variant="outline" disabled={f.enCours} onClick={() => setBcProjetOuvert(null)} className="min-h-0 py-2 text-xs">{trP("Annuler")}</Button>
+                  <Button
+                    disabled={f.enCours}
+                    onClick={async () => {
+                      setBcProjetOuvert((x) => ({ ...x, enCours: true, erreur: "" }));
+                      try {
+                        const ok = await onModifierBcProjet(
+                          f.projetId,
+                          f.bc.id,
+                          { fournisseur: f.fournisseur.trim(), description: f.description, montantHT: Number(f.montantHT) || 0, ...(f.livraison ? { livraison: f.livraison } : {}) },
+                          f.cible || ""
+                        );
+                        if (ok === false) throw new Error(trP("Bon ou projet introuvable — recharge la page."));
+                        setBcProjetOuvert(null);
+                      } catch (e) {
+                        setBcProjetOuvert((x) => ({ ...x, enCours: false, erreur: e?.message || trP("Enregistrement impossible — réessaie.") }));
+                      }
+                    }}
+                    className="min-h-0 py-2 text-xs"
+                  >
+                    {f.enCours ? "…" : memeProjet ? trP("Enregistrer") : trP("Enregistrer et déménager")}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {bcOuvert && bcEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(evFond) => { if (evFond.target !== evFond.currentTarget) return; setBcOuvert(null); }}>
           <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5">

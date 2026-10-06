@@ -537,14 +537,21 @@ export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = 
   }, [ouvert]);
   const f = filtre.trim().toLowerCase();
   const garde = (texte) => !f || String(texte || "").toLowerCase().includes(f);
+  // 📍 📄 ADRESSE ET DEVIS DES PROJETS (2026-10-06, demande du propriétaire :
+  // « mettre l'adresse des travaux avec le numéro de devis ») — les devis
+  // traités en projet portent son id ; versions actives seulement.
+  const tousDevis = useContext(ContexteDevis) || [];
+  const devisDuProjet = (pid) =>
+    [...new Set(tousDevis.filter((d) => d.projetId === pid && d.versionActive !== false).map((d) => d.numero).filter(Boolean))];
+  const projetsEnrichis = projets.map((p) => ({ ...p, devisTexte: devisDuProjet(p.id).join(" · ") }));
   // Plafond par famille : au-delà, taper une lettre de plus est plus
   // rapide que défiler — et la liste reste fluide.
   // 📍 L'adresse entre aussi dans la recherche (2026-09-09, demande du
   // propriétaire : « mettre l'adresse à côté des tâches, plus facile à
   // trouver ») — on peut retrouver une job par son chantier.
-  const tachesVisibles = taches.filter((t) => garde(`${t.clientNom} ${t.titre} ${t.adresse || ""}`)).slice(0, 25);
+  const tachesVisibles = taches.filter((t) => garde(`${t.clientNom} ${t.titre} ${t.adresse || ""} ${t.devisNumero || ""}`)).slice(0, 25);
   const clientsVisibles = clients.filter((c) => garde(c.nom)).slice(0, 25);
-  const projetsVisibles = projets.filter((p) => garde(p.nom)).slice(0, 25);
+  const projetsVisibles = projetsEnrichis.filter((p) => garde(`${p.nom} ${p.adresseTravaux || ""} ${p.devisTexte}`)).slice(0, 25);
   const libelle = (() => {
     if (!valeur) return "";
     if (valeur.startsWith("t:")) {
@@ -591,10 +598,17 @@ export function SelecteurCibleAchat({ valeur, onChoisir, taches = [], clients = 
             className="block w-full px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-orange-50"
           >
             <span className="block whitespace-normal break-words leading-snug">{rendu(x)}</span>
-            {/* 📍 L'adresse du chantier sous la tâche — repère visuel. */}
-            {prefixe === "t" && x.adresse ? (
-              <span className="block whitespace-normal break-words text-[10px] leading-snug text-slate-400">📍 {x.adresse}</span>
-            ) : null}
+            {/* 📍 L'adresse du chantier et 📄 le devis sous la tâche / le projet — repères visuels. */}
+            {(() => {
+              const adresse = prefixe === "t" ? x.adresse : prefixe === "p" ? x.adresseTravaux : "";
+              const devis = prefixe === "t" ? x.devisNumero : prefixe === "p" ? x.devisTexte : "";
+              if (!adresse && !devis) return null;
+              return (
+                <span className="block whitespace-normal break-words text-[10px] leading-snug text-slate-400">
+                  {adresse ? `📍 ${adresse}` : ""}{adresse && devis ? " · " : ""}{devis ? <span className="font-semibold text-blue-700">📄 {devis}</span> : null}
+                </span>
+              );
+            })()}
           </button>
         ))}
       </div>

@@ -460,6 +460,29 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
   const setChoixFacturable = (q) => setFileChoixFacturable((prev) => (q ? [...prev, q] : prev.slice(1)));
   // 🏗️ « Créer un projet à partir de cette tâche » — la tâche visée.
   const [projetDepuisTache, setProjetDepuisTache] = useState(null);
+  // ✋ APPUI MAINTENU AVANT DE DÉPLACER UN BLOC (2026-10-06, demande du
+  // propriétaire : « quand j'accroche une tâche elle bouge instantanément »).
+  // Le glisser du navigateur partait au moindre mouvement pendant le clic.
+  // Il faut maintenant tenir ½ seconde : le bloc s'entoure d'orange (✋),
+  // puis il se déplace. Bouger plus tôt = rien ne bouge ; le clic simple
+  // ouvre toujours la fiche. Les cartes « en attente » restent instantanées.
+  const DELAI_DEPLACEMENT_MS = 500;
+  const appuiBlocRef = useRef({ cle: null, t: 0 });
+  const minuterieAppuiRef = useRef(null);
+  const [blocArme, setBlocArme] = useState(null);
+  const gestesDeplacement = (cle) => ({
+    onPointerDown: () => {
+      appuiBlocRef.current = { cle, t: Date.now() };
+      clearTimeout(minuterieAppuiRef.current);
+      minuterieAppuiRef.current = setTimeout(() => setBlocArme(cle), DELAI_DEPLACEMENT_MS);
+    },
+    onPointerUp: () => {
+      clearTimeout(minuterieAppuiRef.current);
+      setBlocArme(null);
+    },
+    onDragEnd: () => setBlocArme(null),
+  });
+  const appuiAssezLong = (cle) => appuiBlocRef.current.cle === cle && Date.now() - appuiBlocRef.current.t >= DELAI_DEPLACEMENT_MS;
   // Un AUTRE technicien tient-il déjà cette tâche dans la grille ?
   const autreTechnicienALaTache = (tacheId, employeIdCourant) =>
     Object.entries(planning || {}).some(
@@ -4908,9 +4931,21 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                         className={`shrink-0 text-slate-300 transition-transform ${tacheDepliee === t.id ? "rotate-180" : ""}`}
                       />
                     </div>
-                    {tacheDepliee !== t.id && t.clientNom && t.titre && (
-                      <p className="ml-3.5 truncate text-[10px] text-slate-400">{t.clientNom}</p>
-                    )}
+                    {/* 👤 📍 📄 Client, adresse des travaux et devis sous le titre
+                        (2026-10-06, demande du propriétaire) — la carte se
+                        reconnaît sans l'ouvrir. */}
+                    {tacheDepliee !== t.id && (() => {
+                      const adresse = t.adresseTravaux || t.adresseIntervention || "";
+                      const devis = [t.devisNumero, ...(Array.isArray(t.devisJoints) ? t.devisJoints : [])].filter(Boolean);
+                      if (!(t.clientNom && t.titre) && !adresse && devis.length === 0) return null;
+                      return (
+                        <div className="ml-3.5 min-w-0 text-[10px] leading-snug text-slate-400">
+                          {t.clientNom && t.titre && <p className="truncate">{t.clientNom}</p>}
+                          {adresse && <p className="truncate">📍 {adresse}</p>}
+                          {devis.length > 0 && <p className="truncate font-semibold text-blue-700">📄 {devis.join(" · ")}</p>}
+                        </div>
+                      );
+                    })()}
                   </button>
                   {!lectureSeule && (
                     <button
@@ -5933,7 +5968,13 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                               (autre heure, autre technicien). */}
                           <button
                             draggable={!lectureSeule && !seg.tache.est_tache_systeme}
+                            {...gestesDeplacement(`j|${seg.tache.id}|${emp.id}|${jourKey}`)}
+                            title={blocArme === `j|${seg.tache.id}|${emp.id}|${jourKey}` ? tr("✋ Tu peux déplacer ce bloc") : undefined}
                             onDragStart={(ev) => {
+                              if (!appuiAssezLong(`j|${seg.tache.id}|${emp.id}|${jourKey}`)) {
+                                ev.preventDefault();
+                                return;
+                              }
                               ev.dataTransfer.setData(
                                 "text/plain",
                                 JSON.stringify({ deplacement: true, tacheId: seg.tache.id, employeId: emp.id, jour: jourKey })
@@ -5951,7 +5992,7 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                                 : seg.tache.est_tache_systeme
                                 ? "bg-slate-200 text-slate-600"
                                 : `text-black ${(COULEUR_TYPE_TACHE[seg.tache.typeTache] || COULEUR_TYPE_DEFAUT).fond}`
-                            } ${enRedimensionnement ? "ring-2 ring-[#FF6A13]" : ""}`}
+                            } ${enRedimensionnement || blocArme === `j|${seg.tache.id}|${emp.id}|${jourKey}` ? "ring-2 ring-[#FF6A13]" : ""} ${blocArme === `j|${seg.tache.id}|${emp.id}|${jourKey}` ? "cursor-grab" : ""}`}
                           >
                             {emp.estSousTraitant && (
                               <span className="mt-px shrink-0 text-[9px]">
@@ -6175,7 +6216,12 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                             <button
                               key={tache.id}
                               draggable={!lectureSeule && !tache.est_tache_systeme}
+                              {...gestesDeplacement(`s|${tache.id}|${emp.id}|${dateISO(d)}`)}
                               onDragStart={(ev) => {
+                                if (!appuiAssezLong(`s|${tache.id}|${emp.id}|${dateISO(d)}`)) {
+                                  ev.preventDefault();
+                                  return;
+                                }
                                 ev.dataTransfer.setData(
                                   "text/plain",
                                   JSON.stringify({ deplacement: true, tacheId: tache.id, employeId: emp.id, jour: dateISO(d) })
@@ -6184,7 +6230,7 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                               }}
                               onClick={() => !lectureSeule && !tache.est_tache_systeme && (emp.estSousTraitant ? setModalStatutST({ tache, employe: emp, date: dateISO(d) }) : setTacheDetailOuverte({ tache, employe: emp, date: dateISO(d), heure: entreesJour.find((x) => x.tache.id === tache.id)?.heure || HEURE_PAR_DEFAUT }))}
                               onMouseMove={(e) => setSurvol({ tache, employe: emp, heure: HEURE_PAR_DEFAUT, x: e.clientX, y: e.clientY })}
-                              className={`block w-full rounded-lg border-l-4 p-1 text-left text-[9px] font-semibold leading-tight ${
+                              className={`block w-full rounded-lg border-l-4 p-1 text-left text-[9px] font-semibold leading-tight ${blocArme === `s|${tache.id}|${emp.id}|${dateISO(d)}` ? "cursor-grab ring-2 ring-[#FF6A13] " : ""}${
                                 emp.estSousTraitant
                                   ? `${ST_COULEURS[statutBlocST(tache.id, emp.courriel)][0]} ${ST_COULEURS[statutBlocST(tache.id, emp.courriel)][1]}`
                                   : estTerminee(tache, emp)
