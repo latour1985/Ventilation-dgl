@@ -4017,7 +4017,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // d'informations, donc des heures ») : la description des travaux
       // et les heures de chaque technicien suivent — le même niveau de
       // détail que la facture d'un bon seul.
-      const sourcesB = ((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || []).filter(
+      // 💲 PRIX FIXE = PAS D'HEURES SUR LA FACTURE (2026-10-06, demande du
+      // propriétaire, facture 4329 : « lors de travaux avec devis, le client
+      // n'a pas besoin de voir les heures du technicien »). Travaux avec
+      // devis et contrats d'entretien : le prix est convenu d'avance. Les
+      // heures restent pour l'appel de service et le temps et matériel.
+      const prixFixe = b.type === "devis" || b.type === "entretien_contrat";
+      const sourcesB = prixFixe ? [] : ((b.lignesReelles && b.lignesReelles.length > 0 ? b.lignesReelles : b.lignesSource) || []).filter(
         (s) => (Number(s.heures) || 0) > 0
       );
       const heuresTxt = sourcesB.map((s) => `${s.employeNom || "technicien"} : ${Number(s.heures).toFixed(2)} h`).join(" · ");
