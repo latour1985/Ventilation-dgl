@@ -350,6 +350,22 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
   const [envoiBcAjout, setEnvoiBcAjout] = useState(""); // ➕ adresse différente
   const ficheFournisseurParNom = (nom) =>
     (fournisseurs || []).find((f) => (f.nom || "").trim().toLowerCase() === String(nom || "").trim().toLowerCase()) || null;
+  // 📎 ENVOYER / RENVOYER UN BC EXISTANT AVEC PHOTOS ET FICHIERS (2026-10-06,
+  // demande du propriétaire : « on ne peut pas ajouter de photo ou de pièce
+  // jointe » dans la fiche). Les photos ne vivent pas sur le BC : elles
+  // partent avec le courriel — la fenêtre d'envoi existante les accepte.
+  const ouvrirEnvoiBcExistant = (numero, fournisseurNom, description) => {
+    const fiche = ficheFournisseurParNom(fournisseurNom);
+    setOffreEnvoiBc({
+      numero: numero || "(sans nº)",
+      fournisseur: fournisseurNom || "le fournisseur",
+      description: description || "",
+      photos: [],
+      fichiers: [],
+      courriels: fiche?.courriels || [],
+      coches: (fiche?.courriels || []).filter((c) => c.defaut).map((c) => c.email),
+    });
+  };
   const envoyerBcLibre = async () => {
     if (!offreEnvoiBc || offreEnvoiBc.coches.length === 0) return;
     setEnvoiBcLibreEnCours(true);
@@ -1769,6 +1785,18 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                     {f.enCours ? "…" : memeProjet ? trP("Enregistrer") : trP("Enregistrer et déménager")}
                   </Button>
                 </div>
+                <button
+                  type="button"
+                  disabled={f.enCours}
+                  onClick={() => {
+                    ouvrirEnvoiBcExistant(f.bc.numeroBC, f.fournisseur, f.description);
+                    setBcProjetOuvert(null);
+                  }}
+                  className="w-full rounded-xl border border-blue-300 bg-blue-50 py-2 text-[11px] font-bold text-blue-800 hover:bg-blue-100 disabled:opacity-40"
+                >
+                  {trP("📎 Envoyer au fournisseur — avec photos et pièces jointes")}
+                </button>
+                <p className="-mt-1 text-center text-[9px] text-slate-400">{trP("Enregistre d'abord tes changements : l'envoi part avec le texte affiché ici.")}</p>
               </div>
             </div>
           </div>
@@ -1971,6 +1999,17 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                 </Button>
                 <Button variant="outline" onClick={() => setBcOuvert(null)} className="min-h-0 py-2 text-xs">Annuler</Button>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  ouvrirEnvoiBcExistant(bcOuvert.numeroBc, bcEdit.fournisseurNom, bcEdit.description);
+                  setBcOuvert(null);
+                }}
+                className="w-full rounded-xl border border-blue-300 bg-blue-50 py-2 text-[11px] font-bold text-blue-800 hover:bg-blue-100"
+              >
+                {trP("📎 Envoyer au fournisseur — avec photos et pièces jointes")}
+              </button>
+              <p className="-mt-1 text-center text-[9px] text-slate-400">{trP("Enregistre d'abord tes changements : l'envoi part avec le texte affiché ici.")}</p>
               {bcSupprEtape ? (
                 <div className="rounded-xl border border-red-300 bg-red-50 p-2.5">
                   <p className="text-[11px] font-bold text-red-700">
