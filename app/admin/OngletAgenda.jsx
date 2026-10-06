@@ -6977,7 +6977,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                   />
                   <p className="mt-1 text-[10px] leading-snug text-slate-400">
                     {projetLie
-                      ? `Noté sur sa visite et affiché dans le projet « ${projetLie.nom} » (Aperçu → Sous-traitants). Le coût réel du projet vient de sa facture entrée dans QuickBooks.`
+                      ? `Compte comme ESTIMATION dans le coût du projet « ${projetLie.nom} » en marquant Présent — jusqu'à ce que sa facture soit validée « entrée » dans le système comptable (Facturation).`
                       : "Aucun projet lié à cette tâche — le montant est noté sur le bloc, sans coût de projet."}
                   </p>
                 </div>

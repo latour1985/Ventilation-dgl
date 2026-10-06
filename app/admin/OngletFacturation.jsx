@@ -2021,7 +2021,7 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, onNoterAuDossierClient = null, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, tachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, onNoterAuDossierClient = null, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTEntreeQb = null, transactionsQbST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, tachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
   // 🌎 Traduction (tranche facturation, 2026-09-14) — nommée `tr` car le
   // fichier utilise `t` comme variable de boucle (bons/travaux).
   const { t: tr } = useLangue();
@@ -4300,6 +4300,96 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
+      {/* 🧾 FACTURES DE SOUS-TRAITANTS À ENTRER DANS LE SYSTÈME COMPTABLE
+          (2026-10-05, option A choisie par le propriétaire : « comme ça
+          aucune erreur si l'entrée n'est pas faite, il faut toujours la
+          valider »). Chaque visite « Présent » avec un montant reste ici
+          jusqu'à ce qu'on VALIDE que sa facture est entrée. D'ici là, son
+          montant compte comme estimation dans le coût du projet ; après,
+          c'est la facture comptable qui compte — jamais les deux. Un indice
+          signale une facture qui semble déjà là — la validation reste
+          humaine. */}
+      {(() => {
+        const aEntrer = (assignationsST || []).filter(
+          (a) => a?.donnees?.stStatut === "present" && Number(a?.donnees?.stMontant) > 0 && !a?.donnees?.stEntreeQb
+        );
+        if (aEntrer.length === 0) return null;
+        const sys = configEnt?.systemeComptable || "quickbooks";
+        const compta = sys === "sage" ? "Sage" : sys === "aucun" ? "ta comptabilité" : "QuickBooks";
+        const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+        const indiceQb = (a) => {
+          const n = norm(a.employe_nom);
+          const montant = Number(a.donnees?.stMontant) || 0;
+          if (!n) return null;
+          return (
+            (transactionsQbST || []).find((t) => {
+              if (t.type !== "EXPENSE" || t.estCredit) return false;
+              const f = norm(t.fournisseurNomQb);
+              return f && (f.includes(n) || n.includes(f)) && Math.abs((Number(t.amountHT) || 0) - montant) < 1;
+            }) || null
+          );
+        };
+        return (
+          <div className="rounded-2xl border border-purple-300 bg-purple-50 p-4">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-purple-700">
+              🧾 Factures de sous-traitants à entrer dans {compta} ({aEntrer.length})
+            </p>
+            <div className="mt-2 space-y-1.5">
+              {aEntrer.map((a) => {
+                const d = a.donnees || {};
+                const pieces = Array.isArray(d.stPieces) ? d.stPieces : [];
+                const indice = sys === "quickbooks" ? indiceQb(a) : null;
+                return (
+                  <div key={`ent|${a.tache_id}|${a.employe_email}`} className="rounded-lg border border-purple-200 bg-white px-3 py-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-bold text-slate-800">
+                          {a.employe_nom || "Sous-traitant"} — <span className="tabular-nums">{Number(d.stMontant).toFixed(2)} $</span> avant taxes
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {a.titre || "Tâche"}{a.client_nom ? ` — ${a.client_nom}` : ""} · {a.date_debut}
+                          {d.stNote ? ` · 📝 ${d.stNote}` : ""}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => onMarquerSTEntreeQb?.(a.tache_id, a.employe_email, { nom: a.employe_nom, montant: Number(d.stMontant) || 0, titre: a.titre, compta })}
+                        className="shrink-0 rounded-lg bg-purple-600 px-2.5 py-1.5 text-[11px] font-bold text-white"
+                      >
+                        ✓ Entrée dans {compta}
+                      </button>
+                    </div>
+                    {pieces.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {pieces.map((pc, i) => (
+                          <a
+                            key={pc.url + i}
+                            href={pc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="max-w-full truncate rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700"
+                          >
+                            📎 {pc.nom}
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[10px] text-slate-400">Aucune pièce jointe — sa facture s&apos;ajoute dans l&apos;Agenda (clic sur son bloc → 📎).</p>
+                    )}
+                    {indice && (
+                      <p className="mt-1 text-[10px] font-semibold text-emerald-700">
+                        💡 Une facture de {indice.fournisseurNomQb} de {(Number(indice.amountHT) || 0).toFixed(2)} $ ({indice.date}) semble déjà dans QuickBooks — vérifie, puis valide.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[10px] leading-snug text-purple-700">
+              {`Tant qu'une facture n'est pas validée ici, son montant compte comme ESTIMATION dans le coût du projet. Une fois validée, c'est la facture entrée dans ${compta} (rattachée au projet) qui compte — jamais les deux.`}
+            </p>
+          </div>
+        );
+      })()}
       {/* 🤝 SOUS-TRAITANCE À FACTURER (2026-08-19) — la ceinture de
           sécurité : chaque visite de sous-traitant marquée « Présent »
           reste ici tant que le client n'a pas été facturé. */}

@@ -35,7 +35,7 @@ import { envoyerCourriel, gabaritBonTravail, sujetCourrielClient } from "@/lib/c
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { ModalDetailProjet } from "./OngletProjets";
 import { ModalDoublonsClients } from "./ModalDoublonsClients";
-import { facteurChargesEmploye, employeDeLigne, Button, BarrePagination, ITEMS_PAR_PAGE, ModalSelectionCourriel, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet } from "./partage";
+import { facteurChargesEmploye, employeDeLigne, Button, BarrePagination, ITEMS_PAR_PAGE, ModalSelectionCourriel, todayISO, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, BadgeConsultation, GalerieAvantApres, ApercuDevisClient, ApercuBonTravailClient, calculerRentabiliteProjet, couleurSanteBudget, evaluerSanteProjet, useVisitesSousTraitance } from "./partage";
 
 export function DevisDuClient({ devisListe, clientId, surlignerNumero, compact, onNouvelleVersion }) {
   const [dossierOuvert, setDossierOuvert] = useState(null);
@@ -600,7 +600,8 @@ export function DetailTravail({ travail, clients, onFermer, onReactiver, bonLie 
 
 
 export const LigneProjetClient = React.memo(function LigneProjetClient({ p, travaux, transactionsQb, utilisateurs, tauxMetiers, onOuvrir }) {
-  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers), [p, travaux, transactionsQb, utilisateurs, tauxMetiers]);
+  const visitesST = useVisitesSousTraitance();
+  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, visitesST), [p, travaux, transactionsQb, utilisateurs, tauxMetiers, visitesST]);
   const sante = evaluerSanteProjet(p, r);
   return (
     <button
@@ -642,6 +643,8 @@ export const LigneProjetClient = React.memo(function LigneProjetClient({ p, trav
 // (Fusion des deux postes, 2026-09-09 : `cibleCoup` — recherche qui
 // rouvre le même dossier — ET `planning` — rendez-vous à venir.)
 export function OngletClients({ clients, setClients, ajouterJournal, travaux, setTravaux, projets, setProjets, devisListe, transactionsQb, utilisateurs, tauxMetiers, syncQbEnCours, onSyncQuickBooksProjets, peutSyncQb, fournisseurs, setFournisseurs, clientCible, devisCible, cibleCoup = null, onCreerDevis, onNouvelleVersionDevis, bons, inspections, achatsLibres = [], piecesCommandees = [], qbConnecte = null, planning = {} }) {
+  // 🤝 Visites des sous-traitants — leur coût estimé entre dans la rentabilité des projets.
+  const visitesSTClients = useVisitesSousTraitance();
   const [doublonsOuverts, setDoublonsOuverts] = useState(false); // 🔍 fusion validée (2026-09-22)
   // 📅 RENDEZ-VOUS À VENIR (2026-09-08, demande du propriétaire :
   // « ce client est cédulé pour le 9 septembre et je ne peux pas le
@@ -2230,7 +2233,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       if (projetsDuClient.length === 0) return null;
                       const cumul = projetsDuClient.reduce(
                         (acc, p) => {
-                          const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers);
+                          const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, visitesSTClients);
                           acc.vendant += Number(p.budgetTotal) || 0;
                           acc.coutant += r.coutTotalReel || 0;
                           return acc;

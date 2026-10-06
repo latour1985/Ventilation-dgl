@@ -71,6 +71,7 @@ import { ModalItemCatalogue, SectionCatalogue, OngletTarifs } from "./OngletTari
 import { ChampParametre, EnTeteEntreprise, PiedDocument, CarteConnexionQuickbooks, OngletParametres } from "./OngletParametres";
 import { OngletUtilisateurs, ModalProfilUtilisateur, GrilleAcces, ApercuCourrielConnexion } from "./OngletUtilisateurs";
 import { transportQuotidienPayePour } from "./partage";
+import { ContexteSousTraitance } from "./partage";
 import { ContexteClients, useClients, ContexteDevis, useDevis, TERMES_FACTURATION, nomClientNormalise, nomAffichageClient, libelleAdresse, adresseFacturationClient, AutocompleteAdresse, AdressesDocument, BoutonPDF, GalerieAvantApres, projetEnRetard, evaluerSanteProjet, couleurSanteBudget, calculerRentabiliteProjet, ApercuDevisClient, ApercuBonTravailClient } from "./partage";
 import { OngletClients, ModalEditionClient, ModalNouveauClient, DetailTravail, DevisDuClient, LigneProjetClient } from "./OngletClients";
 import { ContexteCatalogue, useCatalogue, SelecteurItem } from "./partage";
@@ -3239,10 +3240,10 @@ function AppAdmin() {
   const compteRisqueProjets = useMemo(
     () =>
       projets.filter((p) => {
-        const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers);
+        const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, assignationsST);
         return r.depassementBudget || r.profitReel < 0 || projetEnRetard(p);
       }).length,
-    [projets, travaux, transactionsQb]
+    [projets, travaux, transactionsQb, assignationsST]
   );
 
   // ============================================================
@@ -3566,6 +3567,8 @@ function AppAdmin() {
     <ContexteCatalogue.Provider value={catalogue}>
     <ContexteClients.Provider value={clients}>
     <ContexteDevis.Provider value={devisListe}>
+    {/* 🤝 Visites des sous-traitants — leur coût estimé dans la rentabilité des projets. */}
+    <ContexteSousTraitance.Provider value={assignationsST}>
     <div className="flex min-h-screen bg-slate-50">
       <MenuLateral
         vue={vue}
@@ -4423,6 +4426,28 @@ function AppAdmin() {
             (utilisateurs || []).filter((u) => u.courriel).map((u) => [u.courriel.toLowerCase(), u.nom])
           )}
           assignationsST={assignationsST}
+          // 🧾 Facture d'un sous-traitant VALIDÉE « entrée dans le système
+          // comptable » (2026-10-05, option A) : elle quitte la liste et son
+          // montant cesse de compter comme estimation dans le projet.
+          transactionsQbST={transactionsQb}
+          onMarquerSTEntreeQb={async (tacheId, courrielSt, infos = {}) => {
+            try {
+              const le = new Date().toISOString();
+              await majDonneesAssignation(tacheId, courrielSt, { stEntreeQb: true, stEntreeQbLe: le });
+              setAssignationsST((prev) =>
+                prev.map((a) =>
+                  a.tache_id === tacheId && a.employe_email === courrielSt
+                    ? { ...a, donnees: { ...(a.donnees || {}), stEntreeQb: true, stEntreeQbLe: le } }
+                    : a
+                )
+              );
+              ajouterJournal(
+                `🧾 Facture de ${infos.nom || "sous-traitant"} (${(Number(infos.montant) || 0).toFixed(2)} $ — « ${infos.titre || "tâche"} ») validée ENTRÉE dans ${infos.compta || "le système comptable"} — l'estimation quitte le coût du projet.`
+              );
+            } catch {
+              ajouterJournal("⚠️ Validation « facture entrée » NON enregistrée — réessaie.");
+            }
+          }}
           onMarquerSTFacture={async (tacheId, courrielSt) => {
             try {
               await majDonneesAssignation(tacheId, courrielSt, { stFacture: true, stFactureLe: new Date().toISOString() });
@@ -5021,6 +5046,7 @@ function AppAdmin() {
       </div>
       </div>
     </div>
+    </ContexteSousTraitance.Provider>
     </ContexteDevis.Provider>
     </ContexteClients.Provider>
     </ContexteCatalogue.Provider>

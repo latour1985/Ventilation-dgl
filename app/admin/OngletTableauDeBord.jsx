@@ -16,7 +16,7 @@ import { BlocReponsesClients } from "./BlocReponsesClients";
 import { EncadreCoutEmploye } from "./EncadreCoutEmploye";
 import { EncadreTauxFacturable } from "./EncadreTauxFacturable";
 import { FileDuMatin } from "./FileDuMatin";
-import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap, estCommissionnaire } from "./partage";
+import { calculerRentabiliteProjet, camionsEntretienDu, cleTacheDesHeures, couleurSanteBudget, estMetierBureau, evaluerSanteProjet, tachesDuJourPourEmploye, todayISO, bcEstAsap, estCommissionnaire, useVisitesSousTraitance } from "./partage";
 
 export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisateurs, tauxMetiers, tauxMetiersRes = {}, creditsQb = [], fraisPaiementQb = [], clients, compteAlertes, compteAttente, journal, setOnglet, inspections, entretiens, soumissionsSansDevis, tachesDevisAFaire = [], tachesAttente = [], facturablesAssignations = {}, onPlanifierRetour = null, onCreerDevisPour = null, ramassagesAttribuer = [], bons, devisListe, parcCamions, planning, statutsAssignations, achatsLibres = [], depots = {}, nomAdmin, ajouterJournal, reponsesClients = [], pieces = [], peutCorrigerHeures = false, onBasculerFacturable = null, onReclasserHeures = null }) {
   // 📦 LIVRAISONS ATTENDUES (2026-09-15) — BC libres non reçus + pièces
@@ -42,8 +42,9 @@ export function OngletTableauDeBord({ projets, travaux, transactionsQb, utilisat
   // 🌎 Tranche 2 de la version anglaise : cet écran est traduit AU
   // COMPLET (repli français sur tout le reste de l'application).
   const { t } = useLangue();
+  const visitesST = useVisitesSousTraitance();
   const analyse = projets.map((p) => {
-    const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0);
+    const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configTdb?.coutCamionHoraire) || 0, visitesST);
     return { p, r, sante: evaluerSanteProjet(p, r) };
   });
   // Heures RÉELLES saisies aujourd'hui par les techniciens (chantier +

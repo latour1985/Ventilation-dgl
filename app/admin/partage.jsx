@@ -845,6 +845,33 @@ export function useClients() {
 
 // LISTE DES DEVIS — la facture d'un devis doit pouvoir reprendre ses
 // lignes détaillées, sinon le client reçoit un montant sans explication.
+// 🤝 VISITES DES SOUS-TRAITANTS (2026-10-05) — les lignes « st:: » de
+// taches_assignees, partagées par page.jsx : le coût estimé d'un
+// sous-traitant entre dans la rentabilité des projets partout (hub,
+// fiche client, tableau de bord) sans câbler la donnée composant par
+// composant.
+export const ContexteSousTraitance = createContext([]);
+
+export function useVisitesSousTraitance() {
+  return useContext(ContexteSousTraitance) || [];
+}
+
+// Le système comptable par son nom, pour les libellés.
+export function nomSystemeComptable(config) {
+  const sys = config?.systemeComptable || "quickbooks";
+  return sys === "sage" ? "Sage" : sys === "aucun" ? "ta comptabilité" : "QuickBooks";
+}
+
+// Visites d'un sous-traitant PRÉSENT avec un montant noté, sur ce projet.
+export function visitesSousTraitanceDuProjet(assignationsST, projetId) {
+  return (assignationsST || []).filter(
+    (a) =>
+      (a.projet_id === projetId || a.donnees?.projetId === projetId) &&
+      a.donnees?.stStatut === "present" &&
+      Number(a.donnees?.stMontant) > 0
+  );
+}
+
 export const ContexteDevis = createContext([]);
 
 export function useDevis() {
@@ -972,7 +999,7 @@ export function evaluerSanteProjet(projet, r) {
 }
 
 
-export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs = [], tauxMetiers = {}, inspections = [], coutCamionDefaut = 0) {
+export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs = [], tauxMetiers = {}, inspections = [], coutCamionDefaut = 0, assignationsST = []) {
   // Heures du projet — les heures ADMINISTRATIVES et DIVERSES en sont
   // exclues même si elles portent un projetId. Une visite de soumission
   // faite avant d'avoir vendu le contrat ne doit pas gonfler le coût de
@@ -1112,7 +1139,14 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
   // 🧱 Matériaux déjà achetés (avant Fluxya, ou sans bon de commande) —
   // saisis à la main sur le projet, comptés dans le coût réel.
   const coutMateriauxReprise = (reprise.materiaux || []).reduce((s, m) => s + (Number(m.montant) || 0), 0);
-  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion + coutReprise + coutMateriauxReprise;
+  // 🤝 SOUS-TRAITANCE ESTIMÉE (2026-10-05, décision du propriétaire —
+  // option A) : le montant noté à la visite d'un sous-traitant COMPTE
+  // dans le coût tant que sa facture n'a pas été VALIDÉE « entrée dans le
+  // système comptable » (bouton dans Facturation). Ensuite, c'est la
+  // dépense QuickBooks rattachée au projet qui compte — jamais les deux.
+  const sousTraitanceEstimee = visitesSousTraitanceDuProjet(assignationsST, projet.id).filter((a) => !a.donnees?.stEntreeQb);
+  const coutSousTraitanceEstime = sousTraitanceEstimee.reduce((s, a) => s + (Number(a.donnees?.stMontant) || 0), 0);
+  const coutTotalReel = coutMateriaux + coutMainOeuvre + coutCamion + coutReprise + coutMateriauxReprise + coutSousTraitanceEstime;
   // ↩️ CRÉDITS CLIENTS / RISTOURNES (2026-10-26, demande du propriétaire) :
   // une note de crédit rattachée AUTOMATIQUEMENT au projet — directement,
   // ou par la facture à laquelle elle a été appliquée — BAISSE le revenu
@@ -1168,6 +1202,8 @@ export function calculerRentabiliteProjet(projet, travaux, transactionsQb, utili
     coutMainOeuvreChantier,
     coutTransport,
     coutCamion,
+    sousTraitanceEstimee,
+    coutSousTraitanceEstime,
     coutTotalReel,
     profitReel,
     pourcentageMarge,

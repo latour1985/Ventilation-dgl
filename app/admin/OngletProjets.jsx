@@ -16,9 +16,8 @@ import { envoyerCourriel, gabaritBcSimple } from "@/lib/courriels";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { poserCopieBc } from "@/lib/supabase/entreprise";
-import { AutocompleteAdresse, Button, ChampPhotosBc, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO } from "./partage";
+import { AutocompleteAdresse, Button, ChampPhotosBc, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO, useVisitesSousTraitance, nomSystemeComptable, visitesSousTraitanceDuProjet } from "./partage";
 import { lireEstimateQbo } from "@/lib/quickbooksClient";
-import { listerAssignationsSousTraitants } from "@/lib/supabase/sousTraitants";
 
 // Projets / chantiers au long cours — lient un client, des tâches de
 // terrain (via `travaux[].projetId`), des bons de commande fournisseur
@@ -76,10 +75,11 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onMajSui
         // Bloc 5 — le camion est un coût comme les autres : 15 $/h pour
         // chaque heure d'un technicien qui en avait un ce jour-là.
         { nom: "Camion", valeur: Math.round(r.coutCamion || 0) },
+        { nom: "Sous-traitance (estimée)", valeur: Math.round(r.coutSousTraitanceEstime || 0) },
       ].filter((d) => d.valeur > 0),
-    [coutMainOeuvreChantier, r.coutMateriaux, coutTransport, r.coutCamion]
+    [coutMainOeuvreChantier, r.coutMateriaux, coutTransport, r.coutCamion, r.coutSousTraitanceEstime]
   );
-  const COULEURS_REPARTITION = ["#131B2E", "#FF6A13", "#3B82F6", "#0EA5E9"];
+  const COULEURS_REPARTITION = ["#131B2E", "#FF6A13", "#3B82F6", "#0EA5E9", "#A855F7"];
 
   return (
     <div>
@@ -174,6 +174,14 @@ export function OngletApercuProjet({ projet, r, sante, onChangerStatut, onMajSui
         <div className="flex justify-between text-slate-500"><span>Coût main-d&apos;œuvre ({r.totalHeures} h, taux réels)</span><span className="tabular-nums">{r.coutMainOeuvre.toFixed(2)} $</span></div>
         {(r.coutCamion || 0) > 0 && (
           <div className="flex justify-between text-slate-500"><span>Coût camion (heures avec véhicule)</span><span className="tabular-nums">{r.coutCamion.toFixed(2)} $</span></div>
+        )}
+        {/* 🤝 Sous-traitance ESTIMÉE (2026-10-05) : montants notés aux visites,
+            en attente de leur facture dans le système comptable. */}
+        {(r.coutSousTraitanceEstime || 0) > 0 && (
+          <div className="flex justify-between text-purple-700">
+            <span>Sous-traitance estimée ({r.sousTraitanceEstimee.length} visite{r.sousTraitanceEstimee.length > 1 ? "s" : ""} — facture à entrer)</span>
+            <span className="tabular-nums">{r.coutSousTraitanceEstime.toFixed(2)} $</span>
+          </div>
         )}
         {/* 📋 Heures ADMINISTRATIVES liées au projet (mesures, visites de
             soumission…) — affichées pour mémoire, JAMAIS dans le coût :
@@ -1148,9 +1156,10 @@ export function OngletFacturationProjet({ r, devisDuClient }) {
 export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb, clients, utilisateurs, tauxMetiers, onFermer, onAjouterBC, onMajMateriel, onMajReprise, onChangerStatut, onRenommer, onMajSuivi = null, onSyncQuickBooks, onAssignerTransaction, syncQbEnCours, peutSyncQb, fournisseurs, setFournisseurs, ajouterJournal, inspections }) {
   const [ongletActif, setOngletActif] = useState("apercu");
   const configProj = useEntreprise();
+  const visitesST = useVisitesSousTraitance();
   const r = useMemo(
-    () => calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections || [], Number(configProj?.coutCamionHoraire) || 0),
-    [projet, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, configProj]
+    () => calculerRentabiliteProjet(projet, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections || [], Number(configProj?.coutCamionHoraire) || 0, visitesST),
+    [projet, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, configProj, visitesST]
   );
   const sante = useMemo(() => evaluerSanteProjet(projet, r), [projet, r]);
   const devisDuClient = useMemo(() => devisListe.filter((d) => d.clientId === projet.clientId), [devisListe, projet.clientId]);
@@ -1238,7 +1247,7 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
                   </div>
                 );
               })()}
-              <SousTraitantsDuProjet projetId={projet.id} />
+              <SousTraitantsDuProjet projetId={projet.id} r={r} />
             </>
           )}
           {ongletActif === "achats" && <OngletBonsCommandeProjet projet={projet} onAjouterBC={onAjouterBC} onMajMateriel={onMajMateriel} r={r} transactionsQb={transactionsQb} fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} ajouterJournal={ajouterJournal} clients={clients} />}
@@ -1259,21 +1268,25 @@ export function ModalDetailProjet({ projet, travaux, devisListe, transactionsQb,
 // pièces (facture, bon de commande…) à ouvrir. INFORMATIF : le coût réel
 // du projet reste celui de sa facture QuickBooks — jamais compté deux fois.
 // Lu à l'ouverture de la fiche (petit ensemble : les lignes « st:: »).
-function SousTraitantsDuProjet({ projetId }) {
-  const [visites, setVisites] = useState(null);
-  useEffect(() => {
-    let actif = true;
-    listerAssignationsSousTraitants()
-      .then((rows) => {
-        if (!actif) return;
-        setVisites((rows || []).filter((a) => a.projet_id === projetId || a.donnees?.projetId === projetId));
-      })
-      .catch(() => actif && setVisites([]));
-    return () => {
-      actif = false;
-    };
-  }, [projetId]);
-  if (!visites || visites.length === 0) return null;
+function SousTraitantsDuProjet({ projetId, r = null }) {
+  const configProjST = useEntreprise();
+  const compta = nomSystemeComptable(configProjST);
+  const toutes = useVisitesSousTraitance();
+  const visites = toutes.filter((a) => a.projet_id === projetId || a.donnees?.projetId === projetId);
+  if (visites.length === 0) return null;
+  // Une facture VALIDÉE « entrée » mais qu'aucune dépense de ce fournisseur
+  // rattachée au projet ne reflète : le coût a quitté l'estimation sans
+  // arriver dans le projet — on le dit (rattachement à faire).
+  const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+  const depensesProjet = (r?.transactionsDuProjet || []).filter((t) => t.type === "EXPENSE");
+  const factureVueDans = (nom) => {
+    const n = norm(nom);
+    return !!n && depensesProjet.some((t) => {
+      const f = norm(t.fournisseurNomQb);
+      return f && (f.includes(n) || n.includes(f));
+    });
+  };
+  const estimees = visitesSousTraitanceDuProjet(visites, projetId);
   const icone = (st) => (st === "present" ? "✅" : st === "absent" ? "❌" : "⏳");
   return (
     <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-3">
@@ -1296,6 +1309,20 @@ function SousTraitantsDuProjet({ projetId }) {
                 )}
               </div>
               {d.stNote && <p className="mt-0.5 text-[11px] text-slate-500">{d.stNote}</p>}
+              {estimees.includes(a) &&
+                (d.stEntreeQb ? (
+                  factureVueDans(a.employe_nom) ? (
+                    <p className="mt-0.5 text-[10px] font-semibold text-emerald-700">✓ Facture entrée dans {compta} — son montant réel compte dans le projet</p>
+                  ) : (
+                    <p className="mt-0.5 text-[10px] font-semibold text-amber-700">
+                      {`⚠️ Validée « entrée dans ${compta} », mais aucune dépense de ce fournisseur n'est rattachée à ce projet — rattache-la (onglet Achats), sinon son coût manque.`}
+                    </p>
+                  )
+                ) : (
+                  <p className="mt-0.5 text-[10px] font-semibold text-purple-700">
+                    Estimé — compte dans le coût du projet jusqu&apos;à ce que sa facture soit entrée dans {compta} (Facturation → « à entrer »)
+                  </p>
+                ))}
               {pieces.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {pieces.map((pc, i) => (
@@ -1316,7 +1343,7 @@ function SousTraitantsDuProjet({ projetId }) {
         })}
       </div>
       <p className="mt-1.5 text-[10px] text-slate-400">
-        Montants notés à titre indicatif — le coût réel du projet vient des factures des sous-traitants entrées dans QuickBooks.
+        {`Un montant noté compte comme ESTIMATION tant que la facture du sous-traitant n'est pas validée « entrée dans ${compta} » ; ensuite c'est sa facture comptable qui compte — jamais les deux.`}
       </p>
     </div>
   );
@@ -1576,7 +1603,8 @@ export const FILTRES_STATUT_HUB = ["Tous", "À planifier", "En cours", "Facturat
 
 
 export const CarteProjet = React.memo(function CarteProjet({ p, client, travaux, transactionsQb, utilisateurs, tauxMetiers, onOuvrir, draggable, onDragStart, compact }) {
-  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers), [p, travaux, transactionsQb, utilisateurs, tauxMetiers]);
+  const visitesST = useVisitesSousTraitance();
+  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, visitesST), [p, travaux, transactionsQb, utilisateurs, tauxMetiers, visitesST]);
   const avancementCalendrier = useMemo(() => calculerAvancementCalendrier(p), [p]);
   const enRetard = projetEnRetard(p);
   const enPerte = r.profitReel < 0;
