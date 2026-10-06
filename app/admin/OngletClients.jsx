@@ -599,9 +599,13 @@ export function DetailTravail({ travail, clients, onFermer, onReactiver, bonLie 
 }
 
 
-export const LigneProjetClient = React.memo(function LigneProjetClient({ p, travaux, transactionsQb, utilisateurs, tauxMetiers, onOuvrir }) {
+export const LigneProjetClient = React.memo(function LigneProjetClient({ p, travaux, inspections = [], transactionsQb, utilisateurs, tauxMetiers, onOuvrir }) {
   const visitesST = useVisitesSousTraitance();
-  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, visitesST), [p, travaux, transactionsQb, utilisateurs, tauxMetiers, visitesST]);
+  const configLigne = useEntreprise();
+  const coutCamion = Number(configLigne?.coutCamionHoraire) || 0;
+  // 🛡️ (audit 2026-10-05) Le CAMION compte ici aussi : sans inspections ni
+  // taux, son coût valait 0 — la carte disait « vert » et la fiche « en perte ».
+  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections || [], coutCamion, visitesST), [p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, coutCamion, visitesST]);
   const sante = evaluerSanteProjet(p, r);
   return (
     <button
@@ -2233,7 +2237,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                       if (projetsDuClient.length === 0) return null;
                       const cumul = projetsDuClient.reduce(
                         (acc, p) => {
-                          const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, visitesSTClients);
+                          const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections || [], Number(configClients?.coutCamionHoraire) || 0, visitesSTClients); // camion compris (audit 2026-10-05)
                           acc.vendant += Number(p.budgetTotal) || 0;
                           acc.coutant += r.coutTotalReel || 0;
                           return acc;
@@ -2274,6 +2278,7 @@ export function OngletClients({ clients, setClients, ajouterJournal, travaux, se
                               key={p.id}
                               p={p}
                               travaux={travaux}
+                              inspections={inspections}
                               transactionsQb={transactionsQb}
                               utilisateurs={utilisateurs}
                               tauxMetiers={tauxMetiers}

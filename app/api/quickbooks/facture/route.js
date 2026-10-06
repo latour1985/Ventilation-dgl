@@ -34,6 +34,7 @@ import {
   nomAuteurServeur } from "@/lib/quickbooksServeur";
 // 🔒 RLS phase 3 : le rôle vient de la table des permissions.
 import { roleServeur } from "@/lib/quickbooksServeur";
+import { jourQuebecDans } from "@/lib/jourQuebec";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -165,8 +166,9 @@ export async function POST(request) {
       const m = termeTexte.match(/(\d+)/);
       return m ? Math.min(120, Math.max(0, parseInt(m[1], 10))) : 30;
     })();
-    const echeance = new Date(Date.now() + joursTerme * 24 * 60 * 60 * 1000);
-    const dateLocale = `${echeance.getFullYear()}-${String(echeance.getMonth() + 1).padStart(2, "0")}-${String(echeance.getDate()).padStart(2, "0")}`;
+    // 🛡️ (audit 2026-10-05) Compté en jours du QUÉBEC : le serveur est en
+    // UTC, l'échéance glissait d'un jour le soir.
+    const dateLocale = jourQuebecDans(joursTerme);
 
     // 💳 LE CHAMP « MODALITÉS » DE QUICKBOOKS (SalesTermRef) — 2026-09-08,
     // demande du propriétaire : le terme doit APPARAÎTRE dans QuickBooks

@@ -22,6 +22,7 @@ import {
   entrepriseDuCompte,
   roleServeur,
 } from "@/lib/quickbooksServeur";
+import { jourQuebec } from "@/lib/jourQuebec";
 
 // Une facture QuickBooks → l'essentiel pour l'écran. Le statut se
 // DÉDUIT des chiffres (solde nul = payée ; solde + échéance passée =
@@ -30,7 +31,9 @@ function resumeFacture(f) {
   const total = Number(f?.TotalAmt) || 0;
   const solde = Number(f?.Balance) || 0;
   const echeance = f?.DueDate || null;
-  const aujourdhui = new Date().toISOString().slice(0, 10);
+  // 🛡️ (audit 2026-10-05) Le jour du Québec : en UTC, une facture due
+  // aujourd'hui passait « en retard » dès 20 h.
+  const aujourdhui = jourQuebec();
   return {
     id: f?.Id,
     numero: f?.DocNumber || "",

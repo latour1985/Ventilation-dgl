@@ -16,7 +16,7 @@ import { envoyerCourriel, gabaritBcSimple } from "@/lib/courriels";
 import { numeroBonCommande } from "@/lib/supabase/compteurs";
 import { sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { poserCopieBc } from "@/lib/supabase/entreprise";
-import { AutocompleteAdresse, Button, ChampPhotosBc, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, genererNumeroSecours, todayISO, useVisitesSousTraitance, nomSystemeComptable, visitesSousTraitanceDuProjet } from "./partage";
+import { AutocompleteAdresse, Button, ChampPhotosBc, SelecteurCibleAchat, SelecteurItem, useCatalogue, calculerRentabiliteProjet, correspond, couleurSanteBudget, evaluerSanteProjet, libelleAdresse, nomAffichageClient, projetEnRetard, dateLocaleDe, genererNumeroSecours, todayISO, useVisitesSousTraitance, nomSystemeComptable, visitesSousTraitanceDuProjet } from "./partage";
 import { lireEstimateQbo } from "@/lib/quickbooksClient";
 
 // Projets / chantiers au long cours — lient un client, des tâches de
@@ -29,8 +29,10 @@ export const STATUTS_PROJET = ["À planifier", "En cours", "Facturation d'acompt
 
 export function calculerAvancementCalendrier(projet) {
   if (!projet.dateDebut || !projet.dateFin) return null;
-  const debut = new Date(projet.dateDebut).getTime();
-  const fin = new Date(projet.dateFin).getTime();
+  // 🛡️ (audit 2026-10-05) Dates lues en heure LOCALE ; la fin = fin de
+  // journée (en UTC, la barre touchait 100 % à 20 h la veille).
+  const debut = dateLocaleDe(projet.dateDebut).getTime();
+  const fin = dateLocaleDe(projet.dateFin, true).getTime();
   if (!(fin > debut)) return null;
   const pct = ((Date.now() - debut) / (fin - debut)) * 100;
   return Math.max(0, Math.min(100, pct));
@@ -1602,9 +1604,13 @@ function ModalNouveauProjetRapide({ clients, setClients, ajouterJournal, onFerme
 export const FILTRES_STATUT_HUB = ["Tous", "À planifier", "En cours", "Facturation d'acompte", "Terminé", "En retard"];
 
 
-export const CarteProjet = React.memo(function CarteProjet({ p, client, travaux, transactionsQb, utilisateurs, tauxMetiers, onOuvrir, draggable, onDragStart, compact }) {
+export const CarteProjet = React.memo(function CarteProjet({ p, client, travaux, inspections = [], transactionsQb, utilisateurs, tauxMetiers, onOuvrir, draggable, onDragStart, compact }) {
   const visitesST = useVisitesSousTraitance();
-  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, visitesST), [p, travaux, transactionsQb, utilisateurs, tauxMetiers, visitesST]);
+  const configCarte = useEntreprise();
+  const coutCamion = Number(configCarte?.coutCamionHoraire) || 0;
+  // 🛡️ (audit 2026-10-05) Le CAMION compte ici aussi : sans inspections ni
+  // taux, son coût valait 0 — la carte disait « vert » et la fiche « en perte ».
+  const r = useMemo(() => calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections || [], coutCamion, visitesST), [p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, coutCamion, visitesST]);
   const avancementCalendrier = useMemo(() => calculerAvancementCalendrier(p), [p]);
   const enRetard = projetEnRetard(p);
   const enPerte = r.profitReel < 0;
@@ -2017,6 +2023,7 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
               p={p}
               client={clients.find((c) => c.id === p.clientId)}
               travaux={travaux}
+              inspections={inspections}
               transactionsQb={transactionsQb}
               utilisateurs={utilisateurs}
               tauxMetiers={tauxMetiers}
@@ -2065,6 +2072,7 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
                     p={p}
                     client={clients.find((c) => c.id === p.clientId)}
                     travaux={travaux}
+                    inspections={inspections}
                     transactionsQb={transactionsQb}
                     utilisateurs={utilisateurs}
                     tauxMetiers={tauxMetiers}
@@ -2116,6 +2124,7 @@ export function OngletProjetsHub({ projets, setProjets, clients, setClients = nu
                         p={p}
                         client={clients.find((c) => c.id === p.clientId)}
                         travaux={travaux}
+                        inspections={inspections}
                         transactionsQb={transactionsQb}
                         utilisateurs={utilisateurs}
                         tauxMetiers={tauxMetiers}

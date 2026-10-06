@@ -964,9 +964,20 @@ export function couleurSanteBudget(pourcentageDepense) {
 // "En retard" est un indicateur calculé (pas un statut choisi par
 // l'admin) : la date de fin prévue est dépassée et le projet n'est
 // pas marqué "Terminé".
+// 🛡️ (audit 2026-10-05) « AAAA-MM-JJ » lu en HEURE LOCALE : new Date()
+// le lisait en UTC (minuit à Londres = 20 h la veille au Québec) — un
+// projet passait « en retard » pendant tout son dernier jour.
+export function dateLocaleDe(valeur, finDeJournee = false) {
+  const m = String(valeur || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return new Date(valeur);
+  return finDeJournee
+    ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59, 999)
+    : new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 export function projetEnRetard(projet) {
   if (!projet.dateFin || projet.statut === "Terminé") return false;
-  return new Date(projet.dateFin).getTime() < Date.now();
+  return dateLocaleDe(projet.dateFin, true).getTime() < Date.now();
 }
 
 // ------------------------------------------------------------
@@ -987,7 +998,7 @@ export function evaluerSanteProjet(projet, r) {
 
   let echeanceProche = false;
   if (projet.dateFin && projet.statut !== "Terminé") {
-    const joursRestants = (new Date(projet.dateFin).getTime() - Date.now()) / 86400000;
+    const joursRestants = (dateLocaleDe(projet.dateFin, true).getTime() - Date.now()) / 86400000;
     echeanceProche = joursRestants >= 0 && joursRestants <= 7;
   }
 

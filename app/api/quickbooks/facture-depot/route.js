@@ -38,6 +38,7 @@ import {
   entrepriseDuCompte } from "@/lib/quickbooksServeur";
 // 🔒 RLS phase 3 : le rôle vient de la table des permissions.
 import { roleServeur } from "@/lib/quickbooksServeur";
+import { jourQuebecDans } from "@/lib/jourQuebec";
 // (Les helpers d'écriture vivent dans quickbooksServeur.js — partagés
 // avec les routes facture, estimate et clients-sync.)
 
@@ -157,8 +158,8 @@ export async function POST(request) {
         // fiche illisible — la facture partira sans adresse, comme avant
       }
     }
-    const echeance = new Date(Date.now() + joursLimite * 24 * 60 * 60 * 1000);
-    const dateLocale = `${echeance.getFullYear()}-${String(echeance.getMonth() + 1).padStart(2, "0")}-${String(echeance.getDate()).padStart(2, "0")}`;
+    // 🛡️ (audit 2026-10-05) Compté en jours du QUÉBEC (serveur en UTC).
+    const dateLocale = jourQuebecDans(joursLimite);
     // `include=invoiceLink` : QuickBooks retourne le lien « voir et
     // payer » quand QuickBooks Payments est actif sur le compte — c'est
     // ce lien que notre courriel offre au client comme bouton.

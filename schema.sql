@@ -7615,3 +7615,18 @@ union all
 select 'annuaire', position('''dgl''' in pg_get_viewdef('public.annuaire_employes'::regclass)) = 0
 union all
 select 'compteur courriels', exists (select 1 from pg_tables where schemaname = 'public' and tablename = 'envois_courriel');
+
+-- ============================================================
+-- 166 - PROJETS : L'ADRESSE DES TRAVAUX ENREGISTRÉE (2026-10-05)
+-- ------------------------------------------------------------
+-- Audit 2026-10-05 : un projet créé depuis un devis ou une fiche client
+-- recevait son adresse des travaux, mais la table n'avait pas de colonne
+-- pour la garder — elle disparaissait au rechargement (fiche du projet,
+-- livraison des bons de commande, étapes d'un extra).
+-- ============================================================
+alter table projets_app add column if not exists adresse_travaux text;
+notify pgrst, 'reload schema';
+
+-- Vérification : une ligne « adresse_travaux ».
+select column_name from information_schema.columns
+ where table_schema = 'public' and table_name = 'projets_app' and column_name = 'adresse_travaux';

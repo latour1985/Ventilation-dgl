@@ -112,9 +112,24 @@ export async function POST(request) {
       telephone: A.telephone || B.telephone || null,
       adresse_facturation: A.adresse_facturation || B.adresse_facturation || null,
       quickbooks_customer_id: A.quickbooks_customer_id || B.quickbooks_customer_id || null,
-      note: [A.note, noteFusion].filter(Boolean).join("\n"),
+      // 🛡️ (audit 2026-10-05) La NOTE de la fiche effacée n'est plus perdue
+      // (« paie en retard, exiger un dépôt »…) : elle suit, étiquetée.
+      note: [A.note, B.note ? `📋 Note de « ${B.nom} » : ${B.note}` : null, noteFusion].filter(Boolean).join("\n"),
     };
-    let { error: eA } = await admin.from("clients_app").update(maj).eq("id", A.id).eq("entreprise_id", E);
+    // 🛡️ (audit 2026-10-05) Les champs VIDES de la fiche gardée se
+    // complètent avec ceux de l'autre : terme de paiement, nom
+    // d'entreprise, lien Sage — et un client « English » le reste.
+    const complements = {
+      terme_facturation: A.terme_facturation || B.terme_facturation || null,
+      entreprise: A.entreprise || B.entreprise || null,
+      sage_contact_id: A.sage_contact_id || B.sage_contact_id || null,
+      ...(B.langue === "en" && (A.langue || "fr") === "fr" ? { langue: "en" } : {}),
+    };
+    let { error: eA } = await admin.from("clients_app").update({ ...maj, ...complements }).eq("id", A.id).eq("entreprise_id", E);
+    // Colonne absente (snippet pas passé) : la fusion se fait sans ces compléments.
+    if (eA && /terme_facturation|sage_contact_id|langue|column/i.test(eA.message || "")) {
+      ({ error: eA } = await admin.from("clients_app").update(maj).eq("id", A.id).eq("entreprise_id", E));
+    }
     if (eA && /note|contacts|equipements/.test(eA.message || "")) {
       const { note: _n, ...sansNote } = maj;
       ({ error: eA } = await admin.from("clients_app").update(sansNote).eq("id", A.id).eq("entreprise_id", E));

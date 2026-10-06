@@ -15,7 +15,7 @@ import { Trash2, X } from "lucide-react";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { lienSelonLangue, langueDuClient, argentSelonLangue } from "@/lib/i18nPublic";
 import { envoyerCourriel, gabaritFactureMaison, sujetCourrielClient } from "@/lib/courriels";
-import { REGIMES_TAXES, calculerTaxesRegime } from "@/lib/taxesCanada";
+import { REGIMES_TAXES, calculerTaxesRegime, arrondiCent } from "@/lib/taxesCanada";
 import {
   creerFactureMaison,
   listerFacturesMaison,
@@ -94,7 +94,7 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
   const lignesValides = lignes.filter((l) => String(l.description || "").trim());
   const sousTotal = lignesValides.reduce((s, l) => s + (Number(l.quantite) || 0) * (Number(l.prix) || 0), 0);
   const taxes = calculerTaxesRegime(sousTotal, regime);
-  const total = Math.round((sousTotal + taxes.reduce((s, t) => s + t.montant, 0)) * 100) / 100;
+  const total = arrondiCent(sousTotal + taxes.reduce((s, t) => s + t.montant, 0));
   // Facture : total positif obligatoire. Crédit : total NÉGATIF obligatoire.
   // 🛡️ (audit 2026-10-05) Un crédit ne dépasse JAMAIS la facture d'origine.
   const creditTropGros = estCredit && Number(origine?.total) > 0 && Math.abs(total) > Number(origine.total) + 0.005;
@@ -247,9 +247,9 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
                   description: String(l.description).trim(),
                   quantite: Number(l.quantite) || 1,
                   prix_unitaire: Number(l.prix) || 0,
-                  montant: Math.round((Number(l.quantite) || 0) * (Number(l.prix) || 0) * 100) / 100,
+                  montant: arrondiCent((Number(l.quantite) || 0) * (Number(l.prix) || 0)),
                 })),
-                sousTotal: Math.round(sousTotal * 100) / 100,
+                sousTotal: arrondiCent(sousTotal),
                 taxes,
                 regime,
                 total,

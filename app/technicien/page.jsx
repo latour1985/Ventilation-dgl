@@ -276,7 +276,10 @@ function completerTransportsJournee(tachesEntree, transportDebutFin = true, date
     const triees = liste.slice().sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
     for (let i = 1; i < triees.length; i++) {
       const suivante = triees[i];
-      if (!resultat.some((t) => t.type === "transport" && t.momentTransport === "ccq" && t.tacheSuivanteId === suivante.id)) {
+      // 🛡️ (audit 2026-10-05) Le transport cherché est celui de CETTE date :
+      // une tâche déplacée à un autre jour y reçoit le sien (l'ancien, déjà
+      // roulé et fermé, reste à sa date — identifiants distincts).
+      if (!resultat.some((t) => t.type === "transport" && t.momentTransport === "ccq" && t.tacheSuivanteId === suivante.id && t.date === date)) {
         // ENTRE les deux tâches, jamais avant la précédente — même quand
         // elles partagent la même heure (tâches empilées).
         const apresPrecedente = triees[i - 1].heure || "08:00";
@@ -372,11 +375,25 @@ function tacheUtileLocalement(t, limiteIso) {
 // photos encore en route, ou dont le bon attend dans la file d'envoi,
 // reste sur le téléphone jusqu'à ce que tout soit parti. Une tâche jamais
 // commencée disparaît comme avant.
+// 🛡️ (audit 2026-10-05) Une carte REPRISE (le bureau a changé le nombre de
+// jours : `sb-X` → `sb-X-j1`…) garde la trace de ses anciens identifiants
+// (`anciensIds`) : la file d'envoi et le coffre photos, qui notent l'ancien,
+// la retrouvent quand même.
+function tacheCorrespond(t, id) {
+  if (!t || !id) return false;
+  return t.id === id || (Array.isArray(t.anciensIds) && t.anciensIds.includes(id));
+}
+// La carte visée par `id` : l'identifiant exact d'abord, sinon la carte
+// reprise qui le porte en ancien identifiant.
+function trouverTache(liste, id) {
+  const l = liste || [];
+  return l.find((t) => t.id === id) || l.find((t) => tacheCorrespond(t, id)) || null;
+}
 function travailEntameNonEnvoye(t, idsEnFile) {
   if (!t) return false;
   const enAttente = (l) => (l || []).some((ph) => ph && !ph.urlDistante);
   if (enAttente(t.photosAvant) || enAttente(t.photosApres)) return true;
-  if (idsEnFile && idsEnFile.has(t.id)) return true;
+  if (idsEnFile && (idsEnFile.has(t.id) || (Array.isArray(t.anciensIds) && t.anciensIds.some((a) => idsEnFile.has(a))))) return true;
   if (t.etat === "complete") return false;
   return (
     t.etat === "en_cours" ||
@@ -596,6 +613,18 @@ function horodatageDepuisHeure(dateISO, heureStr) {
   const d = new Date(`${dateISO}T00:00:00`);
   d.setHours(h, m, 0, 0);
   return d.getTime();
+}
+
+// 🛡️ (audit 2026-10-05) HEURE SAISIE APRÈS UN REPÈRE — chrono de nuit. Une
+// fin « 03:00 » pour un départ à 22 h est le LENDEMAIN 3 h, pas la veille.
+// On ne passe au lendemain que si l'écart obtenu reste plausible (au plus
+// `maxHeures`) : une simple faute de frappe (« 15:00 » pour un départ à
+// 15 h 30) garde son message d'erreur au lieu de devenir 23 h 30 de travail.
+function horodatageApres(dateISO, heureStr, repereTs, maxHeures) {
+  const ts = horodatageDepuisHeure(dateISO, heureStr);
+  if (!ts || !repereTs || ts > repereTs) return ts;
+  const lendemain = horodatageDepuisHeure(isoLocal(decalerDate(dateDepuisIso(dateISO), 1)), heureStr);
+  return lendemain && (lendemain - repereTs) / 3600000 <= maxHeures ? lendemain : ts;
 }
 
 const heureHHMM = (ts) => {
@@ -1247,8 +1276,19 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
   const [erreur, setErreur] = useState("");
 
   const heuresEcoulees = Math.floor(dureeEcoulee(tache) / 3600);
-  const finTs = horodatageDepuisHeure(tache.date, heureFin);
-  const arriveeTs = horodatageDepuisHeure(tache.date, heureArrivee);
+  // Même seuil que le plafond automatique, transport compris : sinon
+  // la fenêtre de correction accepterait une durée que le garde-fou,
+  // lui, refuse — deux règles différentes pour la même question.
+  const plafondSaisie = seuilPourTache(tache, HEURES_AVANT_PLAFOND, HEURES_AVANT_PLAFOND_TRANSPORT);
+  // 🛡️ (audit 2026-10-05) L'heure saisie se pose sur le jour où le chrono
+  // est RÉELLEMENT parti, pas sur la date prévue : une carte prévue lundi,
+  // démarrée mardi, donnait une fin « lundi 15 h 30 », avant le début — la
+  // correction était impossible. Fin avant le début = le lendemain (nuit).
+  const jourReel = dateReelleDe(tache, tache.date);
+  const finTs = horodatageApres(jourReel, heureFin, debut, plafondSaisie);
+  const arriveeTs = finTs
+    ? horodatageApres(isoLocal(new Date(finTs)), heureArrivee, finTs, HEURES_AVANT_PLAFOND_TRANSPORT)
+    : horodatageDepuisHeure(jourReel, heureArrivee);
 
   const valider = () => {
     if (!finTs) {
@@ -1259,10 +1299,6 @@ function ModalCorrectionChrono({ tache, transportRetour, onAnnuler, onConfirmer 
       setErreur(t("Ton heure de fin doit être APRÈS {heure}, l'heure de départ.", { heure: heureHHMM(debut) }));
       return;
     }
-    // Même seuil que le plafond automatique, transport compris : sinon
-    // la fenêtre de correction accepterait une durée que le garde-fou,
-    // lui, refuse — deux règles différentes pour la même question.
-    const plafondSaisie = seuilPourTache(tache, HEURES_AVANT_PLAFOND, HEURES_AVANT_PLAFOND_TRANSPORT);
     if (debut && (finTs - debut) / 3600000 > plafondSaisie) {
       setErreur(t("Plus de {n} h — vérifie l'heure. Si c'est exact, appelle l'administration.", { n: plafondSaisie }));
       return;
@@ -1366,8 +1402,12 @@ function ModalFermetureEquipe({ tache, onConfirmer, onAjuster, onPlusTard }) {
   const [erreur, setErreur] = useState("");
 
   const validerAjustement = () => {
-    const debutTs = horodatageDepuisHeure(tache.date, heureDebut);
-    const finTs = horodatageDepuisHeure(tache.date, heureFin);
+    // 🛡️ (audit 2026-10-05) Le jour où le chrono est RÉELLEMENT parti, pas la
+    // date prévue ; une fin avant le début = le lendemain (chrono de nuit).
+    // Jamais pointé : le jour où le coéquipier a fermé le bon.
+    const jourReel = dateReelleDe(tache, Date.parse(tache.fermetureEquipe?.a) ? isoLocal(new Date(fermeTs)) : tache.date);
+    const debutTs = horodatageDepuisHeure(jourReel, heureDebut);
+    const finTs = horodatageApres(jourReel, heureFin, debutTs, HEURES_AVANT_PLAFOND);
     if (!debutTs || !finTs) {
       setErreur(t("Entre ton heure de début et ton heure de fin."));
       return;
@@ -3528,10 +3568,16 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
   const arriverAvecGps = async () => {
     setCaptureGpsEnCours("arrivee");
     const position = await capturerPositionGps();
+    // 🛡️ (audit 2026-10-05) KILOMÉTRAGE GPS PERDU : la distance notée par
+    // onMajTache n'était pas encore dans l'état quand terminerTache lisait
+    // la tâche — la ligne d'heures partait avec 0 km. Elle voyage
+    // maintenant AVEC la fermeture.
+    let champsArrivee = null;
     if (position && tache.latDepart != null && tache.lngDepart != null) {
       const distance = Math.round(distanceKm(tache.latDepart, tache.lngDepart, position.lat, position.lng) * 10) / 10;
       setKilometresLocal(distance);
-      onMajTache(tache.id, { latArrivee: position.lat, lngArrivee: position.lng, kilometres: distance });
+      champsArrivee = { latArrivee: position.lat, lngArrivee: position.lng, kilometres: distance };
+      onMajTache(tache.id, champsArrivee);
       setMessageGps("");
     } else if (!position) {
       setMessageGps(t("Position GPS indisponible à l'arrivée — ajuste le kilométrage manuellement ci-dessous."));
@@ -3539,7 +3585,7 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
       setMessageGps(t("Position de départ manquante — ajuste le kilométrage manuellement ci-dessous."));
     }
     setCaptureGpsEnCours(null);
-    onTerminer();
+    onTerminer(champsArrivee);
   };
 
   // "Estimation temps de retour (Google Maps)" — outil de planification
@@ -4838,6 +4884,19 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       tacheLocaleId: tache.id,
       tacheId: tache.tacheOrigineId || tache.id,
       charge: { ...chargeBon, photosAvant: undefined, photosApres: undefined },
+      // 🛡️ (audit 2026-10-05) RENVOI d'un bon déjà envoyé (modification dans
+      // le délai) : au rejeu, c'est une MISE À JOUR forcée — la garde « un
+      // bon existe déjà » la sautait en silence.
+      ...(fermee ? { renvoi: true } : {}),
+      // 🛡️ (audit 2026-10-05) ENVOI AUTOMATIQUE AU CLIENT depuis la file :
+      // les destinataires choisis (et ce qu'il faut pour le courriel)
+      // voyagent avec l'action. Une ancienne action sans ce bloc n'envoie rien.
+      courrielClient: {
+        destinataires: Array.isArray(destinataires) ? destinataires : [],
+        clientNom: tache.clientNom || "",
+        langue: tache.clientLangue || null,
+        garantie: !!tache.garantie,
+      },
       horodatage: Date.now(),
     };
     // 📸 Des photos n'ont toujours pas pu partir (réseau faible) : le bon ne
@@ -4856,7 +4915,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     // 📮 Noté « en vol » AVANT de partir : si iOS ferme l'app pendant la
     // requête, le bon repartira de la file au prochain démarrage.
     const cleEnVol = `bon-${tache.id}`;
-    noterEnvoiEnVol({ cle: cleEnVol, type: "bon", tacheLocaleId: actionBonEnFile.tacheLocaleId, tacheId: actionBonEnFile.tacheId, charge: actionBonEnFile.charge, courriel: String(session?.user?.email || "").toLowerCase() || null });
+    noterEnvoiEnVol({ cle: cleEnVol, type: "bon", tacheLocaleId: actionBonEnFile.tacheLocaleId, tacheId: actionBonEnFile.tacheId, charge: actionBonEnFile.charge, renvoi: !!actionBonEnFile.renvoi, courrielClient: actionBonEnFile.courrielClient, courriel: String(session?.user?.email || "").toLowerCase() || null });
     (chargeHeures
       ? fermerTravauxTechnicien(chargeBon, chargeHeures, session).then((r) => r.bonRowId)
       : enregistrerBonTravail(chargeBon, session)
@@ -6288,6 +6347,10 @@ function AppTechnicien() {
   // Config entreprise (contexte) — lue EN TÊTE : les hooks doivent
   // précéder tout retour conditionnel (règle des hooks React).
   const configTech = useEntreprise();
+  // 🛡️ (audit 2026-10-05) Miroir à jour de la config — lu par le rejeu de
+  // la file (envoi automatique du bon au client) sans relancer l'effet.
+  const configTechRef = useRef(configTech);
+  configTechRef.current = configTech;
   // 🚗 CE technicien a-t-il le transport debut/fin paye ? Meme regle
   // que l'admin (entreprise + derogation de SA fiche, lue de
   // l'annuaire — jamais les salaires). Copie locale volontaire du
@@ -6342,12 +6405,9 @@ function AppTechnicien() {
         const distantes = await listerTachesPourEmploye(session.user.email);
         if (annule) return;
         setTaches((prev) => {
-          const enrichies = distantes.map((d) => {
-            const locale = prev.find((t) => t.id === d.id);
-            // La version locale garde sa progression ; seuls les champs
-            // planifiés par l'admin (titre, date, heure, description) suivent.
-            return locale
-              ? {
+          // La version locale garde sa progression ; seuls les champs
+          // planifiés par l'admin (titre, date, heure, description) suivent.
+          const fusionner = (locale, d) => ({
                   ...locale,
                   titre: d.titre,
                   clientNom: d.clientNom,
@@ -6401,25 +6461,74 @@ function AppTechnicien() {
                         return l?.fait && !e.fait ? { ...e, fait: true, faitPar: l.faitPar, faitLe: l.faitLe } : e;
                       })
                     : locale.etapes,
-                }
-              : d;
+          });
+          const idsDistants = new Set(distantes.map((d) => d.id));
+          const idsEnFile = new Set(chargerFileAttente().map((a) => a.tacheLocaleId).filter(Boolean));
+          // 🛡️ (audit 2026-10-05) CARTE REPRISE — le bureau change le nombre
+          // de jours (1 → 2 : `sb-X` devient `sb-X-j1` + `sb-X-j2`) : l'ancienne
+          // carte disparaissait avec son chrono, ses notes, sa signature et ses
+          // photos. Sa progression passe maintenant à la NOUVELLE carte du même
+          // travail et de la même date (une seule carte, jamais d'heures en
+          // double). Les anciens identifiants restent notés sur la carte
+          // (`anciensIds`) : la file d'envoi et le coffre photos la retrouvent.
+          const aDeLaProgression = (t) => (t.etat && t.etat !== "a_faire") || !!t.envoye || travailEntameNonEnvoye(t, idsEnFile);
+          const reprises = new Map(); // ancien identifiant → nouvel identifiant
+          const enrichies = distantes.map((d) => {
+            const locale = prev.find((t) => t.id === d.id);
+            if (locale) return fusionner(locale, d);
+            const ancienne = d.tacheOrigineId
+              ? prev.find(
+                  (t) =>
+                    t.supabase &&
+                    t.type === "travail" &&
+                    !idsDistants.has(t.id) &&
+                    !reprises.has(t.id) &&
+                    t.tacheOrigineId === d.tacheOrigineId &&
+                    t.date === d.date &&
+                    aDeLaProgression(t)
+                )
+              : null;
+            if (!ancienne) return d;
+            reprises.set(ancienne.id, d.id);
+            // Heures DÉJÀ envoyées (carte fermée) : elles vivent sous l'ancienne
+            // clé — un renvoi doit remplacer CETTE ligne, pas en créer une 2e.
+            const heuresDejaParties = ancienne.etat === "complete" || !!ancienne.envoye;
+            return {
+              ...fusionner(ancienne, d),
+              id: d.id,
+              cleHeures: heuresDejaParties ? ancienne.cleHeures || ancienne.tacheOrigineId || d.cleHeures : d.cleHeures,
+              jourNumero: d.jourNumero,
+              nbJoursPrevus: d.nbJoursPrevus,
+              dernierJourPrevu: d.dernierJourPrevu,
+              anciensIds: [...new Set([...(ancienne.anciensIds || []), ancienne.id])].filter((x) => x !== d.id),
+            };
           });
           // 🛡️ Une tâche du bureau absente de la nouvelle liste, mais
-          // ENTAMÉE ici, reste jusqu'à ce que tout soit parti (n° 3).
-          // Seulement si la tâche a VRAIMENT quitté son horaire (aucune
-          // carte du même travail du bureau) : une tâche RÉORGANISÉE (1 → 2
-          // jours, nouvelles cartes) garde l'ancien comportement — jamais
-          // deux cartes pour la même journée, jamais d'heures en double.
-          const idsDistants = new Set(distantes.map((d) => d.id));
-          const originesDistantes = new Set(distantes.map((d) => d.tacheOrigineId).filter(Boolean));
-          const idsEnFile = new Set(chargerFileAttente().map((a) => a.tacheLocaleId).filter(Boolean));
-          const locales = prev.filter(
-            (t) =>
-              !t.supabase ||
-              (!idsDistants.has(t.id) &&
-                !(t.tacheOrigineId && originesDistantes.has(t.tacheOrigineId)) &&
-                travailEntameNonEnvoye(t, idsEnFile))
-          );
+          // ENTAMÉE ici, reste jusqu'à ce que tout soit parti (n° 3). Une
+          // carte reprise ci-dessus, elle, s'efface : sa progression vit
+          // dans la nouvelle carte. (audit 2026-10-05 : une carte entamée
+          // d'un travail RÉORGANISÉ, sans nouvelle carte à la même date — ex.
+          // 3 → 2 jours — reste aussi, au lieu de disparaître avec son travail.)
+          // Toute carte du bureau REMPLACÉE par une nouvelle du même travail et
+          // de la même date — même JAMAIS commencée (la tâche suivante d'un
+          // trajet en cours) : le trajet doit la suivre, sinon il serait
+          // fermé comme « orphelin » et repartirait en double.
+          const remplacements = new Map(reprises);
+          prev.forEach((t) => {
+            if (!t.supabase || t.type !== "travail" || idsDistants.has(t.id) || remplacements.has(t.id) || !t.tacheOrigineId) return;
+            const nouvelle = distantes.find((d) => d.tacheOrigineId === t.tacheOrigineId && d.date === t.date);
+            if (nouvelle) remplacements.set(t.id, nouvelle.id);
+          });
+          const locales = prev
+            .filter((t) => !reprises.has(t.id))
+            .filter((t) => !t.supabase || (!idsDistants.has(t.id) && travailEntameNonEnvoye(t, idsEnFile)))
+            // Les transports journaliers qui menaient à l'ancienne carte
+            // mènent maintenant à la nouvelle (sinon : transport orphelin).
+            .map((t) =>
+              t.type === "transport" && t.tacheSuivanteId && remplacements.has(t.tacheSuivanteId)
+                ? { ...t, tacheSuivanteId: remplacements.get(t.tacheSuivanteId) }
+                : t
+            );
           return completerTransportsJournee([...locales, ...enrichies], transportDebutFinRef.current, datesSansVehiculeRef.current);
         });
       } catch {
@@ -6682,7 +6791,8 @@ function AppTechnicien() {
             // 🛡️ (2026-10-26) La tâche visée doit EXISTER avant qu'on vide la
             // copie de secours — sinon la photo, envoyée mais rattachée à
             // rien, était perdue. Tâche pas (encore) chargée : on réessaiera.
-            if (cibleTache && champ && !(tachesRef.current || []).some((tc) => tc.id === cibleTache)) continue;
+            // (🛡️ audit 2026-10-05 : une carte reprise répond aussi à son ancien identifiant.)
+            if (cibleTache && champ && !(tachesRef.current || []).some((tc) => tacheCorrespond(tc, cibleTache))) continue;
             // Délai maximal : une requête figée par iOS ne bloque plus la
             // reprise jusqu'au redémarrage de l'app.
             const urlDistante = await avecDelai(televerserPhotoTravail(ph.blob, ph.origine || "camera"), 90000);
@@ -6691,17 +6801,20 @@ function AppTechnicien() {
             if (cibleTache === "inspection") noterPhotoInspection(ph.id, urlDistante);
             await decoffrerPhoto(ph.id);
             if (cibleTache && champ) {
-              setTaches((prev) =>
-                prev.map((tc) => {
-                  if (tc.id !== cibleTache) return tc;
+              setTaches((prev) => {
+                // Une seule carte reçoit la photo : l'identifiant exact d'abord,
+                // sinon la carte reprise qui le porte en ancien identifiant.
+                const visee = trouverTache(prev, cibleTache);
+                return prev.map((tc) => {
+                  if (!visee || tc.id !== visee.id) return tc;
                   const liste = tc[champ] || [];
                   const connue = liste.some((x) => x.id === ph.id);
                   const nouvelle = connue
                     ? liste.map((x) => (x.id === ph.id ? { ...x, urlDistante, enAttente: false } : x))
                     : [...liste, { id: ph.id, urlDistante, enAttente: false }];
                   return { ...tc, [champ]: nouvelle };
-                })
-              );
+                });
+              });
             }
           } catch {
             // le réseau est retombé — la photo reste au coffre pour la
@@ -6728,6 +6841,40 @@ function AppTechnicien() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+
+  // 🛡️ (audit 2026-10-05) ENVOI AUTOMATIQUE DU BON AU CLIENT — chemin de la
+  // FILE. Il n'existait que sur l'envoi direct : un bon parti par la file
+  // (réseau faible, photos encore en route) n'arrivait jamais au client.
+  // Mêmes conditions (interrupteur des Paramètres + au moins un courriel
+  // coché), même garde anti-doublon, mêmes fonctions que l'envoi direct.
+  // Ne lance jamais d'erreur : le bon est créé, la file doit avancer.
+  const envoyerBonAuClientDepuisFile = async (action, bonRowId) => {
+    const cc = action?.courrielClient;
+    const destinataires = Array.isArray(cc?.destinataires) ? cc.destinataires.filter(Boolean) : [];
+    const configEnt = configTechRef.current;
+    if (!bonRowId || configEnt?.envoiAutoBonClient === false || destinataires.length === 0) return;
+    try {
+      if (await bonDejaEnvoyeAuClient(action.tacheId)) return;
+      const jetonBon = await assurerJetonBon(bonRowId);
+      const langue = cc.langue || undefined;
+      const r = await envoyerCourriel({
+        a: destinataires,
+        sujet: sujetCourrielClient("bonTravail", langue, { entreprise: configEnt?.nomCommercial || configEnt?.nomLegal || "" }),
+        html: gabaritBonTravail({
+          config: configEnt,
+          clientNom: cc.clientNom || action.charge?.clientNom || "",
+          lien: lienSelonLangue(lienBonPublic(jetonBon), langue),
+          langue,
+          joursValidite: JOURS_VALIDITE_BON,
+          // ⭐ Jamais de demande d'avis Google sur un retour sous garantie.
+          lienAvis: cc.garantie ? null : String(configEnt?.lienAvisGoogle || "").trim() || null,
+        }),
+      });
+      if (r?.envoye) marquerBonEnvoyeClient(bonRowId).catch(() => {});
+    } catch {
+      // le bureau garde son bouton « Bon au client »
+    }
+  };
 
   // Synchronisation de la file — traite UNE action à la fois, puis se
   // redéclenche automatiquement (la dépendance `fileAttente` change
@@ -6778,6 +6925,9 @@ function AppTechnicien() {
         tacheId: a.tacheId,
         charge: a.charge,
         ...(a.courriel ? { courriel: a.courriel } : {}),
+        // 🛡️ (audit 2026-10-05) renvoi forcé + courriel au client suivent la reprise.
+        ...(a.renvoi ? { renvoi: true } : {}),
+        ...(a.courrielClient ? { courrielClient: a.courrielClient } : {}),
         horodatage: Date.now(),
       })),
     ]);
@@ -6842,7 +6992,7 @@ function AppTechnicien() {
           // 📸 (2026-10-26) Le bon attend ses photos encore en route — jusqu'à
           // 15 minutes ; la reprise automatique des photos les envoie entre-
           // temps. Au-delà, il part avec celles qui sont arrivées.
-          const tacheAttente = tachesRef.current.find((x) => x.id === action.tacheLocaleId);
+          const tacheAttente = trouverTache(tachesRef.current, action.tacheLocaleId);
           const enRoute = (l) => (l || []).some((ph) => ph && !ph.urlDistante && (ph.enAttente || ph.blob));
           if (
             tacheAttente &&
@@ -6857,13 +7007,16 @@ function AppTechnicien() {
             );
             return;
           }
-          const existe = await bonExistePourTache(action.tacheId);
+          // 🛡️ (audit 2026-10-05) Un RENVOI (bon modifié dans le délai) est
+          // une mise à jour forcée de MON bon : la garde « un bon existe
+          // déjà » (pensée pour le bon d'un coéquipier) le sautait en silence.
+          const existe = action.renvoi ? false : await bonExistePourTache(action.tacheId);
           if (!existe) {
-            const tacheLocale = tachesRef.current.find((x) => x.id === action.tacheLocaleId);
+            const tacheLocale = trouverTache(tachesRef.current, action.tacheLocaleId);
             // 👥 Même fusion d'équipe qu'à l'envoi direct — le rejeu
             // tourne EN LIGNE, l'apport des coéquipiers est lisible.
             const apport = await apportEquipePourBon(action.tacheId, session?.user?.email);
-            await enregistrerBonTravail(
+            const bonRowId = await enregistrerBonTravail(
               {
                 ...action.charge,
                 photosAvant: [...new Set([...(tacheLocale?.photosAvant || []).map((ph) => ph.urlDistante).filter(Boolean), ...apport.photosAvant])],
@@ -6871,6 +7024,8 @@ function AppTechnicien() {
               },
               session
             );
+            // 🛡️ (audit 2026-10-05) Le bon parti par la file va AUSSI au client.
+            await envoyerBonAuClientDepuisFile(action, bonRowId);
           }
         } else if (action?.type === "inspection" && action.charge) {
           // 🚚 INSPECTION DU CAMION (2026-10-05, chantier iPhone n° 1) : elle
@@ -7123,7 +7278,10 @@ function AppTechnicien() {
       // Heures RÉELLES de début et de fin — pour l'affichage
       // « 7 h 42 → 11 h 15 » et les ajustements côté bureau.
       debutReel: t.debutReel || null,
-      finReelle: Date.now(),
+      // 🛡️ (audit 2026-10-05) BON RENVOYÉ : une tâche DÉJÀ terminée garde
+      // sa vraie heure de fin — avant, modifier le bon dans les 10 minutes
+      // réécrivait la fin à l'heure de la modification.
+      finReelle: t.etat === "complete" && Number(t.finReelle) > 0 ? Number(t.finReelle) : Date.now(),
       // Liens des photos téléversées (avant/après) — affichées au
       // bureau, sur le bon de travail client et dans le PDF.
       photosAvant: (t.photosAvant || []).map((p) => p.urlDistante).filter(Boolean),
@@ -7151,11 +7309,17 @@ function AppTechnicien() {
         return false;
       });
 
-  const terminerTache = (id) => {
+  const terminerTache = (id, champsFinaux = null) => {
     // Capture AVANT la mise à jour d'état : la ligne « travail effectué »
     // (heures réelles + taux coûtant FIGÉ à la saisie) part vers le
     // bureau via Supabase — alimente les coûts réels des projets.
-    const t = taches.find((x) => x.id === id);
+    // 🛡️ (audit 2026-10-05) `champsFinaux` : ce qui vient d'être noté à la
+    // fermeture même (kilométrage GPS de l'arrivée) — pas encore dans
+    // l'état React à cet instant. On lit aussi le miroir À JOUR des
+    // tâches : l'appel arrive après l'attente du GPS.
+    const source = tachesRef.current || taches;
+    const tTrouvee = source.find((x) => x.id === id);
+    const t = tTrouvee && champsFinaux ? { ...tTrouvee, ...champsFinaux } : tTrouvee;
     // 🏢 FERMÉE PAR LE BUREAU (2026-09-15, vécu ETI-NET) : les heures
     // sont DÉJÀ écrites par l'administration — le téléphone n'envoie
     // rien qui pourrait les écraser. La carte se ferme, point.
@@ -7196,7 +7360,9 @@ function AppTechnicien() {
         if (t.id !== id) return t;
         const ecoule = t.tempsDebutSegment ? (Date.now() - t.tempsDebutSegment) / 1000 : 0;
         // finReelle locale : repère du transport rattrapé (demarrerTache).
-        return { ...t, etat: "complete", tempsAccumuleSec: t.tempsAccumuleSec + ecoule, tempsDebutSegment: null, finReelle: Date.now() };
+        // 🛡️ (audit 2026-10-05) Déjà terminée (bon renvoyé) : la fin réelle reste.
+        const finReelle = t.etat === "complete" && Number(t.finReelle) > 0 ? Number(t.finReelle) : Date.now();
+        return { ...t, ...(champsFinaux || {}), etat: "complete", tempsAccumuleSec: t.tempsAccumuleSec + ecoule, tempsDebutSegment: null, finReelle };
       })
     );
     // TRANSPORT CCQ automatique : une tâche de TRAVAIL vient de se
@@ -7205,13 +7371,13 @@ function AppTechnicien() {
     // s'arrête jamais entre deux clients — aucune minute ne manque à
     // la paie.
     if (t && t.type === "travail") {
-      const travauxJour = taches
+      const travauxJour = source
         .filter((x) => x.type === "travail" && x.date === t.date)
         .sort((a, b) => (a.heure || "").localeCompare(b.heure || ""));
       const idx = travauxJour.findIndex((x) => x.id === t.id);
       const suivante = idx >= 0 ? travauxJour[idx + 1] : null;
       if (suivante && suivante.etat !== "complete") {
-        const ccq = taches.find(
+        const ccq = source.find(
           (x) => x.momentTransport === "ccq" && x.tacheSuivanteId === suivante.id && x.etat === "a_faire"
         );
         if (ccq) majTache(ccq.id, { etat: "en_cours", tempsDebutSegment: Date.now(), debutReel: ccq.debutReel || Date.now() });
@@ -7357,7 +7523,9 @@ function AppTechnicien() {
     if (arriveeTs && retour) {
       const hRetour = Math.max(0, (arriveeTs - finTs) / 3600000);
       envoyer(
-        retour,
+        // 🛡️ (audit 2026-10-05) La ligne du retour prend la date de son vrai
+        // départ (fin du chantier), pas « aujourd'hui » si on corrige le lendemain.
+        { ...retour, debutReel: retour.debutReel || finTs },
         hRetour,
         finTs,
         arriveeTs,
@@ -7582,6 +7750,44 @@ function AppTechnicien() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taches]);
 
+  // 🛡️ (audit 2026-10-05) TRANSPORT JOURNALIER SANS FIN — il démarre seul
+  // vers la tâche SUIVANTE. Si le bureau retire cette tâche ou la déplace à
+  // une autre date, le transport « commencé » restait ouvert et roulait
+  // jusqu'au plafond : journée bloquée. Il se ferme maintenant à l'heure du
+  // retrait, ses heures partent par le même chemin que les autres (file
+  // d'envoi si pas de réseau). Si la tâche revient à une AUTRE date, elle y
+  // reçoit son propre transport (voir completerTransportsJournee, étape 3).
+  const transportsFermesRef = useRef(new Set());
+  useEffect(() => {
+    const orphelins = taches.filter(
+      (x) =>
+        x.type === "transport" &&
+        x.momentTransport === "ccq" &&
+        (x.etat === "en_cours" || x.etat === "en_pause") &&
+        !transportsFermesRef.current.has(x.id) &&
+        !taches.some((c) => c.type === "travail" && c.id === x.tacheSuivanteId && c.date === x.date)
+    );
+    if (orphelins.length === 0) return;
+    const maintenant = Date.now();
+    const fermes = new Map(); // id → secondes accumulées à la fermeture
+    orphelins.forEach((x) => {
+      transportsFermesRef.current.add(x.id);
+      const ecoule = x.etat === "en_cours" && x.tempsDebutSegment ? Math.max(0, (maintenant - x.tempsDebutSegment) / 1000) : 0;
+      const tempsAccumuleSec = (x.tempsAccumuleSec || 0) + ecoule;
+      fermes.set(x.id, tempsAccumuleSec);
+      envoyerHeuresOuFile({ ...chargeHeuresDepuisTache({ ...x, tempsAccumuleSec, tempsDebutSegment: null }), finReelle: maintenant });
+    });
+    setTaches((prev) =>
+      prev.map((x) =>
+        fermes.has(x.id)
+          ? { ...x, etat: "complete", tempsAccumuleSec: fermes.get(x.id), tempsDebutSegment: null, finReelle: maintenant, fermeParRetrait: true }
+          : x
+      )
+    );
+    setErreurSync(tx("🚚 Transport journalier fermé : la tâche suivante a été retirée ou déplacée par le bureau."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taches]);
+
   // Vérification au démarrage de l'app, puis toutes les 5 minutes.
   // Pas de processus en arrière-plan : c'est l'ouverture de l'app qui
   // déclenche le rattrapage (lundi matin pour un oubli du vendredi).
@@ -7758,7 +7964,8 @@ function AppTechnicien() {
     setSuggestionChantier(null);
   };
 
-  const tacheActive = taches.find((t) => t.id === tacheActiveId);
+  // (🛡️ audit 2026-10-05 : une carte reprise par le bureau reste ouverte à l'écran.)
+  const tacheActive = trouverTache(taches, tacheActiveId) || undefined;
 
   // La tâche (autre que celle-ci) qui est actuellement en cours ou en
   // pause — s'il y en a une, on ne peut pas démarrer/reprendre celle-ci.
@@ -7870,7 +8077,7 @@ function AppTechnicien() {
             }
             onPause={() => mettreEnPause(tacheActive.id)}
             onReprendre={() => demarrerTache(tacheActive.id)}
-            onTerminer={() => terminerTache(tacheActive.id)}
+            onTerminer={(champsArrivee) => terminerTache(tacheActive.id, champsArrivee)}
             onMajTache={majTache}
             onRetour={retourAccueil}
             tacheBloquante={tacheBloquante}

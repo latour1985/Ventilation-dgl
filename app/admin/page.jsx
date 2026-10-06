@@ -32,7 +32,7 @@ import { bonsARamasser, calculerTournees, tacheDeTournee, ramassagesAAttribuer, 
 import { bcEstRamassage, reglerChargesEmployeur } from "./partage";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
-import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter } from "@/lib/supabase/devis";
+import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter, poserEstimateDevis } from "@/lib/supabase/devis";
 import { LangueProvider, useLangue } from "@/lib/i18n";
 import BoutonLangue from "@/components/BoutonLangue";
 import { listerClients, sauvegarderClient, sAbonnerClients } from "@/lib/supabase/clients";
@@ -2322,7 +2322,11 @@ function AppAdmin() {
   // servir AUSSI au rattrapage ci-dessous) : un estimate par dossier,
   // mis à jour aux révisions. Un échec ne bloque jamais rien.
   const mirroirEstimateDevis = (d) => {
-    const ficheClient = clients.find((c) => (c.nom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase());
+    // 🛡️ (audit 2026-10-05) La fiche du DEVIS d'abord (son clientId) — le
+    // nom seul se trompait de client (homonymes, client renommé).
+    const ficheClient =
+      (d.clientId && clients.find((c) => c.id === d.clientId)) ||
+      clients.find((c) => (c.nom || "").trim().toLowerCase() === (d.clientNom || "").trim().toLowerCase());
     creerEstimateQbo({
       clientId: ficheClient?.id || null,
       clientNom: d.clientNom,
@@ -2354,9 +2358,11 @@ function AppAdmin() {
         }
         if (r?.creee) {
           if (r.estimateId && r.estimateId !== d.qboEstimateId) {
-            const avecEstimate = { ...d, qboEstimateId: r.estimateId };
             setDevisListe((prev) => prev.map((x) => (x.id === d.id ? { ...x, qboEstimateId: r.estimateId } : x)));
-            await sauvegarderDevis(avecEstimate).catch(() => {});
+            // 🛡️ (audit 2026-10-05) Écriture CIBLÉE du seul Nº d'estimate :
+            // réécrire le devis ENTIER (copie du départ) pouvait effacer le
+            // jeton d'une révision envoyée entre-temps — lien client mort.
+            await poserEstimateDevis(d.id, r.estimateId).catch(() => {});
           }
           if (!r.misAJour) ajouterJournal(`📋 Devis ${d.numeroBase || d.numero} créé dans QuickBooks (estimate Nº ${r.docNumber})`);
         } else if (r?.erreur) {
@@ -2395,9 +2401,23 @@ function AppAdmin() {
       prospectAdresse: infos.prospect?.adresse || "",
     };
     setDepots((prev) => ({ ...prev, [tacheId]: repli }));
-    creerDepot(tacheId, { ...infos, joursLimite: joursDelai }).catch(() => {
-      // hors-ligne — le blocage local reste effectif pour la session
-    });
+    // 🛡️ (audit 2026-10-05) L'enregistrement du dépôt est VÉRIFIÉ (un
+    // 2e essai, puis avertissement) — et aucune facture ni courriel ne
+    // part au client pour un dépôt que la base n'a pas (il disparaîtrait
+    // au rechargement, la tâche ne serait plus bloquée).
+    const depotEnregistre = creerDepot(tacheId, { ...infos, joursLimite: joursDelai }).then(
+      () => true,
+      async () => {
+        try {
+          await new Promise((ok) => setTimeout(ok, 3000));
+          await creerDepot(tacheId, { ...infos, joursLimite: joursDelai });
+          return true;
+        } catch (e) {
+          ajouterJournal(`⚠️ Dépôt affiché mais NON enregistré (${e?.message || "connexion impossible"}) — AUCUNE facture ni courriel n'est parti au client. Recrée le dépôt quand la connexion revient.`);
+          return false;
+        }
+      }
+    );
     const t = taxesDepot(infos.montantHT, configEntreprise);
     ajouterJournal(
       `💰 Dépôt requis : ${t.ht.toFixed(2)} $ + taxes = ${t.total.toFixed(2)} $ — payable sous ${libelleDelai}`
@@ -2413,6 +2433,7 @@ function AppAdmin() {
     // déjà en place).
     // ------------------------------------------------------------
     if (!infos.clientNom) return;
+    if (!(await depotEnregistre)) return;
     let facture = null;
     // Les destinataires et NOTRE message de réservation voyagent sur la
     // facture QuickBooks (CustomerMemo) — le client reçoit la facture
@@ -2474,7 +2495,11 @@ function AppAdmin() {
     if (r?.creee) {
       facture = r;
       setDepots((prev) => ({ ...prev, [tacheId]: { ...prev[tacheId], qboInvoiceId: r.factureId, qboDocNumber: r.docNumber } }));
-      majDepotFactureQbo(tacheId, { factureId: r.factureId, docNumber: r.docNumber }).catch(() => {});
+      // 🛡️ (audit 2026-10-05) Sans ce lien en base, le paiement ne serait
+      // JAMAIS détecté : on le dit au lieu de l'avaler.
+      majDepotFactureQbo(tacheId, { factureId: r.factureId, docNumber: r.docNumber }).catch((e) =>
+        ajouterJournal(`⚠️ Facture de dépôt Nº ${r.docNumber || r.factureId} créée, mais son lien n'est PAS enregistré (${e?.message || "connexion impossible"}) — son paiement ne sera pas détecté tout seul : marque le dépôt payé à la main quand le client aura payé.`)
+      );
       ajouterJournal(`🧾 Facture de dépôt QuickBooks Nº ${r.docNumber || r.factureId} créée${r.envoiQb ? (r.envoiQb.envoyee ? ` — ✉️ ENVOYÉE par QuickBooks à ${adressesDepot.join(", ")} (confirmé au registre)` : " — ⚠️ envoi par QuickBooks NON confirmé") : ""} — annulation par VOID seulement`);
       if (r.carteOfferte || r.virementOffert) {
         ajouterJournal(
@@ -2543,8 +2568,20 @@ function AppAdmin() {
     }
   };
   const depotPayeManuel = (tacheId, mode) => {
+    const depotAvant = depots[tacheId];
     setDepots((prev) => ({ ...prev, [tacheId]: { ...(prev[tacheId] || { tacheId }), statut: "paye_manuellement", modePaiement: mode } }));
-    marquerDepotPayeManuellement(tacheId, mode, session?.user?.email).catch(() => {});
+    // 🛡️ (audit 2026-10-05) Échec d'enregistrement = l'écran revient en
+    // arrière et le dit : avant, « payé » s'affichait, la base restait « en
+    // attente », et l'échéance annulait le dépôt (client facturé 2 fois).
+    marquerDepotPayeManuellement(tacheId, mode, session?.user?.email).catch((e) => {
+      setDepots((prev) => {
+        const suite = { ...prev };
+        if (depotAvant) suite[tacheId] = depotAvant;
+        else delete suite[tacheId];
+        return suite;
+      });
+      ajouterJournal(`⚠️ Dépôt « payé (${mode}) » NON enregistré (${e?.message || "connexion impossible"}) — l'écran est revenu en arrière : refais le geste quand la connexion revient.`);
+    });
     ajouterJournal(`💰 Dépôt reçu manuellement (${mode}) — tâche débloquée pour la planification`);
   };
 
@@ -3282,10 +3319,11 @@ function AppAdmin() {
   const compteRisqueProjets = useMemo(
     () =>
       projets.filter((p) => {
-        const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, undefined, undefined, assignationsST);
+        // 🛡️ (audit 2026-10-05) Camion compris, comme la fiche du projet.
+        const r = calculerRentabiliteProjet(p, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, Number(configEntreprise?.coutCamionHoraire) || 0, assignationsST);
         return r.depassementBudget || r.profitReel < 0 || projetEnRetard(p);
       }).length,
-    [projets, travaux, transactionsQb, assignationsST]
+    [projets, travaux, transactionsQb, utilisateurs, tauxMetiers, inspections, configEntreprise, assignationsST]
   );
 
   // ============================================================
