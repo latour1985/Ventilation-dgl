@@ -10,7 +10,7 @@ import TermesConditions from "@/components/TermesConditions";
 import ConnexionTechnicien from "@/components/ConnexionTechnicien";
 import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
 import { permissionsEffectives } from "@/lib/permissions";
-import { enregistrerInspection } from "@/lib/supabase/inspections";
+import { enregistrerInspection, inspectionDejaEnregistree } from "@/lib/supabase/inspections";
 import { listerAnnuaireEmployes } from "@/lib/supabase/repertoireEmployes";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { listerTravauxPourEmploye } from "@/lib/supabase/travauxEffectues";
@@ -365,6 +365,61 @@ function tacheUtileLocalement(t, limiteIso) {
   const enAttente = (l) => (l || []).some((ph) => ph && !ph.urlDistante);
   return enAttente(t.photosAvant) || enAttente(t.photosApres);
 }
+// 🛡️ TÂCHE ENTAMÉE (2026-10-05, chantier iPhone n° 3) : quand le bureau
+// retire ou déplace une tâche, le rafraîchissement la faisait disparaître
+// du téléphone — avec ses photos et son texte pas encore envoyés. Une
+// tâche ENTAMÉE ici (chrono parti, photos ou notes prises), une tâche aux
+// photos encore en route, ou dont le bon attend dans la file d'envoi,
+// reste sur le téléphone jusqu'à ce que tout soit parti. Une tâche jamais
+// commencée disparaît comme avant.
+function travailEntameNonEnvoye(t, idsEnFile) {
+  if (!t) return false;
+  const enAttente = (l) => (l || []).some((ph) => ph && !ph.urlDistante);
+  if (enAttente(t.photosAvant) || enAttente(t.photosApres)) return true;
+  if (idsEnFile && idsEnFile.has(t.id)) return true;
+  if (t.etat === "complete") return false;
+  return (
+    t.etat === "en_cours" ||
+    t.etat === "en_pause" ||
+    !!t.debutReel ||
+    (t.photosAvant || []).length > 0 ||
+    (t.photosApres || []).length > 0 ||
+    !!String(t.notesTerrain || "").trim()
+  );
+}
+
+// 📷 PHOTOS DE L'INSPECTION (2026-10-05, chantier iPhone n° 2) — chaque
+// photo d'anomalie a sa copie de secours (coffre « inspection|… ») ; son
+// adresse, une fois envoyée, est notée ici : l'inspection en file d'envoi
+// la retrouve au moment de partir, même si l'écran a été fermé.
+const CLE_PHOTOS_INSPECTION = "fluxya_photos_inspection_v1";
+function lirePhotosInspection() {
+  try {
+    return JSON.parse(window.localStorage.getItem(CLE_PHOTOS_INSPECTION) || "{}") || {};
+  } catch {
+    return {};
+  }
+}
+function noterPhotoInspection(id, url) {
+  if (!id || !url) return;
+  try {
+    const m = lirePhotosInspection();
+    m[id] = url;
+    window.localStorage.setItem(CLE_PHOTOS_INSPECTION, JSON.stringify(m));
+  } catch {
+    // stockage plein — l'adresse vit encore dans l'inspection si elle est partie à temps
+  }
+}
+function oublierPhotosInspection(ids) {
+  try {
+    const m = lirePhotosInspection();
+    (ids || []).forEach((id) => delete m[id]);
+    window.localStorage.setItem(CLE_PHOTOS_INSPECTION, JSON.stringify(m));
+  } catch {
+    // rien à faire
+  }
+}
+
 // Retourne false si la sauvegarde a ÉCHOUÉ (mémoire pleine) — l'appelant
 // avertit le technicien au lieu de se taire.
 function sauvegarderTaches(taches, email) {
@@ -716,13 +771,30 @@ function destinationDuTrajet(tache, taches, config) {
   return { nom: `${client.nom} — ${adresse.nom}`, ligne1: adresse.ligne1, lat: adresse.lat, lng: adresse.lng };
 }
 
+// 📱 (2026-10-05, chantier iPhone n° 5) MÉMOIRE : la photo n'est plus lue
+// en texte (une photo de 8 Mo en occupait ~11 de plus), on la pointe
+// directement ; la zone de dessin est vidée dès le JPEG produit — Safari
+// ne libère pas seul ces zones et finissait par planter après plusieurs
+// grosses photos.
 function compresserImage(file) {
   return new Promise((resolve, reject) => {
-    const lecteur = new FileReader();
-    lecteur.onerror = () => reject(new Error("Impossible de lire le fichier — il est peut-être corrompu ou trop volumineux."));
-    lecteur.onload = (e) => {
+    let urlSource = null;
+    try {
+      urlSource = URL.createObjectURL(file);
+    } catch {
+      reject(new Error("Impossible de lire le fichier — il est peut-être corrompu ou trop volumineux."));
+      return;
+    }
+    const liberer = () => {
+      if (urlSource) URL.revokeObjectURL(urlSource);
+      urlSource = null;
+    };
+    {
       const img = new window.Image();
-      img.onerror = () => reject(new Error("Le fichier sélectionné n'est pas une image valide."));
+      img.onerror = () => {
+        liberer();
+        reject(new Error("Le fichier sélectionné n'est pas une image valide."));
+      };
       img.onload = () => {
         try {
           // 1600 px / qualité 80 % : on LIT les plaques signalétiques.
@@ -736,8 +808,12 @@ function compresserImage(file) {
           canvas.height = img.height * echelle;
           const ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          liberer();
           canvas.toBlob(
             (blob) => {
+              // Zone de dessin vidée : la mémoire revient tout de suite.
+              canvas.width = 0;
+              canvas.height = 0;
               if (!blob) {
                 reject(new Error("La compression a échoué — réessaie avec une autre photo."));
                 return;
@@ -755,12 +831,12 @@ function compresserImage(file) {
             0.8
           );
         } catch (err) {
+          liberer();
           reject(err);
         }
       };
-      img.src = e.target.result;
-    };
-    lecteur.readAsDataURL(file);
+      img.src = urlSource;
+    }
   });
 }
 
@@ -949,6 +1025,9 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
       // Liens des photos déjà téléversées vers le stockage Supabase —
       // c'est ce que le bureau affichera dans le dossier du véhicule.
       photos: photosAnomalie.map((p) => p.urlDistante).filter(Boolean),
+      // Toutes les photos, envoyées ou non : la file d'envoi recompose les
+      // adresses au moment de partir (n° 2).
+      photosIds: photosAnomalie.map((p) => ({ id: p.id || null, urlDistante: p.urlDistante || null })),
       anomalie,
       // Coût horaire du camion FIGÉ ce matin (bloc 5) — si le tarif
       // change dans Paramètres, les journées passées gardent le leur.
@@ -1098,6 +1177,13 @@ function FormulaireInspection({ onSoumettre, onRetour, dateLabel, monCourriel })
                 titre={t("Photos de l'anomalie")}
                 photos={photosAnomalie}
                 setPhotos={setPhotosAnomalie}
+                // 📷 Copie de secours + adresse notée (2026-10-05) : une photo
+                // encore en route au moment de soumettre n'est plus perdue.
+                coffreCle="inspection|anomalie"
+                onPhotoTeleversee={(id, url) => {
+                  noterPhotoInspection(id, url);
+                  return true;
+                }}
               />
               {anomalie && photosAnomalie.length === 0 && (
                 <p className="text-[11px] leading-snug text-amber-700">
@@ -2765,6 +2851,8 @@ function ModalCaptureCamera({ onCapture, onFermer, onCameraNative }) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(
       (blob) => {
+        canvas.width = 0; // 📱 mémoire libérée tout de suite (iPhone)
+        canvas.height = 0;
         if (!blob) return;
         onCapture({ url: URL.createObjectURL(blob), blob, tailleOriginale: blob.size, tailleCompressee: blob.size });
       },
@@ -3184,7 +3272,7 @@ function ZonePhoto({ titre, photos, setPhotos, onPhotosChange, obligatoire, lect
 // d'avance et l'envoi immédiat (jamais de vidéo « en attente » qui
 // dormirait dans le téléphone).
 // ============================================================
-function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
+function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule, onEnvoiChange = null }) {
   const { t } = useLangue();
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState("");
@@ -3195,6 +3283,7 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
     e.target.value = "";
     if (fichiers.length === 0) return;
     setEnCours(true);
+    onEnvoiChange?.(true); // 🎥 le bon attend la fin de l'envoi (n° 4)
     setErreur("");
     for (const fichier of fichiers) {
       try {
@@ -3211,6 +3300,7 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
       }
     }
     setEnCours(false);
+    onEnvoiChange?.(false);
   };
 
   const retirer = (i) => {
@@ -3256,6 +3346,11 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule }) {
             className="hidden"
           />
         </button>
+      )}
+      {enCours && (
+        <p className="mt-1 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-bold text-amber-800">
+          {t("⏳ Envoi de la vidéo — garde l'app ouverte jusqu'à la fin.")}
+        </p>
       )}
       <p className="mt-1 text-[10px] leading-snug text-slate-400">{t("Courtes séquences (environ 30 secondes,")}{" "}{Math.round(VIDEO_MAX_OCTETS / 1024 / 1024)}{" "}{t("Mo maximum) — une vidéo ne se compresse pas comme une photo. Envoyée tout de suite : reste sur le réseau le temps de l'envoi.")}</p>
       {erreur && (
@@ -3894,7 +3989,17 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   // 🌎 Version anglaise (tranche « bon de travail », 2026-09-04) —
   // interface seulement : le bon envoyé au client et les données
   // enregistrées restent en français.
-  const { t } = useLangue();
+  const { t, langue: langueApp } = useLangue();
+  // 🎥 Une vidéo en route bloque l'envoi du bon (2026-10-05, n° 4).
+  const [videoEnvoi, setVideoEnvoi] = useState(false);
+  // 🎤 iPhone, app installée : la dictée du navigateur y est peu fiable
+  // (limite d'Apple) — on oriente vers le micro du clavier (n° 7).
+  const [dicteeIosApp] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      /iP(hone|ad|od)/.test(window.navigator.userAgent || "") &&
+      (window.navigator.standalone === true || !!window.matchMedia?.("(display-mode: standalone)")?.matches)
+  );
   // 🚗 « EN ROUTE » — envoi du courriel au client (voir le bloc dans le
   // rendu). L'horodatage est gardé SUR la tâche (onMajTache) : la carte
   // ne le propose plus, et le bureau lit la trace au journal.
@@ -4213,6 +4318,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
       : true);
   const peutEnvoyer =
     !lectureSeule &&
+    !videoEnvoi &&
     peutEnvoyerBase &&
     (!necessiteDeuxiemeSignature || estVisiteSoumission || clientAbsent || collegueAFaitSigner || (nomMoule2.trim().length > 2 && aSignature2));
 
@@ -4391,7 +4497,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     }
 
     const reco = new Reconnaissance();
-    reco.lang = "fr-CA";
+    reco.lang = langueApp === "en" ? "en-CA" : "fr-CA"; // 🌎 la langue de l'app
     reco.continuous = false;
     reco.interimResults = false;
     reco.onresult = (e) => {
@@ -5639,6 +5745,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           setVideos={setVideos}
           onVideosChange={(nouvelles) => onMajTache(tache.id, { videos: nouvelles })}
           lectureSeule={lectureSeule}
+          onEnvoiChange={setVideoEnvoi}
         />
 
         {/* NOTES */}
@@ -5648,7 +5755,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
               <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("Notes de terrain")}<span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-emerald-700">{t("Visible au client")}</span>
                 <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-600">{t("Obligatoire")}</span>
               </label>
-              {!lectureSeule && (
+              {!lectureSeule && dicteeIosApp && (
+                <span className="text-[10px] font-semibold text-slate-400">{t("🎤 Pour dicter : micro du clavier")}</span>
+              )}
+              {!lectureSeule && !dicteeIosApp && (
                 <button
                   onClick={() => basculerDicteeVocale("terrain")}
                   disabled={ecoute === "terrain-demande"}
@@ -5706,7 +5816,10 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
             <div className="mb-1.5 flex items-center justify-between">
               <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-500">{t("Notes internes")}<span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-slate-600">{t("Non visible au client")}</span>
               </label>
-              {!lectureSeule && (
+              {!lectureSeule && dicteeIosApp && (
+                <span className="text-[10px] font-semibold text-slate-400">{t("🎤 Pour dicter : micro du clavier")}</span>
+              )}
+              {!lectureSeule && !dicteeIosApp && (
                 <button
                   onClick={() => basculerDicteeVocale("interne")}
                   disabled={ecoute === "interne-demande"}
@@ -5936,6 +6049,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
           <>
             {!peutEnvoyer && (
               <ul className="mb-2 space-y-0.5 text-center text-[11px] font-semibold text-slate-400">
+                {videoEnvoi && <li>{t("Une vidéo est en cours d'envoi — attends la fin pour envoyer le bon.")}</li>}
                 {descriptionManquante && <li>{t("La description (notes de terrain) est requise.")}</li>}
                 {photoApresManquante && <li>{t("Au moins une photo « après travaux » est requise.")}</li>}
                 {resteAFaireManquant && (
@@ -6284,7 +6398,11 @@ function AppTechnicien() {
                 }
               : d;
           });
-          const locales = prev.filter((t) => !t.supabase);
+          // 🛡️ Une tâche du bureau absente de la nouvelle liste, mais
+          // ENTAMÉE ici, reste jusqu'à ce que tout soit parti (n° 3).
+          const idsDistants = new Set(distantes.map((d) => d.id));
+          const idsEnFile = new Set(chargerFileAttente().map((a) => a.tacheLocaleId).filter(Boolean));
+          const locales = prev.filter((t) => !t.supabase || (!idsDistants.has(t.id) && travailEntameNonEnvoye(t, idsEnFile)));
           return completerTransportsJournee([...locales, ...enrichies], transportDebutFinRef.current, datesSansVehiculeRef.current);
         });
       } catch {
@@ -6292,7 +6410,9 @@ function AppTechnicien() {
       }
     };
     chargerAssignees();
-    const desabonner = sAbonnerTachesAssignees(chargerAssignees);
+    // 📶 Seulement SES tâches (n° 8) — plus de rafraîchissement à chaque
+    // geste d'un collègue.
+    const desabonner = sAbonnerTachesAssignees(chargerAssignees, session.user.email);
     return () => {
       annule = true;
       desabonner();
@@ -6549,6 +6669,9 @@ function AppTechnicien() {
             // Délai maximal : une requête figée par iOS ne bloque plus la
             // reprise jusqu'au redémarrage de l'app.
             const urlDistante = await avecDelai(televerserPhotoTravail(ph.blob, ph.origine || "camera"), 90000);
+            // 📷 Photo d'inspection : son adresse est notée AVANT de vider la
+            // copie de secours — l'inspection en file la retrouvera (n° 2).
+            if (cibleTache === "inspection") noterPhotoInspection(ph.id, urlDistante);
             await decoffrerPhoto(ph.id);
             if (cibleTache && champ) {
               setTaches((prev) =>
@@ -6696,6 +6819,31 @@ function AppTechnicien() {
               session
             );
           }
+        } else if (action?.type === "inspection" && action.charge) {
+          // 🚚 INSPECTION DU CAMION (2026-10-05, chantier iPhone n° 1) : elle
+          // passe par la file comme les heures et les bons — envoyée au retour
+          // du réseau, jamais deux fois. Ses photos encore en route sont
+          // attendues jusqu'à 15 minutes (la reprise automatique les envoie).
+          const recues = lirePhotosInspection();
+          const ids = Array.isArray(action.charge.photosIds) ? action.charge.photosIds : [];
+          const manquantes = ids.filter((ph) => ph?.id && !ph.urlDistante && !recues[ph.id]);
+          if (manquantes.length > 0 && Date.now() - (Number(action.horodatage) || 0) < 15 * 60 * 1000) {
+            setTimeout(
+              () => setFileAttente((f) => (f.length > 1 && f[0]?.id === action.id ? [...f.slice(1), f[0]] : [...f])),
+              fileAttente.length > 1 ? 2000 : 20000
+            );
+            return;
+          }
+          const photos = [
+            ...new Set([
+              ...(action.charge.photos || []),
+              ...ids.map((ph) => ph?.urlDistante || recues[ph?.id]).filter(Boolean),
+            ]),
+          ];
+          const { photosIds: _ids, ...charge } = action.charge;
+          const deja = await inspectionDejaEnregistree(charge, session);
+          if (!deja) await enregistrerInspection({ ...charge, photos }, session);
+          oublierPhotosInspection(ids.map((ph) => ph?.id).filter(Boolean));
         } else {
           // action locale historique — un court délai pour ne pas tourner à vide
           await new Promise((resolve) => setTimeout(resolve, 150));
@@ -7473,12 +7621,15 @@ function AppTechnicien() {
       datesSansVehiculeRef.current = new Set([...datesSansVehiculeRef.current, dateCible]);
       setTaches((prev) => completerTransportsJournee(prev, transportDebutFinRef.current, datesSansVehiculeRef.current));
     }
-    // Écriture réelle dans Supabase (inspections_vehicules) — l'onglet
-    // admin la voit en direct. En cas d'échec réseau, l'inspection reste
-    // valable localement (le déblocage des tâches n'attend pas le serveur).
-    enregistrerInspection(record, session).catch(() => {
-      // hors-ligne ou table non accessible — sans blocage pour le technicien
-    });
+    // Écriture réelle dans Supabase (inspections_vehicules) — PAR LA FILE
+    // D'ENVOI (2026-10-05, chantier iPhone n° 1) : avant, un échec réseau
+    // la perdait en silence (le bureau ne la voyait jamais). Elle part tout
+    // de suite si le réseau est là, sinon à son retour — jamais deux fois.
+    // Le déblocage des tâches, lui, n'attend toujours pas le serveur.
+    setFileAttente((prev) => [
+      ...prev,
+      { id: `sync-inspection-${Date.now()}`, type: "inspection", charge: record, horodatage: Date.now() },
+    ]);
     // Courriel automatique à l'admin si anomalie : Phase 4 (Edge Function).
     retourAccueil();
   };

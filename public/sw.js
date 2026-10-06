@@ -39,16 +39,37 @@ self.addEventListener("fetch", (evenement) => {
 
   // Navigation : réseau d'abord, cache en secours.
   if (req.mode === "navigate") {
+    const reseau = fetch(req).then((reponse) => {
+      const copie = reponse.clone();
+      caches.open(CACHE_HORS_LIGNE).then((c) => c.put(req, copie)).catch(() => {});
+      return reponse;
+    });
+    // 📶 SIGNAL FAIBLE (2026-10-05, chantier iPhone n° 6) : l'app technicien
+    // attendait le réseau sans limite avant de s'afficher. Après 4 secondes,
+    // sa dernière version gardée s'ouvre ; le réseau continue en arrière-
+    // plan et met la copie à jour pour la prochaine ouverture. (L'admin, sur
+    // ordinateur, garde le comportement d'avant.)
+    if (url.pathname.startsWith("/technicien")) {
+      evenement.respondWith(
+        (async () => {
+          const enCache = await caches.match(req);
+          if (!enCache) return reseau.catch(() => caches.match("/technicien"));
+          const delai = new Promise((resolve) => setTimeout(() => resolve(null), 4000));
+          try {
+            const premiere = await Promise.race([reseau, delai]);
+            return premiere || enCache;
+          } catch {
+            return enCache;
+          }
+        })()
+      );
+      evenement.waitUntil(reseau.catch(() => {}));
+      return;
+    }
     evenement.respondWith(
-      fetch(req)
-        .then((reponse) => {
-          const copie = reponse.clone();
-          caches.open(CACHE_HORS_LIGNE).then((c) => c.put(req, copie)).catch(() => {});
-          return reponse;
-        })
-        .catch(() =>
-          caches.match(req).then((trouvee) => trouvee || caches.match("/technicien"))
-        )
+      reseau.catch(() =>
+        caches.match(req).then((trouvee) => trouvee || caches.match("/technicien"))
+      )
     );
     return;
   }
