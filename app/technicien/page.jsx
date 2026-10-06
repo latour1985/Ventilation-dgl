@@ -6400,9 +6400,20 @@ function AppTechnicien() {
           });
           // 🛡️ Une tâche du bureau absente de la nouvelle liste, mais
           // ENTAMÉE ici, reste jusqu'à ce que tout soit parti (n° 3).
+          // Seulement si la tâche a VRAIMENT quitté son horaire (aucune
+          // carte du même travail du bureau) : une tâche RÉORGANISÉE (1 → 2
+          // jours, nouvelles cartes) garde l'ancien comportement — jamais
+          // deux cartes pour la même journée, jamais d'heures en double.
           const idsDistants = new Set(distantes.map((d) => d.id));
+          const originesDistantes = new Set(distantes.map((d) => d.tacheOrigineId).filter(Boolean));
           const idsEnFile = new Set(chargerFileAttente().map((a) => a.tacheLocaleId).filter(Boolean));
-          const locales = prev.filter((t) => !t.supabase || (!idsDistants.has(t.id) && travailEntameNonEnvoye(t, idsEnFile)));
+          const locales = prev.filter(
+            (t) =>
+              !t.supabase ||
+              (!idsDistants.has(t.id) &&
+                !(t.tacheOrigineId && originesDistantes.has(t.tacheOrigineId)) &&
+                travailEntameNonEnvoye(t, idsEnFile))
+          );
           return completerTransportsJournee([...locales, ...enrichies], transportDebutFinRef.current, datesSansVehiculeRef.current);
         });
       } catch {
@@ -6842,7 +6853,30 @@ function AppTechnicien() {
           ];
           const { photosIds: _ids, ...charge } = action.charge;
           const deja = await inspectionDejaEnregistree(charge, session);
-          if (!deja) await enregistrerInspection({ ...charge, photos }, session);
+          if (!deja) {
+            try {
+              await enregistrerInspection({ ...charge, photos }, session);
+            } catch (e) {
+              // 🛡️ REFUS DU SERVEUR (une erreur avec un code — pas une panne
+              // de réseau) : l'inspection ne doit JAMAIS bloquer la file (bons,
+              // heures derrière elle). Elle passe en fin de file et réessaie ;
+              // après 5 refus, elle sort et le technicien est averti.
+              if (!e?.code) throw e; // réseau : on garde la tête de file, comme les autres
+              const essais = (Number(action.essais) || 0) + 1;
+              if (essais < 5) {
+                // Nouvel essai dans 20 s (2 s s'il y a d'autres envois à faire
+                // passer) — jamais en boucle serrée.
+                setTimeout(
+                  () => setFileAttente((f) => (f[0]?.id === action.id ? [...f.slice(1), { ...f[0], essais }] : f)),
+                  fileAttente.length > 1 ? 2000 : 20000
+                );
+              } else {
+                setFileAttente((f) => f.filter((x) => x.id !== action.id));
+                setErreurSync(tx("⚠️ L'inspection du camion a été refusée par le serveur — avise le bureau."));
+              }
+              return;
+            }
+          }
           oublierPhotosInspection(ids.map((ph) => ph?.id).filter(Boolean));
         } else {
           // action locale historique — un court délai pour ne pas tourner à vide
