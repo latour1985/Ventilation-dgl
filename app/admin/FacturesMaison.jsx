@@ -58,7 +58,11 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
           uid: `cr-${i}`,
           description: l.description || "",
           quantite: l.quantite ?? 1,
-          prix: -Math.abs(Number(l.prix_unitaire ?? l.prixUnitaire) || 0),
+          // 🛡️ (audit 2026-10-05) Simple INVERSION du signe : une déduction
+          // de la facture (dépôt, rabais) redevient positive dans le crédit.
+          // Avant (-Math.abs), elle restait négative et le crédit proposé
+          // dépassait de beaucoup la facture.
+          prix: -(Number(l.prix_unitaire ?? l.prixUnitaire) || 0),
         }))
       : []
   );
@@ -92,7 +96,9 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
   const taxes = calculerTaxesRegime(sousTotal, regime);
   const total = Math.round((sousTotal + taxes.reduce((s, t) => s + t.montant, 0)) * 100) / 100;
   // Facture : total positif obligatoire. Crédit : total NÉGATIF obligatoire.
-  const peutContinuer = !!client && lignesValides.length > 0 && (estCredit ? total < 0 : total > 0);
+  // 🛡️ (audit 2026-10-05) Un crédit ne dépasse JAMAIS la facture d'origine.
+  const creditTropGros = estCredit && Number(origine?.total) > 0 && Math.abs(total) > Number(origine.total) + 0.005;
+  const peutContinuer = !!client && lignesValides.length > 0 && (estCredit ? total < 0 && !creditTropGros : total > 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) onFermer(); }}>
@@ -225,6 +231,11 @@ export function ModalFactureMaison({ clients, catalogue, configEnt, origine = nu
           </div>
         </div>
 
+        {creditTropGros && (
+          <p className="mx-4 mb-0 rounded-lg bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700">
+            ⚠️ Ce crédit ({argent(Math.abs(total))}) dépasse la facture d&apos;origine ({argent(Number(origine.total))}) — corrige les lignes.
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-4">
           <Button variant="outline" onClick={onFermer} className="min-h-0 py-2 text-xs">Annuler</Button>
           <Button

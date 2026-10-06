@@ -472,6 +472,12 @@ function ecrireEnvoisEnVol(liste) {
 function noterEnvoiEnVol(action) {
   ecrireEnvoisEnVol([...lireEnvoisEnVol().filter((a) => a.cle !== action.cle), { ...action, horodatage: Date.now() }]);
 }
+// Passe une action en FIN de file (sans la perdre) — `maj` s'y ajoute.
+function envoyerEnFinDeFile(file, id, maj = {}) {
+  const i = file.findIndex((x) => x.id === id);
+  if (i < 0) return file;
+  return [...file.slice(0, i), ...file.slice(i + 1), { ...file[i], ...maj }];
+}
 function retirerEnvoiEnVol(cle) {
   ecrireEnvoisEnVol(lireEnvoisEnVol().filter((a) => a.cle !== cle));
 }
@@ -4850,7 +4856,7 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
     // 📮 Noté « en vol » AVANT de partir : si iOS ferme l'app pendant la
     // requête, le bon repartira de la file au prochain démarrage.
     const cleEnVol = `bon-${tache.id}`;
-    noterEnvoiEnVol({ cle: cleEnVol, type: "bon", tacheLocaleId: actionBonEnFile.tacheLocaleId, tacheId: actionBonEnFile.tacheId, charge: actionBonEnFile.charge });
+    noterEnvoiEnVol({ cle: cleEnVol, type: "bon", tacheLocaleId: actionBonEnFile.tacheLocaleId, tacheId: actionBonEnFile.tacheId, charge: actionBonEnFile.charge, courriel: String(session?.user?.email || "").toLowerCase() || null });
     (chargeHeures
       ? fermerTravauxTechnicien(chargeBon, chargeHeures, session).then((r) => r.bonRowId)
       : enregistrerBonTravail(chargeBon, session)
@@ -6771,14 +6777,43 @@ function AppTechnicien() {
         tacheLocaleId: a.tacheLocaleId,
         tacheId: a.tacheId,
         charge: a.charge,
+        ...(a.courriel ? { courriel: a.courriel } : {}),
         horodatage: Date.now(),
       })),
     ]);
     setErreurSync(restes.length > 1 ? tx("📮 {n} envois interrompus par la fermeture de l'app — repris automatiquement.", { n: restes.length }) : tx("📮 1 envoi interrompu par la fermeture de l'app — repris automatiquement."));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+  // 👤 (audit 2026-10-05) Chaque action de la file porte le COMPTE qui l'a
+  // créée : sur un téléphone partagé, les heures de A ne partent jamais
+  // au nom de B. Une action sans compte (créée à l'instant) reçoit celui
+  // de la session en cours.
+  useEffect(() => {
+    const email = String(session?.user?.email || "").toLowerCase();
+    if (!email || !fileAttente.some((a) => a && !a.courriel)) return;
+    setFileAttente((prev) => prev.map((a) => (a && !a.courriel ? { ...a, courriel: email } : a)));
+  }, [fileAttente, session]);
+  // 🔁 (audit 2026-10-05) RÉESSAI AUTOMATIQUE toutes les 60 s : avant, la
+  // file ne repartait qu'au retour de l'événement « en ligne », peu fiable
+  // sur iPhone — des heures pouvaient attendre des jours.
+  useEffect(() => {
+    const minuterie = setInterval(() => {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return;
+      if (syncEnCoursRef.current) return;
+      setFileAttente((f) => (f.length > 0 ? [...f] : f));
+    }, 60000);
+    return () => clearInterval(minuterie);
+  }, []);
   useEffect(() => {
     if (!enLigne || syncEnCoursRef.current || fileAttente.length === 0) return;
+    const monCourriel = String(session?.user?.email || "").toLowerCase();
+    // La première action de CE compte (celles d'un autre compte attendent sa
+    // reconnexion sur ce téléphone — jamais envoyées sous le mauvais nom).
+    const action = fileAttente.find((a) => a && (!a.courriel || a.courriel === monCourriel));
+    if (!action) {
+      if (monCourriel) setErreurSync(tx("📮 Des envois d'un autre compte attendent sa reconnexion sur ce téléphone."));
+      return;
+    }
     let annule = false;
     syncEnCoursRef.current = true;
     setSyncFileEnCours(true);
@@ -6792,10 +6827,17 @@ function AppTechnicien() {
         //   • « bon »     — le bon de travail, photos recomposées au
         //     moment du rejeu (le coffre les a téléversées entre-temps) ;
         //   • autres (majTache locales) — rien à envoyer, on retire.
-        const action = fileAttente[0];
         if (action?.type === "travail" && action.charge) {
-          const deja = await travailDejaEnregistre(action.charge.tacheId, session?.user?.email);
-          if (!deja) await enregistrerTravailEffectue(action.charge, session);
+          // `forcer` : une CORRECTION (chrono oublié, heures ajustées,
+          // plafond) remplace la ligne existante — sinon la garde anti-doublon
+          // la sautait. L'écriture remplace la même ligne : rejouée deux
+          // fois, elle reste juste.
+          if (action.forcer) {
+            await enregistrerTravailEffectue(action.charge, session);
+          } else {
+            const deja = await travailDejaEnregistre(action.charge.tacheId, session?.user?.email);
+            if (!deja) await enregistrerTravailEffectue(action.charge, session);
+          }
         } else if (action?.type === "bon" && action.charge) {
           // 📸 (2026-10-26) Le bon attend ses photos encore en route — jusqu'à
           // 15 minutes ; la reprise automatique des photos les envoie entre-
@@ -6810,7 +6852,7 @@ function AppTechnicien() {
             // Il ne bloque pas le reste de la file : il passe en dernier
             // (s'il est seul, on repasse dans 20 s).
             setTimeout(
-              () => setFileAttente((f) => (f.length > 1 && f[0]?.id === action.id ? [...f.slice(1), f[0]] : [...f])),
+              () => setFileAttente((f) => envoyerEnFinDeFile(f, action.id)),
               fileAttente.length > 1 ? 2000 : 20000
             );
             return;
@@ -6840,7 +6882,7 @@ function AppTechnicien() {
           const manquantes = ids.filter((ph) => ph?.id && !ph.urlDistante && !recues[ph.id]);
           if (manquantes.length > 0 && Date.now() - (Number(action.horodatage) || 0) < 15 * 60 * 1000) {
             setTimeout(
-              () => setFileAttente((f) => (f.length > 1 && f[0]?.id === action.id ? [...f.slice(1), f[0]] : [...f])),
+              () => setFileAttente((f) => envoyerEnFinDeFile(f, action.id)),
               fileAttente.length > 1 ? 2000 : 20000
             );
             return;
@@ -6867,7 +6909,7 @@ function AppTechnicien() {
                 // Nouvel essai dans 20 s (2 s s'il y a d'autres envois à faire
                 // passer) — jamais en boucle serrée.
                 setTimeout(
-                  () => setFileAttente((f) => (f[0]?.id === action.id ? [...f.slice(1), { ...f[0], essais }] : f)),
+                  () => setFileAttente((f) => envoyerEnFinDeFile(f, action.id, { essais })),
                   fileAttente.length > 1 ? 2000 : 20000
                 );
               } else {
@@ -6882,10 +6924,22 @@ function AppTechnicien() {
           // action locale historique — un court délai pour ne pas tourner à vide
           await new Promise((resolve) => setTimeout(resolve, 150));
         }
+        // Retirée PAR SON IDENTIFIANT (même si l'effet a été relancé entre-
+        // temps) : jamais une autre action à sa place, jamais rejouée.
+        setFileAttente((prev) => prev.filter((x) => x.id !== action.id));
         if (annule) return;
-        setFileAttente((prev) => prev.slice(1));
         setErreurSync("");
-      } catch {
+      } catch (e) {
+        // 🛡️ (audit 2026-10-05) REFUS DU SERVEUR (erreur avec un code — pas
+        // une panne de réseau) sur des heures ou un bon : l'action passe en
+        // FIN de file (elle ne bloque plus tout ce qui suit) et réessaie ;
+        // elle n'est jamais jetée — le technicien est averti.
+        if (e?.code && (action.type === "travail" || action.type === "bon")) {
+          const essais = (Number(action.essais) || 0) + 1;
+          setTimeout(() => setFileAttente((f) => envoyerEnFinDeFile(f, action.id, { essais })), fileAttente.length > 1 ? 2000 : 30000);
+          if (!annule) setErreurSync(tx("⚠️ Des heures ou un bon de travail n'arrivent pas au bureau (refus du serveur) — avise le bureau."));
+          return;
+        }
         if (annule) return;
         // Échec réel (pas juste une déconnexion détectée à l'avance) —
         // l'action reste en tête de file pour une prochaine tentative ;
@@ -6903,7 +6957,7 @@ function AppTechnicien() {
     return () => {
       annule = true;
     };
-  }, [enLigne, fileAttente]);
+  }, [enLigne, fileAttente, session]);
 
   // Suggestion de chantier selon la position GPS — une seule demande
   // de géolocalisation, juste après la connexion (pas à chaque
@@ -7017,9 +7071,7 @@ function AppTechnicien() {
       const ecart = finPrecedente ? (maintenant - Number(finPrecedente)) / 1000 : 0;
       if (ccqDeCible && ecart > 0 && ecart < HEURES_AVANT_PLAFOND_TRANSPORT * 3600) {
         const charge = chargeHeuresDepuisTache({ ...ccqDeCible, tempsAccumuleSec: ecart, tempsDebutSegment: null, debutReel: Number(finPrecedente) });
-        enregistrerTravailEffectue(charge, session).catch(() => {
-          setFileAttente((prev) => [...prev, { id: `sync-travail-${Date.now()}`, type: "travail", charge, horodatage: Date.now() }]);
-        });
+        envoyerHeuresOuFile(charge);
         majTache(ccqDeCible.id, { etat: "complete", tempsAccumuleSec: ecart, tempsDebutSegment: null, debutReel: Number(finPrecedente), finReelle: maintenant });
       }
     }
@@ -7080,6 +7132,25 @@ function AppTechnicien() {
     };
   };
 
+  // 🛡️ (audit 2026-10-05, critique) ENVOI D'HEURES QUI NE SE PERD JAMAIS :
+  // un échec (pas de réseau) met la ligne en file d'envoi — elle part toute
+  // seule au retour du réseau. Avant, cinq chemins (fermeture d'équipe,
+  // heures ajustées, correction de chrono, plafond, dîner) affichaient un
+  // message puis fermaient la carte : les heures n'arrivaient jamais.
+  // `forcer` : une correction remplace la ligne déjà présente.
+  // Résout à true (envoyé) ou false (en file) — jamais d'erreur.
+  const envoyerHeuresOuFile = (charge, { forcer = false } = {}) =>
+    enregistrerTravailEffectue(charge, session)
+      .then(() => true)
+      .catch(() => {
+        setFileAttente((prev) => [
+          ...prev,
+          { id: `sync-travail-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, type: "travail", charge, forcer, horodatage: Date.now() },
+        ]);
+        setErreurSync(tx("📦 Heures de « {titre} » en file — elles partiront au bureau dès le retour du réseau.", { titre: charge.titre || tx("tâche") }));
+        return false;
+      });
+
   const terminerTache = (id) => {
     // Capture AVANT la mise à jour d'état : la ligne « travail effectué »
     // (heures réelles + taux coûtant FIGÉ à la saisie) part vers le
@@ -7094,7 +7165,7 @@ function AppTechnicien() {
       // 📮 Noté « en vol » avant de partir (iOS peut fermer l'app pendant la
       // requête) — repart de la file au prochain démarrage si besoin.
       const cleEnVolTravail = `travail-${chargeTravail.tacheId}-${chargeTravail.date || ""}`;
-      noterEnvoiEnVol({ cle: cleEnVolTravail, type: "travail", charge: chargeTravail });
+      noterEnvoiEnVol({ cle: cleEnVolTravail, type: "travail", charge: chargeTravail, courriel: String(session?.user?.email || "").toLowerCase() || null });
       enregistrerTravailEffectue(chargeTravail, session)
         .then(() => {
           retirerEnvoiEnVol(cleEnVolTravail);
@@ -7173,7 +7244,7 @@ function AppTechnicien() {
     const debut = t.debutReel || t.tempsDebutSegment;
     const titreOriginal = t.titre || (t.type === "transport" ? "Transport" : "Tâche");
     const dateTache = dateReelleDe(t);
-    enregistrerTravailEffectue(
+    envoyerHeuresOuFile(
       {
         tacheId: t.cleHeures || t.tacheOrigineId || t.id,
         secteur: t.secteur || "commercial",
@@ -7200,12 +7271,8 @@ function AppTechnicien() {
         jourBloque: true,
         bloqueRaison: `Chrono oublié sur « ${titreOriginal} » — fermé automatiquement après ${heuresPlafond} h.`,
       },
-      session
-    ).catch((e) => {
-      setErreurSync(
-        tx("⚠️ Journée bloquée (chrono oublié sur « {titre} ») mais NON transmise au bureau — {raison}. Appelle l'administration.", { titre: titreOriginal, raison: e?.message || tx("connexion impossible") })
-      );
-    });
+      { forcer: true }
+    );
     setTaches((prev) =>
       prev.map((x) =>
         x.id === t.id
@@ -7228,6 +7295,13 @@ function AppTechnicien() {
     const t = taches.find((x) => x.id === correctionPour);
     setCorrectionPour(null);
     if (!t) return;
+    // 🛡️ (audit 2026-10-05) La tâche a été fermée automatiquement (plafond)
+    // pendant que la fenêtre était ouverte : la correction débloquerait la
+    // journée sans l'administrateur avec les heures du chrono emballé.
+    if (t.etat === "complete" || t.chronoPlafonne) {
+      setErreurSync(tx("⚠️ Cette tâche vient d'être fermée automatiquement (journée bloquée) — appelle le bureau pour corriger tes heures."));
+      return;
+    }
     const debut = t.debutReel || t.tempsDebutSegment;
     // Durée = segments déjà cumulés + le segment courant arrêté à
     // l'heure déclarée (les pauses du technicien restent respectées).
@@ -7235,7 +7309,7 @@ function AppTechnicien() {
     const heures = Math.max(0, (t.tempsAccumuleSec + secondesSegment) / 3600);
 
     const envoyer = (tache, h, dReel, fReelle, note) =>
-      enregistrerTravailEffectue(
+      envoyerHeuresOuFile(
         {
           tacheId: tache.cleHeures || tache.tacheOrigineId || tache.id,
         secteur: tache.secteur || "commercial",
@@ -7259,7 +7333,7 @@ function AppTechnicien() {
           finPropose: new Date(fReelle).toISOString(),
           propositionPar: `${nomTechnicien || "Technicien"} (correction chrono oublié)`,
         },
-        session
+        { forcer: true }
       );
 
     envoyer(
@@ -7268,13 +7342,7 @@ function AppTechnicien() {
       debut,
       finTs,
       `🕐 CHRONO OUBLIÉ — heure de fin déclarée par le technicien (${heureHHMM(finTs)}). À VALIDER.`
-    )
-      .then(() => setErreurSync(""))
-      .catch((e) =>
-        setErreurSync(
-          tx("⚠️ Ta correction n'a PAS été transmise au bureau — {raison}. Réessaie une fois connecté.", { raison: e?.message || tx("connexion impossible") })
-        )
-      );
+    ).then((ok) => ok && setErreurSync(""));
 
     setTaches((prev) =>
       prev.map((x) =>
@@ -7294,7 +7362,7 @@ function AppTechnicien() {
         finTs,
         arriveeTs,
         `🕐 CHRONO OUBLIÉ — retour au bureau déclaré par le technicien (${heureHHMM(finTs)} → ${heureHHMM(arriveeTs)}). À VALIDER.`
-      ).catch(() => {});
+      );
       setTaches((prev) =>
         prev.map((x) =>
           x.id === retour.id
@@ -7347,9 +7415,7 @@ function AppTechnicien() {
       const ecoule = entrant.tempsDebutSegment ? Math.max(0, (fin - entrant.tempsDebutSegment) / 1000) : 0;
       const heures = Math.max(0, ((entrant.tempsAccumuleSec || 0) + ecoule) / 3600);
       const charge = { ...chargeHeuresDepuisTache({ ...entrant, tempsDebutSegment: null }), heures, finReelle: fin };
-      enregistrerTravailEffectue(charge, session).catch(() => {
-        setFileAttente((prev) => [...prev, { id: `sync-travail-${Date.now()}`, type: "travail", charge, horodatage: Date.now() }]);
-      });
+      envoyerHeuresOuFile(charge);
       majTache(entrant.id, { etat: "complete", tempsAccumuleSec: heures * 3600, tempsDebutSegment: null });
     }
     const travauxJour = taches
@@ -7371,24 +7437,15 @@ function AppTechnicien() {
     const segment =
       t.etat === "en_cours" && t.tempsDebutSegment ? Math.max(0, (fermeTs - t.tempsDebutSegment) / 1000) : 0;
     const heures = Math.max(0, ((t.tempsAccumuleSec || 0) + segment) / 3600);
-    enregistrerTravailEffectue(
-      {
-        ...champsFermetureEquipe(t),
-        heures,
-        noteInterne:
-          `${t.notesInternes ? t.notesInternes + "\n" : ""}` +
-          `🤝 Tâche fermée pour l'équipe par ${t.fermetureEquipe.par} — heures pointées confirmées par le technicien.`,
-        debutReel: t.debutReel || null,
-        finReelle: fermeTs,
-      },
-      session
-    )
-      .then(() => setErreurSync(""))
-      .catch((e) =>
-        setErreurSync(
-          tx("⚠️ Tes heures n'ont PAS été transmises au bureau — {raison}. Rouvre l'app une fois connecté.", { raison: e?.message || tx("connexion impossible") })
-        )
-      );
+    envoyerHeuresOuFile({
+      ...champsFermetureEquipe(t),
+      heures,
+      noteInterne:
+        `${t.notesInternes ? t.notesInternes + "\n" : ""}` +
+        `🤝 Tâche fermée pour l'équipe par ${t.fermetureEquipe.par} — heures pointées confirmées par le technicien.`,
+      debutReel: t.debutReel || null,
+      finReelle: fermeTs,
+    }).then((ok) => ok && setErreurSync(""));
     // ⏱️ Le bloc du bureau quitte le « en cours » (2026-08-21, vécu :
     // une tâche fermée PAR UN COÉQUIPIER gardait son marqueur, et le
     // bureau croyait le technicien encore dessus).
@@ -7413,7 +7470,7 @@ function AppTechnicien() {
     setFermetureEquipePour(null);
     if (!t) return;
     const heures = Math.max(0, (finTs - debutTs) / 3600000);
-    enregistrerTravailEffectue(
+    envoyerHeuresOuFile(
       {
         ...champsFermetureEquipe(t),
         // La date suit l'heure de DÉBUT déclarée (revue 2026-09-22).
@@ -7429,14 +7486,8 @@ function AppTechnicien() {
         finPropose: new Date(finTs).toISOString(),
         propositionPar: `${nomTechnicien || "Technicien"} (fermeture d'équipe — heures ajustées)`,
       },
-      session
-    )
-      .then(() => setErreurSync(""))
-      .catch((e) =>
-        setErreurSync(
-          tx("⚠️ Ton ajustement n'a PAS été transmis au bureau — {raison}. Réessaie une fois connecté.", { raison: e?.message || tx("connexion impossible") })
-        )
-      );
+      { forcer: true }
+    ).then((ok) => ok && setErreurSync(""));
     // Même raison que ci-dessus : la carte est fermée, le bureau doit
     // cesser d'afficher « en cours » pour ce technicien.
     if (t.supabase && t.tacheOrigineId) {
@@ -7593,24 +7644,17 @@ function AppTechnicien() {
     if (!t) return;
     majTache(t.id, { lunchReponse: reponse });
     if (reponse === "lunch") {
-      enregistrerTravailEffectue(
-        {
-          tacheId: `lunch-${dateReelleDe(t)}`,
-          titre: `Dîner (${minutesDiner} min non payées)`,
-          clientNom: null,
-          date: dateReelleDe(t),
-          heures: -(minutesDiner / 60),
-          estTransport: false,
-          kilometres: null,
-          projetId: null,
-          noteTerrain: "",
-        },
-        session
-      )
-        .then(() => setErreurSync(""))
-        .catch((e) => {
-          setErreurSync(tx("⚠️ Dîner NON transmis au bureau — {raison}. La déduction de {n} min n'apparaîtra pas dans les heures de la semaine.", { raison: e?.message || tx("connexion impossible"), n: minutesDiner }));
-        });
+      envoyerHeuresOuFile({
+        tacheId: `lunch-${dateReelleDe(t)}`,
+        titre: `Dîner (${minutesDiner} min non payées)`,
+        clientNom: null,
+        date: dateReelleDe(t),
+        heures: -(minutesDiner / 60),
+        estTransport: false,
+        kilometres: null,
+        projetId: null,
+        noteTerrain: "",
+      }).then((ok) => ok && setErreurSync(""));
     }
     demarrerTache(t.id);
   };

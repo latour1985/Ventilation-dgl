@@ -447,6 +447,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
   // virement — ou deux temps si on ne coche pas (pièce à la commande,
   // déplacement à la réception).
   const [demandeDeplacement, setDemandeDeplacement] = useState(false);
+  // 🛡️ (audit 2026-10-05) Facture QuickBooks DÉJÀ créée pour une demande
+  // dont le courriel a échoué : un nouvel essai la RÉUTILISE au lieu d'en
+  // créer une 2e identique. Clé : pièce + montant.
+  const facturesDemandeRef = useRef({});
   const [demandeZone, setDemandeZone] = useState("Zone 1");
   const [demandeMontantDeplacement, setDemandeMontantDeplacement] = useState("");
   // La pièce est-elle encore à payer ? (sinon la fenêtre sert au
@@ -518,10 +522,12 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
     // indisponible ? Le courriel part quand même — le message le dit,
     // rien n'échoue en silence.
     let factureQb = null;
+    const cleDemande = `${p.id}|${totalHT.toFixed(2)}`;
     const carteOk =
       configEnt.paiementCarteAppels === true &&
       (!(Number(configEnt.seuilCarteAppels) > 0) || totalHT <= Number(configEnt.seuilCarteAppels));
-    const rQb = await creerFactureQbo({
+    const dejaCreee = facturesDemandeRef.current[cleDemande] || null;
+    const rQb = dejaCreee || await creerFactureQbo({
       clientId: p.clientId || null,
       clientNom: p.clientNom || "",
       lignes: lignes.map((l) => ({ description: l.etiquette, montant: l.montant })),
@@ -532,7 +538,10 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
       envoyerA: configEnt?.envoiAutoFactureQb === true ? adresses : [],
       customerMemo: demandeDescription,
     });
-    if (rQb?.creee) factureQb = rQb;
+    if (rQb?.creee) {
+      factureQb = rQb;
+      facturesDemandeRef.current[cleDemande] = rQb;
+    }
     // PRODUCTION + envoi confirmé par QuickBooks : la facture officielle
     // (taxée, avec notre message) suffit. En Sandbox, les deux partent.
     const r =

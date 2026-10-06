@@ -21,7 +21,7 @@ import { assignerTacheSupabase, retirerTacheSupabase, majFacturableAssignation, 
 import { estCourrielST } from "@/lib/supabase/sousTraitants";
 import { estFerieCcq, marqueurCcq } from "@/lib/calendrierCcq";
 import { useLangue } from "@/lib/i18n";
-import { taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
+import { taxesDepot, majDepotFactureQbo, remettreDepotEnAttente } from "@/lib/supabase/depots";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { envoyerPushA } from "@/lib/notificationsPush";
 import { pieceBloqueLaTache } from "@/lib/supabase/piecesCommandees";
@@ -256,10 +256,12 @@ export function techniciensPourTache(planning, tacheId, employes) {
   Object.entries(planning).forEach(([cle, valeur]) => {
     if (!listeCellule(valeur).some((t) => t?.id === tacheId)) return;
     const [dateCle, empId, heure] = cle.split("|");
-    const e = (infos[empId] = infos[empId] || { employeId: empId, dates: new Set(), premiereHeure: heure, nbCases: 0 });
+    const e = (infos[empId] = infos[empId] || { employeId: empId, dates: new Set(), premiereHeure: heure, nbCases: 0, heureReelle: null });
     e.dates.add(dateCle);
     if (heure < e.premiereHeure) e.premiereHeure = heure;
     e.nbCases++;
+    // ⏰ (audit 2026-10-05) L'heure EXACTE (09:30), pas la case (09:00).
+    if (!e.heureReelle) e.heureReelle = listeCellule(valeur).find((t) => t?.id === tacheId)?.heureDebutReelle || null;
   });
   return Object.values(infos).map((e) => {
     const nbJours = e.dates.size;
@@ -272,7 +274,7 @@ export function techniciensPourTache(planning, tacheId, employes) {
       // Valeurs brutes (2026-10-15) : la durée PAR TECHNICIEN de la fiche
       // et la sauvegarde d'équipe gardent l'horaire propre de chacun.
       premiereDate,
-      premiereHeure: e.premiereHeure,
+      premiereHeure: e.heureReelle || e.premiereHeure,
       nbJours,
       dates: [...e.dates].sort(),
     };
@@ -1888,6 +1890,15 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       );
       return;
     }
+    // 🛡️ (audit 2026-10-05) Sans courriel, rien ne peut être enregistré pour
+    // cet employé : la tâche aurait disparu au rechargement. On refuse
+    // tout de suite, la tâche reste où elle était.
+    if (!tache.est_tache_systeme && !employe.courriel) {
+      ajouterJournal(
+        `⛔ "${tache.titre || tache.clientNom}" non planifiée — ${employe.nom || "cet employé"} n'a pas de courriel dans le Répertoire (Utilisateurs). Ajoute-le, puis replace la tâche.`
+      );
+      return;
+    }
     // Nombre de jours choisi sur la tâche (0 = pas de jour "réservé" à
     // l'avance ; 1 ou plus = un nombre de jours précis est sélectionné).
     const nbJoursSpecifie = tache.jours ?? 1;
@@ -1925,13 +1936,17 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           const cle = `${dateISO(d)}|${employeId}|${h}`;
           copie[cle] = [
             ...listeCellule(copie[cle]).filter((x) => x.id !== tache.id),
-            { ...tache, employeId, statut: "planifiee" },
+            // ⏰ L'heure EXACTE voyage avec le bloc (audit 2026-10-05).
+            { ...tache, employeId, statut: "planifiee", heureDebutReelle: heureDepart || heuresCibles[0] || null },
           ];
         });
       });
       return recalculerTransports(copie, sansTransportAgendaRef.current);
     });
-    setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
+    // 🛡️ (audit 2026-10-05) La tâche ne quitte la file d'attente qu'une fois
+    // CONFIRMÉE au serveur (plus bas) : un échec de réseau la laissait
+    // nulle part au rechargement.
+    if (tache.est_tache_systeme) setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
     const derniereDate = joursCibles[joursCibles.length - 1];
     const detailJours = joursCibles.length > 1 ? `du ${dateISO(dateDepart)} au ${dateISO(derniereDate)}${tache.sauterWeekend ? " (fins de semaine sautées)" : ""}${tache.sauterFeries ? " (fériés CCQ sautés)" : ""}` : `le ${dateISO(dateDepart)}`;
     // 📅 Avertissement doux (jamais bloquant) : la 1re journée tombe sur
@@ -1951,6 +1966,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     // Écriture réelle dans Supabase (taches_assignees) : l'app technicien
     // du courriel correspondant la voit en direct. Jamais pour les
     // transports système (chaque app les génère localement).
+    let promesse = null;
     if (!tache.est_tache_systeme) {
       if (!employe?.courriel) {
         // Sans courriel dans le Répertoire, impossible de savoir quelle
@@ -1980,7 +1996,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
             setChoixFacturable({ tacheId: tache.id, titre: tache.titre || tache.clientNom || "cette tâche", employe });
           }
         }
-        assignerTacheSupabase(tache, employe, {
+        promesse = assignerTacheSupabase({ ...tache, heureDebutReelle: heureDepart || heuresCibles[0] || null }, employe, {
           // L'heure CHOISIE d'abord (quarts d'heure conservés) — jamais
           // la première case de la grille (c'était le bogue de minuit).
           heureDebut: heureDepart || heuresCibles[0] || null,
@@ -1990,6 +2006,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           // reste (nouvelle ligne : défaut true de la base).
           ...(choixDejaFait ? { facturable: facturablePredetermine } : {}),
         }).then(() => {
+          // Confirmée au serveur : elle peut quitter la file d'attente.
+          setTachesAttente((prev) => prev.filter((t) => t.id !== tache.id));
           // 🔔 Notification push au technicien — un bonus, jamais un
           // bloqueur : l'échec est silencieux (la tâche est déjà chez lui
           // par la synchronisation temps réel de toute façon). Jamais
@@ -2004,8 +2022,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           // Échec d'écriture Supabase (hors-ligne, table/colonne absente,
           // droits) — visible dans le Journal au lieu d'un silence total.
           ajouterJournal(
-            `⚠️ "${tache.titre || tache.clientNom}" reste dans l'agenda mais N'A PAS été envoyée à l'app technicien — erreur de synchronisation : ${e?.message || "connexion impossible"}`
+            `⚠️ "${tache.titre || tache.clientNom}" N'A PAS été enregistrée chez ${employe?.nom || "le technicien"} — erreur de synchronisation : ${e?.message || "connexion impossible"}. Si elle venait de la file d'attente, elle y reste ; sinon replace-la.`
           );
+          return false; // l'appelant sait que ça n'a pas passé (jamais d'erreur non gérée)
         });
       }
     }
@@ -2017,6 +2036,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
         .filter((m) => m.employeId && m.employeId !== employeId)
         .forEach((m) => assigner(tache, m.employeId, dateDepart, heureDepart, m.facturable));
     }
+    return promesse;
   };
 
   // Redimensionne une tâche déjà placée dans la grille (vue Jour) en
@@ -2154,12 +2174,16 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     //    rien : de l'argent reçu se rembourse, ça ne s'efface pas.
     const depot = depotDe(tache.id);
     if (depot?.qboInvoiceId && depot.statut !== "paye" && depot.statut !== "paye_manuellement") {
-      annulerFactureDepot(depot.qboInvoiceId)
+      // 🛡️ (audit 2026-10-05) siImpayee : si le client a payé entre-temps,
+      // QuickBooks n'annule RIEN — de l'argent reçu se rembourse.
+      annulerFactureDepot(depot.qboInvoiceId, { siImpayee: true })
         .then((rv) =>
           ajouterJournal(
-            rv?.annulee
-              ? `🧾 Facture de dépôt${depot.qboDocNumber ? ` Nº ${depot.qboDocNumber}` : ""} annulée par VOID dans QuickBooks (tâche annulée).`
-              : `⚠️ VOID de la facture de dépôt REFUSÉ (${rv?.erreur || rv?.nonConnecte ? "QuickBooks non connecté" : "?"}) — annule-la à la main dans QuickBooks.`
+            rv?.dejaPayee
+              ? `💰 Facture de dépôt${depot.qboDocNumber ? ` Nº ${depot.qboDocNumber}` : ""} PAYÉE par le client — NON annulée. Prévois un remboursement ou un crédit.`
+              : rv?.annulee
+                ? `🧾 Facture de dépôt${depot.qboDocNumber ? ` Nº ${depot.qboDocNumber}` : ""} annulée par VOID dans QuickBooks (tâche annulée).`
+                : `⚠️ VOID de la facture de dépôt REFUSÉ (${rv?.erreur || rv?.nonConnecte ? "QuickBooks non connecté" : "?"}) — annule-la à la main dans QuickBooks.`
           )
         )
         .catch(() => ajouterJournal("⚠️ VOID de la facture de dépôt injoignable — annule-la à la main dans QuickBooks."));
@@ -2337,10 +2361,11 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     // Synchro Supabase : si la tâche change de technicien (ou retourne en
     // attente), on retire l'ancienne assignation. Si c'est le même
     // technicien, l'upsert de assigner() écrasera simplement sa ligne.
-    if (champs.employeId !== ancienEmployeId) {
-      const ancienEmploye = employes.find((e) => e.id === ancienEmployeId);
-      retirerTacheSupabase(tache.id, ancienEmploye?.courriel).catch(() => {});
-    }
+    // 🛡️ (audit 2026-10-05) Changement de technicien : l'ancienne ligne n'est
+    // retirée qu'une fois la NOUVELLE confirmée (plus bas) — un échec réseau
+    // ne laisse plus la tâche nulle part. Retour en attente : tout de suite.
+    const ancienEmployeChange = champs.employeId !== ancienEmployeId ? employes.find((e) => e.id === ancienEmployeId) : null;
+    if (ancienEmployeChange && !champs.employeId) retirerTacheSupabase(tache.id, ancienEmployeChange.courriel).catch(() => {});
     setPlanning((prev) => {
       const copie = { ...prev };
       Object.keys(copie).forEach((cle) => {
@@ -2395,7 +2420,11 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     if (champs.employeId) {
       // « conserver » : une modification/un déplacement ne repose jamais
       // la question 💰/🤝 et n'écrase pas le choix déjà enregistré.
-      assigner(tacheMiseAJour, champs.employeId, new Date(`${champs.date}T00:00:00`), champs.heureDebut, "conserver");
+      const p = assigner(tacheMiseAJour, champs.employeId, new Date(`${champs.date}T00:00:00`), champs.heureDebut, "conserver");
+      if (ancienEmployeChange) {
+        if (p) p.then((ok) => (ok === false ? null : retirerTacheSupabase(tache.id, ancienEmployeChange.courriel))).catch(() => {});
+        else retirerTacheSupabase(tache.id, ancienEmployeChange.courriel).catch(() => {});
+      }
     } else {
       // Technicien retiré — la tâche retourne dans "Tâches en attente"
       // plutôt que de disparaître.
@@ -2608,6 +2637,17 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     // tâche (même date/heure/durée) — chacun reste ensuite ajustable
     // individuellement en cliquant son bloc dans la grille.
     const cibles = employeIds && employeIds.length > 0 ? employeIds : employeId ? [employeId] : [];
+    // 🛡️ (audit 2026-10-05) Dépôt pas encore payé : la tâche ne peut pas
+    // être placée — les modifications sont gardées dans la file au lieu
+    // d'être perdues en silence.
+    if (cibles.length > 0 && depotBloque(tacheId)) {
+      setTachesAttente((prev) =>
+        prev.map((t) => (t.id === tacheId ? { ...tacheMiseAJour, ...(date ? { datePrevue: date } : {}), ...(heureDebut ? { heurePrevue: heureDebut } : {}) } : t))
+      );
+      ajouterJournal(`✏️ « ${tache.titre || tache.clientNom} » modifiée — elle reste en attente : le dépôt n'est pas encore payé.`);
+      setTacheEnEditionId(null);
+      return;
+    }
     if (cibles.length > 0) {
       // assigner() retire déjà la tâche de tachesAttente et l'écrit
       // dans planning — on lui passe la version à jour (nouvelle
@@ -2645,7 +2685,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // modifications » (modifierTachePlanifiee), donc mêmes garanties
   // (Supabase, temps réel, journal). Durée, jours, description et
   // contact voyagent intacts.
-  const deplacerTache = (tacheId, ancienEmployeId, employeCibleId, dateCible, heureCible) => {
+  const deplacerTache = (tacheId, ancienEmployeId, employeCibleId, dateCible, heureCible, jourGlisse = null) => {
     if (lectureSeule) return;
     // Retrouver l'objet tâche dans la grille (sa version la plus à jour)
     // ET sa première case horaire actuelle : un dépôt sur un JOUR
@@ -2661,6 +2701,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       if (!tache) tache = t;
       if (heureActuelle === null || hCle < heureActuelle) heureActuelle = hCle;
     });
+    // ⏰ L'heure EXACTE du bloc (09:30), pas sa case (audit 2026-10-05).
+    if (tache?.heureDebutReelle) heureActuelle = tache.heureDebutReelle;
     if (!tache || tache.est_tache_systeme) return;
     // 🚚 TOURNÉE DE RAMASSAGE (2026-09-21) : la tournée n'est qu'une
     // projection des bons — la déplacer, c'est changer le JOUR (et la
@@ -2689,7 +2731,20 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       );
       return;
     }
-    const dateStr = typeof dateCible === "string" ? dateCible : dateISO(dateCible);
+    let dateStr = typeof dateCible === "string" ? dateCible : dateISO(dateCible);
+    // 🛡️ (audit 2026-10-05, critique) Tâche de PLUSIEURS jours glissée par un
+    // autre jour que le premier (mercredi d'un lundi-mercredi déposé sur
+    // jeudi) : on DÉCALE toute la tâche du même écart (mardi-jeudi), au
+    // lieu de la faire repartir du jour déposé (jeudi-samedi).
+    if (jourGlisse) {
+      const premiere = techniciensPourTache(planning, tacheId, employes).find((x) => x.employeId === String(ancienEmployeId))?.premiereDate;
+      if (premiere && premiere !== jourGlisse) {
+        const ecartJours = Math.round((new Date(`${dateStr}T12:00:00`) - new Date(`${jourGlisse}T12:00:00`)) / 86400000);
+        const debut = new Date(`${premiere}T12:00:00`);
+        debut.setDate(debut.getDate() + ecartJours);
+        dateStr = dateISO(debut);
+      }
+    }
     modifierTachePlanifiee(tache, ancienEmployeId, {
       heures: tache.heures,
       jours: tache.jours,
@@ -2875,7 +2930,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     if (attribuerRamassages(objet, employeId, dateISO(jourAffiche))) return;
     // Bloc déjà placé qu'on déplace — sinon, tâche en attente qu'on assigne.
     if (objet?.deplacement) {
-      deplacerTache(objet.tacheId, objet.employeId, employeId, dateISO(jourAffiche), heure);
+      deplacerTache(objet.tacheId, objet.employeId, employeId, dateISO(jourAffiche), heure, objet.jour || null);
       return;
     }
     assigner(objet, employeId, jourAffiche, heure);
@@ -2889,7 +2944,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     if (attribuerRamassages(objet, employeId, date)) return;
     if (objet?.deplacement) {
       // heure null = « garde l'heure actuelle de la tâche ».
-      deplacerTache(objet.tacheId, objet.employeId, employeId, date, null);
+      deplacerTache(objet.tacheId, objet.employeId, employeId, date, null, objet.jour || null);
       return;
     }
     // ⏰ L'HEURE CHOISIE À LA CRÉATION d'abord (2026-09-01, vécu :
@@ -5131,12 +5186,25 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                     onClick={async () => {
                       const d = depotDe(t.id);
                       if (d?.qboInvoiceId) {
-                        const rv = await annulerFactureDepot(d.qboInvoiceId);
+                        // 🛡️ (audit 2026-10-05) Le client a peut-être payé APRÈS
+                        // l'échéance : QuickBooks refuse alors l'annulation, et la
+                        // relance s'arrête — son dépôt revient « en attente » pour
+                        // être reconnu payé.
+                        const rv = await annulerFactureDepot(d.qboInvoiceId, { siImpayee: true });
+                        if (rv?.dejaPayee) {
+                          await remettreDepotEnAttente(t.id).catch(() => {});
+                          ajouterJournal(`💰 « ${t.titre || t.clientNom} » : le client a PAYÉ la facture de dépôt${d.qboDocNumber ? ` Nº ${d.qboDocNumber}` : ""} — aucune relance ; le paiement sera reconnu dans quelques minutes.`);
+                          return;
+                        }
                         ajouterJournal(
                           rv?.annulee
                             ? `🧾 Ancienne facture de dépôt${d.qboDocNumber ? ` Nº ${d.qboDocNumber}` : ""} annulée par VOID`
                             : `⚠️ VOID de l'ancienne facture refusé (${rv?.erreur || "?"}) — vérifie dans QuickBooks`
                         );
+                        // L'id de la facture annulée quitte le dépôt : sinon, si la
+                        // nouvelle facture échoue, la détection des paiements prend
+                        // l'ancienne (annulée) pour un désistement.
+                        if (rv?.annulee) await majDepotFactureQbo(t.id, { factureId: null, docNumber: null }).catch(() => {});
                       }
                       const fiche = clients.find((c) => c.id === t.clientId);
                       const defauts = (fiche?.courriels || []).filter((c) => c?.defaut).map((c) => c.email).filter(Boolean);
@@ -5833,7 +5901,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                             onDragStart={(ev) => {
                               ev.dataTransfer.setData(
                                 "text/plain",
-                                JSON.stringify({ deplacement: true, tacheId: seg.tache.id, employeId: emp.id })
+                                JSON.stringify({ deplacement: true, tacheId: seg.tache.id, employeId: emp.id, jour: jourKey })
                               );
                               ev.dataTransfer.effectAllowed = "move";
                             }}
@@ -6066,7 +6134,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                               onDragStart={(ev) => {
                                 ev.dataTransfer.setData(
                                   "text/plain",
-                                  JSON.stringify({ deplacement: true, tacheId: tache.id, employeId: emp.id })
+                                  JSON.stringify({ deplacement: true, tacheId: tache.id, employeId: emp.id, jour: dateISO(d) })
                                 );
                                 ev.dataTransfer.effectAllowed = "move";
                               }}
@@ -6440,8 +6508,17 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
         <ModalEditionTache
           tache={tacheDetailOuverte.tache}
           clients={clients}
-          dateInitiale={tacheDetailOuverte.date}
-          heureInitiale={tacheDetailOuverte.heure}
+          // 🛡️ (audit 2026-10-05, critique) Le PREMIER jour et l'heure exacte
+          // du technicien — pas le jour cliqué : ouvrir mardi un chantier
+          // lundi-mercredi et enregistrer le décalait à mardi-jeudi.
+          dateInitiale={
+            techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes).find((x) => x.employeId === tacheDetailOuverte.employe.id)?.premiereDate ||
+            tacheDetailOuverte.date
+          }
+          heureInitiale={
+            techniciensPourTache(planning, tacheDetailOuverte.tache.id, employes).find((x) => x.employeId === tacheDetailOuverte.employe.id)?.premiereHeure ||
+            tacheDetailOuverte.heure
+          }
           employeIdInitial={tacheDetailOuverte.employe.id}
           employes={employes}
           travailFait={travailTermine(tacheDetailOuverte.tache, tacheDetailOuverte.employe)}
@@ -6605,7 +6682,14 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                 });
                 return copie;
               });
-              majDonneesTousLesTechniciens(t0.id, complement).catch(() =>
+              // Les lignes réécrites à l'instant (technicien ouvert + cochés)
+              // portent déjà les devis : on ne les relit/réécrit pas en
+              // parallèle (audit 2026-10-05 — l'ancienne lecture écrasait
+              // l'adresse ou la note qu'on venait de changer).
+              const reecrits = [tacheDetailOuverte.employe.id, ...(champs.autresCibles || [])]
+                .map((id) => employes.find((e) => e.id === id)?.courriel)
+                .filter(Boolean);
+              majDonneesTousLesTechniciens(t0.id, complement, { exclure: reecrits }).catch(() =>
                 ajouterJournal(`⚠️ Devis joints de « ${t0.titre || t0.clientNom} » affichés ici, mais NON transmis à tous les téléphones — réessaie.`)
               );
               const avant = new Set(Array.isArray(t0.devisJoints) ? t0.devisJoints : []);
@@ -6671,7 +6755,9 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           }
         />
       )}
-      {tacheEnEditionId && (
+      {/* La fiche ne s'ouvre que si la tâche existe encore (placée ou retirée
+          par un autre poste pendant l'édition : avant, la page plantait). */}
+      {tacheEnEditionId && tachesAttente.some((t) => t.id === tacheEnEditionId) && (
         <ModalEditionTache
           employes={employes}
           tache={tachesAttente.find((t) => t.id === tacheEnEditionId)}
@@ -6679,6 +6765,11 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           devisListe={devisListe}
           projets={projets}
           commandes={commandesPourTache(tacheEnEditionId)}
+          // 🛡️ (audit 2026-10-05) La date et l'heure PRÉVUES — avant, la fiche
+          // ouvrait sur aujourd'hui 07:00 et « Enregistrer » plaçait la tâche
+          // aujourd'hui chez le technicien prévu.
+          dateInitiale={tachesAttente.find((t) => t.id === tacheEnEditionId)?.datePrevue || undefined}
+          heureInitiale={tachesAttente.find((t) => t.id === tacheEnEditionId)?.heurePrevue || undefined}
           depot={depotDe(tacheEnEditionId) || null}
           prixDepots={prixDepots}
           onCorrigerZone={lectureSeule ? null : corrigerZoneTache}

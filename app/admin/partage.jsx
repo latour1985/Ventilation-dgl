@@ -2417,6 +2417,8 @@ export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer
   // d'une FACTURE seulement) ; pré-rempli depuis la tâche ou le projet,
   // modifiable pour cette facture, vide = aucun numéro.
   const [numeroSuivi, setNumeroSuivi] = useState(String(numeroSuiviDefaut || ""));
+  const envoiLanceRef = useRef(false);
+  const [envoiLance, setEnvoiLance] = useState(false);
   const courriels = client?.courriels || [];
   // Terme pré-rempli : celui du client s'il en a un de connu, sinon le
   // défaut de l'entreprise. Ne s'affiche que pour les vraies factures
@@ -2559,8 +2561,13 @@ export function ModalSelectionCourriel({ client, contexte, onConfirmer, onFermer
         <div className="mt-4 grid grid-cols-2 gap-2">
           <Button variant="outline" onClick={onFermer}>Annuler</Button>
           <Button
-            disabled={selection.length + extras.length === 0}
+            disabled={selection.length + extras.length === 0 || envoiLance}
             onClick={() => {
+              // 🛡️ (audit 2026-10-05) UN SEUL envoi par fenêtre : un double-clic
+              // créait deux devis (deux numéros, deux courriels au client).
+              if (envoiLanceRef.current) return;
+              envoiLanceRef.current = true;
+              setEnvoiLance(true);
               if (ajouterAFiche && onAjouterFiche) extras.forEach((x) => onAjouterFiche(x.email));
               // Le terme voyage AVEC la liste (propriété sur le tableau) —
               // les appelants qui ne lisent que les courriels ne changent pas.

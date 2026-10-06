@@ -1504,7 +1504,11 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
               );
             })()}
             <Button onClick={enregistrer} className="w-full">
-              {dejaPlanifiee ? "Enregistrer les modifications" : employeId ? "Enregistrer et assigner" : "Enregistrer"}
+              {dejaPlanifiee
+                ? "Enregistrer les modifications"
+                : employeIds.length > 0
+                  ? `Enregistrer et placer à l'horaire (${date})`
+                  : "Enregistrer"}
             </Button>
           </div>
 

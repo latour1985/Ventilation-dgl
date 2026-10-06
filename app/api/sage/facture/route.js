@@ -27,8 +27,20 @@ export async function POST(request) {
   } catch {
     return Response.json({ erreur: "Demande illisible." }, { status: 400 });
   }
-  const lignes = Array.isArray(corps?.lignes) ? corps.lignes.filter((l) => l && Number(l.prixUnitaire) >= 0) : [];
-  if (lignes.length === 0) return Response.json({ erreur: "Aucune ligne de facture." }, { status: 400 });
+  const brutes = Array.isArray(corps?.lignes) ? corps.lignes.filter((l) => l && Number.isFinite(Number(l.prixUnitaire))) : [];
+  if (brutes.length === 0) return Response.json({ erreur: "Aucune ligne de facture." }, { status: 400 });
+  // 🛡️ (audit 2026-10-05) Les lignes NÉGATIVES (dépôt déduit, rabais, pièce
+  // payée d'avance) étaient retirées en silence : Sage recevait un montant
+  // PLUS ÉLEVÉ que la facture du client. Avec une déduction, la copie
+  // comptable devient UNE ligne au total net — le montant est toujours exact.
+  const montantLigne = (l) =>
+    Number.isFinite(Number(l.montant)) ? Number(l.montant) : (Number(l.quantite) > 0 ? Number(l.quantite) : 1) * Number(l.prixUnitaire);
+  let lignes = brutes;
+  if (brutes.some((l) => montantLigne(l) < 0)) {
+    const net = Math.round(brutes.reduce((s, l) => s + montantLigne(l), 0) * 100) / 100;
+    if (net <= 0) return Response.json({ erreur: "Total net nul ou négatif — rien à copier dans Sage." }, { status: 400 });
+    lignes = [{ description: `Facture ${String(corps?.reference || "").slice(0, 40)} — total net (déductions incluses)`.replace("  ", " "), quantite: 1, prixUnitaire: net }];
+  }
 
   let acces;
   try {

@@ -40,7 +40,7 @@ import { listerProjets, sauvegarderProjet, sAbonnerProjets } from "@/lib/supabas
 import { listerTachesAttente, sauvegarderTacheAttente, retirerTacheAttente, sAbonnerTachesAttente } from "@/lib/supabase/taches";
 import { listerJournal, ajouterEntreeJournal } from "@/lib/supabase/journal";
 import { listerTaux, sauvegarderTaux } from "@/lib/supabase/tauxMetiers";
-import { listerDepots, creerDepot, creerDepotDejaPaye, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot, majDepotFactureQbo } from "@/lib/supabase/depots";
+import { listerDepots, creerDepot, creerDepotDejaPaye, marquerDepotPayeManuellement, annulerDepotDelai, sAbonnerDepots, taxesDepot, majDepotFactureQbo, remettreDepotEnAttente } from "@/lib/supabase/depots";
 import { ZONES_DEPOTS, listerPrixDepots, sauvegarderPrixDepots, zonesDepuis, supprimerZoneDepot } from "@/lib/supabase/prixDepots";
 import { listerCatalogue, sauvegarderItem, enregistrerItemsEnLot, desactiverItem, listerCatalogueRetires, reactiverItem, margePourcent, profitDollars, vendantPourMarge, sAbonnerCatalogue } from "@/lib/supabase/catalogue";
 import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse } from "@/lib/googlePlaces";
@@ -1592,6 +1592,8 @@ function AppAdmin() {
   const [depots, setDepots] = useState({});
   const depotsRef = useRef(depots);
   depotsRef.current = depots;
+  // Dépôts dont l'annulation pour délai est EN COURS (évite deux passages).
+  const delaisTraitesRef = useRef(new Set());
   useEffect(() => {
     if (!session) return;
     let annule = false;
@@ -1612,26 +1614,40 @@ function AppAdmin() {
   }, [session]);
   useEffect(() => {
     if (!session) return;
+    // 🛡️ AUDIT 2026-10-05 (critique) : un dépôt PAYÉ juste avant l'échéance
+    // était annulé ici d'après l'état connu du navigateur — VOID d'une
+    // facture payée, paiement détaché dans QuickBooks. Désormais :
+    //   1) l'annulation n'a lieu que si la BASE confirme « en attente » ;
+    //   2) le VOID refuse une facture qui a reçu un paiement (siImpayee) —
+    //      le dépôt revient alors « en attente » pour être reconnu payé.
     const verifier = () => {
       const maintenant = Date.now();
       Object.values(depotsRef.current).forEach((d) => {
         if (d.statut === "en_attente_paiement" && d.dateLimite && new Date(d.dateLimite).getTime() < maintenant) {
-          annulerDepotDelai(d.tacheId).catch(() => {});
-          setDepots((prev) => ({ ...prev, [d.tacheId]: { ...prev[d.tacheId], statut: "annule_delai" } }));
-          ajouterJournal(`⏰ Délai de 24 h dépassé — dépôt annulé, tâche non planifiable`);
-          // Facture de dépôt QuickBooks : annulation par VOID (jamais
-          // Delete — règle gelée). La séquence comptable reste pleine.
-          if (d.qboInvoiceId) {
-            annulerFactureDepot(d.qboInvoiceId)
-              .then((rv) =>
-                ajouterJournal(
-                  rv?.annulee
-                    ? `🧾 Facture de dépôt${d.qboDocNumber ? ` Nº ${d.qboDocNumber}` : ""} annulée par VOID dans QuickBooks`
-                    : `⚠️ VOID de la facture de dépôt refusé (${rv?.erreur || "?"}) — annule-la à la main dans QuickBooks`
-                )
-              )
-              .catch(() => {});
-          }
+          if (delaisTraitesRef.current.has(d.tacheId)) return;
+          delaisTraitesRef.current.add(d.tacheId);
+          annulerDepotDelai(d.tacheId)
+            .then(async (nb) => {
+              if (!nb) return; // plus « en attente » en base (payé, déjà annulé) — on ne touche à rien
+              setDepots((prev) => ({ ...prev, [d.tacheId]: { ...prev[d.tacheId], statut: "annule_delai" } }));
+              ajouterJournal(`⏰ Délai de 24 h dépassé — dépôt annulé, tâche non planifiable`);
+              // Facture de dépôt QuickBooks : annulation par VOID (jamais
+              // Delete — règle gelée). La séquence comptable reste pleine.
+              if (!d.qboInvoiceId) return;
+              const rv = await annulerFactureDepot(d.qboInvoiceId, { siImpayee: true });
+              if (rv?.dejaPayee) {
+                await remettreDepotEnAttente(d.tacheId).catch(() => {});
+                ajouterJournal(`💰 Facture de dépôt${d.qboDocNumber ? ` Nº ${d.qboDocNumber}` : ""} PAYÉE par le client — NON annulée ; le paiement sera reconnu dans quelques minutes.`);
+                return;
+              }
+              ajouterJournal(
+                rv?.annulee
+                  ? `🧾 Facture de dépôt${d.qboDocNumber ? ` Nº ${d.qboDocNumber}` : ""} annulée par VOID dans QuickBooks`
+                  : `⚠️ VOID de la facture de dépôt refusé (${rv?.erreur || "?"}) — annule-la à la main dans QuickBooks`
+              );
+            })
+            .catch(() => {})
+            .finally(() => delaisTraitesRef.current.delete(d.tacheId));
         }
       });
     };
@@ -2670,26 +2686,48 @@ function AppAdmin() {
         memoire[el.id] = JSON.stringify(el);
       });
     };
+    // 🛡️ FUSION AU LIEU D'ÉCRASER (audit 2026-10-05) : un rechargement
+    // (un autre poste a changé quelque chose) remplaçait toute la liste —
+    // une fiche modifiée ICI et pas encore enregistrée (600 ms) revenait
+    // en arrière, une tâche créée ici disparaissait. On garde la version
+    // locale de ce qui attend d'être enregistré, et une tâche retirée ici
+    // ne revient pas avant son effacement en base.
+    const fusionnerAvecLocal = (distante, locale, instantane) => {
+      const loc = locale || [];
+      const idsLocaux = new Set(loc.map((el) => el.id));
+      const enAttente = new Map(loc.filter((el) => instantane[el.id] !== JSON.stringify(el)).map((el) => [el.id, el]));
+      const resultat = [];
+      distante.forEach((el) => {
+        if (instantane[el.id] !== undefined && !idsLocaux.has(el.id)) return; // retirée ici, effacement en route
+        resultat.push(enAttente.get(el.id) || el);
+      });
+      enAttente.forEach((el, id) => {
+        if (!distante.some((d) => d.id === id)) resultat.push(el);
+      });
+      return resultat;
+    };
+    const appliquer = (cle, liste, setListe) => {
+      const instantane = { ...dejaEnregistre.current[cle] };
+      semer(cle, liste);
+      setListe((prev) => fusionnerAvecLocal(liste, prev, instantane));
+    };
     const charger = () => {
       listerClients()
         .then((liste) => {
           if (annule || liste.length === 0) return;
-          semer("clients", liste);
-          setClients(liste);
+          appliquer("clients", liste, setClients);
         })
         .catch(() => {});
       listerProjets()
         .then((liste) => {
           if (annule || liste.length === 0) return;
-          semer("projets", liste);
-          setProjets(liste);
+          appliquer("projets", liste, setProjets);
         })
         .catch(() => {});
       listerTachesAttente()
         .then((liste) => {
           if (annule) return;
-          semer("taches", liste);
-          setTachesAttente(liste);
+          appliquer("taches", liste, setTachesAttente);
         })
         .catch(() => {});
     };
@@ -2736,9 +2774,13 @@ function AppAdmin() {
           const signature = JSON.stringify(element);
           if (memoire[cle][element.id] === signature) return;
           memoire[cle][element.id] = signature;
-          sauvegarder(element).catch(() =>
-            ajouterJournal(`⚠️ ${etiquette} « ${element.nom || element.titre || element.id} » affiché localement mais NON enregistré — vérifie la connexion.`)
-          );
+          sauvegarder(element).catch(() => {
+            // 🛡️ (audit 2026-10-05) Échec : la marque « enregistré » est
+            // retirée — le prochain passage RÉESSAIE, et un rechargement
+            // ne remplace pas cette fiche par l'ancienne version.
+            if (memoire[cle][element.id] === signature) delete memoire[cle][element.id];
+            ajouterJournal(`⚠️ ${etiquette} « ${element.nom || element.titre || element.id} » affiché localement mais NON enregistré — vérifie la connexion.`);
+          });
         });
       };
       synchroniser(clients, "clients", sauvegarderClient, "Client");
@@ -4567,14 +4609,20 @@ function AppAdmin() {
               // Report SEULEMENT si la semaine de la ligne est marquée payée
               // (snippet 152) — sinon la correction s'applique à sa semaine.
               if (!t.date || !estSemainePayee(t.date) || dimancheDeSemaineISO(t.date) >= dimancheCourant) return a;
-              const dejaCetteSemaine = t.corrigeLe && dimancheDeSemaineISO(t.corrigeLe) === dimancheCourant;
+              // 🛡️ (audit 2026-10-05) Les heures « d'avant » restent celles
+              // d'ORIGINE tant que le report précédent n'a pas été payé (sa
+              // semaine pas encore marquée payée) — sinon une 2e correction
+              // effaçait le 1er report et le technicien perdait des heures.
+              const garderAvant =
+                t.corrigeLe && t.heuresAvantCorrection != null &&
+                (dimancheDeSemaineISO(t.corrigeLe) === dimancheCourant || !estSemainePayee(t.corrigeLe));
               // Journée BLOQUÉE = exclue de la paie de sa semaine : rien n'a été
               // versé (revue 2026-09-22 — avant : « payée 16 h » et report −8 h).
               const journeeBloquee = joursBloques(travaux).has(cleJour(t.employeEmail, t.date));
               return {
                 ...a,
                 corrigeLe: new Date().toISOString(),
-                heuresAvantCorrection: journeeBloquee ? 0 : dejaCetteSemaine && t.heuresAvantCorrection != null ? t.heuresAvantCorrection : Number(t.heures) || 0,
+                heuresAvantCorrection: journeeBloquee ? 0 : garderAvant ? t.heuresAvantCorrection : Number(t.heures) || 0,
               };
             };
             const resume = ajustements
@@ -4631,11 +4679,18 @@ function AppAdmin() {
             const dimancheCourant = dimancheDeSemaineISO(new Date());
             const lignesEnrichies = lignes.map((l) => {
               if (!l.date || !estSemainePayee(l.date) || dimancheDeSemaineISO(l.date) >= dimancheCourant) return l;
-              const dejaCetteSemaine = l.corrigeLe && dimancheDeSemaineISO(l.corrigeLe) === dimancheCourant;
+              // 🛡️ (audit 2026-10-05, critique) Même règle que « Corriger » :
+              // une journée BLOQUÉE n'a rien versé (avant = 0) — la validation
+              // gardait les heures du chrono oublié et le technicien perdait
+              // toutes ses heures. Et le report précédent non payé est gardé.
+              const garderAvant =
+                l.corrigeLe && l.heuresAvantCorrection != null &&
+                (dimancheDeSemaineISO(l.corrigeLe) === dimancheCourant || !estSemainePayee(l.corrigeLe));
+              const journeeBloquee = joursBloques(travaux).has(cleJour(l.employeEmail, l.date));
               return {
                 ...l,
                 corrigeLeAEcrire: new Date().toISOString(),
-                heuresAvantCorrectionAEcrire: dejaCetteSemaine && l.heuresAvantCorrection != null ? l.heuresAvantCorrection : Number(l.heures) || 0,
+                heuresAvantCorrectionAEcrire: journeeBloquee ? 0 : garderAvant ? l.heuresAvantCorrection : Number(l.heures) || 0,
               };
             });
             const tardive = lignesEnrichies.some((l) => l.corrigeLeAEcrire !== undefined && l.corrigeLeAEcrire !== null && l.corrigeLeAEcrire);

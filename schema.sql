@@ -7226,3 +7226,54 @@ alter table prix_depots add column if not exists territoire text;
 alter table clients_app add column if not exists langue text not null default 'fr';
 alter table clients_app drop constraint if exists clients_app_langue_check;
 alter table clients_app add constraint clients_app_langue_check check (langue in ('fr', 'en'));
+
+-- ============================================================
+-- 164 - DEVIS : LA RÉPONSE TOMBE SUR LA VERSION LUE (2026-10-05)
+-- ------------------------------------------------------------
+-- Audit 2026-10-05 : si le bureau publiait une nouvelle version du
+-- devis PENDANT que le client avait la page ouverte, son « J'accepte »
+-- s'écrivait sur la NOUVELLE version — celle qu'il n'avait pas lue.
+-- La page envoie maintenant le numéro de la version affichée
+-- (p_numero) ; si ce n'est plus la version active, rien ne s'écrit et
+-- la page demande au client de recharger.
+-- Compatible : sans p_numero (ancienne page), même comportement qu'avant.
+-- ============================================================
+drop function if exists repondre_devis(text,text,text,text,text,text);
+create or replace function repondre_devis(
+  p_jeton text, p_reponse text, p_nom text,
+  p_message text default null, p_version text default null, p_texte text default null,
+  p_numero text default null
+) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare v_ok boolean;
+begin
+  if p_reponse not in ('accepte','refuse','modification') then return false; end if;
+  if coalesce(trim(p_nom), '') = '' then return false; end if;
+  update devis_app d set
+    reponse_client = p_reponse,
+    repondu_le = now(),
+    repondu_par_nom = trim(p_nom),
+    message_client = nullif(trim(coalesce(p_message,'')), ''),
+    conditions_version = p_version,
+    conditions_texte = p_texte,
+    statut = case when p_reponse = 'accepte' then 'accepte' else d.statut end
+  where d.version_active
+    and d.reponse_client is null                    -- jamais deux fois
+    and (p_numero is null or d.numero = p_numero)   -- la version LUE seulement
+    and exists (
+      select 1 from devis_app porteur
+       where porteur.jeton_public = p_jeton
+         and coalesce(porteur.numero_base, porteur.numero) = coalesce(d.numero_base, d.numero)
+         and porteur.entreprise_id = d.entreprise_id
+         and (porteur.jeton_expire_le is null or porteur.jeton_expire_le > now())
+    )
+  returning true into v_ok;
+  return coalesce(v_ok, false);
+end;
+$$;
+revoke all on function repondre_devis(text,text,text,text,text,text,text) from public;
+grant execute on function repondre_devis(text,text,text,text,text,text,text) to anon, authenticated;
+notify pgrst, 'reload schema';
+
+-- Vérification : une seule ligne, avec 7 paramètres.
+select proname, pronargs from pg_proc where proname = 'repondre_devis';

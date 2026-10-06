@@ -180,9 +180,21 @@ function ContenuDevis({ params }) {
         // Le texte exact affiché — c'est la pièce à conviction.
         version: VERSION_CONDITIONS,
         texte: reponse === "accepte" ? CONDITIONS_TEXTE : null,
+        // 🛡️ (audit 2026-10-05) La réponse vise la version LUE — jamais
+        // une version publiée par le bureau pendant la lecture.
+        numero: devis.numero,
       });
       if (!ok) {
-        setErreur("deja");
+        // Pourquoi refusé ? Une nouvelle version sans réponse = le devis
+        // a changé pendant la lecture ; sinon, déjà répondu ou expiré.
+        let raison = "deja";
+        try {
+          const frais = await chargerDevisPublic(jeton);
+          if (frais && !frais.reponseClient && frais.numero !== devis.numero) raison = "version";
+        } catch {
+          // on garde « deja »
+        }
+        setErreur(raison);
         setEnvoi("");
         return;
       }
@@ -198,6 +210,7 @@ function ContenuDevis({ params }) {
     chargement: "Impossible de charger ce devis. Réessayez dans quelques minutes.",
     option: "Cette option ne peut plus être choisie (déjà répondue ou lien expiré). Rechargez la page.",
     deja: "Ce devis a déjà reçu une réponse, ou le lien est expiré. Communiquez avec nous.",
+    version: "Ce devis vient d'être mis à jour par l'entreprise. Rechargez la page pour voir la nouvelle version avant de répondre.",
     envoi: "L'envoi a échoué. Vérifiez votre connexion et réessayez.",
   };
   const texteErreur = erreur ? t(MESSAGES_ERREUR[erreur] || erreur) : "";

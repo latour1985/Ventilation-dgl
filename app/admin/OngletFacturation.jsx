@@ -2482,6 +2482,32 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     );
   };
   const [bonFacturationId, setBonFacturationId] = useState(null);
+  // 🛡️ Verrou de facturation + bons « à vérifier » (audit 2026-10-05).
+  const facturationsEnCoursRef = useRef(new Set());
+  const [bonsEnFacturation, setBonsEnFacturation] = useState([]);
+  const CLE_BONS_A_VERIFIER = "fluxya_bons_a_verifier_v1";
+  const [bonsAVerifier, setBonsAVerifier] = useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem(CLE_BONS_A_VERIFIER) || "{}") || {};
+    } catch {
+      return {};
+    }
+  });
+  const ecrireAVerifier = (maj) => {
+    try {
+      window.localStorage.setItem(CLE_BONS_A_VERIFIER, JSON.stringify(maj));
+    } catch {
+      // stockage indisponible — la marque vit pour la session
+    }
+    return maj;
+  };
+  const marquerAVerifier = (ids, raison) =>
+    setBonsAVerifier((prev) => ecrireAVerifier({ ...prev, ...Object.fromEntries((ids || []).map((id) => [id, { le: new Date().toISOString(), raison: String(raison || "") }])) }));
+  const oublierAVerifier = (ids) =>
+    setBonsAVerifier((prev) => ecrireAVerifier(Object.fromEntries(Object.entries(prev).filter(([id]) => !(ids || []).includes(id)))));
+  // « Réseau indisponible » = la requête est partie mais sa réponse n'est
+  // jamais revenue : la facture existe peut-être (≠ refus de QuickBooks).
+  const reponsePerdue = (erreur) => /r[ée]seau indisponible|failed to fetch|d[ée]lai d[ée]pass[ée]/i.test(String(erreur || ""));
   // Fenêtre d'avant-envoi : { mode: "simple"|"progressive", bonId,
   // info?, montant, clientNom, courriels } — remplie quand le choix des
   // courriels est confirmé, juste AVANT l'émission réelle.
@@ -3440,7 +3466,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     const d = new Date(Date.now() + Number(m[1]) * 24 * 60 * 60 * 1000);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
-  const facturerBonMaison = async (id, choixCourriels) => {
+  const facturerBonMaisonBrut = async (id, choixCourriels) => {
     const b = bons.find((x) => x.id === id);
     if (!b) return;
     const fiche = trouverClientDuBon(b);
@@ -3488,6 +3514,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           .join("\n"),
       });
     } catch (e) {
+      // Panne de réseau (pas un refus de la base) : la facture est PEUT-ÊTRE créée.
+      if (!e?.code) marquerAVerifier([id], e?.message || "réseau");
       ajouterJournal(`⚠️ Facture maison NON créée pour « ${b.projet} » : ${e?.message || "erreur"} — le bon reste en attente.`);
       return;
     }
@@ -3531,7 +3559,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       const rs = await creerFactureSageCopie({
         clientId: fiche?.id || null,
         clientNom: b.client || "",
-        lignes: lignesMaison.map((l) => ({ description: l.description, quantite: l.quantite, prixUnitaire: l.prix_unitaire })),
+        // Le montant de chaque ligne voyage aussi : la route en tire le total net exact.
+        lignes: lignesMaison.map((l) => ({ description: l.description, quantite: l.quantite, prixUnitaire: l.prix_unitaire, montant: l.montant })),
         reference: creee.numero,
         date: dateISO(new Date()),
       }).catch(() => ({}));
@@ -3887,7 +3916,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // LIGNE PAR BON (date + description + montant) : le client voit le
   // détail de son mois, et les N bons passent « facturés » d'un coup —
   // ils quittent la pile, donc plus de risque de facturer deux fois.
-  const facturerGroupe = async (groupe, choixCourriels, paiements = {}) => {
+  const facturerGroupeBrut = async (groupe, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
     const bonsDuGroupe = (groupe?.bons || []).filter((b) => resteAFacturerDe(b) > 0);
     if (bonsDuGroupe.length === 0) return;
@@ -3960,6 +3989,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       adresseTravaux: bonsDuGroupe[0]?.adresseTravaux || null,
     });
     if (r?.erreur) {
+      if (reponsePerdue(r.erreur)) {
+        marquerAVerifier(bonsDuGroupe.map((b) => b.id), r.erreur);
+        ajouterJournal(`⚠️ Facture groupée pour ${clientNom} : la réponse de QuickBooks s'est PERDUE (${r.erreur}). Elle est PEUT-ÊTRE créée — vérifie dans QuickBooks avant de refacturer ces ${bonsDuGroupe.length} bons.`);
+        return;
+      }
       ajouterJournal(`⚠️ Facture groupée NON créée pour ${clientNom} : ${r.erreur} — les ${bonsDuGroupe.length} bons restent en attente`);
       return;
     }
@@ -4049,7 +4083,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     );
   };
 
-  const envoyerQb = async (id, choixCourriels, paiements = {}) => {
+  const envoyerQbBrut = async (id, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
     const b = bons.find((x) => x.id === id);
     if (!b) return;
@@ -4084,6 +4118,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       qboEstimateId: (b.devisNumero && devisAJourPourNumero(devisListe, b.devisNumero)?.qboEstimateId) || null,
     });
     if (r?.erreur) {
+      if (reponsePerdue(r.erreur)) {
+        marquerAVerifier([id], r.erreur);
+        ajouterJournal(`⚠️ Facture pour "${b.projet}" : la réponse de QuickBooks s'est PERDUE (${r.erreur}). Elle est PEUT-ÊTRE créée — vérifie dans QuickBooks avant de refacturer.`);
+        return;
+      }
       ajouterJournal(`⚠️ Facture QuickBooks NON créée pour "${b.projet}" : ${r.erreur} — le bon reste en attente`);
       return;
     }
@@ -4159,7 +4198,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // montant possible (voir ModalFacturationDevis) — le statut ne passe
   // à « envoyé » que lorsque le cumul atteint le montant total du
   // devis/contrat.
-  const emettreFacture = async (bonId, { montant, type, detail, lignesFacture }, choixCourriels, paiements = {}) => {
+  const emettreFactureBrut = async (bonId, { montant, type, detail, lignesFacture }, choixCourriels, paiements = {}) => {
     const destinataires = listeDestinataires(choixCourriels);
     // Le devis maison d'abord ; sinon le devis QuickBooks retrouvé par
     // numéro — son total sert au statut « envoyé » (cumul atteint).
@@ -4213,6 +4252,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       // QuickBooks, et l'estimate se ferme quand tout est facturé.
       qboEstimateId: devisCourant?.qboEstimateId || devisCourant?.estimateId || null,
     });
+    if (rQbo?.erreur && reponsePerdue(rQbo.erreur)) {
+      marquerAVerifier([bonId], rQbo.erreur);
+      ajouterJournal(`⚠️ Facture progressive : la réponse de QuickBooks s'est PERDUE (${rQbo.erreur}). Elle est PEUT-ÊTRE créée — vérifie dans QuickBooks avant de refacturer.`);
+      return;
+    }
     if (rQbo?.erreur || rQbo?.nonConnecte) {
       ajouterJournal(
         rQbo?.nonConnecte
@@ -4297,6 +4341,43 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     setBonFacturationId(null);
     setFactureEnAttenteCourriel(null);
   };
+
+  // 🛡️ UNE FACTURATION À LA FOIS PAR BON (audit 2026-10-05) : un double-clic,
+  // ou une fenêtre refermée pendant l'envoi puis relancée, créait une 2e
+  // facture. Un bon en cours de facturation refuse tout second envoi.
+  // RÉPONSE PERDUE (réseau coupé après l'envoi) : la facture existe peut-
+  // être — le bon est marqué « à vérifier » et ne se refacture qu'après
+  // confirmation explicite (gardé sur ce poste, même après rechargement).
+  const avecVerrouFacturation = async (ids, fn) => {
+    const cles = [...new Set((ids || []).filter(Boolean))];
+    if (cles.length === 0 || cles.some((c) => facturationsEnCoursRef.current.has(c))) {
+      ajouterJournal("⏳ Facturation déjà en cours pour ce bon — attends la fin avant de recommencer.");
+      return;
+    }
+    const douteux = cles.filter((c) => bonsAVerifier[c]);
+    if (douteux.length > 0) {
+      const ok =
+        typeof window !== "undefined" &&
+        window.confirm(
+          "⚠️ La dernière tentative de facturation de ce bon n'a pas eu de réponse : la facture existe PEUT-ÊTRE déjà dans QuickBooks.\n\nAs-tu vérifié dans QuickBooks qu'elle n'existe pas ? OK = facturer quand même, Annuler = vérifier d'abord."
+        );
+      if (!ok) return;
+      oublierAVerifier(douteux);
+    }
+    cles.forEach((c) => facturationsEnCoursRef.current.add(c));
+    setBonsEnFacturation((prev) => [...new Set([...prev, ...cles])]);
+    try {
+      return await fn();
+    } finally {
+      cles.forEach((c) => facturationsEnCoursRef.current.delete(c));
+      setBonsEnFacturation((prev) => prev.filter((c) => !cles.includes(c)));
+    }
+  };
+  const facturerBonMaison = (id, ...reste) => avecVerrouFacturation([id], () => facturerBonMaisonBrut(id, ...reste));
+  const envoyerQb = (id, ...reste) => avecVerrouFacturation([id], () => envoyerQbBrut(id, ...reste));
+  const emettreFacture = (bonId, ...reste) => avecVerrouFacturation([bonId], () => emettreFactureBrut(bonId, ...reste));
+  const facturerGroupe = (groupe, ...reste) =>
+    avecVerrouFacturation((groupe?.bons || []).map((b) => b.id), () => facturerGroupeBrut(groupe, ...reste));
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
@@ -5245,6 +5326,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                     {depotPayePour(b.tacheId).payeLe ? ` le ${new Date(depotPayePour(b.tacheId).payeLe).toLocaleDateString("fr-CA")}` : ""} · sera déduit de la facture
                   </p>
                 )}
+                {bonsAVerifier[b.id] && b.statutQb !== "envoye" && (
+                  <p className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                    ⚠️ Dernière facturation sans réponse ({String(bonsAVerifier[b.id].le || "").slice(0, 10)}) — vérifie dans QuickBooks qu&apos;elle n&apos;existe pas avant de refacturer.
+                  </p>
+                )}
                 {correctionsZonePour(b.tacheId).length > 0 && (() => {
                   const c = correctionsZonePour(b.tacheId).slice(-1)[0];
                   return (
@@ -5363,6 +5449,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                 ) : b.statutQb === "envoye" ? (
                   <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600">
                     <CheckCircle2 size={12} /> Facturé
+                  </span>
+                ) : bonsEnFacturation.includes(b.id) ? (
+                  <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold text-sky-700">
+                    ⏳ Facturation en cours…
                   </span>
                 ) : b.prixNonListe ? (
                   <Button onClick={() => setBonAReviserId(b.id)} className="mt-1 min-h-[40px] gap-1 px-3 py-1.5 text-[11px] md:min-h-0 md:px-2 md:py-1 md:text-[10px]">

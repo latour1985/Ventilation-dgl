@@ -695,10 +695,17 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       const expire = new Date(Date.now() + JOURS_VALIDITE_LIEN_DEVIS * 24 * 60 * 60 * 1000).toISOString();
       const maj = { ...devis, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
+      // 🛡️ (audit 2026-10-05) persisterDevis répond false (il ne lève pas
+      // d'erreur) : le garde-fou ne se déclenchait jamais et le lien mort
+      // partait quand même.
+      let enregistre = false;
       try {
-        await persisterDevis(maj);
+        enregistre = (await persisterDevis(maj)) !== false;
       } catch {
-        ajouterJournal(`⚠️ Lien d'acceptation de ${devis.numero} créé localement mais NON enregistré — le client verrait une page invalide.`);
+        enregistre = false;
+      }
+      if (!enregistre) {
+        ajouterJournal(`⚠️ Lien d'acceptation de ${devis.numero} créé localement mais NON enregistré — le client verrait une page invalide. Réessaie.`);
         return;
       }
       ajouterJournal(
@@ -879,9 +886,14 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       const maj = { ...devisCourant, jetonPublic: jeton, jetonExpireLe: expire };
       setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? maj : d)));
       devisCourant = maj;
+      // 🛡️ (audit 2026-10-05) Même garde : false = PAS enregistré → rien ne part.
+      let enregistre = false;
       try {
-        await persisterDevis(maj);
+        enregistre = (await persisterDevis(maj)) !== false;
       } catch {
+        enregistre = false;
+      }
+      if (!enregistre) {
         ajouterJournal(`⚠️ Devis ${devis.numero} NON envoyé — le lien n'a pas pu être enregistré. Réessaie.`);
         setEnvoiDevisEnCours(false);
         return;
