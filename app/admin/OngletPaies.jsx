@@ -7,7 +7,7 @@
 // le code est déplacé tel quel — seuls des export/import s'ajoutent.
 
 import React, { useState } from "react";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Pencil, Phone } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Copy, Pencil, Phone, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
 import { joursBloques, cleJour, enregistrerTravailPourEmploye } from "@/lib/supabase/travauxEffectues";
 import { dateISO, ajouterJours, dimancheDeSemaineISO, Button, DefilementHorizontal, transportQuotidienPayePour } from "./partage";
@@ -36,6 +36,11 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   const [detailAdmin, setDetailAdmin] = useState(null);
   // Avertissement avant de copier une paie incomplète (journée bloquée).
   const [avertissementPaieOuvert, setAvertissementPaieOuvert] = useState(false);
+  // 👁️ APERÇU DE LA PAIE AVANT EXPORT (2026-10-05, chantier validé) — le
+  // même tableau que « Copier pour la paie », à l'écran, avec les totaux,
+  // les repères 🔒🌙📅↩️ et un filtre par technicien ("" = toute l'équipe).
+  const [apercuPaieOuvert, setApercuPaieOuvert] = useState(false);
+  const [filtreApercu, setFiltreApercu] = useState("");
   // Règles de paie lues dans les Paramètres de l'entreprise (seuil des
   // heures supplémentaires, heure de bascule « Nuit ») — plus codées en
   // dur, pour qu'un changement de convention se règle dans l'écran.
@@ -459,6 +464,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
         if (e.parJour[iso]) acc.parJour[iso] = (acc.parJour[iso] || 0) + e.parJour[iso];
       });
       acc.chantier += e.chantier;
+      acc.residentiel += e.residentiel || 0;
       acc.transport += e.transport;
       acc.transportCcq += e.transportCcq;
       acc.administratif += e.administratif;
@@ -471,7 +477,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
       acc.total += e.total;
       return acc;
     },
-    { parJour: {}, chantier: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, course: 0, diner: 0, nuit: 0, weekend: 0, report: 0, total: 0 }
+    { parJour: {}, chantier: 0, residentiel: 0, transport: 0, transportCcq: 0, administratif: 0, divers: 0, course: 0, diner: 0, nuit: 0, weekend: 0, report: 0, total: 0 }
   );
 
   // 🕐 HORLOGE STANDARD (demande du propriétaire, 2026-08-19) : à
@@ -685,6 +691,151 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
           </div>
         </div>
       )}
+
+      {/* 👁️ APERÇU DE LA PAIE — exactement les colonnes de l'export, en
+          décimales comme lui. Repères : 🔒 journée bloquée (pas dans les
+          totaux), 🌙 heures de nuit, 📅 heures de week-end, ↩️ report d'une
+          correction tardive. Rien ne se modifie ici : on regarde, puis on
+          copie (toute l'équipe, même si un filtre est actif). */}
+      {apercuPaieOuvert && (() => {
+        const d2 = (n) => (Math.abs(Number(n) || 0) > 0.004 ? Number(n).toFixed(2) : "");
+        const bloqueesDe = (email) => journeesBloquees.filter((j) => String(j.email || "").toLowerCase() === String(email || "").toLowerCase());
+        const lignes = employesSemaine.filter((e) => !filtreApercu || e.email === filtreApercu);
+        const colonnes = [
+          { cle: "chantier", lib: "Chantier", v: (e) => e.chantier },
+          { cle: "residentiel", lib: "dont Résidentiel", v: (e) => e.residentiel || 0 },
+          { cle: "transport", lib: "Transport", v: (e) => e.transport },
+          { cle: "transportCcq", lib: "Transport journalier", v: (e) => e.transportCcq },
+          { cle: "administratif", lib: "Administratif", v: (e) => e.administratif },
+          { cle: "divers", lib: "Divers", v: (e) => e.divers },
+          { cle: "course", lib: "Course", v: (e) => e.course },
+          { cle: "diner", lib: "Dîner", v: (e) => e.diner },
+          { cle: "nuit", lib: "🌙 Nuit", v: (e) => e.nuit },
+          { cle: "weekend", lib: "📅 Sam/Dim", v: (e) => e.weekend },
+          { cle: "report", lib: "↩️ Report ±", v: (e) => e.report },
+        ];
+        const nbBloquees = (filtreApercu ? bloqueesDe(filtreApercu) : journeesBloquees).length;
+        return (
+          <div className="fenetre-mobile fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(ev) => { if (ev.target === ev.currentTarget) setApercuPaieOuvert(false); }}>
+            <div className="panneau-mobile flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white">
+              <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 p-4">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-extrabold text-slate-900">👁️ Aperçu de la paie — semaine {labelSemaine}</h3>
+                  <p className="text-[11px] text-slate-500">Le même tableau que « Copier pour la paie » (heures en décimales). Vérifie, puis copie.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={filtreApercu}
+                    onChange={(e) => setFiltreApercu(e.target.value)}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-base sm:text-xs"
+                    aria-label="Filtrer par technicien"
+                  >
+                    <option value="">Toute l&apos;équipe ({employesSemaine.length})</option>
+                    {employesSemaine.map((e) => (
+                      <option key={e.email} value={e.email}>{e.nom}</option>
+                    ))}
+                  </select>
+                  <button onClick={() => setApercuPaieOuvert(false)} aria-label="Fermer" className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+                </div>
+              </div>
+
+              <div className="overflow-auto p-4">
+                {nbBloquees > 0 && (
+                  <p className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[11px] font-bold text-red-700">
+                    🔒 {nbBloquees} journée{nbBloquees > 1 ? "s" : ""} bloquée{nbBloquees > 1 ? "s" : ""} — PAS comptée{nbBloquees > 1 ? "s" : ""} dans les totaux ci-dessous. Débloque-{nbBloquees > 1 ? "les" : "la"} avant de copier.
+                  </p>
+                )}
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full min-w-[1100px] text-[11px] tabular-nums">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="sticky left-0 z-10 bg-slate-50 px-2 py-2 text-left font-bold">Technicien</th>
+                        {jours.map((j, i) => (
+                          <th key={isoJours[i]} className="px-1.5 py-2 text-right font-bold capitalize">
+                            {j.toLocaleDateString("fr-CA", { weekday: "short", day: "numeric" })}
+                          </th>
+                        ))}
+                        {colonnes.map((c) => (
+                          <th key={c.cle} className="px-1.5 py-2 text-right font-bold">{c.lib}</th>
+                        ))}
+                        <th className="px-1.5 py-2 text-right font-bold">Régulières</th>
+                        <th className="px-1.5 py-2 text-right font-bold">Suppl. (&gt;{seuilSupp} h)</th>
+                        <th className="bg-slate-100 px-2 py-2 text-right font-extrabold text-slate-700">TOTAL À PAYER</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lignes.map((e) => {
+                        const bloquees = bloqueesDe(e.email);
+                        const reperes = [
+                          bloquees.length > 0 ? { i: "🔒", t: `${bloquees.length} journée(s) bloquée(s) — pas dans les totaux` } : null,
+                          Math.abs(e.nuit) > 0.004 ? { i: "🌙", t: `Nuit : ${e.nuit.toFixed(2)} h` } : null,
+                          Math.abs(e.weekend) > 0.004 ? { i: "📅", t: `Week-end : ${e.weekend.toFixed(2)} h` } : null,
+                          Math.abs(e.report) > 0.004 ? { i: "↩️", t: `Report d'une correction tardive : ${e.report > 0 ? "+" : ""}${e.report.toFixed(2)} h` } : null,
+                        ].filter(Boolean);
+                        return (
+                          <tr key={e.email} className="border-t border-slate-100">
+                            <td className="sticky left-0 z-10 bg-white px-2 py-1.5 text-left font-bold text-slate-800">
+                              <span className="whitespace-nowrap">{e.nom}</span>
+                              {reperes.map((r) => (
+                                <span key={r.i} title={r.t} className="ml-1 cursor-help">{r.i}</span>
+                              ))}
+                            </td>
+                            {isoJours.map((iso) => {
+                              const bloquee = bloquees.some((j) => j.date === iso);
+                              return (
+                                <td key={iso} className={`px-1.5 py-1.5 text-right ${bloquee ? "bg-red-50 font-bold text-red-600" : "text-slate-700"}`}>
+                                  {bloquee ? "🔒" : d2(e.parJour[iso])}
+                                </td>
+                              );
+                            })}
+                            {colonnes.map((c) => (
+                              <td key={c.cle} className={`px-1.5 py-1.5 text-right ${c.cle === "report" && Math.abs(e.report) > 0.004 ? "font-bold text-purple-600" : "text-slate-700"}`}>
+                                {d2(c.v(e))}
+                              </td>
+                            ))}
+                            <td className="px-1.5 py-1.5 text-right text-slate-700">{e.regulieres.toFixed(2)}</td>
+                            <td className={`px-1.5 py-1.5 text-right ${e.supplementaires > 0 ? "font-bold text-amber-700" : "text-slate-700"}`}>{d2(e.supplementaires)}</td>
+                            <td className="bg-slate-50 px-2 py-1.5 text-right font-extrabold text-slate-900">{(e.total + e.report).toFixed(2)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-300 bg-slate-100 font-extrabold text-slate-900">
+                        <td className="sticky left-0 z-10 bg-slate-100 px-2 py-2 text-left">TOTAL ÉQUIPE</td>
+                        {isoJours.map((iso) => (
+                          <td key={iso} className="px-1.5 py-2 text-right">{d2(totauxEquipe.parJour[iso])}</td>
+                        ))}
+                        {colonnes.map((c) => (
+                          <td key={c.cle} className="px-1.5 py-2 text-right">{d2(c.v(totauxEquipe))}</td>
+                        ))}
+                        <td className="px-1.5 py-2 text-right" />
+                        <td className="px-1.5 py-2 text-right" />
+                        <td className="bg-slate-200 px-2 py-2 text-right">{(totauxEquipe.total + totauxEquipe.report).toFixed(2)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                {filtreApercu && (
+                  <p className="mt-1.5 text-[10px] text-slate-400">Filtre actif : la ligne « TOTAL ÉQUIPE » reste celle de toute l&apos;équipe.</p>
+                )}
+                <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                  🔒 journée bloquée (chrono oublié — pas dans les totaux) · 🌙 heures de nuit · 📅 heures de week-end · ↩️ report d&apos;une correction faite après une paie déjà versée. Survole un repère pour le détail.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 p-4">
+                <Button variant="outline" onClick={() => setApercuPaieOuvert(false)} className="min-h-0 px-4 py-2 text-xs">
+                  Fermer
+                </Button>
+                <Button onClick={() => copierPourLaPaie()} className="min-h-0 px-4 py-2 text-xs">
+                  {copie ? <><Check size={14} /> Copié !</> : <><Copy size={14} /> Copier pour la paie (toute l&apos;équipe)</>}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* AVERTISSEMENT AVANT DE COPIER UNE PAIE INCOMPLÈTE */}
       {avertissementPaieOuvert && (
@@ -1914,9 +2065,14 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
             <p className="text-[11px] text-slate-400">
               Heures régulières : jusqu'à {seuilSupp} h/semaine · au-delà = heures supplémentaires (taux et demi, normes du Québec). Clique le <span className="font-bold">nom</span> d'un technicien pour sa semaine complète, ou la <span className="font-bold">cellule d'un jour</span> pour le détail de cette journée.
             </p>
-            <Button onClick={() => copierPourLaPaie()} className="min-h-0 px-4 py-2 text-xs">
-              {copie ? <><Check size={14} /> Copié !</> : <><Copy size={14} /> Copier pour la paie</>}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setApercuPaieOuvert(true)} className="min-h-0 px-4 py-2 text-xs">
+                👁️ Vérifier avant export
+              </Button>
+              <Button onClick={() => copierPourLaPaie()} className="min-h-0 px-4 py-2 text-xs">
+                {copie ? <><Check size={14} /> Copié !</> : <><Copy size={14} /> Copier pour la paie</>}
+              </Button>
+            </div>
           </div>
           {/* 💵 PAIE FAITE ? (snippet 152, 2026-09-21) — c'est CE geste qui
               décide si une correction devient un report. Offert seulement

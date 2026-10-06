@@ -993,7 +993,19 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // 📍 Unités des AUTRES adresses : repliées par défaut (2026-09-14,
   // règle du propriétaire : « les numéros doivent apparaître s'il
   // s'agit de la même adresse que les travaux »).
-  const [autresUnitesOuvertes, setAutresUnitesOuvertes] = useState(false);
+  // 📍 (2026-10-05) Groupées PAR ADRESSE : chaque autre adresse est une
+  // ligne repliée qu'on ouvre d'un clic — { cléAdresse: true }.
+  const [groupesUnitesOuverts, setGroupesUnitesOuverts] = useState({});
+  // 📍 Clé d'une adresse pour regrouper les unités (2026-10-05) : numéro
+  // civique + nom de rue AU COMPLET, sans accents ni ponctuation, sans le
+  // type de voie (« Chem. » = « chemin »), sans l'étiquette « Maison — ».
+  const cleAdresseUnites = (texte) => {
+    const morceaux = String(texte || "").split(/\s+[—–]\s+/);
+    let t = morceaux.find((m) => /^\s*\d/.test(m)) || morceaux[morceaux.length - 1] || "";
+    t = t.split(",")[0].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ");
+    const typesVoie = new Set(["rue", "r", "chemin", "chem", "ch", "boulevard", "boul", "bd", "blvd", "avenue", "av", "ave", "montee", "mtee", "rang", "rg", "route", "rte", "place", "pl", "cote", "croissant", "cr", "terrasse", "allee", "impasse", "promenade", "prom"]);
+    return t.split(" ").filter((m) => m && !typesVoie.has(m)).join(" ");
+  };
   const unitesConnuesDuClient = (clientId) => {
     const fiche = clients.find((x) => x.id === clientId);
     if (!fiche) return [];
@@ -3624,18 +3636,27 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                       ? libelleAdresse((clientFiche?.adresses || []).find((a) => a.id === adresseTravauxId) || {})
                       : "")
                   : adresseFacturationClient(clientFiche) || "";
-                const normaliser = (s) =>
-                  String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]/g, "");
-                const cible = normaliser(adresseChoisieTexte);
-                const correspond = (adr) => {
-                  if (!cible || !adr) return false;
-                  const n = normaliser(adr);
-                  return n.includes(cible.slice(0, 12)) || cible.includes(n.slice(0, 12));
-                };
-                const memes = connues.filter((u) => correspond(u.adresse));
-                const autres = connues.filter((u) => !correspond(u.adresse));
-                const filtrage = memes.length > 0; // sans correspondance : tout montrer
-                const CaseUnite = ({ u, montrerAdresse }) => (
+                // 📍 UNITÉS GROUPÉES PAR ADRESSE (2026-10-05, proposition
+                // acceptée par le propriétaire) : le groupe de l'adresse des
+                // travaux s'affiche ouvert, en premier ; chaque AUTRE adresse
+                // devient une ligne repliée avec son nombre d'unités. Adresse
+                // nouvelle ou sans unité connue : une ligne le dit (au lieu
+                // de tout déballer). Comparaison fiable : numéro civique +
+                // nom de rue au complet (plus les 12 premières lettres).
+                const cible = cleAdresseUnites(adresseChoisieTexte);
+                const groupes = [];
+                connues.forEach((u) => {
+                  const cle = cleAdresseUnites(u.adresse) || "__sans_adresse__";
+                  let g = groupes.find((x) => x.cle === cle);
+                  if (!g) {
+                    g = { cle, libelle: u.adresse ? String(u.adresse).split(",")[0] : "Adresse non notée", unites: [] };
+                    groupes.push(g);
+                  }
+                  g.unites.push(u);
+                });
+                const groupeCible = cible ? groupes.find((g) => g.cle === cible) : null;
+                const autresGroupes = groupes.filter((g) => g !== groupeCible);
+                const CaseUnite = ({ u }) => (
                   <label key={u.cle} className="flex items-start gap-1.5 rounded px-1 py-0.5 text-[11px] text-slate-700">
                     <input
                       type="checkbox"
@@ -3651,11 +3672,6 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                       {u.emplacement ? <span className="mr-1 rounded bg-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-600">📍 {u.emplacement}</span> : null}
                       <span className="font-semibold">{u.modele || "Modèle non relevé"}</span>
                       {u.serie ? <span className="text-slate-500"> · Nº {u.serie}</span> : null}
-                      {montrerAdresse && (
-                        <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">
-                          📍 {u.adresse || "adresse non notée"}
-                        </span>
-                      )}
                     </span>
                   </label>
                 );
@@ -3664,27 +3680,37 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                     <label className="mb-0.5 block text-[10px] font-bold text-slate-400">
                       🔧 Unité(s) concernée(s) <span className="font-normal normal-case text-slate-400">— relevées lors de visites passées, optionnel</span>
                     </label>
-                    <div className="max-h-44 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1.5">
-                      {filtrage ? (
-                        <>
-                          <p className="px-1 text-[9px] font-bold uppercase tracking-wide text-emerald-600">
-                            📍 {adresseChoisieTexte} — l&apos;adresse des travaux ✓
-                          </p>
-                          {memes.map((u) => <CaseUnite key={u.cle} u={u} montrerAdresse={false} />)}
-                          {autres.length > 0 && (
+                    <div className="max-h-56 space-y-0.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+                      <p className="px-1 text-[9px] font-bold uppercase tracking-wide text-emerald-600">
+                        📍 {adresseChoisieTexte ? String(adresseChoisieTexte).split(",")[0] : "Adresse des travaux"} — l&apos;adresse des travaux ✓
+                        {groupeCible ? ` (${groupeCible.unites.length})` : ""}
+                      </p>
+                      {groupeCible ? (
+                        groupeCible.unites.map((u) => <CaseUnite key={u.cle} u={u} />)
+                      ) : (
+                        <p className="px-1 py-0.5 text-[10px] italic text-slate-400">
+                          Aucune unité connue à cette adresse — le technicien la relèvera sur place.
+                        </p>
+                      )}
+                      {autresGroupes.map((g) => {
+                        const ouvert = !!groupesUnitesOuverts[g.cle];
+                        const cochees = g.unites.filter((u) => unitesChoisies.includes(u.cle)).length;
+                        return (
+                          <div key={g.cle}>
                             <button
                               type="button"
-                              onClick={() => setAutresUnitesOuvertes((v) => !v)}
-                              className="mt-1 w-full rounded px-1 py-0.5 text-left text-[10px] font-bold text-slate-400 hover:text-slate-600"
+                              onClick={() => setGroupesUnitesOuverts((prev) => ({ ...prev, [g.cle]: !prev[g.cle] }))}
+                              className="mt-1 flex w-full items-center gap-1 rounded px-1 py-0.5 text-left text-[10px] font-bold text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                             >
-                              {autresUnitesOuvertes ? "▾" : "▸"} Unités vues à d&apos;autres adresses ({autres.length})
+                              <span>{ouvert ? "▾" : "▸"}</span>
+                              <span className="min-w-0 truncate">📍 {g.libelle}</span>
+                              <span className="shrink-0">({g.unites.length})</span>
+                              {cochees > 0 && <span className="shrink-0 rounded-full bg-[#131B2E] px-1.5 text-[9px] text-white">{cochees} ✓</span>}
                             </button>
-                          )}
-                          {autresUnitesOuvertes && autres.map((u) => <CaseUnite key={u.cle} u={u} montrerAdresse={true} />)}
-                        </>
-                      ) : (
-                        connues.map((u) => <CaseUnite key={u.cle} u={u} montrerAdresse={!!u.adresse} />)
-                      )}
+                            {ouvert && g.unites.map((u) => <CaseUnite key={u.cle} u={u} />)}
+                          </div>
+                        );
+                      })}
                     </div>
                     <p className="mt-0.5 text-[9px] text-slate-400">
                       Le technicien verra l&apos;unité en évidence sur sa fiche de tâche, et sa section « Unité vérifiée » sera pré-remplie.
