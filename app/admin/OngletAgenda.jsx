@@ -1392,6 +1392,7 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
 
   const creerTache = (doublonAccepte = false) => {
     if (lectureSeule || !nouveauTitre.trim()) return;
+    if (!estTypeSansClient(nouveauType) && !nouveauClientId) return; // 👤 client obligatoire (2026-10-06)
     // Formulaire de projet ouvert et complet : le projet naît avec la tâche.
     const projetIdCree = !nouveauProjetId && miniProjetOuvert ? creerMiniProjet() : null;
     const client = clients.find((c) => c.id === nouveauClientId);
@@ -4796,6 +4797,11 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                     {(() => {
                       const raisons = [];
                       if (!nouveauTitre.trim()) raisons.push("un titre");
+                      // 👤 CLIENT OBLIGATOIRE (2026-10-06, vécu « Remplacer 2
+                      // thermostats » : appel de service créé SANS client — le
+                      // bon est arrivé « sans client » en facturation). Seuls les
+                      // types sans client (divers, course, congé, shop) s'en passent.
+                      if (!estTypeSansClient(nouveauType) && !nouveauClientId) raisons.push("le client");
                       // Secteur CCQ : obligatoire, AUCUNE présélection
                       // (2026-08-17) — il fige le taux coûtant de chaque
                       // heure. Sans objet pour course/congé (masqué).
@@ -4827,13 +4833,13 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                         .forEach((id) => {
                           const fiche = employes.find((e) => e.id === id);
                           if (fiche?.estSousTraitant) return;
-                          raisons.push(`le choix facturable ou non pour ${fiche?.nom || "un technicien ajouté"}`);
+                          raisons.push(tr("le choix facturable ou non pour {nom}", { nom: fiche?.nom || tr("un technicien ajouté") }));
                         });
                       return (
                         <>
                           {raisons.length > 0 && (
                             <p className="mb-2 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-semibold text-slate-500">
-                              Pour créer la tâche, il manque : {raisons.join(" · ")}.
+                              {tr("Pour créer la tâche, il manque : {liste}.", { liste: raisons.map((r) => tr(r)).join(" · ") })}
                             </p>
                           )}
                           {/* 📅 DATE SANS TECHNICIEN (2026-09-06, vécu : « je
