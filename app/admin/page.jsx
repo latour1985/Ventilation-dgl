@@ -1936,7 +1936,18 @@ function AppAdmin() {
         // bons ramassés la vidaient et elle disparaissait du téléphone en
         // pleine route — et de l'historique de l'agenda.
         const jourTournee = (id.match(/(\d{4}-\d{2}-\d{2})$/) || [])[1];
-        if (jourTournee && jourTournee <= todayISO()) continue;
+        if (jourTournee && jourTournee <= todayISO()) {
+          // 🛡️ (audit 2026-10-05) …SAUF si elle a été RÉASSIGNÉE : ses bons
+          // sont maintenant dans la tournée de quelqu'un d'autre ce jour-là
+          // (A malade → B). Sinon deux personnes avaient la même tournée.
+          const ailleurs = new Set(
+            Object.values(tournees)
+              .filter((x) => x.id !== id && x.jour === jourTournee)
+              .flatMap((x) => x.bons.map((b) => b.numero))
+          );
+          const reassignee = (t?.ramassages || []).some((r) => r?.numero && ailleurs.has(r.numero));
+          if (!reassignee) continue;
+        }
         const courriel = id.slice(PREFIXE_TOURNEE.length).replace(/-\d{4}-\d{2}-\d{2}$/, "");
         try {
           await retirerTacheSupabase(id, courriel);

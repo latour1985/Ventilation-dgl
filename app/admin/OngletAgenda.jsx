@@ -451,7 +451,13 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     return n > 0 ? ` 📎${n}` : "";
   };
   // 💰/🤝 Le choix « facturable » en attente de réponse — { tacheId, titre, employe }.
-  const [choixFacturable, setChoixFacturable] = useState(null);
+  // 🛡️ (audit 2026-10-05) Une FILE de questions (une à la fois) : l'édition
+  // rapide place plusieurs techniciens d'un coup — une seule case d'état
+  // gardait la dernière question et perdait les autres. Chaque question
+  // porte la promesse de l'assignation : la réponse s'écrit APRÈS elle.
+  const [fileChoixFacturable, setFileChoixFacturable] = useState([]);
+  const choixFacturable = fileChoixFacturable[0] || null;
+  const setChoixFacturable = (q) => setFileChoixFacturable((prev) => (q ? [...prev, q] : prev.slice(1)));
   // 🏗️ « Créer un projet à partir de cette tâche » — la tâche visée.
   const [projetDepuisTache, setProjetDepuisTache] = useState(null);
   // Un AUTRE technicien tient-il déjà cette tâche dans la grille ?
@@ -1859,7 +1865,10 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
   // 💰/🤝 a DÉJÀ été fait (cases de la création de tâche) — la fenêtre
   // après coup ne s'ouvre alors pas. Absent : comportement habituel
   // (question posée dès qu'un 2e technicien rejoint la tâche).
-  const assigner = (tacheParam, employeId, dateDepart, heureDepart, facturablePredetermine) => {
+  // `options.coequipier` (audit 2026-10-05) : ce technicien est placé AVEC
+  // d'autres dans le même geste (édition rapide) — la grille n'est pas
+  // encore à jour, la question 💰/🤝 doit quand même être posée.
+  const assigner = (tacheParam, employeId, dateDepart, heureDepart, facturablePredetermine, options = {}) => {
     if (lectureSeule) return;
     // 👥 ÉQUIPE PRÉVUE (cochée à la création SANS date, 2026-08-17) :
     // détachée de l'objet dès l'entrée — elle ne doit ni vivre dans les
@@ -1878,6 +1887,13 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       ajouterJournal(
         `⛔ "${tache.titre || tache.clientNom}" non planifiable — dépôt ${d?.statut === "annule_delai" ? "annulé (délai de 24 h dépassé)" : "en attente de paiement"}`
       );
+      return;
+    }
+    // 🛡️ (audit 2026-10-05) Une tâche de RETOUR dont la pièce n'est pas
+    // reçue reste en attente — le bouton 📅, « Assigner » sur mobile et
+    // l'édition rapide passaient par ici sans le vérifier.
+    if (tachesAttente.some((t) => t.id === tache.id) && pieceBloque(tache.id)) {
+      ajouterJournal(`⛔ "${tache.titre || tache.clientNom}" non planifiable — la pièce commandée n'est pas encore reçue (onglet Pièces).`);
       return;
     }
     // L'employé doit exister dans la grille : sinon les cases seraient
@@ -1984,7 +2000,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
         // d'une assignation EXISTANTE — on ne repose pas la question et
         // on n'écrit pas facturable (le choix déjà en base reste).
         const conserverChoix = facturablePredetermine === "conserver";
-        if (autreTechnicienALaTache(tache.id, employeId) && !conserverChoix && !employe.estSousTraitant) {
+        let questionFacturable = null;
+        if ((autreTechnicienALaTache(tache.id, employeId) || options.coequipier) && !conserverChoix && !employe.estSousTraitant) {
           if (choixDejaFait) {
             onMajFacturable?.(tache.id, employe.courriel, facturablePredetermine);
             ajouterJournal(
@@ -1993,7 +2010,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                 : `🤝 ${employe.nom} ajouté sur « ${tache.titre || tache.clientNom || "cette tâche"} » — NON facturable (aide interne) : ses heures ne seront pas comptées dans la facturation.`
             );
           } else {
-            setChoixFacturable({ tacheId: tache.id, titre: tache.titre || tache.clientNom || "cette tâche", employe });
+            questionFacturable = { tacheId: tache.id, titre: tache.titre || tache.clientNom || "cette tâche", employe };
           }
         }
         promesse = assignerTacheSupabase({ ...tache, heureDebutReelle: heureDepart || heuresCibles[0] || null }, employe, {
@@ -2026,6 +2043,7 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           );
           return false; // l'appelant sait que ça n'a pas passé (jamais d'erreur non gérée)
         });
+        if (questionFacturable) setChoixFacturable({ ...questionFacturable, promesse });
       }
     }
     // 👥 Le reste de l'équipe prévue s'assigne maintenant, d'un coup —
@@ -2125,13 +2143,30 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
     const piece = pieceLieeATache(tache.id);
     const avertissements = [];
     if (depot) {
-      const paye = depot.statut === "paye" || depot.statut === "paye_manuel";
+      // 🛡️ (audit 2026-10-05) « paye_manuellement » est le vrai statut : un
+      // dépôt payé à la main était annoncé « non payé » ici.
+      const paye = ["paye", "paye_manuellement", "paye_manuel"].includes(depot.statut);
       avertissements.push(
         `💰 Un dépôt ${paye ? "PAYÉ" : "non payé"} est rattaché à cette tâche — décide de son sort (remboursement ou conservé, selon ta politique) en annulant.`
       );
     }
     if (piece) {
       avertissements.push(`🔧 La pièce « ${piece.pieceRequise} » est liée à cette tâche — pense à l'annuler ou la réaffecter dans l'onglet Pièces.`);
+    }
+    // 🛡️ (audit 2026-10-05) Le travail de TOUTE l'équipe compte, pas
+    // seulement celui du technicien ouvert : des heures d'un coéquipier ou
+    // un bon déjà envoyé = la tâche se facture (ou se crédite), elle ne
+    // s'annule plus — sinon ces heures payées n'étaient jamais facturées.
+    const idT = String(tache.id);
+    const memeTache = (id) => String(id || "") === idT || String(id || "").startsWith(`${idT}::`);
+    const heuresEquipe = (travaux || []).some((w) => memeTache(w.tacheId) && Number(w.heures) > 0);
+    const bonExiste = (bons || []).some((b) => String(b.tacheId || "") === idT);
+    if (heuresEquipe || bonExiste) {
+      return {
+        permise: false,
+        bloqueeRaison: "🔒 Un membre de l'équipe a déjà des heures ou un bon de travail sur cette tâche — elle ne peut plus être annulée : elle doit se facturer (ou se créditer) via l'onglet Facturation.",
+        avertissements,
+      };
     }
     const sensible = !!depot || !!piece;
     const permise = estAdminAgenda || (estRepartiteurAgenda && !sensible);
@@ -2660,8 +2695,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       // technicien.
       const equipe = Array.isArray(tacheMiseAJour.equipePrevue) ? tacheMiseAJour.equipePrevue : [];
       const { equipePrevue: _equipe, ...tacheSansEquipe } = tacheMiseAJour;
-      cibles.forEach((id) =>
-        assigner(tacheSansEquipe, id, new Date(`${date}T00:00:00`), heureDebut, equipe.find((m) => m.employeId === id)?.facturable)
+      cibles.forEach((id, rang) =>
+        assigner(tacheSansEquipe, id, new Date(`${date}T00:00:00`), heureDebut, equipe.find((m) => m.employeId === id)?.facturable, { coequipier: rang > 0 })
       );
     } else {
       // 🕚 La date/heure choisies SUIVENT la tâche en attente (2026-09-02,
@@ -7169,9 +7204,14 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
           onChoisir={(facturable) => {
             const c = choixFacturable;
             setChoixFacturable(null);
-            majFacturableAssignation(c.tacheId, c.employe?.courriel, facturable).catch(() =>
-              ajouterJournal("⚠️ Choix facturable NON enregistré (snippet 71 manquant ?) — réessaie en redéposant le technicien.")
-            );
+            // 🛡️ (audit 2026-10-05) La réponse s'écrit APRÈS l'assignation :
+            // avant, l'UPDATE pouvait passer avant que la ligne existe et ne
+            // toucher rien — le choix se perdait en silence.
+            Promise.resolve(c.promesse)
+              .then((ok) => (ok === false ? null : majFacturableAssignation(c.tacheId, c.employe?.courriel, facturable)))
+              .catch(() =>
+                ajouterJournal("⚠️ Choix facturable NON enregistré (snippet 71 manquant ?) — réessaie en redéposant le technicien.")
+              );
             onMajFacturable?.(c.tacheId, c.employe?.courriel, facturable);
             ajouterJournal(
               facturable

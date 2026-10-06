@@ -222,7 +222,22 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
   const estCcq = (t) => t.estTransport && /ccq|durant la journée|journalier/i.test(t.titre || "");
   // Dîner non payé : ligne de −30 min envoyée quand le technicien coche
   // « Lunch » avant son transport de fin de journée.
-  const estLunch = (t) => !t.estTransport && /dîner|diner|lunch/i.test(t.titre || "");
+  // 🛡️ (audit 2026-10-05) Reconnu par sa CLÉ (« lunch-AAAA-MM-JJ », comme
+  // lib/tauxFacturable) ou par une ligne NÉGATIVE titrée dîner — plus par
+  // le seul titre : « Entretien hotte — Diner Chez Ben » (6 h de chantier)
+  // tombait dans la colonne Dîner.
+  const estLunch = (t) =>
+    !t.estTransport &&
+    (String(t.tacheId || "").startsWith("lunch-") || (Number(t.heures) < 0 && /dîner|diner|lunch/i.test(t.titre || "")));
+  // 🛡️ (audit 2026-10-05) LES HEURES « TELLES QUE PAYÉES » — une ligne
+  // corrigée après la paie de sa semaine compte pour ses heures d'AVANT
+  // (l'écart est au Report ±). Une seule règle pour le total, la nuit,
+  // le week-end et le détail du jour : avant, ces trois-là lisaient les
+  // heures corrigées et ne concordaient plus avec le total.
+  const heuresPayees = (t) => {
+    const payeeAvantCorrection = t.corrigeLe && t.heuresAvantCorrection != null && dimancheDeSemaineISO(t.corrigeLe) > dimancheDeSemaineISO(t.date);
+    return payeeAvantCorrection ? Number(t.heuresAvantCorrection) || 0 : Number(t.heures) || 0;
+  };
   // 🚗 COURSE INTERNE — colonne À PART (2026-09-28, demande du
   // propriétaire : certains employés ont un autre taux pour les courses).
   // Reconnue par sa clé : « course-… » (course lancée du téléphone ou
@@ -326,8 +341,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     // la semaine de la correction. Avant, cette semaine montrait déjà les
     // heures corrigées ET l'autre recevait le report : la somme des deux
     // écrans comptait la correction deux fois.
-    const payeeAvantCorrection = t.corrigeLe && t.heuresAvantCorrection != null && dimancheDeSemaineISO(t.corrigeLe) > dimancheDeSemaineISO(t.date);
-    const h = payeeAvantCorrection ? Number(t.heuresAvantCorrection) || 0 : Number(t.heures) || 0;
+    const h = heuresPayees(t);
     e.parJour[t.date] = (e.parJour[t.date] || 0) + h;
     // ADMINISTRATIF et DIVERS passent AVANT le classement habituel :
     // ce sont des heures payées, mais qui ne sont ni du chantier ni du
@@ -387,7 +401,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
     Object.entries(parDate).forEach(([iso, lignes]) => {
       const classe = classificationJournee(lignes, iso);
       if (classe === "jour") return;
-      const somme = lignes.reduce((s, t) => s + (Number(t.heures) || 0), 0);
+      const somme = lignes.reduce((s, t) => s + heuresPayees(t), 0);
       if (classe === "nuit") e.nuit += somme;
       else e.weekend += somme;
     });
@@ -1536,7 +1550,7 @@ export function OngletPaies({ travaux, utilisateurs, droitHeures, onAjusterPlan,
                       : { label: "CHANTIER", cls: "bg-emerald-100 text-emerald-700" };
                   const tj = lignesJour.reduce(
                     (acc, t) => {
-                      const h = Number(t.heures) || 0;
+                      const h = heuresPayees(t);
                       const cat = t.categorieHeures || "projet";
                       if (estLunch(t)) acc.diner += h;
                       else if (estCourse(t)) acc.course += h;

@@ -21,6 +21,7 @@ import { use } from "react";
 import dynamic from "next/dynamic";
 import { AlertTriangle, Loader2, FileCheck2, MapPin, Wrench } from "lucide-react";
 import { chargerBonPublic, JOURS_VALIDITE_BON, noterConsultationBon } from "@/lib/supabase/bonPublic";
+import { signatureImageValide } from "@/lib/supabase/bonsTravail";
 import { ligneAccreditations } from "@/lib/supabase/devisPublic";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import ContactEntreprise from "@/components/ContactEntreprise";
@@ -238,9 +239,22 @@ function ContenuBon({ params }) {
               <FileCheck2 size={15} className="shrink-0" /> {t("Client absent à la fin des travaux — bon transmis sans signature.")}
             </p>
           ) : bon.signeParNom ? (
-            <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[12px] font-semibold text-emerald-700">
-              <FileCheck2 size={15} className="shrink-0" /> {t("Signé électroniquement par : {nom}", { nom: bon.signeParNom })}
-            </p>
+            <>
+              <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[12px] font-semibold text-emerald-700">
+                <FileCheck2 size={15} className="shrink-0" /> {t("Signé électroniquement par : {nom}", { nom: bon.signeParNom })}
+              </p>
+              {/* ✍️ (2026-10-06) LA SIGNATURE ELLE-MÊME, sous le nom —
+                  seulement une vraie image PNG en données (jamais un lien
+                  externe). Absente (ancien bon, snippet 167 pas passé) :
+                  rien ne s'affiche, le nom suffit comme avant. */}
+              {signatureImageValide(bon.signatureImage) && (
+                <img
+                  src={bon.signatureImage}
+                  alt={t("Signature du client")}
+                  className="mt-2 h-20 w-auto max-w-full rounded-lg border border-slate-200 bg-white object-contain p-1"
+                />
+              )}
+            </>
           ) : bon.signeParCollegue ? (
             <p className="flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[12px] font-semibold text-emerald-700">
               <FileCheck2 size={15} className="shrink-0" /> {t("Signature recueillie sur place auprès de notre équipe à la fin de l'intervention.")}

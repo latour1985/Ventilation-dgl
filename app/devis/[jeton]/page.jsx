@@ -124,7 +124,7 @@ function ContenuDevis({ params }) {
         // portait une VIEILLE réponse verrouillait la page — impossible
         // de revenir). L'état « répondu » appartient au DOSSIER, pas à
         // l'option feuilletée.
-        setDevis((prev) => ({ ...prev, numero: v.numero, lignes: v.lignes, totalVendant: v.totalVendant }));
+        setDevis((prev) => ({ ...prev, numero: v.numero, lignes: v.lignes, totalVendant: v.totalVendant, ...(v.date ? { date: v.date } : {}) }));
       }
     } catch {
       // on reste sur l'option affichée

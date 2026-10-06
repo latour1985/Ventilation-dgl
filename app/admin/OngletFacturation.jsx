@@ -25,7 +25,7 @@ import { SectionFacturesMaison } from "./FacturesMaison";
 import { majFacturesEmises, poserFacturesEmisesLot, sauvegarderRevisionBon, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
-import { AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, devisAJourPourNumero, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
+import { SignatureBonALaDemande, AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, devisAJourPourNumero, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { libelleZone, resumeAvisZone } from "./FenetreCorrectionZone";
@@ -2700,6 +2700,8 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       existant.photosAvantUrls = [...(existant.photosAvantUrls || []), ...(b.photosAvantUrls || [])];
       existant.photosApresUrls = [...(existant.photosApresUrls || []), ...(b.photosApresUrls || [])];
       existant.signeParNom = existant.signeParNom || b.signeParNom;
+      // ✍️ (2026-10-06) L'image de la signature suit le nom.
+      existant.signatureImage = existant.signatureImage || b.signatureImage || null;
       existant.clientAbsent = existant.clientAbsent || b.clientAbsent;
       // Si UNE des lignes est déjà facturée, le travail l'est.
       if (b.statutQb !== "en_attente") existant.statutQb = b.statutQb;
@@ -5174,13 +5176,19 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                   <p className="mt-1 rounded-lg bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700">
                     ✍️ Signature recueillie par un collègue sur place (équipe de 2+) — un seul bon envoyé au client.
                   </p>
+                ) : !b.signeParNom ? (
+                  <p className="mt-1 flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
+                    <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                    Bon de travail NON SIGNÉ par le client — à valider avant de facturer.
+                  </p>
                 ) : (
-                  !b.signeParNom && (
-                    <p className="mt-1 flex items-start gap-1 rounded-lg bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">
-                      <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-                      Bon de travail NON SIGNÉ par le client — à valider avant de facturer.
-                    </p>
-                  )
+                  /* ✍️ (2026-10-06) SIGNÉ : le nom ET l'image de la signature
+                     (snippet 167) — l'image seulement si c'est un vrai PNG
+                     en données ; un ancien bon n'a que le nom. */
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-semibold text-emerald-700">
+                    <span>✍️ Signé par {b.signeParNom}</span>
+                    <SignatureBonALaDemande bonIds={(b.lignesSource || [b]).map((x) => x?.id)} signePar={b.signeParNom} />
+                  </div>
                 )}
                 {/* 🚧 TRAVAUX NON TERMINÉS — l'avertissement le plus fort
                     de la carte, placé AVANT tout le reste : facturer un

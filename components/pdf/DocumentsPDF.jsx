@@ -380,6 +380,13 @@ export function BonTravailPDF({ travail, clients, config, langue = "fr" }) {
 // conditions de vente — ni soumission ni facture (décision du
 // propriétaire, 2026-08-15). `bon` vient de chargerBonPublic().
 // ============================================================
+// ✍️ (2026-10-06) Signature du client (snippet 167) : même règle que la
+// page publique — une image PNG en données, rien d'autre.
+const imageSignatureSure = (v) => typeof v === "string" && v.length <= 300000 && /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/.test(v);
+const sSignature = {
+  image: { height: 50, width: 115, objectFit: "contain", marginTop: 4, backgroundColor: "#ffffff", borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 4, padding: 2 },
+};
+
 const sPhotoLegende = {
   bloc: { width: 118, marginRight: 6, marginBottom: 6 },
   legende: { fontSize: 6.5, color: "#64748b", marginTop: 1.5, lineHeight: 1.3 },
@@ -442,7 +449,14 @@ export function BonTravailPublicPDF({ bon, config, langue = "fr" }) {
         {bon?.clientAbsent ? (
           <Text style={s.signed}>{L(langue, "Client absent à la fin des travaux — bon transmis sans signature.", "Client absent at the end of the work — work order sent without a signature.")}</Text>
         ) : bon?.signeParNom ? (
-          <Text style={s.signed}>{L(langue, "Signé électroniquement par : ", "Signed electronically by: ")}{bon.signeParNom}</Text>
+          <View>
+            <Text style={s.signed}>{L(langue, "Signé électroniquement par : ", "Signed electronically by: ")}{bon.signeParNom}</Text>
+            {/* ✍️ (2026-10-06) L'image de la signature, sous le nom —
+                seulement une image PNG en données (jamais un lien). */}
+            {imageSignatureSure(bon.signatureImage) ? (
+              <Image src={bon.signatureImage} style={sSignature.image} />
+            ) : null}
+          </View>
         ) : bon?.signeParCollegue ? (
           <Text style={s.signed}>{L(langue, "Signature recueillie sur place aupres de notre equipe a la fin de l'intervention.", "Signature collected on site by our team at the end of the service call.")}</Text>
         ) : null}

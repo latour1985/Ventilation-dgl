@@ -7630,3 +7630,386 @@ notify pgrst, 'reload schema';
 -- Vérification : une ligne « adresse_travaux ».
 select column_name from information_schema.columns
  where table_schema = 'public' and table_name = 'projets_app' and column_name = 'adresse_travaux';
+
+-- ============================================================
+-- 167 - BON : LA SIGNATURE DU CLIENT CONSERVÉE (2026-10-06)
+-- ------------------------------------------------------------
+-- Décision du propriétaire : « garder l'image de la signature du
+-- client sur le bon : oui ». Jusqu'ici, seul le NOM tapé en lettres
+-- moulées partait au bureau ; le dessin fait au doigt sur le téléphone
+-- était perdu. Il voyage maintenant avec le bon, en texte
+-- « data:image/png;base64,… » (quelques Ko, aucun téléversement).
+--  1. Nouvelle colonne bons_travail.signature_image.
+--  2. fermer_travaux_technicien (version du 165, TOUTES ses gardes
+--     gardées) écrit l'image. Un renvoi SANS dessin (page rechargée,
+--     modification) n'efface jamais l'image déjà au dossier.
+--     Seul le format PNG en données est accepté (300 000 caractères max).
+--  3. bon_travail_public renvoie aussi signature_image : la page du
+--     client et son PDF montrent la signature sous le nom.
+-- Sans risque : l'app tolère l'absence de la colonne et de l'image.
+-- ============================================================
+
+-- ---- 1. La colonne ----
+alter table bons_travail add column if not exists signature_image text;
+
+-- ---- 2. Fermeture terrain : + signature_image (reste identique au 165) ----
+create or replace function fermer_travaux_technicien(p_bon jsonb, p_travail jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  v_bon_id uuid;
+  -- ✍️ (167) L'image n'est retenue que si c'est un PNG en données de
+  -- taille raisonnable — sinon null (et l'ancienne est gardée).
+  v_signature text := case
+    when p_bon->>'signature_image' like 'data:image/png;base64,%'
+     and length(p_bon->>'signature_image') <= 300000
+    then p_bon->>'signature_image'
+    else null
+  end;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  -- Un technicien ferme SES heures et SON bon ; le bureau peut fermer pour un autre.
+  if not public.fn_est_bureau() and (
+       lower(coalesce(p_bon->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+    or lower(coalesce(p_travail->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+  ) then
+    raise exception 'Fermeture terrain : seulement pour ses propres heures';
+  end if;
+  -- 🛡️ (165) Les clés (tache_id, employe_email) sont communes à toutes les
+  -- entreprises : une ligne existante d'une AUTRE entreprise ne se fait
+  -- jamais écraser (ni lire en retour) par cette fonction.
+  if exists (select 1 from bons_travail b
+              where b.tache_id = p_bon->>'tache_id'
+                and b.employe_email = p_bon->>'employe_email'
+                and b.entreprise_id is distinct from ent)
+     or exists (select 1 from travaux_effectues t
+              where t.tache_id = p_travail->>'tache_id'
+                and t.employe_email = p_travail->>'employe_email'
+                and t.entreprise_id is distinct from ent) then
+    raise exception 'Fermeture terrain : cette tâche appartient à une autre entreprise';
+  end if;
+  insert into bons_travail (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    description, date_travail, heures, type_tache, secteur, devis_numero,
+    adresse_travaux, projet_id, photos, courriels_envoi, signe_par_nom,
+    signe_par_collegue, client_absent, unites, modele_unite, serie_unite,
+    piece_a_commander, piece_requise, travaux_non_termines, reste_a_faire,
+    etapes, envoye_le, statut_facturation, signature_image
+  ) values (
+    ent,
+    p_bon->>'tache_id',
+    p_bon->>'employe_email',
+    p_bon->>'employe_nom',
+    p_bon->>'titre',
+    p_bon->>'client_nom',
+    p_bon->>'description',
+    (p_bon->>'date_travail')::date,
+    coalesce((p_bon->>'heures')::numeric, 0),
+    p_bon->>'type_tache',
+    coalesce(p_bon->>'secteur', 'commercial'),
+    p_bon->>'devis_numero',
+    p_bon->>'adresse_travaux',
+    p_bon->>'projet_id',
+    nullif(p_bon->'photos', 'null'::jsonb),
+    coalesce(p_bon->'courriels_envoi', '[]'::jsonb),
+    p_bon->>'signe_par_nom',
+    coalesce((p_bon->>'signe_par_collegue')::boolean, false),
+    coalesce((p_bon->>'client_absent')::boolean, false),
+    coalesce(p_bon->'unites', '[]'::jsonb),
+    p_bon->>'modele_unite',
+    p_bon->>'serie_unite',
+    coalesce((p_bon->>'piece_a_commander')::boolean, false),
+    p_bon->>'piece_requise',
+    coalesce((p_bon->>'travaux_non_termines')::boolean, false),
+    p_bon->>'reste_a_faire',
+    nullif(p_bon->'etapes', 'null'::jsonb),
+    coalesce(nullif(p_bon->>'envoye_le', '')::timestamptz, now()),
+    'a_facturer',
+    v_signature
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, description = excluded.description,
+    date_travail = excluded.date_travail, heures = excluded.heures,
+    type_tache = excluded.type_tache, secteur = excluded.secteur,
+    devis_numero = excluded.devis_numero, adresse_travaux = excluded.adresse_travaux,
+    projet_id = excluded.projet_id, photos = excluded.photos,
+    courriels_envoi = excluded.courriels_envoi, signe_par_nom = excluded.signe_par_nom,
+    signe_par_collegue = excluded.signe_par_collegue, client_absent = excluded.client_absent,
+    unites = excluded.unites, modele_unite = excluded.modele_unite,
+    serie_unite = excluded.serie_unite, piece_a_commander = excluded.piece_a_commander,
+    piece_requise = excluded.piece_requise, travaux_non_termines = excluded.travaux_non_termines,
+    reste_a_faire = excluded.reste_a_faire, etapes = excluded.etapes,
+    envoye_le = excluded.envoye_le, statut_facturation = excluded.statut_facturation,
+    -- ✍️ (167) Un renvoi sans dessin garde l'image déjà au dossier.
+    signature_image = coalesce(excluded.signature_image, bons_travail.signature_image)
+    where bons_travail.entreprise_id = ent
+  returning id into v_bon_id;
+
+  insert into travaux_effectues (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    date_travail, heures, est_transport, kilometres, projet_id, note_terrain,
+    note_interne, debut_reel, fin_reelle, photos, taux_coutant_fige, secteur,
+    categorie_heures, jour_bloque, bloque_raison,
+    heures_proposees, debut_propose, fin_propose, proposition_par,
+    proposition_le, groupe_proposition
+  ) values (
+    ent,
+    p_travail->>'tache_id',
+    p_travail->>'employe_email',
+    p_travail->>'employe_nom',
+    p_travail->>'titre',
+    p_travail->>'client_nom',
+    (p_travail->>'date_travail')::date,
+    coalesce((p_travail->>'heures')::numeric, 0),
+    coalesce((p_travail->>'est_transport')::boolean, false),
+    nullif(p_travail->>'kilometres', '')::numeric,
+    p_travail->>'projet_id',
+    p_travail->>'note_terrain',
+    p_travail->>'note_interne',
+    nullif(p_travail->>'debut_reel', '')::timestamptz,
+    nullif(p_travail->>'fin_reelle', '')::timestamptz,
+    nullif(p_travail->'photos', 'null'::jsonb),
+    nullif(p_travail->>'taux_coutant_fige', '')::numeric,
+    coalesce(p_travail->>'secteur', 'commercial'),
+    coalesce(p_travail->>'categorie_heures', 'projet'),
+    coalesce((p_travail->>'jour_bloque')::boolean, false),
+    p_travail->>'bloque_raison',
+    nullif(p_travail->>'heures_proposees', '')::numeric,
+    nullif(p_travail->>'debut_propose', '')::timestamptz,
+    nullif(p_travail->>'fin_propose', '')::timestamptz,
+    p_travail->>'proposition_par',
+    nullif(p_travail->>'proposition_le', '')::timestamptz,
+    p_travail->>'groupe_proposition'
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, date_travail = excluded.date_travail,
+    heures = excluded.heures, est_transport = excluded.est_transport,
+    kilometres = excluded.kilometres, projet_id = excluded.projet_id,
+    note_terrain = excluded.note_terrain, note_interne = excluded.note_interne,
+    debut_reel = excluded.debut_reel, fin_reelle = excluded.fin_reelle,
+    photos = excluded.photos, taux_coutant_fige = excluded.taux_coutant_fige,
+    secteur = excluded.secteur, categorie_heures = excluded.categorie_heures,
+    jour_bloque = excluded.jour_bloque, bloque_raison = excluded.bloque_raison,
+    heures_proposees = excluded.heures_proposees, debut_propose = excluded.debut_propose,
+    fin_propose = excluded.fin_propose, proposition_par = excluded.proposition_par,
+    proposition_le = excluded.proposition_le, groupe_proposition = excluded.groupe_proposition
+    -- 🏢 Une ligne FERMEE PAR LE BUREAU ne se fait jamais ecraser par le
+    -- chrono d un telephone (vecu ETI-NET, 2026-09-08). Seul le bureau
+    -- (policies) peut la modifier ensuite.
+    where travaux_effectues.entreprise_id = ent
+      and (travaux_effectues.note_interne is null
+           or travaux_effectues.note_interne not like '🏢 FERM%E PAR LE BUREAU%');
+
+  return v_bon_id;
+end;
+$$;
+revoke all on function fermer_travaux_technicien(jsonb, jsonb) from public, anon;
+grant execute on function fermer_travaux_technicien(jsonb, jsonb) to authenticated;
+
+-- ---- 3. bon_travail_public : + signature_image ----
+-- (le type de retour change : on supprime puis on recrée, mêmes droits)
+drop function if exists bon_travail_public(text);
+create function bon_travail_public(p_jeton text)
+returns table (
+  entreprise_nom text,
+  entreprise_adresse text,
+  entreprise_telephone text,
+  entreprise_courriel text,
+  entreprise_rbq text,
+  titre text,
+  client_nom text,
+  client_adresse_facturation text,
+  description text,
+  date_travail date,
+  adresse_travaux text,
+  photos jsonb,
+  legendes jsonb,
+  signe_par_nom text,
+  signe_par_collegue boolean,
+  client_absent boolean,
+  unites jsonb,
+  expire boolean,
+  entreprise_id text,
+  entreprise_logo text,
+  entreprise_associations jsonb,
+  entreprise_site_web text,
+  entreprise_neq text,
+  entreprise_numero_tps text,
+  entreprise_numero_tvq text,
+  signature_image text
+)
+language sql
+security definer
+set search_path = public
+as $$
+  select
+    coalesce(e.nom_commercial, e.nom_legal, 'Ventilation DGL inc.'),
+    e.adresse,
+    e.telephone,
+    e.courriel,
+    e.numero_rbq,
+    b.titre,
+    b.client_nom,
+    c.adresse_facturation,
+    b.description,
+    b.date_travail,
+    b.adresse_travaux,
+    ph.photos,
+    coalesce((
+      select jsonb_object_agg(pl.url, pl.legende)
+      from photos_legendes pl
+      where pl.legende is not null and pl.legende <> ''
+        and pl.url in (
+          select jsonb_array_elements_text(coalesce(ph.photos->'avant', '[]'::jsonb))
+          union
+          select jsonb_array_elements_text(coalesce(ph.photos->'apres', '[]'::jsonb))
+        )
+    ), '{}'::jsonb),
+    b.signe_par_nom,
+    coalesce(b.signe_par_collegue, false),
+    b.client_absent,
+    coalesce(b.unites, '[]'::jsonb),
+    (b.jeton_expire_le is not null and b.jeton_expire_le < now()),
+    b.entreprise_id,
+    e.logo_donnees,
+    coalesce(e.associations, case when e.membre_cmmtq then '["cmmtq"]'::jsonb else '[]'::jsonb end),
+    e.site_web,
+    e.numero_neq,
+    e.numero_tps,
+    e.numero_tvq,
+    -- ✍️ (167) L'image seulement si c'est un PNG en données.
+    case when b.signature_image like 'data:image/png;base64,%' then b.signature_image else null end
+  from bons_travail b
+  left join entreprises e on e.id = b.entreprise_id
+  left join clients_app c
+    on c.nom = b.client_nom and c.entreprise_id = b.entreprise_id
+  cross join lateral (
+    select jsonb_build_object(
+      'avant', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'avant', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'avant', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb),
+      'apres', coalesce((
+        select jsonb_agg(u) from (
+          select distinct u from (
+            select jsonb_array_elements_text(coalesce(b.photos->'apres', '[]'::jsonb)) as u
+            union all
+            select jsonb_array_elements_text(coalesce(t.photos->'apres', '[]'::jsonb))
+              from travaux_effectues t
+              where t.tache_id = b.tache_id or t.tache_id like b.tache_id || '::%'
+          ) brut
+        ) uniques
+      ), '[]'::jsonb)
+    ) as photos
+  ) ph
+  where b.jeton_public = p_jeton;
+$$;
+grant execute on function bon_travail_public(text) to anon, authenticated;
+
+notify pgrst, 'reload schema';
+
+-- Vérification : 3 lignes à true.
+select 'colonne signature_image' as verification,
+       exists (select 1 from information_schema.columns
+               where table_schema = 'public' and table_name = 'bons_travail'
+                 and column_name = 'signature_image') as ok
+union all
+select 'fermeture terrain : écrit la signature',
+       position('signature_image' in pg_get_functiondef('public.fermer_travaux_technicien(jsonb, jsonb)'::regprocedure)) > 0
+union all
+select 'bon public : renvoie la signature',
+       exists (select 1 from pg_proc p
+               where p.proname = 'bon_travail_public'
+                 and 'signature_image' = any (p.proargnames));
+
+-- ============================================================
+-- 168 - DEVIS : LA DATE ET LES 30 JOURS SUIVENT L'OPTION (2026-10-06)
+-- ------------------------------------------------------------
+-- Audit 2026-10-05 : en feuilletant les options d'un devis, la page du
+-- client gardait la DATE de la version active — une option vieille de
+-- 45 jours paraissait récente (et son PDF portait la mauvaise date). La
+-- règle « prix valides 30 jours » n'était vérifiée que dans le
+-- navigateur. Désormais :
+--   1. devis_public_version renvoie aussi la date de l'option ;
+--   2. repondre_devis refuse une ACCEPTATION de plus de 30 jours
+--      (refus et demande de modification restent toujours permis).
+-- ============================================================
+
+-- ---- 1. Le contenu d'une option, avec SA date ----
+drop function if exists devis_public_version(text, text);
+create function devis_public_version(p_jeton text, p_numero text)
+returns table (numero text, version int, note_version text, lignes jsonb, total_vendant numeric, reponse_client text, date_emission date)
+language sql security definer set search_path = public as $$
+  select d.numero, coalesce(d.version, 0)::int, d.note_version,
+    (select coalesce(jsonb_agg(jsonb_build_object(
+        'uid', l->>'uid', 'nom', l->>'nom', 'description', l->>'description',
+        'quantite', l->'quantite', 'prix_vendant', l->'prix_vendant')), '[]'::jsonb)
+     from jsonb_array_elements(d.lignes) l),
+    d.total_vendant, d.reponse_client, d.date_emission
+  from devis_app d
+  join devis_app porteur on porteur.jeton_public = p_jeton
+    and (porteur.jeton_expire_le is null or porteur.jeton_expire_le > now())
+  where d.numero = p_numero
+    and coalesce(d.numero_base, d.numero) = coalesce(porteur.numero_base, porteur.numero)
+    and d.entreprise_id = porteur.entreprise_id
+    and (d.version_active or d.offerte_comparaison);
+$$;
+revoke all on function devis_public_version(text, text) from public;
+grant execute on function devis_public_version(text, text) to anon, authenticated;
+
+-- ---- 2. L'acceptation respecte les 30 jours (même règle que la page) ----
+create or replace function repondre_devis(
+  p_jeton text, p_reponse text, p_nom text,
+  p_message text default null, p_version text default null, p_texte text default null,
+  p_numero text default null
+) returns boolean
+language plpgsql security definer set search_path = public as $$
+declare v_ok boolean;
+begin
+  if p_reponse not in ('accepte','refuse','modification') then return false; end if;
+  if coalesce(trim(p_nom), '') = '' then return false; end if;
+  update devis_app d set
+    reponse_client = p_reponse,
+    repondu_le = now(),
+    repondu_par_nom = trim(p_nom),
+    message_client = nullif(trim(coalesce(p_message,'')), ''),
+    conditions_version = p_version,
+    conditions_texte = p_texte,
+    statut = case when p_reponse = 'accepte' then 'accepte' else d.statut end
+  where d.version_active
+    and d.reponse_client is null                    -- jamais deux fois
+    and (p_numero is null or d.numero = p_numero)   -- la version LUE seulement (164)
+    -- 🛡️ (168) Prix valides 30 jours : une acceptation plus vieille est
+    -- refusée ici aussi, pas seulement à l'écran.
+    and (p_reponse <> 'accepte'
+         or d.date_emission is null
+         or d.date_emission >= (now() at time zone 'America/Toronto')::date - 30)
+    and exists (
+      select 1 from devis_app porteur
+       where porteur.jeton_public = p_jeton
+         and coalesce(porteur.numero_base, porteur.numero) = coalesce(d.numero_base, d.numero)
+         and porteur.entreprise_id = d.entreprise_id
+         and (porteur.jeton_expire_le is null or porteur.jeton_expire_le > now())
+    )
+  returning true into v_ok;
+  return coalesce(v_ok, false);
+end;
+$$;
+revoke all on function repondre_devis(text,text,text,text,text,text,text) from public;
+grant execute on function repondre_devis(text,text,text,text,text,text,text) to anon, authenticated;
+notify pgrst, 'reload schema';
+
+-- Vérification : 2 lignes à true.
+select 'option datée' as garde, position('date_emission' in pg_get_functiondef('public.devis_public_version(text,text)'::regprocedure)) > 0 as ok
+union all
+select 'acceptation 30 jours', position('America/Toronto' in pg_get_functiondef('public.repondre_devis(text,text,text,text,text,text,text)'::regprocedure)) > 0;

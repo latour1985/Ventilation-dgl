@@ -21,6 +21,49 @@ import { googlePlacesDisponible, nouveauJeton, chercherAdresses, detailsAdresse 
 import { lireEstimateQbo } from "@/lib/quickbooksClient";
 import { listerLegendes, sauvegarderLegende, televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import { listerModelesEtapes, sauvegarderModeleEtapes } from "@/lib/supabase/modelesEtapes";
+import { signatureImageValide, chargerSignatureBon } from "@/lib/supabase/bonsTravail";
+
+// ✍️ (2026-10-06) L'IMAGE DE LA SIGNATURE, chargée À LA DEMANDE : la liste
+// des bons ne la transporte pas (poids). `bonIds` : les bons de la tâche
+// (« sbb-… ») — la première image trouvée s'affiche. `auto` : chargée dès
+// l'affichage (aperçu d'un seul bon) ; sinon un petit lien « voir ».
+export function SignatureBonALaDemande({ bonIds = [], signePar = "", auto = false, classe = "h-10" }) {
+  const [image, setImage] = useState(null);
+  const [etat, setEtat] = useState("repos"); // repos | charge | absente
+  const cle = (bonIds || []).filter(Boolean).join("|");
+  const charger = async () => {
+    setEtat("charge");
+    for (const id of cle.split("|")) {
+      const img = await chargerSignatureBon(id);
+      if (img) {
+        setImage(img);
+        setEtat("ok");
+        return;
+      }
+    }
+    setEtat("absente");
+  };
+  useEffect(() => {
+    if (auto && cle) charger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, cle]);
+  if (image && signatureImageValide(image)) {
+    return (
+      <img
+        src={image}
+        alt={signePar ? `Signature de ${signePar}` : "Signature du client"}
+        className={`${classe} w-auto max-w-full rounded border border-slate-200 bg-white object-contain p-0.5`}
+      />
+    );
+  }
+  if (auto || !cle) return null;
+  if (etat === "absente") return <span className="text-[10px] font-normal text-slate-400">(nom seulement)</span>;
+  return (
+    <button type="button" onClick={charger} disabled={etat === "charge"} className="text-[10px] font-semibold text-emerald-700 underline underline-offset-2">
+      {etat === "charge" ? "…" : "voir la signature"}
+    </button>
+  );
+}
 import TermesConditions from "@/components/TermesConditions";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 // ⚠️ Cycle assumé partage ↔ OngletParametres : les deux ne se lisent
@@ -2165,8 +2208,16 @@ export function ApercuBonTravailClient({ travail: travailBrut, clients, onFermer
           <TermesConditions />
 
           <div className="mt-4 flex items-center gap-2 rounded-lg bg-emerald-50 p-2.5 text-[11px] font-semibold text-emerald-700">
-            <FileCheck2 size={14} className="shrink-0" /> Signé électroniquement par le client à la fin de l'intervention
+            <FileCheck2 size={14} className="shrink-0" />{" "}
+            {bon?.signeParNom ? `Signé électroniquement par : ${bon.signeParNom}` : "Signé électroniquement par le client à la fin de l'intervention"}
           </div>
+          {/* ✍️ (2026-10-06) L'IMAGE DE LA SIGNATURE quand le bon la porte
+              (snippet 167) — seulement une image PNG en données. */}
+          {bon?.id && (
+            <div className="mt-2">
+              <SignatureBonALaDemande bonIds={[bon.id]} signePar={bon.signeParNom} auto classe="h-16" />
+            </div>
+          )}
 
           <PiedDocument />
         </div>

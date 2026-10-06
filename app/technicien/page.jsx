@@ -18,7 +18,7 @@ import { televerserPhotoTravail, televerserVideoTravail, VIDEO_MAX_OCTETS, liste
 import { coffrerPhoto, lireBlobPhoto, listerPhotosCoffre, decoffrerPhoto } from "@/lib/horsLigneTechnicien";
 import { SqueletteTechnicien } from "@/components/EcranSquelette";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
-import { enregistrerBonTravail, bonExistePourTache, apportEquipePourBon } from "@/lib/supabase/bonsTravail";
+import { enregistrerBonTravail, bonExistePourTache, apportEquipePourBon, signatureImageValide } from "@/lib/supabase/bonsTravail";
 import { fermerTravauxTechnicien } from "@/lib/supabase/fermetureTechnicien";
 import { envoyerCourriel, gabaritBonTravail, gabaritEnRoute, sujetCourrielClient } from "@/lib/courriels";
 import { lienSelonLangue } from "@/lib/i18nPublic";
@@ -316,6 +316,8 @@ function completerTransportsJournee(tachesEntree, transportDebutFin = true, date
 // à la sauvegarde, pas l'aperçu de l'image elle-même. Le dessin de la
 // signature (pixels du canvas) n'est pas persisté non plus, pour
 // garder le stockage léger ; seul le fait qu'elle ait été signée l'est.
+// ✍️ (2026-10-06) Le dessin part maintenant AVEC LE BON au bureau
+// (signatureImage, snippet 167) — voir lireImageSignature().
 function allegerPhotosPourStockage(photos) {
   // L'URL DISTANTE (stockage Supabase) survit au rechargement — c'est le
   // lien officiel de la photo au dossier. Les blobs/URLs locaux, non —
@@ -3411,6 +3413,32 @@ function ZoneVideo({ videos, setVideos, onVideosChange, lectureSeule, onEnvoiCha
 // ============================================================
 // SIGNATURE TACTILE
 // ============================================================
+// ✍️ (2026-10-06) L'IMAGE DE LA SIGNATURE, pour le bon (snippet 167) :
+// le dessin du canevas en PNG « data:… » (quelques Ko, aucun
+// téléversement — elle voyage dans la charge du bon, file hors ligne
+// comprise). null si le canevas est VIDE : après un rechargement de la
+// page, « signé » est mémorisé mais pas les pixels — on n'envoie jamais
+// une image blanche qui effacerait la vraie au dossier.
+function lireImageSignature(canvas) {
+  try {
+    if (!canvas || !canvas.width || !canvas.height) return null;
+    const ctx = canvas.getContext("2d");
+    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    let dessine = false;
+    for (let i = 3; i < pixels.length; i += 4) {
+      if (pixels[i] !== 0) {
+        dessine = true;
+        break;
+      }
+    }
+    if (!dessine) return null;
+    const image = canvas.toDataURL("image/png");
+    return signatureImageValide(image) ? image : null;
+  } catch {
+    return null; // jamais bloquant : le bon part avec le nom, comme avant
+  }
+}
+
 function ZoneSignature({ aSignature, setASignature, canvasRef, onSignatureCommencee, onSignatureEffacee, lectureSeule, libelle }) {
   const { t } = useLangue();
   const dessine = useRef(false);
@@ -3547,18 +3575,27 @@ function TacheTransport({ tache, onDemarrer, onPause, onReprendre, onTerminer, o
   // retour). Si le GPS est indisponible, le trajet démarre quand même
   // (le kilométrage restera à saisir manuellement) et Maps s'ouvre
   // tout de même avec l'adresse de destination seule.
+  //
+  // 🛡️ (audit 2026-10-05) iPHONE : Maps s'ouvrait APRÈS l'attente du GPS
+  // (jusqu'à 8 s), donc hors du geste du doigt — Safari bloque alors
+  // l'ouverture en silence. Maps s'ouvre maintenant DANS le geste, en
+  // premier. La demande de position part juste avant (encore au premier
+  // plan) et le chrono démarre tout de suite : si iOS met l'app en veille
+  // pendant que Maps est devant, le trajet ne doit pas commencer seulement
+  // au retour dans l'app. La position de départ s'inscrit dès qu'elle arrive.
   const demarrerAvecGps = async () => {
     setCaptureGpsEnCours("depart");
-    const position = await capturerPositionGps();
+    const positionEnCours = capturerPositionGps();
+    if (destination) ouvrirTrajet(destination.ligne1, "google");
+    onDemarrer();
+    const position = await positionEnCours;
     if (position) {
       onMajTache(tache.id, { latDepart: position.lat, lngDepart: position.lng, heureDepartGps: position.heure });
       setMessageGps("");
     } else {
       setMessageGps(t("Position GPS indisponible au départ — le kilométrage devra être ajusté manuellement."));
     }
-    if (destination) ouvrirTrajet(destination.ligne1, "google");
     setCaptureGpsEnCours(null);
-    onDemarrer();
   };
 
   // "Arrivé au chantier" (aller) / "Arrivé à l'entrepôt" (retour) —
@@ -4728,6 +4765,11 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
   const envoyer = async (destinataires) => {
     setModalCourriels(false);
     setEnvoiEnCours(true);
+    // ✍️ (2026-10-06) L'IMAGE DE LA SIGNATURE, lue TOUT DE SUITE (avant les
+    // attentes réseau plus bas) — seulement quand le client a signé ICI.
+    // Client absent ou collègue qui a fait signer : rien.
+    const imageSignature =
+      !clientAbsent && !collegueAFaitSigner && aSignature ? lireImageSignature(canvasRef.current) : null;
     const heures = dureeEcoulee(tache) / 3600;
     // TÂCHE NON FACTURABLE (visite, divers, congé) : aucune demande de
     // facturation n'est créée. Elle n'apparaîtra jamais dans l'onglet
@@ -4835,6 +4877,9 @@ function BonDeTravail({ tache, onDemarrer, onPause, onReprendre, onTerminer, onR
         videos: (videos || []).map((v) => v.urlDistante).filter(Boolean),
         courrielsEnvoi: destinataires,
         signeParNom: clientAbsent || collegueAFaitSigner ? "" : nomMoule.trim(),
+        // ✍️ (2026-10-06) Le dessin lui-même (colonne signature_image,
+        // snippet 167) — absent = l'image déjà au dossier est gardée.
+        ...(imageSignature ? { signatureImage: imageSignature } : {}),
         signeParCollegue: collegueAFaitSigner,
         // Clause 10 : client absent à la fin des travaux — la mention
         // suit le bon jusqu'à la facturation.

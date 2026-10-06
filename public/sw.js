@@ -39,9 +39,14 @@ self.addEventListener("fetch", (evenement) => {
 
   // Navigation : réseau d'abord, cache en secours.
   if (req.mode === "navigate") {
+    // 🛡️ (audit 2026-10-05) Seule une page RÉUSSIE est gardée : une page
+    // d'erreur reçue pendant un déploiement (500, 404) aurait ensuite été
+    // servie hors ligne, ou après les 4 secondes de signal faible.
     const reseau = fetch(req).then((reponse) => {
-      const copie = reponse.clone();
-      caches.open(CACHE_HORS_LIGNE).then((c) => c.put(req, copie)).catch(() => {});
+      if (reponse.ok) {
+        const copie = reponse.clone();
+        caches.open(CACHE_HORS_LIGNE).then((c) => c.put(req, copie)).catch(() => {});
+      }
       return reponse;
     });
     // 📶 SIGNAL FAIBLE (2026-10-05, chantier iPhone n° 6) : l'app technicien
@@ -57,7 +62,8 @@ self.addEventListener("fetch", (evenement) => {
           const delai = new Promise((resolve) => setTimeout(() => resolve(null), 4000));
           try {
             const premiere = await Promise.race([reseau, delai]);
-            return premiere || enCache;
+            // Une page en ERREUR ne remplace pas la bonne copie gardée.
+            return premiere && premiere.ok ? premiere : enCache;
           } catch {
             return enCache;
           }

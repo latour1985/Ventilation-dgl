@@ -28,8 +28,11 @@ export async function GET(request) {
   const jeton = enTete.startsWith("Bearer ") ? enTete.slice(7) : null;
   const utilisateur = await utilisateurDepuisJeton(jeton);
   if (!utilisateur) return Response.json({ erreur: "Connexion requise." }, { status: 401 });
-  if ((await roleServeur(utilisateur)) === "Technicien") {
-    return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
+  // 🛡️ (audit 2026-10-05) BRANCHER le système comptable = toutes les
+  // factures suivantes partent dans CE fichier : réservé à l'Admin
+  // principal (avant : tout rôle de bureau pouvait relier un autre fichier).
+  if ((await roleServeur(utilisateur)) !== "Admin principal") {
+    return Response.json({ erreur: "Brancher le système comptable est réservé à l'Admin principal." }, { status: 403 });
   }
   // 🏢 MULTI-QUICKBOOKS (2026-09-08) : le verrou « DGL seulement » du
   // grand soir saute — CHAQUE entreprise branche maintenant SON propre
