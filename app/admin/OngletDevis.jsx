@@ -43,8 +43,40 @@ export function tauxMoyenEquipe(tauxMetiers) {
 // sont hautes ; les listes compactes, elles, restent à 10).
 const DEVIS_PAR_PAGE = 5;
 
-export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onChoisirBonTravail, onChoisirProjet, onChoisirProjetExistant, onChoisirVenteDirecte = null, tauxMoyen = 45 }) {
+export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onChoisirBonTravail, onChoisirProjet, onChoisirProjetExistant, onChoisirVenteDirecte = null, tauxMoyen = 45, employes = [] }) {
+  const { t: trT } = useLangue();
   const [option, setOption] = useState(null); // "bon_travail" | "projet" | "projet_existant" | "vente_directe" | null
+  // 📅 QUAND ? (2026-10-06, demande du propriétaire : « lors de l'acceptation
+  // du devis, mettre une date ou mettre en attente, pour le mettre
+  // directement à l'agenda »). « attente » = comme avant (date et équipe
+  // PRÉVUES facultatives, mémorisées sur la carte) ; « maintenant » = la
+  // tâche est placée à l'agenda dès l'ouverture de l'onglet Agenda.
+  const [quand, setQuand] = useState("attente");
+  const [titreTache, setTitreTache] = useState(`Devis ${devis.numero} — Intervention`);
+  const [datePlanif, setDatePlanif] = useState("");
+  const [heurePlanif, setHeurePlanif] = useState("07:00");
+  const [heuresJour, setHeuresJour] = useState(1);
+  const [nbJours, setNbJours] = useState(0);
+  const [techs, setTechs] = useState([]);
+  const [choixFact, setChoixFact] = useState({});
+  const basculerTech = (id) => setTechs((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const nomTech = (id) => (employes || []).find((e) => e.id === id)?.nom || "?";
+  const choixManquantsT = techs.slice(1).filter((id) => !(employes || []).find((e) => e.id === id)?.estSousTraitant && choixFact[id] !== true && choixFact[id] !== false);
+  const texteChoix = choixManquantsT.length > 0 ? trT("le choix facturable ou non pour {nom}", { nom: choixManquantsT.map(nomTech).join(", ") }) : null;
+  const manquePlanif =
+    quand === "maintenant"
+      ? [!datePlanif && trT("la date"), techs.length === 0 && trT("au moins un technicien"), texteChoix].filter(Boolean)
+      : [texteChoix].filter(Boolean);
+  const planif = () => ({
+    mode: quand,
+    titre: titreTache.trim() || `Devis ${devis.numero} — Intervention`,
+    date: datePlanif || null,
+    heure: heurePlanif || "07:00",
+    heures: Math.max(0, Number(heuresJour) || 0) || 1,
+    jours: Math.max(0, Number(nbJours) || 0),
+    employeIds: techs,
+    choixFacturables: choixFact,
+  });
   const client = clients.find((c) => c.id === devis.clientId);
   // 🏠 Pré-choisie depuis le DEVIS quand il porte son adresse des
   // travaux (2026-08-31) — plus à la resélectionner au traitement.
@@ -248,9 +280,87 @@ export function ModalTraiterDevis({ devis, clients, projets = [], onFermer, onCh
                 <p className="text-xs text-slate-400">Aucune adresse enregistrée pour ce client — l'adresse de facturation sera utilisée par défaut.</p>
               )}
             </div>
+            {/* 📅 QUAND ? (2026-10-06) */}
+            <div>
+              <label className="mb-1 block text-xs font-bold text-slate-500">{trT("Titre de la tâche")}</label>
+              <input value={titreTache} onChange={(e) => setTitreTache(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="mb-1.5 text-xs font-bold text-slate-500">{trT("📅 Quand ?")}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { v: "attente", txt: trT("Mettre en attente") },
+                  { v: "maintenant", txt: trT("Planifier maintenant") },
+                ].map((o) => (
+                  <button
+                    key={o.v}
+                    type="button"
+                    onClick={() => setQuand(o.v)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${quand === o.v ? "border-[#131B2E] bg-[#131B2E] text-white" : "border-slate-300 bg-white text-slate-600"}`}
+                  >
+                    {o.txt}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-[10px] text-slate-500">
+                {quand === "attente"
+                  ? trT("La tâche va dans « Tâches en attente ». Date et techniciens facultatifs : ils restent mémorisés sur la carte pour la placer d'un clic.")
+                  : trT("La tâche est placée directement à l'agenda (transports calculés, téléphones avisés). Un dépôt pas encore payé la garde en attente.")}
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{trT("Date")}</label>
+                  <input type="date" value={datePlanif} onChange={(e) => setDatePlanif(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{trT("Heure de début")}</label>
+                  <input type="time" value={heurePlanif} onChange={(e) => setHeurePlanif(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{trT("Heures / jour")}</label>
+                  <InputNombreDecimal valeur={heuresJour} onChange={setHeuresJour} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-[10px] font-bold text-slate-400">{trT("Nombre de jours")}</label>
+                  <InputNombreDecimal valeur={nbJours} onChange={setNbJours} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs" />
+                </div>
+              </div>
+              <p className="mb-1 mt-2 text-[10px] font-bold text-slate-400">{trT("Techniciens (le 1er coché est le principal)")}</p>
+              <div className="max-h-48 space-y-1 overflow-y-auto">
+                {(employes || []).map((e) => (
+                  <label key={e.id} className={`flex items-center gap-2 rounded-lg border bg-white px-2 py-1.5 ${techs.includes(e.id) ? "border-[#131B2E]" : "border-slate-200"}`}>
+                    <input type="checkbox" checked={techs.includes(e.id)} onChange={() => basculerTech(e.id)} className="h-4 w-4 shrink-0 accent-[#131B2E]" />
+                    <span className="min-w-0 flex-1 text-xs font-bold text-slate-800">{e.estSousTraitant ? `🤝 ${e.nom}` : e.nom}</span>
+                    {techs.includes(e.id) && techs[0] !== e.id && !e.estSousTraitant && (
+                      <span className="flex shrink-0 gap-1" onClick={(ev) => ev.preventDefault()}>
+                        {[
+                          { v: true, txt: trT("💰 Facturable"), on: "border-emerald-400 bg-emerald-50 text-emerald-800" },
+                          { v: false, txt: trT("🤝 Aide interne"), on: "border-slate-400 bg-slate-100 text-slate-700" },
+                        ].map((o) => (
+                          <button
+                            key={String(o.v)}
+                            type="button"
+                            onClick={() => setChoixFact((prev) => ({ ...prev, [e.id]: o.v }))}
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${choixFact[e.id] === o.v ? o.on : "border-slate-200 text-slate-400"}`}
+                          >
+                            {o.txt}
+                          </button>
+                        ))}
+                      </span>
+                    )}
+                    {techs[0] === e.id && techs.length > 1 && <span className="shrink-0 text-[10px] font-bold text-slate-400">{trT("principal · facturable")}</span>}
+                  </label>
+                ))}
+              </div>
+            </div>
+            {manquePlanif.length > 0 && (
+              <p className="rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-semibold text-slate-600">{trT("Il manque : {liste}.", { liste: manquePlanif.join(" · ") })}</p>
+            )}
             <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={() => setOption(null)}>Retour</Button>
-              <Button onClick={() => onChoisirBonTravail(devis, adresseChoisie())}>Convertir et assigner</Button>
+              <Button variant="outline" onClick={() => setOption(null)}>{trT("Retour")}</Button>
+              <Button disabled={manquePlanif.length > 0} onClick={() => onChoisirBonTravail(devis, adresseChoisie(), planif())}>
+                {quand === "maintenant" ? trT("Convertir et planifier") : trT("Convertir et mettre en attente")}
+              </Button>
             </div>
           </div>
         )}
@@ -437,7 +547,7 @@ export function ModalReportCatalogue({ info, peutModifierListePrix, onFermer, on
 }
 
 
-export function OngletDevis({ clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, onClientCiblePris = null, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris, onVenteDirecte = null }) {
+export function OngletDevis({ employesPlanif = [], clients, setClients, devisListe, setDevisListe, ajouterJournal, ajouterTacheAgenda, projets = [], setProjets, onDevisTraite, persisterDevis, clientCible, onClientCiblePris = null, peutModifierListePrix, onMajCoutCatalogue, tauxMetiers, devisAReviser, onDevisReviserPris, onVenteDirecte = null }) {
   // 🌎 Traduction (tranche devis admin, 2026-09-14) — nommée `tr`.
   const { t: tr } = useLangue();
   // Liste de prix (289 items) — sert au sélecteur de lignes de devis.
@@ -1650,6 +1760,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         ? `📄 Contrat ${devis.numero} (${devis.clientNom || "client"}) marqué SIGNÉ par le bureau — signature reçue hors ligne (papier ou autre) ; en vigueur à compter d'aujourd'hui. Prêt à être traité.`
         : `✅ Devis ${devis.numero} marqué accepté — prêt à être traité ("Traiter le devis")`
     );
+    // 📅 (2026-10-06) La fenêtre « Traiter le devis » s'ouvre tout de suite :
+    // on peut planifier pendant qu'on a le client en tête (Annuler = plus tard).
+    setDevisATraiterId(devis.id);
   };
 
   // OPTION A — Intervention directe : le devis devient un bon de
@@ -1660,7 +1773,9 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
   // d'apparaître ensuite dans l'onglet Facturation (facturation
   // progressive plafonnée au devis) puis d'être converti en facture
   // QuickBooks, exactement comme les devis traités par l'ancien flux.
-  const traiterCommeBonDeTravail = async (devis, adresseTravaux) => {
+  // `planif` (2026-10-06) : { mode: "attente" | "maintenant", titre, date, heure,
+  // heures, jours, employeIds, choixFacturables } — voir ModalTraiterDevis.
+  const traiterCommeBonDeTravail = async (devis, adresseTravaux, planif = null) => {
     let numeroBc;
     try {
       numeroBc = await numeroBonCommande();
@@ -1681,7 +1796,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
       id: `tache-${devis.id}`,
       clientId: devis.clientId,
       clientNom: devis.clientNom,
-      titre: `Devis ${devis.numero} — Intervention`,
+      titre: planif?.titre || `Devis ${devis.numero} — Intervention`,
       // 📝 La DESCRIPTION de chaque item suit dans la tâche (2026-09-17,
       // vécu : seuls les noms « 1 × Canair… » apparaissaient — modèles,
       // garantie, ce qui est inclus, tout le détail du devis manquait au
@@ -1694,17 +1809,31 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
         })
         .join("\n\n"),
       statut: "a_planifier",
-      heures: 1,
-      jours: 0,
+      heures: planif?.heures || 1,
+      jours: planif?.jours || 0,
       sauterWeekend: false,
       typeTache: "devis",
       devisNumero: devis.numero,
       adresseTravaux: adresseTravaux || null,
+      // 📅 QUAND ? (2026-10-06) — date, heure et équipe PRÉVUES sur la carte ;
+      // « placerAuto » = l'agenda la place lui-même à son ouverture.
+      ...(planif?.date ? { datePrevue: planif.date, heurePrevue: planif.heure || "07:00" } : {}),
+      ...((planif?.employeIds || []).length > 0
+        ? {
+            technicienPrevu: planif.employeIds[0],
+            equipePrevue: planif.employeIds.slice(1).map((id) => ({ employeId: id, facturable: planif.choixFacturables?.[id] })),
+          }
+        : {}),
+      ...(planif?.mode === "maintenant" && planif.date && (planif.employeIds || []).length > 0 ? { placerAuto: true } : {}),
     }, clients));
 
     setDevisListe((prev) => prev.map((d) => (d.id === devis.id ? { ...d, traite: true, modeTraitement: "bon_travail" } : d)));
     persisterDevis?.({ ...devis, traite: true, modeTraitement: "bon_travail" });
-    ajouterJournal(`🔧 Devis ${devis.numero} converti en bon de travail — prêt pour attribution dans l'agenda. Lien QuickBooks conservé (facturation finale via l'onglet Facturation).`);
+    ajouterJournal(
+      planif?.mode === "maintenant"
+        ? `🔧 Devis ${devis.numero} converti en bon de travail — PLANIFIÉ le ${planif.date} à ${planif.heure} (placé à l'agenda à l'ouverture de l'onglet). Lien QuickBooks conservé.`
+        : `🔧 Devis ${devis.numero} converti en bon de travail — prêt pour attribution dans l'agenda${planif?.date ? ` (prévu le ${planif.date})` : ""}. Lien QuickBooks conservé (facturation finale via l'onglet Facturation).`
+    );
     setDevisATraiterId(null);
     onDevisTraite?.("agenda");
   };
@@ -3342,6 +3471,7 @@ export function OngletDevis({ clients, setClients, devisListe, setDevisListe, aj
           onChoisirVenteDirecte={onVenteDirecte ? traiterCommeVenteDirecte : null}
           projets={projets}
           tauxMoyen={tauxMoyenEquipe(tauxMetiers)}
+          employes={employesPlanif}
         />
       )}
     </div>

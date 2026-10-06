@@ -117,6 +117,17 @@ export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, ta
   );
   const basculerEmploye = (id) =>
     setEmployeIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  // 💰/🤝 CHOIX FACTURABLE DES TECHNICIENS EN PLUS (2026-10-06, demande du
+  // propriétaire : « je ne peux pas dire qui est facturable, comme quand je
+  // crée une tâche »). Pré-rempli avec l'équipe prévue ; le 1er coché est le
+  // principal (pas de question), les sous-traitants non plus.
+  const [choixFacturables, setChoixFacturables] = useState(() =>
+    Object.fromEntries((Array.isArray(tache?.equipePrevue) ? tache.equipePrevue : []).filter((m) => m.facturable === true || m.facturable === false).map((m) => [m.employeId, m.facturable]))
+  );
+  const estSousTraitantId = (id) => !!(employes || []).find((e) => e.id === id)?.estSousTraitant;
+  const choixManquants = dejaPlanifiee
+    ? []
+    : employeIds.slice(1).filter((id) => !estSousTraitantId(id) && choixFacturables[id] !== true && choixFacturables[id] !== false);
   // Techniciens (autres que celui ouvert ici) qui recevront AUSSI la
   // modification — cases cochées dans « Appliquer la modification à… ».
   // ✅ TOUTE L'ÉQUIPE COCHÉE D'OFFICE (2026-09-03, vécu par le
@@ -360,6 +371,7 @@ export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, ta
   };
 
   const enregistrer = () => {
+    if (choixManquants.length > 0) return; // 💰/🤝 obligatoire pour chaque technicien en plus
     // Contact sur place résolu depuis le carnet (ou conservé tel quel).
     const carnetClient = client?.contacts || [];
     // 📇 Nouveau contact tapé ICI (2026-09-17, vécu : impossible d'ajouter
@@ -392,6 +404,8 @@ export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, ta
       // sinon la tâche reste "en attente" avec sa durée mise à jour.
       employeId: dejaPlanifiee ? employeId || null : employeIds[0] || null,
       employeIds: dejaPlanifiee ? undefined : employeIds,
+      // 💰/🤝 par technicien en plus (attente seulement).
+      ...(dejaPlanifiee ? {} : { choixFacturables }),
       date,
       heureDebut,
       description,
@@ -904,7 +918,27 @@ export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, ta
                       onChange={() => basculerEmploye(e.id)}
                       className="h-4 w-4 shrink-0 accent-[#131B2E]"
                     />
-                    <span className="text-xs font-bold text-slate-800">{e.nom}</span>
+                    <span className="min-w-0 flex-1 text-xs font-bold text-slate-800">{e.nom}</span>
+                    {employeIds.includes(e.id) && employeIds[0] !== e.id && !e.estSousTraitant && (
+                      <span className="flex shrink-0 gap-1" onClick={(ev) => ev.preventDefault()}>
+                        {[
+                          { v: true, txt: tr("💰 Facturable"), on: "border-emerald-400 bg-emerald-50 text-emerald-800" },
+                          { v: false, txt: tr("🤝 Aide interne"), on: "border-slate-400 bg-slate-100 text-slate-700" },
+                        ].map((o) => (
+                          <button
+                            key={String(o.v)}
+                            type="button"
+                            onClick={() => setChoixFacturables((prev) => ({ ...prev, [e.id]: o.v }))}
+                            className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${choixFacturables[e.id] === o.v ? o.on : "border-slate-200 text-slate-400"}`}
+                          >
+                            {o.txt}
+                          </button>
+                        ))}
+                      </span>
+                    )}
+                    {employeIds[0] === e.id && employeIds.length > 1 && (
+                      <span className="shrink-0 text-[10px] font-bold text-slate-400">{tr("principal · facturable")}</span>
+                    )}
                   </label>
                 ))}
               </div>
@@ -1541,7 +1575,12 @@ export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, ta
                 </p>
               );
             })()}
-            <Button onClick={enregistrer} className="w-full">
+            {choixManquants.length > 0 && (
+              <p className="mb-1.5 rounded-lg bg-slate-100 px-2 py-1.5 text-[10px] font-semibold text-slate-600">
+                {tr("Il manque le choix facturable ou non pour : {noms}.", { noms: choixManquants.map((id) => (employes || []).find((e) => e.id === id)?.nom || "?").join(", ") })}
+              </p>
+            )}
+            <Button onClick={enregistrer} disabled={choixManquants.length > 0} className="w-full">
               {dejaPlanifiee
                 ? "Enregistrer les modifications"
                 : employeIds.length > 0

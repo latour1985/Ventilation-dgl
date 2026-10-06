@@ -4356,6 +4356,7 @@ function AppAdmin() {
 
       {vue === "devis" && (
         <OngletDevis
+          employesPlanif={(utilisateursActifs || []).map((u) => ({ id: u.id, nom: u.nom }))}
           devisAReviser={devisAReviser}
           onDevisReviserPris={() => setDevisAReviser(null)}
           onVenteDirecte={(devis) => {

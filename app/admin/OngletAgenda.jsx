@@ -483,6 +483,10 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
     onDragEnd: () => setBlocArme(null),
   });
   const appuiAssezLong = (cle) => appuiBlocRef.current.cle === cle && Date.now() - appuiBlocRef.current.t >= DELAI_DEPLACEMENT_MS;
+  // 📅 TÂCHES « PLANIFIER MAINTENANT » (2026-10-06) — créées depuis
+  // « Traiter le devis » avec date + équipe : placées ici, par le MÊME
+  // chemin que la fenêtre d'édition (dépôt non payé = reste en attente).
+  const placementsFaitsRef = useRef(new Set());
   // Un AUTRE technicien tient-il déjà cette tâche dans la grille ?
   const autreTechnicienALaTache = (tacheId, employeIdCourant) =>
     Object.entries(planning || {}).some(
@@ -2646,7 +2650,27 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
   // les appels Supabase correspondants (voir lib/supabase/taches.js —
   // creerTache/assignerTache), avec une synchronisation Realtime pour
   // que l'app technicien voie la tâche apparaître instantanément.
-  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau, devisJoints, devisJointsLignes, numeroSuiviClient, titre }) => {
+  useEffect(() => {
+    if (lectureSeule) return;
+    const aPlacer = (tachesAttente || []).filter((t) => t.placerAuto && t.datePrevue && t.technicienPrevu && !placementsFaitsRef.current.has(t.id));
+    aPlacer.forEach((t) => {
+      placementsFaitsRef.current.add(t.id);
+      const equipe = Array.isArray(t.equipePrevue) ? t.equipePrevue : [];
+      enregistrerEditionRapide(t.id, {
+        heures: Number(t.heures) || 1,
+        jours: Number(t.jours) || 0,
+        sauterWeekend: !!t.sauterWeekend,
+        employeIds: [t.technicienPrevu, ...equipe.map((m) => m.employeId).filter((id) => id && id !== t.technicienPrevu)],
+        date: t.datePrevue,
+        heureDebut: t.heurePrevue || "07:00",
+        description: t.description,
+        choixFacturables: Object.fromEntries(equipe.map((m) => [m.employeId, m.facturable])),
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tachesAttente]);
+
+  const enregistrerEditionRapide = (tacheId, { heures, jours, sauterWeekend, sauterFeries, employeId, employeIds, date, heureDebut, description, contactSurPlace, adresseTravaux, adresseIntervention, adresseUnite, nouvelleAdressePourDossier, garantie, piecesJointes, etapes, projetId, devisNumero, typeTache, nouveauContactCarnet, noteBureau, devisJoints, devisJointsLignes, numeroSuiviClient, titre, choixFacturables = null }) => {
     if (lectureSeule) return;
     const tache = tachesAttente.find((t) => t.id === tacheId);
     if (!tache) return;
@@ -2654,6 +2678,7 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
     if (nouveauContactCarnet) ajouterContactAuCarnet(tache, nouveauContactCarnet);
     const tacheMiseAJour = {
       ...tache,
+      placerAuto: false, // 📅 placée (ou gardée) une fois — jamais replacée toute seule ensuite
       heures,
       jours,
       sauterWeekend,
@@ -2720,7 +2745,8 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
       const equipe = Array.isArray(tacheMiseAJour.equipePrevue) ? tacheMiseAJour.equipePrevue : [];
       const { equipePrevue: _equipe, ...tacheSansEquipe } = tacheMiseAJour;
       cibles.forEach((id, rang) =>
-        assigner(tacheSansEquipe, id, new Date(`${date}T00:00:00`), heureDebut, equipe.find((m) => m.employeId === id)?.facturable, { coequipier: rang > 0 })
+        // 💰/🤝 choisi dans la fenêtre (2026-10-06) d'abord, sinon l'équipe prévue.
+        assigner(tacheSansEquipe, id, new Date(`${date}T00:00:00`), heureDebut, rang > 0 && choixFacturables && (choixFacturables[id] === true || choixFacturables[id] === false) ? choixFacturables[id] : equipe.find((m) => m.employeId === id)?.facturable, { coequipier: rang > 0 })
       );
     } else {
       // 🕚 La date/heure choisies SUIVENT la tâche en attente (2026-09-02,
