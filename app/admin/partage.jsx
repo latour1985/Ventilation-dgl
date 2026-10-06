@@ -1602,6 +1602,46 @@ function ChampTexteLocal({ valeur, onValeur, ...props }) {
 // devis joint aura sa propre carte en Facturation.
 //   devisDuClient : devis Fluxya du client (versions actives)
 //   exclure       : le numéro du devis principal
+// 📍 CLÉ D'ADRESSE COURTE — « Chantier — 280 Chem. Landry, Saint-Paul » et
+// « 280 chemin Landry » donnent la même clé (numéro + rue, sans accents,
+// ponctuation ni type de voie). Sert à reconnaître « la même adresse ».
+export function cleAdresseCourte(adresse) {
+  const brut = String(adresse || "").split(" — ").pop();
+  const rue = brut.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/[,\n]/)[0];
+  return rue
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\b(rue|avenue|ave|av|boulevard|boul|blvd|bd|chemin|chem|ch|route|rte|rang|montee)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// 🔄 ÉTAT D'UN BON REPORTÉ (2026-10-06, demande du propriétaire : le report
+// n'était qu'une étiquette — le bon restait dans la pile).
+//   infoVisite(id) → { titre, date, enAttente } | null (tâche disparue)
+// Renvoie null (pas reporté), ou :
+//   { actif: true,  mode: "visite" | "date" | "sans_cible", visite, date }
+//   { actif: false, motif: "visite_fermee" | "visite_retiree" | "date_atteinte", ... }
+// Un bon reporté ACTIF sort de « Prêts à facturer » ; inactif, il y revient.
+export function etatReportBon(b, { infoVisite = null, bons = [], aujourdhuiISO = null } = {}) {
+  if (!b || b.retraitStatut !== "reporte") return null;
+  const aujourdhui = aujourdhuiISO || dateISO(new Date());
+  if (b.reporteTacheId) {
+    const visite = infoVisite ? infoVisite(b.reporteTacheId) : null;
+    const fermee = (bons || []).some(
+      (x) => !x.estDevisJoint && String(x.tacheId || "").split("::")[0] === b.reporteTacheId
+    );
+    if (fermee) return { actif: false, motif: "visite_fermee", visite };
+    if (!visite) return { actif: false, motif: "visite_retiree" };
+    return { actif: true, mode: "visite", visite, date: visite.date || null };
+  }
+  if (b.reporteJusquAu) {
+    return b.reporteJusquAu <= aujourdhui
+      ? { actif: false, motif: "date_atteinte", date: b.reporteJusquAu }
+      : { actif: true, mode: "date", date: b.reporteJusquAu };
+  }
+  return { actif: true, mode: "sans_cible" };
+}
+
 export function lignesSansPrixDevis(devis) {
   return (devis?.lignes || []).map((l) => ({ nom: l.nom, quantite: l.quantite, unite: l.unite || "" }));
 }

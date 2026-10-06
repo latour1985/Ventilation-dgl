@@ -22,30 +22,43 @@ import { listerFacturesLibres, enregistrerFactureLibre, majEnvoiFactureLibre, ma
 import { creerFactureMaison, lienFactureMaison, finaliserFactureMaison, PREFIXE_SUIVI_FACTURE, listerFacturesMaison } from "@/lib/supabase/facturesMaison";
 import { calculerTaxesRegime } from "@/lib/taxesCanada";
 import { SectionFacturesMaison } from "./FacturesMaison";
-import { majFacturesEmises, poserFacturesEmisesLot, sauvegarderRevisionBon, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
+import { majFacturesEmises, poserFacturesEmisesLot, sauvegarderRevisionBon, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, leverReportFacturation, RAISONS_RETRAIT, majMaterielStock } from "@/lib/supabase/bonsTravail";
 import { assurerJetonBon, lienBonPublic, marquerBonEnvoyeClient, JOURS_VALIDITE_BON } from "@/lib/supabase/bonPublic";
 import { EnTeteEntreprise, PiedDocument } from "./OngletParametres";
-import { SignatureBonALaDemande, AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, devisAJourPourNumero, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
+import { etatReportBon, SignatureBonALaDemande, AdressesDocument, BadgeConsultation, BarrePagination, BoutonPDF, Button, ITEMS_PAR_PAGE, ModalSelectionCourriel, SelecteurItem, adresseFacturationClient, correspond, dateISO, devisAJourPourNumero, hauteurDescription, libelleDestinataires, listeDestinataires, nomAffichageClient, tauxAffiche, useCatalogue, useClients, useDevis } from "./partage";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { taxesDepot } from "@/lib/supabase/depots";
 import { libelleZone, resumeAvisZone } from "./FenetreCorrectionZone";
 import { enregistrerAttributionQb } from "@/lib/supabase/quickbooks";
 
-export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
+export function ModalRetraitFacturation({ bon, onFermer, onDemander, visitesFutures = [] }) {
+  const { t: tr, langue } = useLangue();
   const [raison, setRaison] = useState("travaux_en_cours");
   const [note, setNote] = useState("");
+  // 🔄 REPORT (2026-10-06, demande du propriétaire) : jusqu'à la PROCHAINE
+  // VISITE à la même adresse (recommandé quand il y en a une), ou une date.
+  const dans7Jours = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return dateISO(d);
+  })();
+  const [cibleReport, setCibleReport] = useState(visitesFutures[0]?.id || "date");
+  const [dateReport, setDateReport] = useState(dans7Jours);
+  const jourLisible = (iso) =>
+    iso ? new Date(`${iso}T00:00:00`).toLocaleDateString(langue === "en" ? "en-CA" : "fr-CA", { weekday: "short", day: "numeric", month: "long" }) : "";
+  const cible = raison !== "travaux_en_cours" ? null : cibleReport === "date" ? { date: dateReport } : { tacheId: cibleReport };
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
         <div className="mb-3 flex items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-extrabold text-slate-900">Retirer de la facturation</h3>
+            <h3 className="text-sm font-extrabold text-slate-900">{tr("Retirer de la facturation")}</h3>
             <p className="text-xs text-slate-500">{bon.client} · {bon.projet}</p>
           </div>
           <button onClick={onFermer}><X size={18} className="text-slate-400" /></button>
         </div>
         <p className="mb-2 text-[11px] text-slate-500">
-          Choisis la raison — un <span className="font-bold">Admin principal</span> devra valider avant que le bon quitte la pile.
+          {tr("Choisis la raison — un Admin principal devra valider avant que le bon quitte la pile.")}
         </p>
         <div className="space-y-1.5">
           {Object.entries(RAISONS_RETRAIT).map(([cle, libelle]) => (
@@ -61,21 +74,57 @@ export function ModalRetraitFacturation({ bon, onFermer, onDemander }) {
                 className="mt-0.5 h-4 w-4 accent-[#FF6A13]"
               />
               <span className="text-xs font-semibold text-slate-700">
-                {cle === "travaux_en_cours" ? "🔄 " : cle === "garantie" ? "🛡️ " : cle === "facture_hors_fluxya" ? "🧾 " : "🏠 "}{libelle}
+                {cle === "travaux_en_cours" ? "🔄 " : cle === "garantie" ? "🛡️ " : cle === "facture_hors_fluxya" ? "🧾 " : "🏠 "}{tr(libelle)}
               </span>
             </label>
           ))}
         </div>
+        {raison === "travaux_en_cours" && (
+          <div className="mt-2 rounded-xl border border-blue-200 bg-blue-50 p-2.5">
+            <p className="text-[11px] font-extrabold text-blue-900">{tr("🔄 Reporter jusqu'à :")}</p>
+            <div className="mt-1 space-y-1">
+              {visitesFutures.map((v, i) => (
+                <label key={v.id} className="flex cursor-pointer items-start gap-2 text-[11px] text-slate-700">
+                  <input type="radio" name="cible-report" checked={cibleReport === v.id} onChange={() => setCibleReport(v.id)} className="mt-0.5 h-4 w-4 accent-blue-600" />
+                  <span>
+                    {tr("la visite « {titre} » du {date} (même adresse)", { titre: v.titre, date: jourLisible(v.date) })}
+                    {i === 0 && <span className="ml-1 font-bold text-blue-700">{tr("— recommandé")}</span>}
+                    <span className="block text-[10px] text-slate-500">{tr("Le bon revient dans « Prêts à facturer » quand le technicien ferme cette visite.")}</span>
+                  </span>
+                </label>
+              ))}
+              <label className="flex cursor-pointer items-center gap-2 text-[11px] text-slate-700">
+                <input type="radio" name="cible-report" checked={cibleReport === "date"} onChange={() => setCibleReport("date")} className="h-4 w-4 accent-blue-600" />
+                <span>{tr("une date :")}</span>
+                <input
+                  type="date"
+                  value={dateReport}
+                  min={dateISO(new Date())}
+                  onChange={(e) => { setDateReport(e.target.value); setCibleReport("date"); }}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px]"
+                />
+              </label>
+              {visitesFutures.length === 0 && (
+                <p className="text-[10px] text-slate-500">{tr("Aucune visite planifiée à cette adresse pour ce client — choisis une date.")}</p>
+              )}
+            </div>
+          </div>
+        )}
         <textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="Note facultative (ex : 2e visite prévue vendredi)"
+          placeholder={tr("Note facultative (ex : 2e visite prévue vendredi)")}
           rows={2}
           className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-xs outline-none focus:border-[#FF6A13]"
         />
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button variant="outline" onClick={onFermer}>Annuler</Button>
-          <Button onClick={() => onDemander(raison, note.trim())}>Demander le retrait</Button>
+          <Button variant="outline" onClick={onFermer}>{tr("Annuler")}</Button>
+          <Button
+            disabled={raison === "travaux_en_cours" && cibleReport === "date" && !dateReport}
+            onClick={() => onDemander(raison, note.trim(), cible)}
+          >
+            {raison === "travaux_en_cours" ? tr("Reporter") : tr("Demander le retrait")}
+          </Button>
         </div>
       </div>
     </div>
@@ -2021,10 +2070,10 @@ export function ModalFactureLibre({ clients, projets, catalogue, configEnt, onFe
 }
 
 
-export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, onNoterAuDossierClient = null, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTEntreeQb = null, transactionsQbST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, tachePour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
+export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, clients, depots, pieces, inspections, prixDepots, estAdminPrincipal, onAjouterCourrielClient, onNoterAuDossierClient = null, facturablesAssignations = {}, onBasculerFacturable = null, assignationsST = [], onMarquerSTEntreeQb = null, transactionsQbST = [], onMarquerSTFacture, travaux = [], zonePourTache = null, descriptionTachePour = null, tachePour = null, infoVisite = null, visitesFuturesPour = null, achatsLibres = [], nomsEmployes = {}, projets = [], nomAdmin = null, onSynchroniserQb = null, qbConnecte = null, venteDirecte = null, onVenteDirecteConsommee = null, onDevisFacture = null }) {
   // 🌎 Traduction (tranche facturation, 2026-09-14) — nommée `tr` car le
   // fichier utilise `t` comme variable de boucle (bons/travaux).
-  const { t: tr } = useLangue();
+  const { t: tr, langue: langueFact } = useLangue();
   // 📦 Éditeur du matériel de stock d'un bon — { bonId, items } | null.
   const [materielStockPour, setMaterielStockPour] = useState(null);
   const catalogueFacturation = useCatalogue();
@@ -2946,8 +2995,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       });
     return lignes.sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 10);
   };
+  // 🔄 Bon reporté ENCORE en attente (visite pas fermée, date pas atteinte).
+  const etatReportDe = (b) => etatReportBon(b, { infoVisite, bons });
   const categorieBon = (b) => {
     if (b.statutQb === "retire") return "retire";
+    if (b.statutQb !== "envoye" && etatReportDe(b)?.actif) return "reporte";
     if (b.statutQb === "envoye") return "facture";
     // Le devis de ce bon est facturé au complet (par ce bon ou un autre).
     if (b.devisNumero && devisSansSolde.has(b.devisNumero)) return "facture";
@@ -3018,7 +3070,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     filtresActifs.length === 0
       ? rechercheFact.trim()
         ? bonsGroupes
-        : bonsGroupes.filter((b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture")
+        : bonsGroupes.filter((b) => !["retire", "facture", "reporte"].includes(categorieBon(b)))
       : bonsGroupes.filter((b) => filtresActifs.includes(categorieBon(b)))
   ).filter((b) => bonCorrespond(b, rechercheFact));
   // ============================================================
@@ -3055,8 +3107,9 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
     // exclure faisait disparaître le tableau entier quand toute la pile
     // attendait une révision — et c'est justement ceux-là qu'on ne doit
     // pas oublier. Ils sont comptés à part, jamais facturés à 0 $.
+    // 🔄 Les bons reportés en attente n'y sont pas (2026-10-06).
     const candidats = bonsGroupes.filter(
-      (b) => categorieBon(b) !== "retire" && categorieBon(b) !== "facture"
+      (b) => !["retire", "facture", "reporte"].includes(categorieBon(b))
     );
     const parClient = new Map();
     candidats.forEach((b) => {
@@ -3216,11 +3269,14 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
   // retrait d'UNE carte l'affichait sur TOUTES. Sans tacheId, on cible
   // le bon lui-même, et rien ne part en base (aucune ligne à modifier).
   const memeCibleRetrait = (b) => (x) => (b.tacheId ? x.tacheId === b.tacheId : x.id === b.id);
-  const demanderRetrait = async (b, raison, note) => {
+  const demanderRetrait = async (b, raison, note, cibleReport = null) => {
     try {
-      if (b.tacheId) await demanderRetraitFacturation(b.tacheId, raison, note);
+      if (b.tacheId) await demanderRetraitFacturation(b.tacheId, raison, note, cibleReport);
       const cible = memeCibleRetrait(b);
-      setBons((prev) => prev.map((x) => (cible(x) ? { ...x, retraitStatut: "demande", retraitRaison: raison, retraitNote: note || "" } : x)));
+      const report = raison === "travaux_en_cours";
+      const champsReport = { reporteTacheId: report ? cibleReport?.tacheId || null : null, reporteJusquAu: report ? cibleReport?.date || null : null };
+      setBons((prev) => prev.map((x) => (cible(x) ? { ...x, retraitStatut: "demande", retraitRaison: raison, retraitNote: note || "", ...champsReport } : x)));
+      b = { ...b, ...champsReport };
       // 👑 L'ADMIN PRINCIPAL QUI DEMANDE VALIDE DU MÊME GESTE (2026-09-03,
       // vécu : « regarde ce que ça écrit » — le système lui demandait de
       // se valider lui-même). Le deux-temps reste ENTIER pour les autres
@@ -3247,12 +3303,23 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       ajouterJournal(
         approuve
           ? b.retraitRaison === "travaux_en_cours"
-            ? `🔄 Report APPROUVÉ — ${b.client} sera facturé à la prochaine journée de facturation.`
+            ? `🔄 Report APPROUVÉ — ${b.client} (« ${b.projet} ») ${b.reporteTacheId ? `attend la fermeture de la visite « ${infoVisite?.(b.reporteTacheId)?.titre || b.reporteTacheId} »${infoVisite?.(b.reporteTacheId)?.date ? ` du ${infoVisite(b.reporteTacheId).date}` : ""}` : b.reporteJusquAu ? `revient dans « Prêts à facturer » le ${b.reporteJusquAu}` : "reste reporté sans date"} — rien ne sera facturé d'ici là.`
             : `🗂️ Retrait APPROUVÉ — ${b.client} sort de la facturation (${RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison}). Ses coûts restent comptés dans l'analyse.`
           : `↩️ Retrait REFUSÉ — le bon de ${b.client} reste à facturer.`
       );
     } catch {
       ajouterJournal("⚠️ Validation du retrait NON enregistrée — réessaie.");
+    }
+  };
+  // 🔄 Lever le report (2026-10-06) — le bon revient dans la pile tout de suite.
+  const leverReport = async (b) => {
+    try {
+      if (b.tacheId) await leverReportFacturation(b.tacheId);
+      const cible = memeCibleRetrait(b);
+      setBons((prev) => prev.map((x) => (cible(x) ? { ...x, retraitStatut: null, retraitRaison: null, retraitNote: "", reporteTacheId: null, reporteJusquAu: null } : x)));
+      ajouterJournal(`🔄 Report LEVÉ — « ${b.projet} » (${b.client}) revient dans « Prêts à facturer ».`);
+    } catch {
+      ajouterJournal("⚠️ Report NON levé — réessaie.");
     }
   };
   const remettreBonAFacturer = async (b) => {
@@ -4526,10 +4593,10 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
           changent pas).
           ============================================================ */}
       {(() => {
-        const etapeDe = (c) => (c === "rouge" ? "reviser" : c === "retire" ? "retire" : c === "facture" ? "facture" : "pret");
+        const etapeDe = (c) => (c === "rouge" ? "reviser" : c === "retire" ? "retire" : c === "facture" ? "facture" : c === "reporte" ? "reporte" : "pret");
         const nomType = (t) => (t === "appel_service" ? "appel" : t === "devis" ? "devis" : t === "entretien_contrat" ? "contrat" : "T&M");
         const pluriel = (nom, n) => (nom === "T&M" || nom === "devis" ? nom : n > 1 ? `${nom}s` : nom);
-        const detail = { reviser: {}, pret: {}, retire: {}, facture: {} };
+        const detail = { reviser: {}, pret: {}, reporte: {}, retire: {}, facture: {} };
         bonsGroupes.forEach((b) => {
           const e = etapeDe(categorieBon(b));
           const t = nomType(b.type);
@@ -4552,11 +4619,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         const tuiles = [
           { cle: "reviser", n: rouges, titre: tr("À réviser"), sous: tr("prix à fixer avant la facture"), actif: filtresActifs.includes("rouge"), clic: () => basculerFiltre("rouge"), c: ["text-red-600", "border-red-100 bg-red-50", "border-red-400 bg-red-50 ring-2 ring-red-300"] },
           { cle: "pret", n: bleus + violets + jaunes + gris, titre: tr("Prêts à facturer"), sous: tr("prix validé, pas encore envoyé"), actif: pretActif, clic: basculerPrets, c: ["text-amber-600", "border-amber-100 bg-amber-50", "border-amber-400 bg-amber-50 ring-2 ring-amber-300"] },
+          // 🔄 Bons reportés en attente (2026-10-06) — hors de « Prêts à facturer ».
+          { cle: "reporte", n: parCategorie.reporte || 0, titre: tr("🔄 Reportés"), sous: tr("attendent une visite ou une date"), actif: filtresActifs.includes("reporte"), clic: () => basculerFiltre("reporte"), c: ["text-blue-600", "border-blue-100 bg-blue-50", "border-blue-400 bg-blue-50 ring-2 ring-blue-300"] },
           { cle: "retire", n: retires, titre: tr("Retirés"), sous: tr("garantie / maison / hors Fluxya"), actif: filtresActifs.includes("retire"), clic: () => basculerFiltre("retire"), c: ["text-slate-500", "border-slate-200 bg-slate-50", "border-slate-400 bg-slate-100 ring-2 ring-slate-300"] },
           { cle: "facture", n: dejaFactures, titre: tr("✅ Déjà facturés"), sous: tr("hors de la liste — un clic les montre"), actif: filtresActifs.includes("facture"), clic: () => basculerFiltre("facture"), c: ["text-emerald-600", "border-emerald-100 bg-emerald-50", "border-emerald-400 bg-emerald-50 ring-2 ring-emerald-300"] },
         ];
         return (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
             {tuiles.map((tu) => (
               <button key={tu.cle} onClick={tu.clic} className={`rounded-xl border p-3 text-left transition-shadow ${tu.actif ? tu.c[2] : tu.c[1]}`}>
                 <p className={`text-2xl font-extrabold tabular-nums ${tu.c[0]}`}>{tu.n}</p>
@@ -5155,12 +5224,39 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                     )}
                   </div>
                 )}
-                {b.retraitStatut === "reporte" && (
-                  <p className="mt-1 rounded-lg bg-blue-50 px-2 py-1 text-[11px] font-bold text-blue-700">
-                    🔄 Reporté — sera facturé à la prochaine journée de facturation
-                    {b.retraitValidePar ? ` (approuvé par ${b.retraitValidePar})` : ""}.
-                  </p>
-                )}
+                {b.retraitStatut === "reporte" && (() => {
+                  // 🔄 REPORT (2026-10-06) : ce qu'il attend, ou pourquoi il est revenu.
+                  const er = etatReportDe(b);
+                  const jour = (iso) => (iso ? new Date(`${iso}T00:00:00`).toLocaleDateString(langueFact === "en" ? "en-CA" : "fr-CA", { day: "numeric", month: "long" }) : "");
+                  const texte = !er
+                    ? ""
+                    : er.actif
+                    ? er.mode === "visite"
+                      ? tr("🔄 Reporté — attend la fermeture de la visite « {titre} »{date}.", { titre: er.visite?.titre || "", date: er.date ? ` (${jour(er.date)})` : "" })
+                      : er.mode === "date"
+                      ? tr("🔄 Reporté jusqu'au {date}.", { date: jour(er.date) })
+                      : tr("🔄 Reporté sans date — choisis une visite ou une date (« Reporter de nouveau »).")
+                    : er.motif === "visite_fermee"
+                    ? tr("🔄 Revenu du report — la visite « {titre} » est fermée : à facturer.", { titre: er.visite?.titre || "" })
+                    : er.motif === "visite_retiree"
+                    ? tr("⚠️ Revenu du report — la visite attendue a été retirée de l'agenda : à facturer.")
+                    : tr("🔄 Revenu du report — la date du {date} est arrivée : à facturer.", { date: jour(er.date) });
+                  return (
+                    <div className={`mt-1 rounded-lg px-2 py-1 text-[11px] font-bold ${er?.actif ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-800"}`}>
+                      <p>{texte}</p>
+                      <span className="mt-1 flex flex-wrap gap-1.5">
+                        <button onClick={() => leverReport(b)} className="rounded-md bg-[#131B2E] px-2 py-0.5 text-[10px] font-bold text-white">
+                          {er?.actif ? tr("Facturer maintenant") : tr("OK — retirer l'étiquette de report")}
+                        </button>
+                        {er?.actif && (
+                          <button onClick={() => setBonRetraitId(b.id)} className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[10px] font-bold text-blue-700">
+                            {tr("Reporter de nouveau")}
+                          </button>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {b.statutQb === "retire" && (
                   <p className="mt-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">
                     🗂️ Retiré de la facturation — {RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison}
@@ -5604,10 +5700,11 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
       {bonRetrait && (
         <ModalRetraitFacturation
           bon={bonRetrait}
+          visitesFutures={visitesFuturesPour ? visitesFuturesPour(bonRetrait) : []}
           onFermer={() => setBonRetraitId(null)}
-          onDemander={(raison, note) => {
+          onDemander={(raison, note, cible) => {
             setBonRetraitId(null);
-            demanderRetrait(bonRetrait, raison, note);
+            demanderRetrait(bonRetrait, raison, note, cible);
           }}
         />
       )}

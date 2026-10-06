@@ -25,11 +25,11 @@ import { assignerTacheSupabase, retirerTacheSupabase, listerToutesAssignations, 
 import { listerSousTraitants, sauvegarderSousTraitant, listerAssignationsSousTraitants, COURRIEL_ST, estCourrielST } from "@/lib/supabase/sousTraitants";
 import { listerEmployes, sauvegarderEmploye, supprimerEmploye } from "@/lib/supabase/repertoireEmployes";
 import { listerTravauxEffectues, sAbonnerTravauxEffectues, appliquerAjustementsHeures, proposerAjustementsHeures, validerGroupePropositions, refuserGroupePropositions, joursBloques, cleJour, debloquerJournee, enregistrerTravailPourEmploye, rattacherProjetAuxHeures, heuresRattachablesA, deplacerLigneHeures, rattacherTacheLot, reclasserHeures } from "@/lib/supabase/travauxEffectues";
-import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock, creerBonDevisJoint } from "@/lib/supabase/bonsTravail";
+import { listerBonsTravail, sAbonnerBonsTravail, majFacturesEmises, demanderRetraitFacturation, validerRetraitFacturation, remettreAFacturer, RAISONS_RETRAIT, enregistrerBonTravailBureau, rattacherAuBon, majMaterielStock, creerBonDevisJoint, leverReportFacturation } from "@/lib/supabase/bonsTravail";
 import { listerFournisseurs, sauvegarderFournisseur } from "@/lib/supabase/fournisseurs";
 import { listerSemainesPayees, marquerSemainePayee, annulerSemainePayee } from "@/lib/supabase/semainesPaie";
 import { bonsARamasser, calculerTournees, tacheDeTournee, ramassagesAAttribuer, PREFIXE_TOURNEE } from "@/lib/tourneesRamassage";
-import { bcEstRamassage, reglerChargesEmployeur } from "./partage";
+import { bcEstRamassage, reglerChargesEmployeur, cleAdresseCourte, etatReportBon } from "./partage";
 import { listerCamions, sauvegarderCamion, camionIndisponible, declarerIndispoCamion, leverIndispoCamion } from "@/lib/supabase/camions";
 import { numeroDevis, numeroBonCommande } from "@/lib/supabase/compteurs";
 import { listerDevis, sauvegarderDevis, activerVersionDevis, sAbonnerDevis, supprimerDevis, reponsesClientATraiter, poserEstimateDevis } from "@/lib/supabase/devis";
@@ -2104,6 +2104,73 @@ function AppAdmin() {
     }
     return (tachesAttente || []).find((t) => t.id === id) || null;
   };
+  // 🔄 INDEX DES VISITES (2026-10-06, bons reportés) — chaque tâche réelle
+  // de l'agenda (grille + attente) : titre, client, adresse et dates.
+  // Sert à proposer « reporter jusqu'à la prochaine visite à cette
+  // adresse » et à savoir quand cette visite a lieu (ou a disparu).
+  const visitesIndex = useMemo(() => {
+    const m = new Map();
+    const noter = (t, date) => {
+      if (!t?.id || t.est_tache_systeme || String(t.id).startsWith("transport-")) return;
+      const v = m.get(t.id) || {
+        id: t.id,
+        titre: t.titre || t.clientNom || "Tâche",
+        clientId: t.clientId || null,
+        clientNom: t.clientNom || "",
+        cleAdresse: cleAdresseCourte(t.adresseTravaux || t.adresseIntervention || ""),
+        dates: [],
+        enAttente: false,
+      };
+      if (date) v.dates.push(date);
+      else v.enAttente = true;
+      m.set(t.id, v);
+    };
+    Object.entries(planning || {}).forEach(([cle, valeur]) => {
+      const date = String(cle).split("|")[0];
+      listeCellule(valeur).forEach((t) => noter(t, date));
+    });
+    (tachesAttente || []).forEach((t) => noter(t, null));
+    return m;
+  }, [planning, tachesAttente]);
+  const infoVisite = (id) => {
+    const v = visitesIndex.get(id);
+    if (!v) return null;
+    const dates = [...new Set(v.dates)].sort();
+    const auj = dateISO(new Date());
+    return { ...v, date: dates.find((d) => d >= auj) || dates[dates.length - 1] || null, dates };
+  };
+  // Visites À VENIR chez le même client, à la même adresse que le bon.
+  const visitesFuturesPour = (bon) => {
+    if (!bon) return [];
+    const auj = dateISO(new Date());
+    const base = String(bon.tacheId || "").split("::")[0];
+    const cleBon = cleAdresseCourte(bon.adresseTravaux || "");
+    const nomBon = String(bon.client || "").trim().toLowerCase();
+    return [...visitesIndex.values()]
+      .filter((v) => v.id !== base && v.dates.some((d) => d >= auj))
+      .filter((v) => String(v.clientNom || "").trim().toLowerCase() === nomBon)
+      .filter((v) => (cleBon ? v.cleAdresse === cleBon : !v.cleAdresse))
+      .map((v) => ({ id: v.id, titre: v.titre, date: [...new Set(v.dates)].sort().find((d) => d >= auj) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  };
+  // 🧾 Bons REPORTÉS qui attendent une visite donnée (badge d'agenda, fiche
+  // de tâche, file du matin). Un bon par tâche (l'équipe = un seul bon).
+  const bonsEnAttenteParVisite = useMemo(() => {
+    const m = new Map();
+    const vus = new Set();
+    (bons || []).forEach((b) => {
+      if (!b.reporteTacheId || b.retraitStatut !== "reporte") return;
+      const cle = `${b.tacheId}#${b.devisNumero || ""}#${b.estDevisJoint ? "j" : ""}`;
+      if (vus.has(cle)) return;
+      const etat = etatReportBon(b, { infoVisite, bons });
+      if (!etat?.actif) return;
+      vus.add(cle);
+      m.set(b.reporteTacheId, [...(m.get(b.reporteTacheId) || []), { tacheId: b.tacheId, titre: b.projet, client: b.client, date: b.date, devisNumero: b.devisNumero || null }]);
+    });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bons, visitesIndex]);
+
   // 🚗 Ids des tâches d'agenda de type COURSE — Heures de la semaine les
   // range dans leur propre colonne (2026-09-28).
   const idsCoursesAgenda = useMemo(() => {
@@ -3107,7 +3174,8 @@ function AppAdmin() {
     setTachesAttente((prev) => [tache, ...prev]);
   };
 
-  const compteAlertes = bons.filter((b) => b.statutQb === "en_attente").length;
+  // 🔄 Un bon reporté qui attend encore (visite pas fermée, date pas atteinte) ne compte pas (2026-10-06).
+  const compteAlertes = bons.filter((b) => b.statutQb === "en_attente" && !etatReportBon(b, { infoVisite, bons })?.actif).length;
 
   // ------------------------------------------------------------
   // SYNCHRONISATION QUICKBOOKS — factures & dépenses par projet
@@ -4343,6 +4411,18 @@ function AppAdmin() {
           planning={planning}
           setPlanning={setPlanning}
           statutsAssignations={statutsAssignations}
+          bonsEnAttenteParVisite={bonsEnAttenteParVisite}
+          onLeverReport={async (tacheIdBon) => {
+            // 🔄 « Facturer maintenant » depuis la fiche de la visite (2026-10-06).
+            try {
+              await leverReportFacturation(tacheIdBon);
+              setBons((prev) => prev.map((x) => (x.tacheId === tacheIdBon ? { ...x, retraitStatut: null, retraitRaison: null, retraitNote: "", reporteTacheId: null, reporteJusquAu: null } : x)));
+              const b0 = (bons || []).find((x) => x.tacheId === tacheIdBon);
+              ajouterJournal(`🔄 Report LEVÉ depuis l'agenda — « ${b0?.projet || "bon"} » (${b0?.client || ""}) revient dans « Prêts à facturer ».`);
+            } catch {
+              ajouterJournal("⚠️ Report NON levé — réessaie.");
+            }
+          }}
           onDevisJoints={(numeros, tache) => {
             // 📎 DEVIS JOINTS À UNE TÂCHE (2026-10-01) : ils sont planifiés —
             // marqués « traités » pour qu'on ne les convertisse pas une 2e
@@ -4573,6 +4653,8 @@ function AppAdmin() {
           // seulement le rapport du technicien.
           descriptionTachePour={(tacheId) => tacheParId(tacheId)?.description || null}
           tachePour={(tacheId) => tacheParId(tacheId)}
+          infoVisite={infoVisite}
+          visitesFuturesPour={visitesFuturesPour}
           zonePourTache={(tacheId) => {
             if (!tacheId) return null;
             for (const valeur of Object.values(planning)) {

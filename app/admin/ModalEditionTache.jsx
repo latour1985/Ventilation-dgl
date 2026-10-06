@@ -9,13 +9,14 @@
 import { useRef, useState } from "react";
 import { Check, Mail, MapPin, Phone, Plus, User, X } from "lucide-react";
 import { useEntreprise } from "@/lib/contexteEntreprise";
+import { useLangue } from "@/lib/i18n";
 import { televerserPieceJointeTache } from "@/lib/supabase/photosTravaux";
 import VisionneusePhotos from "@/components/VisionneusePhotos";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { FenetreCorrectionZone, libelleZone, resumeAvisZone } from "./FenetreCorrectionZone";
 import { EditeurDevisJoints, lignesSansPrixDevis, devisDepuisQbo, AutocompleteAdresse, Button, EditeurEtapesJob, HEURES, HEURES_QUART, HEURE_PAR_DEFAUT, TYPES_TACHE, TYPE_INFO, adresseFacturationClient, courrielDefautClient, estTypeSansClient, libelleAdresse, todayISO } from "./partage";
 
-export function ModalEditionTache({ tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null, onChangerJoursTechnicien = null, prixDepots = null, onCorrigerZone = null, dejaFacture = false }) {
+export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, tache, clients, employes, dateInitiale, heureInitiale, employeIdInitial, onFermer, onEnregistrer, techniciensSurTache, onAjouterTechnicien, travailFait, onRetirerHoraire, onAnnulerTache, annulation, onFermerPourTechnicien, projets, devisListe, onCreerProjetDepuisTache, onTraiterPropositionProjet, facturables, onBasculerFacturable, onRetirerTechnicien, depot = null, commandes = [], equipeEtat = [], bonExiste = false, onFermerPourEquipe = null, onChangerJoursTechnicien = null, prixDepots = null, onCorrigerZone = null, dejaFacture = false }) {
   // ANNULATION EN DEUX TEMPS — un geste irréversible mérite deux clics
   // volontaires : 1) raison obligatoire (+ avertissements dépôt/pièce),
   // 2) dernière vérification en rouge. Adminis toujours ; répartiteur
@@ -203,6 +204,8 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
   const [projetLie, setProjetLie] = useState(tache.projetId || "");
   const [devisLie, setDevisLie] = useState(tache.devisNumero || "");
   const [devisSaisiMain, setDevisSaisiMain] = useState("");
+  const { t: tr, langue } = useLangue();
+  const [reportsLeves, setReportsLeves] = useState([]);
   // 📎 Autres devis de la même visite (2026-10-01) — une facture par devis.
   const [devisJointsEdit, setDevisJointsEdit] = useState(Array.isArray(tache.devisJoints) ? tache.devisJoints : []);
   // Projets proposés : ceux du client de la tâche d'abord ; les autres
@@ -1100,6 +1103,41 @@ export function ModalEditionTache({ tache, clients, employes, dateInitiale, heur
           {/* 🏗️/📄 RATTACHEMENTS (2026-08-22) — projet et devis, changeables
               APRÈS la création. Les heures déjà pointées et le bon de
               travail déjà créé suivent le nouveau rattachement. */}
+          {/* 🧾 BON(S) REPORTÉ(S) QUI ATTENDENT CETTE VISITE (2026-10-06) — ils
+              reviendront à facturer quand le technicien la fermera ; on peut
+              aussi les facturer tout de suite. */}
+          {bonsEnAttente.filter((b) => !reportsLeves.includes(b.tacheId)).length > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <p className="text-xs font-extrabold text-amber-900">{tr("🧾 Bon en attente de facturation à cette adresse")}</p>
+              <div className="mt-1.5 space-y-1.5">
+                {bonsEnAttente
+                  .filter((b) => !reportsLeves.includes(b.tacheId))
+                  .map((b) => (
+                    <div key={`${b.tacheId}#${b.devisNumero || ""}`} className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-amber-900">
+                      <span className="min-w-0">
+                        {tr("« {titre} » du {date} — sera à facturer après cette visite.", {
+                          titre: b.titre,
+                          date: b.date ? new Date(`${b.date}T00:00:00`).toLocaleDateString(langue === "en" ? "en-CA" : "fr-CA", { day: "numeric", month: "long" }) : "",
+                        })}
+                      </span>
+                      {onLeverReport && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReportsLeves((prev) => [...prev, b.tacheId]);
+                            onLeverReport(b.tacheId);
+                          }}
+                          className="shrink-0 rounded-md bg-[#131B2E] px-2 py-1 text-[10px] font-bold text-white"
+                        >
+                          {tr("Facturer maintenant")}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {!estTypeSansClient(tache.typeTache) && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Rattachements</p>

@@ -408,7 +408,7 @@ export function ModalProjetDepuisTache({ tache, clients, onFermer, onCreer }) {
 }
 
 
-export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null, onMajRamassageBc = null, ramassagesAttribuer = [] }) {
+export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = null, onLeverReport = null, tachesAttente, setTachesAttente, planning, setPlanning, ajouterJournal, clients, setClients, devisListe, projets, lectureSeule, employes, travaux, bons, pieces, depots, prixDepots, onCreerDepot, onCreerDepotDejaPaye, onDepotPaye, onDetacherPiece, onCreerProjet, role, onMajFacturable, facturablesAssignations = {}, statutsAssignations, sousTraitants, assignationsST, onEnregistrerSousTraitant, onStatutST, onAjouterCoutSousTraitant, achatsLibres = [], fournisseurs = [], cible = null, onCibleTraitee = null, onMarquerBcRecu = null, onOuvrirPieces = null, onMajRamassageBc = null, ramassagesAttribuer = [] }) {
   // 🚗 Employes sans transport debut/fin (reglage entreprise + fiche) —
   // les 4 recalculs de la grille passent par cette ref, toujours fraiche.
   const configTransports = useEntreprise();
@@ -5981,6 +5981,15 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
                                 📄 {(seg.tache.devisNumero ? 1 : 0) + seg.tache.devisJoints.length} devis
                               </span>
                             )}
+                            {/* 🧾 Bon(s) reporté(s) qui attendent CETTE visite (2026-10-06). */}
+                            {(bonsEnAttenteParVisite?.get(seg.tache.id) || []).length > 0 && (
+                              <span
+                                title={tr("Bon reporté — à facturer après cette visite : {liste}", { liste: bonsEnAttenteParVisite.get(seg.tache.id).map((x) => x.titre).join(" · ") })}
+                                className="shrink-0 rounded bg-amber-200 px-1 text-[8px] font-extrabold text-amber-900"
+                              >
+                                🧾 {bonsEnAttenteParVisite.get(seg.tache.id).length}
+                              </span>
+                            )}
                             {!emp.estSousTraitant && estEnCours(seg.tache, emp) && <span className="mt-0.5 block h-2 w-2 shrink-0 animate-pulse rounded-full bg-fuchsia-500" />}
                             {seg.tache.est_tache_systeme && <Car size={10} className="mt-px shrink-0" />}
                             <span className="min-w-0">
@@ -6542,6 +6551,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
       {tacheDetailOuverte && !(Array.isArray(tacheDetailOuverte.tache?.ramassages) && tacheDetailOuverte.tache.ramassages.length > 0) && (
         <ModalEditionTache
           tache={tacheDetailOuverte.tache}
+          bonsEnAttente={bonsEnAttenteParVisite?.get(tacheDetailOuverte.tache.id) || []}
+          onLeverReport={onLeverReport}
           clients={clients}
           // 🛡️ (audit 2026-10-05, critique) Le PREMIER jour et l'heure exacte
           // du technicien — pas le jour cliqué : ouvrir mardi un chantier
@@ -6796,6 +6807,8 @@ export function OngletAgenda({ onDevisJoints = null, tachesAttente, setTachesAtt
         <ModalEditionTache
           employes={employes}
           tache={tachesAttente.find((t) => t.id === tacheEnEditionId)}
+          bonsEnAttente={bonsEnAttenteParVisite?.get(tacheEnEditionId) || []}
+          onLeverReport={onLeverReport}
           clients={clients}
           devisListe={devisListe}
           projets={projets}

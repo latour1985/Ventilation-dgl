@@ -10,12 +10,14 @@
 // ailleurs dans l'application (même définition que l'écran d'arrivée).
 
 import { useMemo } from "react";
-import { dateISO, listeCellule } from "./partage";
+import { dateISO, listeCellule, etatReportBon } from "./partage";
+import { useLangue } from "@/lib/i18n";
 
 export function FileDuMatin({
   bons = [], devisListe = [], pieces = [], tachesAttente = [], achatsLibres = [], travaux = [], planning = {}, utilisateurs = [],
   soumissionsSansDevis = [], tachesDevisAFaire = [], ramassagesAttribuer = [], setOnglet, onPlanifierRetour = null,
 }) {
+  const { t: tr } = useLangue();
   const aujourdhui = dateISO(new Date());
   const ilYa = (j) => dateISO(new Date(Date.now() - j * 86400000));
 
@@ -59,10 +61,40 @@ export function FileDuMatin({
     const nbRam = (ramassagesAttribuer || []).reduce((s, g) => s + ((g.bons || []).length || 1), 0);
     if (nbRam > 0) L.push({ cle: "ramassages", ton: "ambre", icone: "🚚", texte: `${nbRam} ramassage${nbRam > 1 ? "s" : ""} à attribuer (personne ou jour)`, action: "Agenda", onglet: "agenda" });
 
+    // 🔄 Bons REPORTÉS (2026-10-06) : où en est la visite attendue (grille +
+    // attente) — un report fini (visite fermée, date atteinte) redevient « à facturer ».
+    const datesVisite = new Map();
+    Object.entries(planning || {}).forEach(([cle, cellule]) => {
+      const jour = cle.split("|")[0];
+      listeCellule(cellule).forEach((t) => {
+        if (t?.id) datesVisite.set(t.id, [...(datesVisite.get(t.id) || []), jour]);
+      });
+    });
+    (tachesAttente || []).forEach((t) => { if (t?.id && !datesVisite.has(t.id)) datesVisite.set(t.id, []); });
+    const infoVisite = (id) => {
+      if (!datesVisite.has(id)) return null;
+      const dates = [...new Set(datesVisite.get(id))].sort();
+      return { titre: "", date: dates.find((d) => d >= aujourdhui) || dates[dates.length - 1] || null };
+    };
+    const etatRep = (b) => etatReportBon(b, { infoVisite, bons, aujourdhuiISO: aujourdhui });
+
     // 6. Travaux à facturer (un travail = une tâche, peu importe le nombre de techniciens).
     const aFacturer = new Set(
-      (bons || []).filter((b) => b.statutQb === "en_attente" && !b.retraitStatut && (b.facturesEmises || []).filter((f) => !f.annuleeQb).length === 0).map((b) => String(b.tacheId || b.id).split("::")[0])
+      (bons || [])
+        .filter((b) => b.statutQb === "en_attente" && (!b.retraitStatut || (b.retraitStatut === "reporte" && !etatRep(b)?.actif)) && (b.facturesEmises || []).filter((f) => !f.annuleeQb).length === 0)
+        .map((b) => String(b.tacheId || b.id).split("::")[0])
     );
+    // 6b. Bons reportés qui reviennent d'ici 7 jours (visite ou date).
+    const dans7 = dateISO(new Date(Date.now() + 7 * 86400000));
+    const reviennent = new Set(
+      (bons || [])
+        .filter((b) => {
+          const e = etatRep(b);
+          return e?.actif && e.date && e.date <= dans7;
+        })
+        .map((b) => String(b.tacheId || b.id).split("::")[0])
+    );
+    if (reviennent.size > 0) L.push({ cle: "reportes", ton: "bleu", icone: "🔄", texte: tr("{n} bon(s) reporté(s) reviennent à facturer d'ici 7 jours (après une visite ou à leur date)", { n: reviennent.size }), action: tr("Facturation"), onglet: "facturation" });
     if (aFacturer.size > 0) L.push({ cle: "facturer", ton: "bleu", icone: "🧾", texte: `${aFacturer.size} travau${aFacturer.size > 1 ? "x" : ""} à réviser / facturer`, action: "Facturation", onglet: "facturation" });
 
     // 7. Devis envoyés il y a 7 jours et plus, sans réponse, pas relancés depuis 7 jours.
@@ -79,6 +111,7 @@ export function FileDuMatin({
     if (aFaire > 0) L.push({ cle: "devisafaire", ton: "bleu", icone: "📄", texte: `${aFaire} devis à faire (visites de soumission, travaux planifiés sans devis)`, action: "Voir", onglet: "tableau-de-bord-bas" });
 
     return L;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bons, devisListe, pieces, tachesAttente, achatsLibres, travaux, planning, utilisateurs, soumissionsSansDevis, tachesDevisAFaire, ramassagesAttribuer, aujourdhui, onPlanifierRetour]);
 
   const tons = { rouge: "border-red-200 bg-red-50", ambre: "border-amber-200 bg-amber-50", bleu: "border-slate-200 bg-white" };

@@ -8013,3 +8013,51 @@ notify pgrst, 'reload schema';
 select 'option datée' as garde, position('date_emission' in pg_get_functiondef('public.devis_public_version(text,text)'::regprocedure)) > 0 as ok
 union all
 select 'acceptation 30 jours', position('America/Toronto' in pg_get_functiondef('public.repondre_devis(text,text,text,text,text,text,text)'::regprocedure)) > 0;
+
+-- ============================================================
+-- 169 - BON REPORTÉ : JUSQU'À LA PROCHAINE VISITE OU UNE DATE (2026-10-06)
+-- ------------------------------------------------------------
+-- Demande du propriétaire : un bon « reporté » restait dans la pile à
+-- facturer (le report n'était qu'une étiquette, sans date). Il attend
+-- maintenant SOIT la fermeture d'une visite planifiée à la même adresse
+-- (reporte_tache_id), SOIT une date (reporte_jusqu_au) — puis revient
+-- tout seul dans « Prêts à facturer ». Colonnes de FACTURATION : comme
+-- les autres, intouchables hors bureau (même fonction qu'au 156, deux
+-- lignes de plus).
+-- ============================================================
+alter table bons_travail add column if not exists reporte_tache_id text;
+alter table bons_travail add column if not exists reporte_jusqu_au date;
+
+create or replace function public.fn_proteger_facturation_bon()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if (select auth.uid()) is null or coalesce((select auth.role()), '') = 'service_role' then return new; end if;
+  if public.fn_est_bureau() then return new; end if;
+  new.revision            := old.revision;
+  new.factures_emises     := old.factures_emises;
+  new.materiel_stock      := old.materiel_stock;
+  new.retrait_statut      := old.retrait_statut;
+  new.retrait_raison      := old.retrait_raison;
+  new.retrait_note        := old.retrait_note;
+  new.retrait_demande_par := old.retrait_demande_par;
+  new.retrait_demande_le  := old.retrait_demande_le;
+  new.retrait_valide_par  := old.retrait_valide_par;
+  new.retrait_valide_le   := old.retrait_valide_le;
+  new.reporte_tache_id    := old.reporte_tache_id;
+  new.reporte_jusqu_au    := old.reporte_jusqu_au;
+  -- Un bon déjà FACTURÉ ou RETIRÉ ne redevient pas « à facturer » parce
+  -- qu'un technicien refait sa fermeture.
+  if old.statut_facturation in ('envoye', 'retire') then
+    new.statut_facturation := old.statut_facturation;
+  end if;
+  return new;
+end $$;
+
+notify pgrst, 'reload schema';
+
+-- Vérification : 2 colonnes, et la protection les couvre (3 lignes à true).
+select 'colonne reporte_tache_id' as quoi, exists (select 1 from information_schema.columns where table_name = 'bons_travail' and column_name = 'reporte_tache_id') as ok
+union all
+select 'colonne reporte_jusqu_au', exists (select 1 from information_schema.columns where table_name = 'bons_travail' and column_name = 'reporte_jusqu_au')
+union all
+select 'protégées hors bureau', position('reporte_jusqu_au' in pg_get_functiondef('public.fn_proteger_facturation_bon()'::regprocedure)) > 0;
