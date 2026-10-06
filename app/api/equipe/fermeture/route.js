@@ -15,7 +15,7 @@
 // assigné à cette tâche. Même patron que les routes QuickBooks.
 
 import webpush from "web-push";
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, nomAuteurServeur } from "@/lib/quickbooksServeur";
 
 // Notification push à UN coéquipier — un bonus, jamais un bloqueur :
 // sans abonnement ou sans clés VAPID, on passe simplement au suivant.
@@ -75,7 +75,7 @@ export async function POST(request) {
   const maLigne = (lignes || []).find((l) => (l.employe_email || "").toLowerCase() === monEmail);
   if (!maLigne) return Response.json({ erreur: "Tu n'es pas assigné à cette tâche." }, { status: 403 });
 
-  const nom = utilisateur.user_metadata?.nom || monEmail.split("@")[0];
+  const nom = await nomAuteurServeur(utilisateur); // fiche employé (audit 2026-10-05)
 
   // 🚪 MODE « JE PARS EN PREMIER » (2026-08-18) : aucune marque écrite —
   // les coéquipiers n'ont PAS fini à leur place, ils continuent. On les

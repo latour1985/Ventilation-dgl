@@ -34,6 +34,13 @@ export async function POST(request) {
   if (utilisateur.app_metadata?.plateforme !== true) {
     return Response.json({ erreur: "Réservé à la plateforme." }, { status: 403 });
   }
+  // 🛡️ (audit 2026-10-05) Les EXPORTS sont réservés à la clé principale
+  // (règle des niveaux d'opérateurs) — un sceau sans niveau = clé
+  // principale (compte du propriétaire, d'avant les niveaux).
+  const niveau = utilisateur.app_metadata?.plateforme_role;
+  if (["admin-regulier", "gestionnaire", "technicien"].includes(niveau)) {
+    return Response.json({ erreur: "Export réservé à la clé principale." }, { status: 403 });
+  }
 
   let corps;
   try {

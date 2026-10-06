@@ -16,7 +16,7 @@
 // Les bons d'un PROJET (JSON dans projets_app.bons_commande) suivent la
 // même règle, par numéro de BC.
 
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, nomAuteurServeur } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -40,7 +40,7 @@ export async function POST(request) {
 
   const entrepriseId = entrepriseDuCompte(utilisateur);
   const moi = String(utilisateur.email || "").toLowerCase();
-  const nomMoi = utilisateur.user_metadata?.nom || moi;
+  const nomMoi = await nomAuteurServeur(utilisateur); // fiche employé (audit 2026-10-05)
   const admin = clientSupabaseService();
   const quand = new Date().toISOString();
   const horodatage = new Date().toLocaleString("fr-CA", { timeZone: "America/Toronto", dateStyle: "short", timeStyle: "short" });

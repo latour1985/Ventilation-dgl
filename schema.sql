@@ -7277,3 +7277,341 @@ notify pgrst, 'reload schema';
 
 -- Vérification : une seule ligne, avec 7 paramètres.
 select proname, pronargs from pg_proc where proname = 'repondre_devis';
+
+-- ============================================================
+-- 165 - SÉCURITÉ : CLOISONS ENTRE ENTREPRISES ET RÔLES (2026-10-05)
+-- ------------------------------------------------------------
+-- Audit de sécurité du 2026-10-05 (lot 2, partie A). Rien ne change pour
+-- l'usage normal ; seuls les gestes ANORMAUX sont refusés.
+--  1. Fermeture terrain : ne touche jamais la ligne d'une autre entreprise.
+--  2. Fiche entreprise : abonnement, rabais, suspension, modules et
+--     adresse d'expédition vérifiée = la plateforme seulement.
+--  3. Accès : seul un Admin principal nomme/retire un admin ; personne
+--     ne modifie ses propres accès.
+--  4. rattacher_tache_lot : garde « bureau » remise (perdue au 160).
+--  5. Heures : le taux figé d'une ligne ne se réécrit pas hors bureau.
+--  6. Annuaire : plus de repli sur DGL pour un compte sans entreprise.
+--  7. Compteur d'envois de courriels (limite par compte, route serveur).
+-- ============================================================
+
+-- ---- 1. Fermeture terrain cloisonnée ----
+create or replace function fermer_travaux_technicien(p_bon jsonb, p_travail jsonb)
+returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  v_bon_id uuid;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  -- Un technicien ferme SES heures et SON bon ; le bureau peut fermer pour un autre.
+  if not public.fn_est_bureau() and (
+       lower(coalesce(p_bon->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+    or lower(coalesce(p_travail->>'employe_email', '')) <> lower(coalesce((select auth.jwt()) ->> 'email', ''))
+  ) then
+    raise exception 'Fermeture terrain : seulement pour ses propres heures';
+  end if;
+  -- 🛡️ (165) Les clés (tache_id, employe_email) sont communes à toutes les
+  -- entreprises : une ligne existante d'une AUTRE entreprise ne se fait
+  -- jamais écraser (ni lire en retour) par cette fonction.
+  if exists (select 1 from bons_travail b
+              where b.tache_id = p_bon->>'tache_id'
+                and b.employe_email = p_bon->>'employe_email'
+                and b.entreprise_id is distinct from ent)
+     or exists (select 1 from travaux_effectues t
+              where t.tache_id = p_travail->>'tache_id'
+                and t.employe_email = p_travail->>'employe_email'
+                and t.entreprise_id is distinct from ent) then
+    raise exception 'Fermeture terrain : cette tâche appartient à une autre entreprise';
+  end if;
+  insert into bons_travail (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    description, date_travail, heures, type_tache, secteur, devis_numero,
+    adresse_travaux, projet_id, photos, courriels_envoi, signe_par_nom,
+    signe_par_collegue, client_absent, unites, modele_unite, serie_unite,
+    piece_a_commander, piece_requise, travaux_non_termines, reste_a_faire,
+    etapes, envoye_le, statut_facturation
+  ) values (
+    ent,
+    p_bon->>'tache_id',
+    p_bon->>'employe_email',
+    p_bon->>'employe_nom',
+    p_bon->>'titre',
+    p_bon->>'client_nom',
+    p_bon->>'description',
+    (p_bon->>'date_travail')::date,
+    coalesce((p_bon->>'heures')::numeric, 0),
+    p_bon->>'type_tache',
+    coalesce(p_bon->>'secteur', 'commercial'),
+    p_bon->>'devis_numero',
+    p_bon->>'adresse_travaux',
+    p_bon->>'projet_id',
+    nullif(p_bon->'photos', 'null'::jsonb),
+    coalesce(p_bon->'courriels_envoi', '[]'::jsonb),
+    p_bon->>'signe_par_nom',
+    coalesce((p_bon->>'signe_par_collegue')::boolean, false),
+    coalesce((p_bon->>'client_absent')::boolean, false),
+    coalesce(p_bon->'unites', '[]'::jsonb),
+    p_bon->>'modele_unite',
+    p_bon->>'serie_unite',
+    coalesce((p_bon->>'piece_a_commander')::boolean, false),
+    p_bon->>'piece_requise',
+    coalesce((p_bon->>'travaux_non_termines')::boolean, false),
+    p_bon->>'reste_a_faire',
+    nullif(p_bon->'etapes', 'null'::jsonb),
+    coalesce(nullif(p_bon->>'envoye_le', '')::timestamptz, now()),
+    'a_facturer'
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, description = excluded.description,
+    date_travail = excluded.date_travail, heures = excluded.heures,
+    type_tache = excluded.type_tache, secteur = excluded.secteur,
+    devis_numero = excluded.devis_numero, adresse_travaux = excluded.adresse_travaux,
+    projet_id = excluded.projet_id, photos = excluded.photos,
+    courriels_envoi = excluded.courriels_envoi, signe_par_nom = excluded.signe_par_nom,
+    signe_par_collegue = excluded.signe_par_collegue, client_absent = excluded.client_absent,
+    unites = excluded.unites, modele_unite = excluded.modele_unite,
+    serie_unite = excluded.serie_unite, piece_a_commander = excluded.piece_a_commander,
+    piece_requise = excluded.piece_requise, travaux_non_termines = excluded.travaux_non_termines,
+    reste_a_faire = excluded.reste_a_faire, etapes = excluded.etapes,
+    envoye_le = excluded.envoye_le, statut_facturation = excluded.statut_facturation
+    where bons_travail.entreprise_id = ent
+  returning id into v_bon_id;
+
+  insert into travaux_effectues (
+    entreprise_id, tache_id, employe_email, employe_nom, titre, client_nom,
+    date_travail, heures, est_transport, kilometres, projet_id, note_terrain,
+    note_interne, debut_reel, fin_reelle, photos, taux_coutant_fige, secteur,
+    categorie_heures, jour_bloque, bloque_raison,
+    heures_proposees, debut_propose, fin_propose, proposition_par,
+    proposition_le, groupe_proposition
+  ) values (
+    ent,
+    p_travail->>'tache_id',
+    p_travail->>'employe_email',
+    p_travail->>'employe_nom',
+    p_travail->>'titre',
+    p_travail->>'client_nom',
+    (p_travail->>'date_travail')::date,
+    coalesce((p_travail->>'heures')::numeric, 0),
+    coalesce((p_travail->>'est_transport')::boolean, false),
+    nullif(p_travail->>'kilometres', '')::numeric,
+    p_travail->>'projet_id',
+    p_travail->>'note_terrain',
+    p_travail->>'note_interne',
+    nullif(p_travail->>'debut_reel', '')::timestamptz,
+    nullif(p_travail->>'fin_reelle', '')::timestamptz,
+    nullif(p_travail->'photos', 'null'::jsonb),
+    nullif(p_travail->>'taux_coutant_fige', '')::numeric,
+    coalesce(p_travail->>'secteur', 'commercial'),
+    coalesce(p_travail->>'categorie_heures', 'projet'),
+    coalesce((p_travail->>'jour_bloque')::boolean, false),
+    p_travail->>'bloque_raison',
+    nullif(p_travail->>'heures_proposees', '')::numeric,
+    nullif(p_travail->>'debut_propose', '')::timestamptz,
+    nullif(p_travail->>'fin_propose', '')::timestamptz,
+    p_travail->>'proposition_par',
+    nullif(p_travail->>'proposition_le', '')::timestamptz,
+    p_travail->>'groupe_proposition'
+  )
+  on conflict (tache_id, employe_email) do update set
+    employe_nom = excluded.employe_nom, titre = excluded.titre,
+    client_nom = excluded.client_nom, date_travail = excluded.date_travail,
+    heures = excluded.heures, est_transport = excluded.est_transport,
+    kilometres = excluded.kilometres, projet_id = excluded.projet_id,
+    note_terrain = excluded.note_terrain, note_interne = excluded.note_interne,
+    debut_reel = excluded.debut_reel, fin_reelle = excluded.fin_reelle,
+    photos = excluded.photos, taux_coutant_fige = excluded.taux_coutant_fige,
+    secteur = excluded.secteur, categorie_heures = excluded.categorie_heures,
+    jour_bloque = excluded.jour_bloque, bloque_raison = excluded.bloque_raison,
+    heures_proposees = excluded.heures_proposees, debut_propose = excluded.debut_propose,
+    fin_propose = excluded.fin_propose, proposition_par = excluded.proposition_par,
+    proposition_le = excluded.proposition_le, groupe_proposition = excluded.groupe_proposition
+    -- 🏢 Une ligne FERMEE PAR LE BUREAU ne se fait jamais ecraser par le
+    -- chrono d un telephone (vecu ETI-NET, 2026-09-08). Seul le bureau
+    -- (policies) peut la modifier ensuite.
+    where travaux_effectues.entreprise_id = ent
+      and (travaux_effectues.note_interne is null
+           or travaux_effectues.note_interne not like '🏢 FERM%E PAR LE BUREAU%');
+
+  return v_bon_id;
+end;
+$$;
+
+-- ---- 2. Fiche entreprise : les champs de la PLATEFORME ----
+create or replace function public.fn_proteger_fiche_entreprise()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  echeance_atteinte boolean;
+begin
+  -- Routes serveur (clé service) et console plateforme : passent telles quelles.
+  if (select auth.uid()) is null or coalesce((select auth.role()), '') = 'service_role' then return new; end if;
+  if public.est_plateforme() then return new; end if;
+  -- Seule exception : la bascule AUTOMATIQUE « Résiliée » à la fin d'une
+  -- annulation demandée par le client (snippet 136).
+  echeance_atteinte := old.annulation_effet_le is not null
+    and old.annulation_effet_le <= (now() at time zone 'America/Toronto')::date;
+  if echeance_atteinte and new.statut_plateforme = 'resilie' then
+    new.suspendue := true;
+  else
+    new.statut_plateforme        := old.statut_plateforme;
+    new.suspendue                := old.suspendue;
+    new.resilie_le               := old.resilie_le;
+    new.resilie_raison           := old.resilie_raison;
+    new.statut_avant_resiliation := old.statut_avant_resiliation;
+  end if;
+  new.courriel_expediteur_verifie := old.courriel_expediteur_verifie;
+  new.gratuit_jusqua              := old.gratuit_jusqua;
+  new.rabais_pourcent             := old.rabais_pourcent;
+  new.promo_pourcent              := old.promo_pourcent;
+  new.promo_mois                  := old.promo_mois;
+  new.prix_base                   := old.prix_base;
+  new.prix_par_siege              := old.prix_par_siege;
+  new.sieges_inclus               := old.sieges_inclus;
+  new.modules                     := old.modules;
+  new.created_at                  := old.created_at;
+  return new;
+end $$;
+drop trigger if exists trg_proteger_fiche_entreprise on entreprises;
+create trigger trg_proteger_fiche_entreprise before update on entreprises
+  for each row execute function public.fn_proteger_fiche_entreprise();
+
+-- ---- 3. Accès : pas d'auto-promotion ----
+create or replace function public.fn_proteger_permissions()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  moi text := lower(coalesce((select auth.jwt()) ->> 'email', ''));
+  admins text[] := array['Admin principal', 'Admin régulier'];
+begin
+  if (select auth.uid()) is null or coalesce((select auth.role()), '') = 'service_role'
+     or public.est_plateforme() or public.fn_mon_role() = 'Admin principal' then
+    if tg_op = 'DELETE' then return old; end if;
+    return new;
+  end if;
+  if tg_op = 'INSERT' then
+    if new.role = any(admins) then
+      raise exception 'Seul un Admin principal peut accorder un rôle d''administration' using errcode = '42501';
+    end if;
+    return new;
+  end if;
+  if tg_op = 'UPDATE' then
+    -- Réécriture identique (sauvegarde d'une fiche sans changement d'accès) : permise.
+    if new.email is not distinct from old.email and new.role is not distinct from old.role
+       and new.sous_categorie is not distinct from old.sous_categorie
+       and new.sections is not distinct from old.sections then
+      return new;
+    end if;
+    if old.role = any(admins) or new.role = any(admins) then
+      raise exception 'Seul un Admin principal peut modifier les accès d''un administrateur' using errcode = '42501';
+    end if;
+    if lower(old.email) = moi or lower(new.email) = moi then
+      raise exception 'Personne ne modifie ses propres accès' using errcode = '42501';
+    end if;
+    return new;
+  end if;
+  -- DELETE
+  if old.role = any(admins) then
+    raise exception 'Seul un Admin principal peut retirer un administrateur' using errcode = '42501';
+  end if;
+  if lower(old.email) = moi then
+    raise exception 'Personne ne retire ses propres accès' using errcode = '42501';
+  end if;
+  return old;
+end $$;
+drop trigger if exists trg_proteger_permissions on permissions_utilisateurs;
+create trigger trg_proteger_permissions before insert or update or delete on permissions_utilisateurs
+  for each row execute function public.fn_proteger_permissions();
+
+-- ---- 4. Rattachement de tâche : bureau seulement ----
+create or replace function rattacher_tache_lot(
+  p_tache_id text,
+  p_maj_projet boolean default false,
+  p_projet_id text default null,
+  p_toutes_categories boolean default false,
+  p_maj_devis boolean default false,
+  p_devis_numero text default null
+)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  ent text := public.entreprise_du_jeton();
+  n integer := 0;
+begin
+  if ent is null then raise exception 'Connexion requise'; end if;
+  -- 🛡️ (165) Garde du 145 remise : perdue en recréant la fonction au 160.
+  if not public.fn_est_bureau() then raise exception 'Rattachement de tache reserve au bureau'; end if;
+  if p_maj_projet then
+    update travaux_effectues
+       set projet_id = nullif(p_projet_id, '')
+     where entreprise_id = ent
+       -- 🛡️ (165) % et _ du numéro pris au pied de la lettre (plus de jokers).
+       and (tache_id = p_tache_id
+            or tache_id like replace(replace(replace(p_tache_id, '\', '\\'), '%', '\%'), '_', '\_') || '::%')
+       and (p_toutes_categories or coalesce(categorie_heures, 'projet') = 'projet');
+    get diagnostics n = row_count;
+  end if;
+  if p_maj_projet or p_maj_devis then
+    update bons_travail
+       set projet_id = case when p_maj_projet then nullif(p_projet_id, '') else projet_id end,
+           devis_numero = case
+             when p_maj_devis and coalesce(employe_email, '') not like 'devis::%' then nullif(p_devis_numero, '')
+             else devis_numero
+           end
+     where tache_id = p_tache_id and entreprise_id = ent;
+  end if;
+  return n;
+end;
+$$;
+
+-- ---- 5. Taux figé : intouchable hors bureau une fois posé ----
+create or replace function public.fn_proteger_taux_fige()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if (select auth.uid()) is null or coalesce((select auth.role()), '') = 'service_role' then return new; end if;
+  if public.fn_est_bureau() then return new; end if;
+  if old.taux_coutant_fige is not null then
+    new.taux_coutant_fige := old.taux_coutant_fige;
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_proteger_taux_fige on travaux_effectues;
+create trigger trg_proteger_taux_fige before update on travaux_effectues
+  for each row execute function public.fn_proteger_taux_fige();
+
+-- ---- 6. Annuaire : son entreprise, jamais DGL par défaut ----
+create or replace view public.annuaire_employes as
+  select id, nom, courriel, nom_utilisateur
+    from public.repertoire_employes
+   where entreprise_id = coalesce(public.entreprise_du_jeton(), '');
+alter view public.annuaire_employes set (security_invoker = false);
+revoke all on public.annuaire_employes from public, anon;
+grant select on public.annuaire_employes to authenticated;
+
+-- ---- 7. Compteur d'envois de courriels (route /api/courriel, clé service) ----
+create table if not exists envois_courriel (
+  id               bigint generated always as identity primary key,
+  entreprise_id    text not null,
+  courriel         text not null,
+  nb_destinataires integer not null default 1,
+  envoye_le        timestamptz not null default now()
+);
+create index if not exists idx_envois_courriel_compte on envois_courriel (courriel, envoye_le desc);
+alter table envois_courriel enable row level security;
+-- Aucune politique : invisible depuis le navigateur, seule la clé service y touche.
+
+notify pgrst, 'reload schema';
+
+-- Vérification : 7 lignes, toutes à true.
+select 'fermeture cloisonnée' as garde, position('autre entreprise' in pg_get_functiondef('public.fermer_travaux_technicien(jsonb,jsonb)'::regprocedure)) > 0 as ok
+union all
+select 'rattachement bureau', position('reserve au bureau' in pg_get_functiondef('public.rattacher_tache_lot(text,boolean,text,boolean,boolean,text)'::regprocedure)) > 0
+union all
+select 'fiche entreprise', exists (select 1 from pg_trigger where tgname = 'trg_proteger_fiche_entreprise')
+union all
+select 'accès', exists (select 1 from pg_trigger where tgname = 'trg_proteger_permissions')
+union all
+select 'taux figé', exists (select 1 from pg_trigger where tgname = 'trg_proteger_taux_fige')
+union all
+select 'annuaire', position('''dgl''' in pg_get_viewdef('public.annuaire_employes'::regclass)) = 0
+union all
+select 'compteur courriels', exists (select 1 from pg_tables where schemaname = 'public' and tablename = 'envois_courriel');

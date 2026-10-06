@@ -214,6 +214,51 @@ export async function POST(request) {
   // Meme refus pour un courriel d'operateur de la console (acces
   // separes). La re-invitation d'un compte de SA propre entreprise,
   // elle, passe toujours (mot de passe oublie / relance).
+  // 🛡️ (audit 2026-10-05) RÉINVITATION D'UN COMPTE EXISTANT : le lien
+  // de réinitialisation donne le compte à qui le tient. Donc :
+  //   • un compte de la console Fluxya (sceau plateforme) ne se réinvite
+  //     jamais d'ici ;
+  //   • un ADMIN ne se fait réinviter que par l'Admin principal ;
+  //   • le lien part SEULEMENT par courriel au titulaire — jamais affiché
+  //     à l'écran de celui qui réinvite (voir plus bas).
+  if (!nouveau) {
+    let metaCible = null;
+    try {
+      const { data: fiche } = await admin.auth.admin.getUserById(idCompteInvite);
+      metaCible = fiche?.user?.app_metadata || null;
+    } catch {
+      metaCible = null;
+    }
+    if (!metaCible) {
+      return Response.json({ erreur: "Compte introuvable pour l'instant — réessaie dans un moment." }, { status: 502 });
+    }
+    if (metaCible.plateforme === true) {
+      return Response.json(
+        { erreur: "Ce courriel est un compte de la console Fluxya — il ne se réinitialise pas depuis la gestion des employés." },
+        { status: 403 }
+      );
+    }
+    if (role !== "Admin principal") {
+      let roleCible = "Technicien";
+      try {
+        const { data } = await admin
+          .from("permissions_utilisateurs")
+          .select("role")
+          .eq("email", courriel)
+          .eq("entreprise_id", entrepriseDuCompte(utilisateur))
+          .maybeSingle();
+        roleCible = String(data?.role || "Technicien").trim();
+      } catch {
+        roleCible = "Admin principal"; // dans le doute, on refuse
+      }
+      if (ROLES_ADMINS.includes(roleCible)) {
+        return Response.json(
+          { erreur: "Seul l'Admin principal peut réinviter un administrateur." },
+          { status: 403 }
+        );
+      }
+    }
+  }
   if (idCompteInvite) {
     const entrepriseInviteur = entrepriseDuCompte(utilisateur);
     try {
@@ -267,8 +312,11 @@ export async function POST(request) {
   // 4. Envoyer l'invitation — Resend en prod, lien remis à l'admin en
   //    mode simulé (local).
   const cle = process.env.RESEND_API_KEY;
+  // 🛡️ Compte EXISTANT : le lien ne s'affiche jamais à l'écran (voir plus haut).
+  const lienRemisable = nouveau ? lien : undefined;
+  const sansLien = "par sécurité, le lien d'un compte existant part seulement par courriel — réessaie plus tard";
   if (!cle) {
-    return Response.json({ simule: true, nouveau, lien });
+    return Response.json({ simule: true, nouveau, lien: lienRemisable, ...(nouveau ? {} : { erreur: `Service de courriels absent — ${sansLien}.` }) });
   }
   // 📧 AU NOM DE L'ENTREPRISE (niveau 1, 2026-08-19) : le nouvel employé
   // reçoit l'invitation au nom de SON entreprise — même mécanique que la
@@ -312,10 +360,10 @@ export async function POST(request) {
     if (!reponse.ok) {
       // Compte créé mais courriel refusé : on remet le lien à l'admin
       // plutôt que de laisser l'employé dans les limbes.
-      return Response.json({ envoye: false, nouveau, lien, erreur: resultat?.message || `Envoi refusé (code ${reponse.status}).` });
+      return Response.json({ envoye: false, nouveau, lien: lienRemisable, erreur: `${resultat?.message || `Envoi refusé (code ${reponse.status}).`}${nouveau ? "" : ` — ${sansLien}`}` });
     }
     return Response.json({ envoye: true, nouveau });
   } catch {
-    return Response.json({ envoye: false, nouveau, lien, erreur: "Service d'envoi injoignable." });
+    return Response.json({ envoye: false, nouveau, lien: lienRemisable, erreur: `Service d'envoi injoignable.${nouveau ? "" : ` — ${sansLien}`}` });
   }
 }

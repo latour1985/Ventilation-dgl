@@ -26,6 +26,11 @@ export async function GET(request) {
   if (utilisateur.app_metadata?.plateforme !== true) {
     return Response.json({ erreur: "Réservé à la plateforme." }, { status: 403 });
   }
+  // 🛡️ (audit 2026-10-05) Même règle que l'onglet Facturation de la
+  // console : clé principale et admin régulier seulement.
+  if (["gestionnaire", "technicien"].includes(utilisateur.app_metadata?.plateforme_role)) {
+    return Response.json({ erreur: "Réservé à la facturation de la plateforme." }, { status: 403 });
+  }
 
   try {
     const admin = clientSupabaseService();

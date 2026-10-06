@@ -26,9 +26,16 @@
 // posée dans Vercel, tout se met à envoyer pour vrai — aucun autre
 // changement.
 
-import { clientSupabaseService } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, roleServeur } from "@/lib/quickbooksServeur";
 
 const MAX_DESTINATAIRES = 10;
+// 🛡️ (audit 2026-10-05) Le TECHNICIEN n'envoie que les courriels de
+// l'app terrain (« en route », bon de travail) : quelques destinataires,
+// ni copie ni pièce jointe. Et chaque compte a un plafond à l'heure —
+// la porte ne peut plus servir à arroser Internet au nom de l'entreprise.
+const MAX_DESTINATAIRES_TECHNICIEN = 5;
+const PLAFOND_HEURE_TECHNICIEN = 20;
+const PLAFOND_HEURE_BUREAU = 300;
 
 function courrielValide(adresse) {
   return typeof adresse === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adresse.trim());
@@ -62,6 +69,12 @@ export async function POST(request) {
     return Response.json({ erreur: "Connexion requise." }, { status: 401 });
   }
 
+  // 🛡️ (audit 2026-10-05) Un compte SANS entreprise n'envoie rien.
+  if (!utilisateur.app_metadata?.entreprise_id) {
+    return Response.json({ erreur: "Compte sans entreprise — envoi refusé." }, { status: 403 });
+  }
+  const estTechnicien = (await roleServeur(utilisateur)) === "Technicien";
+
   // 2. La demande est-elle bien formée ?
   let corps;
   try {
@@ -72,7 +85,7 @@ export async function POST(request) {
   const destinataires = (Array.isArray(corps?.a) ? corps.a : [corps?.a])
     .filter(courrielValide)
     .map((a) => a.trim())
-    .slice(0, MAX_DESTINATAIRES);
+    .slice(0, estTechnicien ? MAX_DESTINATAIRES_TECHNICIEN : MAX_DESTINATAIRES);
   const sujet = String(corps?.sujet || "").trim().slice(0, 200);
   const html = String(corps?.html || "");
   if (destinataires.length === 0 || !sujet || !html) {
@@ -83,12 +96,12 @@ export async function POST(request) {
   // DIRECTEMENT — c'est lui qui corrigera la date dans l'application.
   // L'adresse vient du jeton de session validé, jamais du corps de la
   // demande : impossible de mettre en copie une adresse arbitraire.
-  const copieExpediteur = corps?.copieExpediteur === true && courrielValide(utilisateur.email);
+  const copieExpediteur = !estTechnicien && corps?.copieExpediteur === true && courrielValide(utilisateur.email);
   // 📧 COPIES SUPPLÉMENTAIRES (2026-09-03, bons de commande) : adresses
   // choisies par l'admin à l'envoi (ex. commande@...) — même niveau de
   // confiance que les destinataires eux-mêmes (l'admin connecté choisit
   // déjà librement « à qui »). Validées et plafonnées comme eux.
-  const copiesSupplementaires = (Array.isArray(corps?.copieA) ? corps.copieA : [])
+  const copiesSupplementaires = (!estTechnicien && Array.isArray(corps?.copieA) ? corps.copieA : [])
     .filter(courrielValide)
     .map((a) => a.trim())
     .slice(0, 3);
@@ -167,11 +180,28 @@ export async function POST(request) {
   // Supabase) — la route ne sert jamais à relayer un fichier étranger.
   // Au plus 5 ; nom nettoyé (pas de chemin, 120 caractères).
   const hoteStockage = (() => { try { return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || "").host; } catch { return ""; } })();
-  const piecesJointes = (Array.isArray(corps?.piecesJointes) ? corps.piecesJointes : [])
+  const piecesJointes = (!estTechnicien && Array.isArray(corps?.piecesJointes) ? corps.piecesJointes : [])
     .filter((p) => p && typeof p.url === "string")
     .filter((p) => { try { return hoteStockage && new URL(p.url).host === hoteStockage; } catch { return false; } })
     .slice(0, 5)
     .map((p) => ({ filename: String(p.nom || "fichier").replace(/[\\/]/g, "_").slice(0, 120), path: p.url }));
+  // 🛡️ PLAFOND À L'HEURE, par compte (snippet 165 : table envois_courriel).
+  // Table absente (snippet pas encore passé) : pas de plafond, comme avant.
+  const compte = String(utilisateur.email || "").toLowerCase();
+  const service = clientSupabaseService();
+  try {
+    const depuis = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count, error } = await service
+      .from("envois_courriel")
+      .select("id", { count: "exact", head: true })
+      .eq("courriel", compte)
+      .gte("envoye_le", depuis);
+    if (!error && (count || 0) >= (estTechnicien ? PLAFOND_HEURE_TECHNICIEN : PLAFOND_HEURE_BUREAU)) {
+      return Response.json({ erreur: "Trop de courriels envoyés dans la dernière heure — réessaie plus tard." }, { status: 429 });
+    }
+  } catch {
+    // compteur injoignable — on n'empêche pas l'envoi
+  }
   try {
     const reponse = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -203,6 +233,13 @@ export async function POST(request) {
         { erreur: resultat?.message || `Le service d'envoi a refusé (code ${reponse.status}).` },
         { status: 502 }
       );
+    }
+    // Compté APRÈS l'envoi réussi ; le ménage garde 2 jours d'historique.
+    try {
+      await service.from("envois_courriel").insert({ entreprise_id: entrepriseId, courriel: compte, nb_destinataires: destinataires.length });
+      await service.from("envois_courriel").delete().eq("courriel", compte).lt("envoye_le", new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString());
+    } catch {
+      // compteur indisponible — sans conséquence pour l'envoi déjà parti
     }
     return Response.json({ envoye: true, id: resultat?.id || null });
   } catch {

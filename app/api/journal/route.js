@@ -15,7 +15,7 @@
 //   • { action: "lister", limite } — réservé à l'administration/bureau
 //     (pas aux Techniciens), comme l'onglet Journal lui-même.
 
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, nomAuteurServeur } from "@/lib/quickbooksServeur";
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -36,9 +36,10 @@ export async function POST(request) {
   if (corps?.action === "ajouter") {
     const texte = String(corps?.texte || "").trim().slice(0, 2000);
     if (!texte) return Response.json({ erreur: "Texte requis." }, { status: 400 });
-    // L'auteur vient du JETON vérifié — le nom du compte, sinon son
-    // courriel. Ajouté au texte : la table n'a pas de colonne de nom.
-    const nom = utilisateur.user_metadata?.nom || utilisateur.email;
+    // L'auteur vient du JETON vérifié — le nom de SA FICHE EMPLOYÉ
+    // (audit 2026-10-05 : plus le profil, modifiable par l'utilisateur).
+    // Ajouté au texte : la table n'a pas de colonne de nom.
+    const nom = await nomAuteurServeur(utilisateur);
     const { error } = await admin.from("journal_activite").insert({
       texte: `${texte} — par ${nom}`,
       created_by: utilisateur.id,

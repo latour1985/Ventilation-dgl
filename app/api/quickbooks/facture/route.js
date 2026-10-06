@@ -30,7 +30,8 @@ import {
   codeTaxeVente,
   proprietesTaxe,
   envoyerFactureParQb,
-  entrepriseDuCompte } from "@/lib/quickbooksServeur";
+  entrepriseDuCompte,
+  nomAuteurServeur } from "@/lib/quickbooksServeur";
 // 🔒 RLS phase 3 : le rôle vient de la table des permissions.
 import { roleServeur } from "@/lib/quickbooksServeur";
 
@@ -70,7 +71,7 @@ export async function POST(request) {
     }
     if (!acces) return Response.json({ nonConnecte: true });
     const note = String(corps?.note || "").trim().slice(0, 800);
-    const par = String(utilisateur.user_metadata?.nom || utilisateur.email || "").trim();
+    const par = await nomAuteurServeur(utilisateur); // fiche employé (audit 2026-10-05)
     try {
       const lu = await requeteQbo(acces, `select Id, SyncToken, PrivateNote from Invoice where Id = '${factureId}' maxresults 1`);
       const facture = lu?.Invoice?.[0];

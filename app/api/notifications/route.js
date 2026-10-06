@@ -54,11 +54,18 @@ export async function POST(request) {
     const courriel = String(corps?.courriel || "").trim().toLowerCase();
     if (!courriel) return Response.json({ erreur: "Courriel requis." }, { status: 400 });
 
+    // 🛡️ (audit 2026-10-05) Seulement un téléphone de SA propre entreprise.
+    const entreprise = entrepriseDuCompte(utilisateur);
     const { data: ligne } = await admin
       .from("push_abonnements")
       .select("abonnement")
       .eq("courriel", courriel)
+      .eq("entreprise_id", entreprise)
       .maybeSingle();
+    // 🛡️ Le lien ouvert au toucher reste DANS Fluxya : un chemin interne
+    // (« /… »), jamais une adresse externe (hameçonnage).
+    const urlDemandee = String(corps?.url || "/technicien").slice(0, 200);
+    const urlSure = /^\/(?![/\\])/.test(urlDemandee) ? urlDemandee : "/technicien";
     if (!ligne?.abonnement) return Response.json({ sansAbonnement: true });
 
     webpush.setVapidDetails(process.env.VAPID_SUJET || "mailto:info@ventilationdgl.com", clePublique, clePrivee);
@@ -68,7 +75,7 @@ export async function POST(request) {
         JSON.stringify({
           titre: String(corps?.titre || "Fluxya").slice(0, 80),
           corps: String(corps?.corps || "").slice(0, 200),
-          url: String(corps?.url || "/technicien").slice(0, 200),
+          url: urlSure,
         })
       );
       return Response.json({ envoye: true });
@@ -76,7 +83,7 @@ export async function POST(request) {
       // Abonnement mort (application désinstallée, permission retirée) :
       // on l'efface — le technicien réactivera depuis son écran d'accueil.
       if (e?.statusCode === 404 || e?.statusCode === 410) {
-        await admin.from("push_abonnements").delete().eq("courriel", courriel);
+        await admin.from("push_abonnements").delete().eq("courriel", courriel).eq("entreprise_id", entreprise);
         return Response.json({ sansAbonnement: true, expire: true });
       }
       return Response.json({ erreur: String(e?.message || "Envoi refusé.") }, { status: 502 });

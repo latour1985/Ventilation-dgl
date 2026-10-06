@@ -19,7 +19,7 @@
 // Clé service (plusieurs tables), mais TOUJOURS bornée à l'entreprise de
 // l'appelant, et réservée au bureau.
 
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur, nomAuteurServeur } from "@/lib/quickbooksServeur";
 
 const norm = (s) => String(s || "").trim().toLowerCase();
 
@@ -123,7 +123,8 @@ export async function POST(request) {
     const { error: eB } = await admin.from("clients_app").delete().eq("id", B.id).eq("entreprise_id", E);
     if (eB) throw new Error(`suppression de la fiche fusionnée : ${eB.message}`);
     const d = apercu.deplaces;
-    const texte = `🔗 Fiches clients FUSIONNÉES : « ${B.nom} » → « ${A.nom} » (fiche gardée). Déplacés : ${d.devis} devis, ${d.projets} projet(s), ${d.tachesAttente + d.tachesAgenda} tâche(s), ${d.achats + d.pieces} achat(s)/pièce(s), ${d.facturesLibres + d.facturesMaison} facture(s)${d.bonsParNom + d.heuresParNom ? `, ${d.bonsParNom} bon(s) et ${d.heuresParNom} ligne(s) d'heures renommés` : ""}. Ajoutés : ${apercu.ajoutes.adresses} adresse(s), ${apercu.ajoutes.courriels} courriel(s), ${apercu.ajoutes.contacts} contact(s).${apercu.deuxQuickbooks ? ` ⚠️ Les deux fiches étaient liées à QuickBooks (#${A.quickbooks_customer_id} gardé, #${B.quickbooks_customer_id} à fusionner aussi dans QuickBooks).` : ""} — par ${utilisateur.user_metadata?.nom || utilisateur.email}`;
+    const auteur = await nomAuteurServeur(utilisateur); // fiche employé (audit 2026-10-05)
+    const texte = `🔗 Fiches clients FUSIONNÉES : « ${B.nom} » → « ${A.nom} » (fiche gardée). Déplacés : ${d.devis} devis, ${d.projets} projet(s), ${d.tachesAttente + d.tachesAgenda} tâche(s), ${d.achats + d.pieces} achat(s)/pièce(s), ${d.facturesLibres + d.facturesMaison} facture(s)${d.bonsParNom + d.heuresParNom ? `, ${d.bonsParNom} bon(s) et ${d.heuresParNom} ligne(s) d'heures renommés` : ""}. Ajoutés : ${apercu.ajoutes.adresses} adresse(s), ${apercu.ajoutes.courriels} courriel(s), ${apercu.ajoutes.contacts} contact(s).${apercu.deuxQuickbooks ? ` ⚠️ Les deux fiches étaient liées à QuickBooks (#${A.quickbooks_customer_id} gardé, #${B.quickbooks_customer_id} à fusionner aussi dans QuickBooks).` : ""} — par ${auteur}`;
     await admin.from("journal_activite").insert({ entreprise_id: E, created_by: null, texte });
     return Response.json({ fusionne: true, apercu });
   } catch (e) {

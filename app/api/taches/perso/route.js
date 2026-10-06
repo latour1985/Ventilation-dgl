@@ -17,7 +17,7 @@
 //   • seuls les deux types sans client sont acceptés — aucune tâche
 //     facturable ne peut naître ici.
 
-import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, nomAuteurServeur } from "@/lib/quickbooksServeur";
 
 // 🏗️ LISTE DES PROJETS pour le sélecteur « C'est pour un projet ? » du
 // travail au shop (2026-08-31, décision du propriétaire : le technicien
@@ -80,7 +80,7 @@ export async function POST(request) {
     : `${String(maintenant.getHours()).padStart(2, "0")}:${String(maintenant.getMinutes()).padStart(2, "0")}`;
 
   const email = (utilisateur.email || "").toLowerCase();
-  const nom = utilisateur.user_metadata?.nom || email.split("@")[0];
+  const nom = await nomAuteurServeur(utilisateur); // fiche employé (audit 2026-10-05)
   const prefixe = type === "shop" ? "🏭" : "🚗";
   const id = `${type}-${Date.now()}`;
 
