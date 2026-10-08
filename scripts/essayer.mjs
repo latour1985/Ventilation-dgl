@@ -42,7 +42,12 @@ execSync("npx.cmd eslint app lib components --quiet", { stdio: "inherit", shell:
 // 2. Déploiement PREVIEW (pas --prod) — Vercel construit à distance et
 //    répond l'adresse unique du déploiement sur stdout.
 console.log("🚀 Déploiement d'essai (la production ne bouge pas)…");
-const sortie = lancer("vercel.cmd", ["deploy", "--yes"]);
+// 🧪 NEXT_PUBLIC_VERSION_ESSAI=1 (2026-10-08) : marque CETTE version comme
+// « essai ». Les chantiers en cours (module Inventaire) n'apparaissent
+// QUE là — la production, construite sans ce drapeau, ne les montre
+// jamais, même si le code est publié (décision du propriétaire : « ne
+// met rien en production sur cette partie avant qu'on soit à point »).
+const sortie = lancer("vercel.cmd", ["deploy", "--yes", "--build-env", "NEXT_PUBLIC_VERSION_ESSAI=1", "--env", "NEXT_PUBLIC_VERSION_ESSAI=1"]);
 // La CLI peut répondre en JSON ({ deployment: { url } }) ou en texte —
 // on prend l'adresse UNIQUE du déploiement où qu'elle soit, en écartant
 // les alias (fluxya*.vercel.app) que la sortie mentionne aussi.

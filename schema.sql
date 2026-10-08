@@ -8061,3 +8061,337 @@ union all
 select 'colonne reporte_jusqu_au', exists (select 1 from information_schema.columns where table_name = 'bons_travail' and column_name = 'reporte_jusqu_au')
 union all
 select 'protégées hors bureau', position('reporte_jusqu_au' in pg_get_functiondef('public.fn_proteger_facturation_bon()'::regprocedure)) > 0;
+
+-- ============================================================
+-- 170 - MODULE INVENTAIRE (OPTION PAYANTE) : EMPLACEMENTS, STOCK, MOUVEMENTS (2026-10-08)
+-- ------------------------------------------------------------
+-- Demande du propriétaire : un inventaire par emplacement (entrepôt,
+-- chaque camion, chantiers), activé par abonnement (supplément mensuel).
+--   • inv_emplacements : où dort le matériel ;
+--   • inv_stock        : combien de chaque article à chaque endroit
+--                        (verifie_le NULL = « ⚠️ non vérifié ») ;
+--   • inv_mouvements   : l'historique — APPEND-ONLY : une erreur se
+--                        corrige par un ajustement, jamais un effacement.
+-- Personne n'écrit le stock directement : tout passe par 3 fonctions
+-- (security definer) qui vérifient l'entreprise, le MODULE ACTIF et le
+-- rôle — le bureau fait tout ; un technicien seulement prendre /
+-- retourner / ajouter à SON camion.
+-- Les quantités de l'ancien écran (inventaire_articles.quantite) ne
+-- bougent pas : elles servent seulement à l'import « non vérifié ».
+-- ============================================================
+
+-- ---- 1. L'option payante : activée ou non (NON par défaut, même
+--         pour une entreprise qui a « tous les modules ») + prix du
+--         supplément mensuel (50 $ temporaire, décision du 2026-10-08). ----
+alter table entreprises add column if not exists option_inventaire boolean not null default false;
+alter table entreprises add column if not exists prix_option_inventaire numeric default 50;
+
+-- ---- 1-B. L'option et son prix : la PLATEFORME seulement (même
+--          garde que les modules et les prix, snippet 165 + 2 lignes). ----
+create or replace function public.fn_proteger_fiche_entreprise()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  echeance_atteinte boolean;
+begin
+  -- Routes serveur (clé service) et console plateforme : passent telles quelles.
+  if (select auth.uid()) is null or coalesce((select auth.role()), '') = 'service_role' then return new; end if;
+  if public.est_plateforme() then return new; end if;
+  -- Seule exception : la bascule AUTOMATIQUE « Résiliée » à la fin d'une
+  -- annulation demandée par le client (snippet 136).
+  echeance_atteinte := old.annulation_effet_le is not null
+    and old.annulation_effet_le <= (now() at time zone 'America/Toronto')::date;
+  if echeance_atteinte and new.statut_plateforme = 'resilie' then
+    new.suspendue := true;
+  else
+    new.statut_plateforme        := old.statut_plateforme;
+    new.suspendue                := old.suspendue;
+    new.resilie_le               := old.resilie_le;
+    new.resilie_raison           := old.resilie_raison;
+    new.statut_avant_resiliation := old.statut_avant_resiliation;
+  end if;
+  new.courriel_expediteur_verifie := old.courriel_expediteur_verifie;
+  new.gratuit_jusqua              := old.gratuit_jusqua;
+  new.rabais_pourcent             := old.rabais_pourcent;
+  new.promo_pourcent              := old.promo_pourcent;
+  new.promo_mois                  := old.promo_mois;
+  new.prix_base                   := old.prix_base;
+  new.prix_par_siege              := old.prix_par_siege;
+  new.sieges_inclus               := old.sieges_inclus;
+  new.modules                     := old.modules;
+  new.option_inventaire           := old.option_inventaire;
+  new.prix_option_inventaire      := old.prix_option_inventaire;
+  new.created_at                  := old.created_at;
+  return new;
+end $$;
+
+-- ---- 2. Fiche article : codes et coût moyen ----
+alter table inventaire_articles add column if not exists code_produit text;
+alter table inventaire_articles add column if not exists code_barres text;
+alter table inventaire_articles add column if not exists cout_moyen numeric not null default 0;
+alter table inventaire_articles add column if not exists fournisseur_nom text;
+create unique index if not exists ux_inventaire_code_barres
+  on inventaire_articles (entreprise_id, code_barres) where code_barres is not null and code_barres <> '';
+
+-- ---- 3. Le module est-il actif pour MON entreprise ? ----
+create or replace function public.fn_module_inventaire() returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select coalesce(
+    (select e.option_inventaire from entreprises e where e.id = public.entreprise_du_jeton()),
+    false)
+$fn$;
+
+-- ---- 4. Tables ----
+create table if not exists inv_emplacements (
+  id                text primary key default gen_random_uuid()::text,
+  entreprise_id     text not null default 'dgl',
+  nom               text not null,
+  type              text not null check (type in ('entrepot', 'camion', 'chantier')),
+  responsable_email text,
+  projet_id         text,
+  actif             boolean not null default true,
+  created_at        timestamptz not null default now()
+);
+create index if not exists idx_inv_emplacements_entreprise on inv_emplacements (entreprise_id);
+
+create table if not exists inv_stock (
+  entreprise_id  text not null default 'dgl',
+  article_id     text not null references inventaire_articles (id) on delete cascade,
+  emplacement_id text not null references inv_emplacements (id) on delete cascade,
+  quantite       numeric not null default 0,
+  seuil_min      numeric,
+  verifie_le     timestamptz,
+  maj_le         timestamptz not null default now(),
+  primary key (article_id, emplacement_id)
+);
+create index if not exists idx_inv_stock_entreprise on inv_stock (entreprise_id);
+
+create table if not exists inv_mouvements (
+  id               bigserial primary key,
+  entreprise_id    text not null default 'dgl',
+  article_id       text not null,
+  type             text not null check (type in ('import', 'reception', 'sortie', 'retour', 'transfert', 'ajustement', 'comptage')),
+  de_emplacement   text,
+  vers_emplacement text,
+  quantite         numeric not null check (quantite > 0),
+  cout_unitaire    numeric,
+  tache_id         text,
+  bc_numero        text,
+  note             text,
+  par_email        text,
+  created_at       timestamptz not null default now()
+);
+create index if not exists idx_inv_mouvements_article on inv_mouvements (entreprise_id, article_id, created_at desc);
+create index if not exists idx_inv_mouvements_date on inv_mouvements (entreprise_id, created_at desc);
+
+-- ---- 5. Sécurité : lecture = mon entreprise + module actif ;
+--         écriture directe = bureau (emplacements, seuils) ; les
+--         mouvements ne s'écrivent QUE par les fonctions ci-dessous. ----
+alter table inv_emplacements enable row level security;
+alter table inv_stock enable row level security;
+alter table inv_mouvements enable row level security;
+do $$
+declare t text; p record;
+begin
+  foreach t in array array['inv_emplacements', 'inv_stock', 'inv_mouvements'] loop
+    for p in select policyname from pg_policies where schemaname = 'public' and tablename = t loop
+      execute format('drop policy %I on public.%I', p.policyname, t);
+    end loop;
+    execute format(
+      'create policy %I on public.%I for select to authenticated
+         using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_module_inventaire()))',
+      t || '_lecture', t);
+  end loop;
+end $$;
+create policy inv_emplacements_ecriture on inv_emplacements for all to authenticated
+  using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()) and (select public.fn_module_inventaire()))
+  with check (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()) and (select public.fn_module_inventaire()));
+-- inv_stock : le bureau ajuste le SEUIL (la quantité, elle, est protégée plus bas).
+create policy inv_stock_seuil on inv_stock for update to authenticated
+  using (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()) and (select public.fn_module_inventaire()))
+  with check (entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau()) and (select public.fn_module_inventaire()));
+
+drop trigger if exists trg_entreprise_inv_emplacements on inv_emplacements;
+create trigger trg_entreprise_inv_emplacements before insert on inv_emplacements
+  for each row execute function public.poser_entreprise_id();
+
+-- Une mise à jour directe d'inv_stock ne touche JAMAIS la quantité ni la
+-- vérification (seules les fonctions, en service, le peuvent).
+create or replace function public.fn_proteger_inv_stock()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(current_setting('fluxya.inv_mouvement', true), '') = '1' then return new; end if;
+  if coalesce((select auth.role()), '') = 'service_role' then return new; end if;
+  new.quantite   := old.quantite;
+  new.verifie_le := old.verifie_le;
+  return new;
+end $$;
+drop trigger if exists trg_proteger_inv_stock on inv_stock;
+create trigger trg_proteger_inv_stock before update on inv_stock
+  for each row execute function public.fn_proteger_inv_stock();
+
+-- ---- 6. UN MOUVEMENT (prendre, retourner, transférer, recevoir, ajuster) ----
+-- Le stock peut devenir NÉGATIF (un gars prend ce qui n'était pas
+-- compté) : on ne bloque jamais le terrain, l'écran le signale.
+create or replace function public.inv_mouvement(
+  p_article text, p_type text, p_de text, p_vers text, p_quantite numeric,
+  p_cout numeric default null, p_tache text default null, p_bc text default null, p_note text default null
+) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare
+  e text := public.entreprise_du_jeton();
+  courriel text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  bureau boolean := public.fn_est_bureau();
+  type_de text; type_vers text; resp_de text; resp_vers text;
+  total_avant numeric; cout_avant numeric;
+  nouvel_id bigint;
+begin
+  if (select auth.uid()) is null or e is null then raise exception 'Connexion requise.'; end if;
+  if not public.fn_module_inventaire() then raise exception 'Le module Inventaire n''est pas actif.'; end if;
+  if p_quantite is null or p_quantite <= 0 then raise exception 'Quantité invalide.'; end if;
+  if p_type not in ('reception', 'sortie', 'retour', 'transfert', 'ajustement') then raise exception 'Type de mouvement invalide.'; end if;
+  if not exists (select 1 from inventaire_articles where id = p_article and entreprise_id = e) then raise exception 'Article introuvable.'; end if;
+  if p_de is not null then
+    select type, lower(coalesce(responsable_email, '')) into type_de, resp_de from inv_emplacements where id = p_de and entreprise_id = e;
+    if type_de is null then raise exception 'Emplacement de départ introuvable.'; end if;
+  end if;
+  if p_vers is not null then
+    select type, lower(coalesce(responsable_email, '')) into type_vers, resp_vers from inv_emplacements where id = p_vers and entreprise_id = e;
+    if type_vers is null then raise exception 'Emplacement d''arrivée introuvable.'; end if;
+  end if;
+  if p_de is null and p_vers is null then raise exception 'Un emplacement est requis.'; end if;
+  if p_type = 'transfert' and (p_de is null or p_vers is null or p_de = p_vers) then raise exception 'Transfert : deux emplacements différents.'; end if;
+  if p_type = 'sortie' and p_de is null then raise exception 'Sortie : d''où ?'; end if;
+  if p_type in ('retour', 'reception') and p_vers is null then raise exception 'Retour / réception : vers où ?'; end if;
+
+  -- 🔒 Technicien : prendre de SON camion ou de l'entrepôt, retourner
+  -- dans SON camion, passer de l'entrepôt à SON camion. Rien d'autre.
+  if not bureau then
+    if p_type = 'sortie' and (type_de = 'entrepot' or (type_de = 'camion' and resp_de = courriel)) then null;
+    elsif p_type = 'retour' and type_vers = 'camion' and resp_vers = courriel then null;
+    elsif p_type = 'transfert' and type_de = 'entrepot' and type_vers = 'camion' and resp_vers = courriel then null;
+    else raise exception 'Réservé au bureau.';
+    end if;
+  end if;
+
+  perform set_config('fluxya.inv_mouvement', '1', true);
+
+  -- 💲 Coût moyen : une RÉCEPTION avec prix recalcule la moyenne pondérée.
+  if p_type = 'reception' and p_cout is not null and p_cout >= 0 then
+    select coalesce(sum(greatest(quantite, 0)), 0) into total_avant from inv_stock where article_id = p_article and entreprise_id = e;
+    select cout_moyen into cout_avant from inventaire_articles where id = p_article;
+    update inventaire_articles
+       set cout_moyen = case when total_avant + p_quantite > 0
+                             then round(((total_avant * coalesce(cout_avant, 0)) + (p_quantite * p_cout)) / (total_avant + p_quantite), 4)
+                             else p_cout end
+     where id = p_article;
+  end if;
+
+  if p_de is not null then
+    insert into inv_stock (entreprise_id, article_id, emplacement_id, quantite)
+      values (e, p_article, p_de, -p_quantite)
+      on conflict (article_id, emplacement_id) do update set quantite = inv_stock.quantite - p_quantite, maj_le = now();
+  end if;
+  if p_vers is not null then
+    insert into inv_stock (entreprise_id, article_id, emplacement_id, quantite)
+      values (e, p_article, p_vers, p_quantite)
+      on conflict (article_id, emplacement_id) do update set quantite = inv_stock.quantite + p_quantite, maj_le = now();
+  end if;
+
+  insert into inv_mouvements (entreprise_id, article_id, type, de_emplacement, vers_emplacement, quantite, cout_unitaire, tache_id, bc_numero, note, par_email)
+    values (e, p_article, p_type, p_de, p_vers, p_quantite,
+            coalesce(p_cout, (select cout_moyen from inventaire_articles where id = p_article)),
+            p_tache, p_bc, nullif(left(coalesce(p_note, ''), 500), ''), courriel)
+    returning id into nouvel_id;
+  return nouvel_id;
+end $$;
+
+-- ---- 7. COMPTAGE : le stock compté devient le stock, chaque écart
+--         devient un mouvement « comptage » daté et signé (bureau). ----
+-- p_lignes = [{"article_id": "...", "compte": 12}, ...]
+create or replace function public.inv_valider_comptage(p_emplacement text, p_lignes jsonb, p_note text default null)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  e text := public.entreprise_du_jeton();
+  courriel text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  l jsonb; art text; compte numeric; actuel numeric; ecart numeric; n integer := 0;
+begin
+  if (select auth.uid()) is null or e is null then raise exception 'Connexion requise.'; end if;
+  if not public.fn_module_inventaire() then raise exception 'Le module Inventaire n''est pas actif.'; end if;
+  if not public.fn_est_bureau() then raise exception 'Réservé au bureau.'; end if;
+  if not exists (select 1 from inv_emplacements where id = p_emplacement and entreprise_id = e) then raise exception 'Emplacement introuvable.'; end if;
+  perform set_config('fluxya.inv_mouvement', '1', true);
+  for l in select * from jsonb_array_elements(coalesce(p_lignes, '[]'::jsonb)) loop
+    art := l ->> 'article_id';
+    compte := (l ->> 'compte')::numeric;
+    if art is null or compte is null or compte < 0 then continue; end if;
+    if not exists (select 1 from inventaire_articles where id = art and entreprise_id = e) then continue; end if;
+    select quantite into actuel from inv_stock where article_id = art and emplacement_id = p_emplacement;
+    actuel := coalesce(actuel, 0);
+    ecart := compte - actuel;
+    insert into inv_stock (entreprise_id, article_id, emplacement_id, quantite, verifie_le)
+      values (e, art, p_emplacement, compte, now())
+      on conflict (article_id, emplacement_id) do update set quantite = compte, verifie_le = now(), maj_le = now();
+    if ecart <> 0 then
+      insert into inv_mouvements (entreprise_id, article_id, type, de_emplacement, vers_emplacement, quantite, cout_unitaire, note, par_email)
+        values (e, art, 'comptage',
+                case when ecart < 0 then p_emplacement end,
+                case when ecart > 0 then p_emplacement end,
+                abs(ecart), (select cout_moyen from inventaire_articles where id = art),
+                coalesce(nullif(left(coalesce(p_note, ''), 500), ''), 'Comptage : attendu ' || actuel || ', compté ' || compte),
+                courriel);
+    end if;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+-- ---- 8. IMPORT « NON VÉRIFIÉ » de l'ancien inventaire vers un
+--         emplacement (bureau) — une seule fois par article. ----
+create or replace function public.inv_importer_stock(p_emplacement text)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  e text := public.entreprise_du_jeton();
+  courriel text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  a record; n integer := 0;
+begin
+  if (select auth.uid()) is null or e is null then raise exception 'Connexion requise.'; end if;
+  if not public.fn_module_inventaire() then raise exception 'Le module Inventaire n''est pas actif.'; end if;
+  if not public.fn_est_bureau() then raise exception 'Réservé au bureau.'; end if;
+  if not exists (select 1 from inv_emplacements where id = p_emplacement and entreprise_id = e) then raise exception 'Emplacement introuvable.'; end if;
+  perform set_config('fluxya.inv_mouvement', '1', true);
+  for a in
+    select i.id, i.quantite, i.cout_moyen from inventaire_articles i
+     where i.entreprise_id = e and coalesce(i.quantite, 0) > 0
+       and not exists (select 1 from inv_mouvements m where m.entreprise_id = e and m.article_id = i.id and m.type = 'import')
+  loop
+    insert into inv_stock (entreprise_id, article_id, emplacement_id, quantite, verifie_le)
+      values (e, a.id, p_emplacement, a.quantite, null)
+      on conflict (article_id, emplacement_id) do update set quantite = inv_stock.quantite + a.quantite, maj_le = now();
+    insert into inv_mouvements (entreprise_id, article_id, type, vers_emplacement, quantite, cout_unitaire, note, par_email)
+      values (e, a.id, 'import', p_emplacement, a.quantite, a.cout_moyen, 'Import de l''inventaire existant — non vérifié', courriel);
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+revoke all on function public.inv_mouvement(text, text, text, text, numeric, numeric, text, text, text) from public, anon;
+revoke all on function public.inv_valider_comptage(text, jsonb, text) from public, anon;
+revoke all on function public.inv_importer_stock(text) from public, anon;
+grant execute on function public.inv_mouvement(text, text, text, text, numeric, numeric, text, text, text) to authenticated;
+grant execute on function public.inv_valider_comptage(text, jsonb, text) to authenticated;
+grant execute on function public.inv_importer_stock(text) to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- Vérification : 5 lignes, toutes à true.
+select 'tables avec RLS (3)' as quoi, (select count(*) = 3 from pg_class where relname in ('inv_emplacements', 'inv_stock', 'inv_mouvements') and relrowsecurity) as ok
+union all
+select 'fonctions (4)', (select count(*) = 4 from pg_proc where proname in ('inv_mouvement', 'inv_valider_comptage', 'inv_importer_stock', 'fn_module_inventaire'))
+union all
+select 'colonnes articles (4)', (select count(*) = 4 from information_schema.columns where table_name = 'inventaire_articles' and column_name in ('code_produit', 'code_barres', 'cout_moyen', 'fournisseur_nom'))
+union all
+select 'option et prix (2)', (select count(*) = 2 from information_schema.columns where table_name = 'entreprises' and column_name in ('option_inventaire', 'prix_option_inventaire'))
+union all
+select 'option protégée hors plateforme', position('option_inventaire' in pg_get_functiondef('public.fn_proteger_fiche_entreprise()'::regprocedure)) > 0;

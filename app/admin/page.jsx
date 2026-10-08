@@ -7,7 +7,7 @@ import {
   ChevronRight, MapPin, Mail, FileCheck2, Clock, Send, X, Check,
   AlertCircle, Search, Users, UserPlus, RefreshCw, Phone, CreditCard,
   Camera, ClipboardList, UserCog, KeyRound, ShieldCheck, Lock, Loader2, User, Pencil, Briefcase, Car,
-  Cloud, CheckCircle2, AlertTriangle, LayoutGrid, List, BarChart3, Menu, LogOut, Banknote, Copy, Settings, Package,
+  Cloud, CheckCircle2, AlertTriangle, LayoutGrid, List, BarChart3, Menu, LogOut, Banknote, Copy, Settings, Package, Boxes,
   LifeBuoy,
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
@@ -91,6 +91,8 @@ import { navigationPermise } from "@/lib/gardeNonEnregistre";
 import { TYPES_TACHE, TYPE_INFO, estTypeSansClient, HEURES_QUART, HEURE_PAR_DEFAUT, listeCellule, cleTacheDesHeures, camionsEntretienDu, tachesDuJourPourEmploye } from "./partage";
 import { ModalEditionTache } from "./ModalEditionTache";
 import RechercheJournal from "./RechercheJournal";
+import OngletInventaire from "./OngletInventaire";
+import { inventaireDisponible } from "@/lib/supabase/inventaireModule";
 import { OngletTableauDeBord } from "./OngletTableauDeBord";
 import { OngletAide } from "./OngletAide";
 import { listerRetoursEntreprise, sAbonnerRetours } from "@/lib/supabase/retours";
@@ -364,6 +366,7 @@ function MenuLateral({ vue, onChoisir, permissions, badges, courriel, role, onDe
       { id: "projets", label: "Projets", icone: Briefcase, badge: badges?.projets },
       { id: "inspections", label: "Véhicules", icone: Car },
       { id: "pieces", label: "Pièces en commande", icone: Package, badge: badges?.pieces },
+      { id: "inventaire", label: "Inventaire", icone: Boxes },
     ]},
     { titre: "Administration", items: [
       { id: "paies", label: "Heures de la semaine", icone: Banknote, badge: badges?.paies },
@@ -3761,9 +3764,16 @@ function AppAdmin() {
   // a dans son forfait ; personne (Admin principal compris) ne voit un
   // module absent. `null` = tous les modules (DGL, historique).
   const modulesEntreprise = Array.isArray(configEntreprise?.modules) ? configEntreprise.modules : null;
-  const permissions = modulesEntreprise
+  const permissionsForfait = modulesEntreprise
     ? permissionsSelonRole.filter((s) => modulesEntreprise.includes(s))
     : permissionsSelonRole;
+  // 📦 OPTION PAYANTE INVENTAIRE (2026-10-08) — à part du forfait : il faut
+  // l'option activée par la plateforme ET l'accès aux Pièces (même monde).
+  // 🧪 En chantier : version d'essai seulement (voir inventaireModule.js).
+  const permissions =
+    inventaireDisponible(configEntreprise) && permissionsForfait.includes("pieces")
+      ? [...permissionsForfait, "inventaire"]
+      : permissionsForfait;
   // AUTORISATION « modifier la liste de prix ». Verrou posé ici, et pas
   // seulement dans l'écran des accès : même si la case se retrouvait
   // cochée pour un autre rôle, elle reste sans effet. Les prix du
@@ -5034,6 +5044,14 @@ function AppAdmin() {
         />
       )}
 
+      {/* 📦 MODULE INVENTAIRE — option payante (2026-10-08) ; 🧪 essai seulement. */}
+      {vue === "inventaire" && (
+        <OngletInventaire
+          utilisateurs={utilisateursActifs}
+          projets={projets}
+          ajouterJournal={ajouterJournal}
+        />
+      )}
       {vue === "pieces" && (
         <OngletPieces
           // 🚚 Qui peut ramasser : le commissionnaire d'abord, puis le terrain.

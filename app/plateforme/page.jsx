@@ -23,6 +23,7 @@ import { Building2, Lock, LogOut, Plus, ShieldAlert, Download, Pause, Play, Chec
 import { supabase } from "@/lib/supabase/client";
 import { seConnecterSurveille } from "@/lib/connexionSurveillee";
 import ChampMotDePasse from "@/components/ChampMotDePasse";
+import { INVENTAIRE_EN_ESSAI } from "@/lib/supabase/inventaireModule";
 import {
   listerEntreprisesPlateforme,
   majEntreprisePlateforme,
@@ -328,6 +329,8 @@ function TableauPlateforme({ session }) {
               if ("adresse" in champs) bd.adresse = champs.adresse || null;
               if ("gratuitJusqua" in champs) bd.gratuit_jusqua = champs.gratuitJusqua || null;
               if ("modules" in champs) bd.modules = champs.modules;
+              if ("optionInventaire" in champs) bd.option_inventaire = champs.optionInventaire === true;
+              if ("prixOptionInventaire" in champs) bd.prix_option_inventaire = champs.prixOptionInventaire === "" ? null : Number(champs.prixOptionInventaire);
               if ("prixBase" in champs) bd.prix_base = champs.prixBase === "" ? null : Number(champs.prixBase);
               if ("siegesInclus" in champs) bd.sieges_inclus = Number(champs.siegesInclus) || 4;
               if ("prixParSiege" in champs) bd.prix_par_siege = champs.prixParSiege === "" ? null : Number(champs.prixParSiege);
@@ -903,6 +906,40 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                       Un module décoché disparaît pour TOUTE l'entreprise, son admin principal compris. L'entreprise
                       voit le changement à sa prochaine connexion.
                     </p>
+                    {/* 📦 OPTION PAYANTE INVENTAIRE (2026-10-08, snippet 170) —
+                        à part des modules du forfait : NON par défaut, même
+                        pour une entreprise qui a « tous les modules », et
+                        facturée en supplément. 🧪 En chantier : visible
+                        seulement sur la version d'essai. */}
+                    {INVENTAIRE_EN_ESSAI && (
+                      <div className={`mt-2 rounded-xl border-2 p-2.5 ${e.optionInventaire ? "border-orange-400 bg-orange-50" : "border-slate-200 bg-white"}`}>
+                        <label className="flex items-center justify-between gap-2">
+                          <span>
+                            <span className="block text-[11px] font-extrabold text-slate-800">📦 Inventaire — option payante</span>
+                            <span className="block text-[10px] text-slate-500">Emplacements, mouvements, comptages, scan, commandes suggérées</span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={e.optionInventaire === true}
+                            onChange={() => onMaj(e.id, { optionInventaire: !e.optionInventaire })}
+                            className="h-5 w-5 shrink-0 accent-orange-500"
+                          />
+                        </label>
+                        <label className="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold text-slate-500">
+                          Supplément mensuel
+                          <input
+                            type="number"
+                            min={0}
+                            step="1"
+                            value={e.prixOptionInventaire ?? ""}
+                            onChange={(ev) => onMaj(e.id, { prixOptionInventaire: ev.target.value })}
+                            className="w-20 rounded-lg border border-slate-300 px-2 py-1 text-[11px] tabular-nums"
+                          />
+                          $ / mois
+                        </label>
+                        <p className="mt-1 text-[9px] leading-snug text-slate-400">🧪 En chantier — visible seulement sur la version d&apos;essai.</p>
+                      </div>
+                    )}
                   </div>
                   {/* 💰 PRIX — modifiables en tout temps (hausses annuelles,
                       ententes). Les changements s'appliquent aux calculs
@@ -1261,7 +1298,11 @@ function SectionFacturation({ entreprises }) {
         });
         const base = (Number(e.prixBase) || 0) * facteurRabais;
         const totalExtras = lignes.reduce((s2, l) => s2 + l.montant, 0);
-        const total = gratuite ? 0 : base + totalExtras;
+        // 📦 Option Inventaire (snippet 170) — supplément mensuel, même
+        // rabais que la base. 🧪 Compté seulement sur la version d'essai
+        // tant que le module n'est pas publié.
+        const optionInventaire = INVENTAIRE_EN_ESSAI && e.optionInventaire ? (Number(e.prixOptionInventaire) || 0) * facteurRabais : 0;
+        const total = gratuite ? 0 : base + totalExtras + optionInventaire;
         const prixManquants = !gratuite && (e.prixBase == null || (extras.length > 0 && e.prixParSiege == null));
         return (
           <div key={e.id} className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1301,6 +1342,12 @@ function SectionFacturation({ entreprises }) {
                   </div>
                 ))}
                 {extras.length === 0 && <p className="text-slate-400">Aucun siège au-delà des inclus.</p>}
+                {optionInventaire > 0 && (
+                  <div className="flex justify-between font-bold text-orange-800">
+                    <span>📦 Option Inventaire{rabaisEffectif > 0 ? ` (−${rabaisEffectif} %)` : ""}</span>
+                    <span className="tabular-nums">{optionInventaire.toFixed(2)} $</span>
+                  </div>
+                )}
                 {prixManquants && (
                   <p className="mt-1 rounded-lg bg-red-50 px-2 py-1 font-bold text-red-600">⚠️ Prix non définis — ouvre « Statut & modules… » dans l'onglet Entreprises pour les fixer.</p>
                 )}
