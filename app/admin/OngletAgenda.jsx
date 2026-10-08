@@ -7172,21 +7172,59 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                 {tache.titre || tache.clientNom || "Tâche"}{tache.clientNom && tache.titre ? ` — ${tache.clientNom}` : ""} · {date}
                 {ficheSt?.telephone ? ` · 📞 ${ficheSt.telephone}` : ""}
               </p>
+              {/* 📍 📄 Adresse des travaux et devis (2026-10-08, demande du
+                  propriétaire) — comme sur les autres blocs de l'agenda. */}
+              {(() => {
+                const adresse = tache.adresseTravaux || tache.adresseIntervention || "";
+                const devis = [tache.devisNumero, ...(Array.isArray(tache.devisJoints) ? tache.devisJoints : [])].filter(Boolean);
+                if (!adresse && devis.length === 0) return null;
+                return (
+                  <div className="mt-1.5 space-y-0.5 text-xs">
+                    {adresse && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(adresse)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block font-semibold text-slate-700 underline decoration-slate-300 underline-offset-2"
+                      >
+                        📍 {adresse}
+                      </a>
+                    )}
+                    {devis.length > 0 && <p className="font-semibold text-blue-700">📄 {devis.join(" · ")}</p>}
+                  </div>
+                );
+              })()}
               <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-600">
-                Statut actuel : {ST_ICONES[statut]} {statut === "present" ? "Présent" : statut === "absent" ? "Pas venu" : "Prévu — à confirmer après la visite"}
+                {tr("Statut actuel :")} {ST_ICONES[statut]} {statut === "present" ? tr("Présent") : statut === "absent" ? tr("Pas venu") : tr("Prévu — à confirmer après la visite")}
               </p>
               <div className="mt-3 space-y-2.5">
+                {/* ✏️ MODIFIER LA TÂCHE (2026-10-08, demande du propriétaire) —
+                    la fiche complète (date, heures, adresse, description,
+                    devis…), la même que pour un technicien. La présence, le
+                    montant et les pièces du sous-traitant sont conservés
+                    (champs propres à l'assignation, jamais réécrits). */}
+                {!lectureSeule && (
+                  <button
+                    onClick={() => {
+                      setModalStatutST(null);
+                      setTacheDetailOuverte({ tache, employe, date, heure: HEURE_PAR_DEFAUT });
+                    }}
+                    className="min-h-[44px] w-full rounded-xl border border-slate-300 bg-white text-xs font-extrabold text-slate-700 active:scale-[0.99]"
+                  >
+                    ✏️ {tr("Modifier la tâche — date, heures, adresse, description")}
+                  </button>
+                )}
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-500">Note (facultative)</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">{tr("Note (facultative)")}</label>
                   <input
                     value={note}
                     onChange={(e) => setModalStatutST({ ...modalStatutST, note: e.target.value })}
-                    placeholder="Arrivé à 9 h, travaux du sous-sol faits…"
+                    placeholder={tr("Arrivé à 9 h, travaux du sous-sol faits…")}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-bold text-slate-500">Montant qu&apos;il TE facture ($, avant taxes)</label>
+                  <label className="mb-1 block text-xs font-bold text-slate-500">{tr("Montant qu'il TE facture ($, avant taxes)")}</label>
                   <InputNombreDecimal
                     valeur={montant || 0}
                     onChange={(v) => setModalStatutST({ ...modalStatutST, montant: v })}
@@ -7194,12 +7232,12 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                   />
                   <p className="mt-1 text-[10px] leading-snug text-slate-400">
                     {projetLie
-                      ? `Compte comme ESTIMATION dans le coût du projet « ${projetLie.nom} » en marquant Présent — jusqu'à ce que sa facture soit validée « entrée » dans le système comptable (Facturation).`
-                      : "Aucun projet lié à cette tâche — le montant est noté sur le bloc, sans coût de projet."}
+                      ? tr("Compte comme ESTIMATION dans le coût du projet « {nom} » en marquant Présent — jusqu'à ce que sa facture soit validée « entrée » dans le système comptable (Facturation).").replace("{nom}", projetLie.nom)
+                      : tr("Aucun projet lié à cette tâche — le montant est noté sur le bloc, sans coût de projet.")}
                   </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 p-2.5">
-                  <p className="text-xs font-bold text-slate-500">📎 Pièces justificatives <span className="font-normal text-slate-400">(facture, bon de commande…)</span></p>
+                  <p className="text-xs font-bold text-slate-500">📎 {tr("Pièces justificatives")} <span className="font-normal text-slate-400">{tr("(facture, bon de commande…)")}</span></p>
                   {pieces.length > 0 && (
                     <ul className="mt-1.5 space-y-1">
                       {pieces.map((pc, i) => (
@@ -7228,7 +7266,7 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                   )}
                   {!lectureSeule && (
                     <label className={`mt-1.5 flex min-h-[40px] cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs font-bold text-slate-600 ${modalStatutST.envoiPieces ? "pointer-events-none opacity-50" : ""}`}>
-                      {modalStatutST.envoiPieces ? "Envoi en cours…" : "➕ Ajouter une photo ou un fichier (PDF)"}
+                      {modalStatutST.envoiPieces ? tr("Envoi en cours…") : `➕ ${tr("Ajouter une photo ou un fichier (PDF)")}`}
                       <input
                         type="file"
                         accept="image/*,application/pdf"
@@ -7241,17 +7279,17 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                       />
                     </label>
                   )}
-                  {modalStatutST.erreurPieces && <p className="mt-1 text-[10px] font-semibold text-red-600">⚠️ {modalStatutST.erreurPieces}</p>}
+                  {modalStatutST.erreurPieces && <p className="mt-1 text-[10px] font-semibold text-red-600">⚠️ {tr(modalStatutST.erreurPieces)}</p>}
                 </div>
                 <button onClick={() => valider("present")} className="min-h-[48px] w-full rounded-xl bg-emerald-600 text-sm font-extrabold text-white active:scale-[0.99]">
-                  ✅ Présent — il est venu faire les travaux
+                  ✅ {tr("Présent — il est venu faire les travaux")}
                 </button>
                 <button onClick={() => valider("absent")} className="min-h-[48px] w-full rounded-xl border-2 border-red-300 bg-red-50 text-sm font-extrabold text-red-700 active:scale-[0.99]">
-                  ❌ Pas venu
+                  ❌ {tr("Pas venu")}
                 </button>
                 {statut !== "prevu" && (
                   <button onClick={() => valider("prevu")} className="min-h-[44px] w-full rounded-xl border border-slate-300 text-xs font-bold text-slate-600 active:scale-[0.99]">
-                    ↩︎ Remettre « prévu »
+                    ↩︎ {tr("Remettre « prévu »")}
                   </button>
                 )}
                 {ficheSt && !lectureSeule && (
@@ -7259,7 +7297,7 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
                     onClick={() => { setModalStatutST(null); setModalFicheST({ ...ficheSt }); }}
                     className="min-h-[40px] w-full rounded-xl text-[11px] font-bold text-slate-400 active:scale-[0.99]"
                   >
-                    ✏️ Modifier la fiche du sous-traitant
+                    👤 {tr("Modifier la fiche du sous-traitant")}
                   </button>
                 )}
               </div>
