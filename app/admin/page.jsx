@@ -90,6 +90,7 @@ import { notifier } from "@/lib/toasts";
 import { navigationPermise } from "@/lib/gardeNonEnregistre";
 import { TYPES_TACHE, TYPE_INFO, estTypeSansClient, HEURES_QUART, HEURE_PAR_DEFAUT, listeCellule, cleTacheDesHeures, camionsEntretienDu, tachesDuJourPourEmploye } from "./partage";
 import { ModalEditionTache } from "./ModalEditionTache";
+import RechercheJournal from "./RechercheJournal";
 import { OngletTableauDeBord } from "./OngletTableauDeBord";
 import { OngletAide } from "./OngletAide";
 import { listerRetoursEntreprise, sAbonnerRetours } from "@/lib/supabase/retours";
@@ -1098,16 +1099,21 @@ function JournalAutomatisation({ entrees }) {
       } catch {}
       return suivant;
     });
+  // 🔎 Fenêtre de recherche dans TOUT le journal (2026-10-08).
+  const [recherche, setRecherche] = useState(false);
+  const { t: trJ } = useLangue();
   if (entrees.length === 0) return null;
   const aujourdhui = todayISO();
   const derniere = entrees[0];
   const alerte = /⚠️|⛔|❌/.test(derniere?.texte || "");
   return (
     <div className="mx-auto w-full max-w-5xl px-4 pb-4 md:px-6">
+      {recherche && <RechercheJournal onFermer={() => setRecherche(false)} />}
+      <div className="flex items-stretch gap-1.5">
       <button
         onClick={basculer}
         title={ouvert ? "Réduire le journal" : "Afficher le journal complet"}
-        className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
           alerte ? "border-orange-300 bg-orange-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
         }`}
       >
@@ -1122,6 +1128,15 @@ function JournalAutomatisation({ entrees }) {
           {ouvert ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
         </span>
       </button>
+      <button
+        type="button"
+        onClick={() => setRecherche(true)}
+        title={trJ("Rechercher dans tout le journal")}
+        className="flex shrink-0 items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-600 hover:border-slate-400 hover:bg-slate-50"
+      >
+        🔎 <span className="hidden sm:inline">{trJ("Rechercher")}</span>
+      </button>
+      </div>
       {ouvert && (
         <div className="mt-1.5 max-h-48 space-y-1.5 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
           {entrees.map((e) => (

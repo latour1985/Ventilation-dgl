@@ -14,8 +14,26 @@
 //     pas. Append-only : aucune modification, aucune suppression.
 //   • { action: "lister", limite } — réservé à l'administration/bureau
 //     (pas aux Techniciens), comme l'onglet Journal lui-même.
+//   • { action: "rechercher", q, depuis, jusqua, type, avant, limite }
+//     (2026-10-08, demande du propriétaire) — TOUT l'historique, pas
+//     seulement les 300 dernières lignes (≈ 3 jours). Mêmes gardes que
+//     « lister » : bureau seulement, entreprise de l'appelant seulement.
 
 import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, nomAuteurServeur } from "@/lib/quickbooksServeur";
+
+// 🔎 Familles de lignes proposées en filtre — des motifs FIXES (jamais
+// tirés de la demande) : la syntaxe « or » de PostgREST n'y voit donc
+// jamais de texte tapé par l'utilisateur.
+const FILTRES_TYPE = {
+  problemes: "texte.ilike.%⚠️%,texte.ilike.%⛔%,texte.ilike.%❌%",
+  bc: "texte.ilike.%BC-%,texte.ilike.%bon de commande%",
+  facturation: "texte.ilike.%factur%,texte.ilike.%retrait%,texte.ilike.%dépôt%,texte.ilike.%paiement%",
+};
+
+// Un mot tapé devient un motif ILIKE littéral : %, _ et \ sont échappés,
+// * (joker de PostgREST) est retiré.
+const motifLitteral = (mot) => `%${String(mot).replace(/\*/g, "").replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+const isoValide = (v) => typeof v === "string" && v.length <= 40 && !Number.isNaN(Date.parse(v));
 
 export async function POST(request) {
   const enTete = request.headers.get("authorization") || "";
@@ -50,7 +68,7 @@ export async function POST(request) {
     return Response.json({ ok: true });
   }
 
-  if (corps?.action === "lister") {
+  if (corps?.action === "lister" || corps?.action === "rechercher") {
     // ⚠️ RÔLE LU EN BASE, PAS DANS LE PROFIL (audit 2026-08-17) :
     // user_metadata est modifiable par l'utilisateur lui-même
     // (auth.updateUser) — un technicien pouvait s'auto-promouvoir et
@@ -74,6 +92,29 @@ export async function POST(request) {
     }
     if (roleReel === "Technicien") {
       return Response.json({ erreur: "Réservé à l'administration." }, { status: 403 });
+    }
+    if (corps.action === "rechercher") {
+      const mots = String(corps?.q || "").trim().slice(0, 120).split(/\s+/).filter(Boolean).slice(0, 6);
+      const limiteR = Math.min(200, Math.max(1, parseInt(corps?.limite) || 100));
+      let requete = admin
+        .from("journal_activite")
+        .select("id, texte, created_at")
+        .eq("entreprise_id", entrepriseDuCompte(utilisateur));
+      // Chaque mot doit apparaître (ET) — « BC-1086 reçu » trouve la ligne
+      // qui contient les deux, dans n'importe quel ordre.
+      for (const mot of mots) {
+        const motif = motifLitteral(mot);
+        if (motif !== "%%") requete = requete.ilike("texte", motif);
+      }
+      if (isoValide(corps?.depuis)) requete = requete.gte("created_at", corps.depuis);
+      if (isoValide(corps?.jusqua)) requete = requete.lt("created_at", corps.jusqua);
+      // « Afficher plus » : on repart AVANT la dernière ligne déjà reçue.
+      if (isoValide(corps?.avant)) requete = requete.lt("created_at", corps.avant);
+      if (FILTRES_TYPE[corps?.type]) requete = requete.or(FILTRES_TYPE[corps.type]);
+      const { data, error } = await requete.order("created_at", { ascending: false }).order("id", { ascending: false }).limit(limiteR + 1);
+      if (error) return Response.json({ erreur: error.message }, { status: 502 });
+      const lignes = data || [];
+      return Response.json({ lignes: lignes.slice(0, limiteR), encore: lignes.length > limiteR });
     }
     const limite = Math.min(500, Math.max(1, parseInt(corps?.limite) || 300));
     // 🔐 CLOISON D'ENTREPRISE (2026-09-08, vécu : « les journaux se
