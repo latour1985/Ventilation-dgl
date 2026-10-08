@@ -23,7 +23,7 @@ import { Building2, Lock, LogOut, Plus, ShieldAlert, Download, Pause, Play, Chec
 import { supabase } from "@/lib/supabase/client";
 import { seConnecterSurveille } from "@/lib/connexionSurveillee";
 import ChampMotDePasse from "@/components/ChampMotDePasse";
-import { INVENTAIRE_EN_ESSAI } from "@/lib/supabase/inventaireModule";
+import { INVENTAIRE_EN_ESSAI, listerConsentementsOptions } from "@/lib/supabase/inventaireModule";
 import {
   listerEntreprisesPlateforme,
   majEntreprisePlateforme,
@@ -329,7 +329,14 @@ function TableauPlateforme({ session }) {
               if ("adresse" in champs) bd.adresse = champs.adresse || null;
               if ("gratuitJusqua" in champs) bd.gratuit_jusqua = champs.gratuitJusqua || null;
               if ("modules" in champs) bd.modules = champs.modules;
-              if ("optionInventaire" in champs) bd.option_inventaire = champs.optionInventaire === true;
+              // Cochée par la console : activation aujourd'hui (prorata) ; décochée : arrêt immédiat.
+              if ("optionInventaire" in champs) {
+                bd.option_inventaire = champs.optionInventaire === true;
+                if (champs.optionInventaire === true) {
+                  bd.option_inventaire_active_le = new Date().toISOString();
+                  bd.option_inventaire_fin_le = null;
+                }
+              }
               if ("prixOptionInventaire" in champs) bd.prix_option_inventaire = champs.prixOptionInventaire === "" ? null : Number(champs.prixOptionInventaire);
               if ("prixBase" in champs) bd.prix_base = champs.prixBase === "" ? null : Number(champs.prixBase);
               if ("siegesInclus" in champs) bd.sieges_inclus = Number(champs.siegesInclus) || 4;
@@ -921,7 +928,7 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                           <input
                             type="checkbox"
                             checked={e.optionInventaire === true}
-                            onChange={() => onMaj(e.id, { optionInventaire: !e.optionInventaire })}
+                            onChange={() => onMaj(e.id, e.optionInventaire ? { optionInventaire: false } : { optionInventaire: true, optionInventaireActiveLe: new Date().toISOString(), optionInventaireFinLe: null })}
                             className="h-5 w-5 shrink-0 accent-orange-500"
                           />
                         </label>
@@ -937,6 +944,8 @@ function SectionEntreprises({ entreprises, isolationOk, peutModifier = true, ges
                           />
                           $ / mois
                         </label>
+                        {e.optionInventaireFinLe && <p className="mt-1 text-[10px] font-bold text-amber-700">⏳ Désactivation programmée — s&apos;arrête le {e.optionInventaireFinLe}.</p>}
+                        <ConsentementsOption entrepriseId={e.id} />
                         <p className="mt-1 text-[9px] leading-snug text-slate-400">🧪 En chantier — visible seulement sur la version d&apos;essai.</p>
                       </div>
                     )}
@@ -1203,6 +1212,34 @@ function SectionIncidents({ incidents, session, onCree }) {
 // Les montants calculés se reportent dans les factures récurrentes
 // QuickBooks (débit préautorisé) — l'humain garde la main sur l'argent.
 // ============================================================
+// 📜 Trace des consentements d'une entreprise pour ses options (snippet 171)
+// — qui a activé / désactivé, quand, à quel prix, quelle version des conditions.
+function ConsentementsOption({ entrepriseId }) {
+  const [liste, setListe] = useState(null);
+  useEffect(() => {
+    let actif = true;
+    listerConsentementsOptions()
+      .then((l) => actif && setListe(l.filter((c) => c.entrepriseId === entrepriseId)))
+      .catch(() => actif && setListe([]));
+    return () => {
+      actif = false;
+    };
+  }, [entrepriseId]);
+  if (!liste || liste.length === 0) return null;
+  const LIB = { activation: "✅ Activée", desactivation: "⏹️ Désactivation demandée", annulation_desactivation: "↩️ Désactivation annulée" };
+  return (
+    <div className="mt-1.5 space-y-0.5 rounded-lg bg-white/70 p-1.5 text-[10px] text-slate-600">
+      {liste.slice(0, 5).map((c) => (
+        <p key={c.id}>
+          {LIB[c.action] || c.action} le {new Date(c.le).toLocaleString("fr-CA")} par {c.parEmail || "?"}
+          {c.prix != null ? " · " + c.prix.toFixed(2) + " $" : ""}
+          {c.version ? " · conditions " + c.version : ""}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function SectionFacturation({ entreprises }) {
   const [sieges, setSieges] = useState(null);
   const [erreur, setErreur] = useState("");
@@ -1301,7 +1338,21 @@ function SectionFacturation({ entreprises }) {
         // 📦 Option Inventaire (snippet 170) — supplément mensuel, même
         // rabais que la base. 🧪 Compté seulement sur la version d'essai
         // tant que le module n'est pas publié.
-        const optionInventaire = INVENTAIRE_EN_ESSAI && e.optionInventaire ? (Number(e.prixOptionInventaire) || 0) * facteurRabais : 0;
+        // Prorata au mois d'activation (jour inclus), mois complet ensuite ;
+        // rien après la fin programmée (désactivation = fin de mois, snippet 171).
+        const opt = (() => {
+          if (!INVENTAIRE_EN_ESSAI || !e.optionInventaire) return { montant: 0 };
+          const debutOpt = e.optionInventaireActiveLe ? enISO(new Date(e.optionInventaireActiveLe)) : null;
+          const finOpt = e.optionInventaireFinLe || null;
+          if ((finOpt && finOpt < debutMois) || (debutOpt && debutOpt > finMois)) return { montant: 0 };
+          const prixOpt = (Number(e.prixOptionInventaire) || 0) * facteurRabais;
+          if (debutOpt && debutOpt >= debutMois) {
+            const jours = joursDansMois - Number(debutOpt.slice(8, 10)) + 1;
+            return { montant: prixOpt * (jours / joursDansMois), prorata: "activée le " + debutOpt + " → prorata " + jours + "/" + joursDansMois + " j", finOpt };
+          }
+          return { montant: prixOpt, finOpt };
+        })();
+        const optionInventaire = opt.montant;
         const total = gratuite ? 0 : base + totalExtras + optionInventaire;
         const prixManquants = !gratuite && (e.prixBase == null || (extras.length > 0 && e.prixParSiege == null));
         return (
@@ -1344,7 +1395,11 @@ function SectionFacturation({ entreprises }) {
                 {extras.length === 0 && <p className="text-slate-400">Aucun siège au-delà des inclus.</p>}
                 {optionInventaire > 0 && (
                   <div className="flex justify-between font-bold text-orange-800">
-                    <span>📦 Option Inventaire{rabaisEffectif > 0 ? ` (−${rabaisEffectif} %)` : ""}</span>
+                    <span>
+                      📦 Option Inventaire{rabaisEffectif > 0 ? ` (−${rabaisEffectif} %)` : ""}
+                      {opt.prorata && <span className="ml-1 font-normal text-emerald-700">· {opt.prorata}</span>}
+                      {opt.finOpt && <span className="ml-1 font-normal text-amber-700">· s&apos;arrête le {opt.finOpt}</span>}
+                    </span>
                     <span className="tabular-nums">{optionInventaire.toFixed(2)} $</span>
                   </div>
                 )}

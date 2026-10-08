@@ -5209,6 +5209,7 @@ function AppAdmin() {
           config={configEntreprise}
           estAdminPrincipal={role === "Admin principal"}
           ajouterJournal={ajouterJournal}
+          onConfigOptions={(champs) => setConfigEntreprise((prev) => ({ ...prev, ...champs }))}
           onSauvegarder={async (nouvelle) => {
             await sauvegarderEntreprise(nouvelle);
             setConfigEntreprise(nouvelle);

@@ -8395,3 +8395,172 @@ union all
 select 'option et prix (2)', (select count(*) = 2 from information_schema.columns where table_name = 'entreprises' and column_name in ('option_inventaire', 'prix_option_inventaire'))
 union all
 select 'option protégée hors plateforme', position('option_inventaire' in pg_get_functiondef('public.fn_proteger_fiche_entreprise()'::regprocedure)) > 0;
+
+-- ============================================================
+-- 171 - OPTIONS PAYANTES ACTIVÉES PAR L'ENTREPRISE ELLE-MÊME (2026-10-08)
+-- ------------------------------------------------------------
+-- Demande du propriétaire : l'Admin principal d'une entreprise active
+-- (ou désactive) lui-même une option payante, après avoir lu le
+-- descriptif et les conditions et CONSENTI à l'augmentation. La
+-- facturation suit seule (console : prorata au mois d'activation).
+--   • options_consentements : la PREUVE — qui, quand, le prix accepté,
+--     la version et le texte des conditions. Append-only : personne ne
+--     la modifie ni ne l'efface (aucune policy d'écriture).
+--   • option_inventaire_active_le / _fin_le : la désactivation prend
+--     effet à la FIN DU MOIS en cours (accès conservé jusque-là).
+--   • 2 fonctions : réservées à l'Admin principal de SON entreprise ;
+--     le PRIX reste fixé par la plateforme (l'entreprise ne fait que
+--     l'accepter — un prix changé entre-temps est refusé).
+-- ============================================================
+
+alter table entreprises add column if not exists option_inventaire_active_le timestamptz;
+alter table entreprises add column if not exists option_inventaire_fin_le date;
+
+create table if not exists options_consentements (
+  id                 bigserial primary key,
+  entreprise_id      text not null,
+  option             text not null,
+  action             text not null check (action in ('activation', 'desactivation', 'annulation_desactivation')),
+  prix               numeric,
+  conditions_version text,
+  conditions_texte   text,
+  par_email          text,
+  created_at         timestamptz not null default now()
+);
+create index if not exists idx_options_consentements on options_consentements (entreprise_id, created_at desc);
+alter table options_consentements enable row level security;
+drop policy if exists options_consentements_lecture on options_consentements;
+create policy options_consentements_lecture on options_consentements for select to authenticated
+  using ((entreprise_id = public.entreprise_du_jeton() and (select public.fn_est_bureau())) or (select public.est_plateforme()));
+
+-- ---- La garde de la fiche entreprise laisse passer les 2 fonctions
+--      ci-dessous (drapeau posé par elles seules) — reste identique au 170. ----
+create or replace function public.fn_proteger_fiche_entreprise()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  echeance_atteinte boolean;
+begin
+  -- Routes serveur (clé service) et console plateforme : passent telles quelles.
+  if (select auth.uid()) is null or coalesce((select auth.role()), '') = 'service_role' then return new; end if;
+  if public.est_plateforme() then return new; end if;
+  -- 📦 Activation / désactivation d'une option par l'Admin principal
+  -- (snippet 171) : seules option_inventaire_activer/_desactiver posent ce drapeau.
+  if coalesce(current_setting('fluxya.option_abonnement', true), '') = '1' then return new; end if;
+  -- Seule exception : la bascule AUTOMATIQUE « Résiliée » à la fin d'une
+  -- annulation demandée par le client (snippet 136).
+  echeance_atteinte := old.annulation_effet_le is not null
+    and old.annulation_effet_le <= (now() at time zone 'America/Toronto')::date;
+  if echeance_atteinte and new.statut_plateforme = 'resilie' then
+    new.suspendue := true;
+  else
+    new.statut_plateforme        := old.statut_plateforme;
+    new.suspendue                := old.suspendue;
+    new.resilie_le               := old.resilie_le;
+    new.resilie_raison           := old.resilie_raison;
+    new.statut_avant_resiliation := old.statut_avant_resiliation;
+  end if;
+  new.courriel_expediteur_verifie := old.courriel_expediteur_verifie;
+  new.gratuit_jusqua              := old.gratuit_jusqua;
+  new.rabais_pourcent             := old.rabais_pourcent;
+  new.promo_pourcent              := old.promo_pourcent;
+  new.promo_mois                  := old.promo_mois;
+  new.prix_base                   := old.prix_base;
+  new.prix_par_siege              := old.prix_par_siege;
+  new.sieges_inclus               := old.sieges_inclus;
+  new.modules                     := old.modules;
+  new.option_inventaire           := old.option_inventaire;
+  new.prix_option_inventaire      := old.prix_option_inventaire;
+  new.option_inventaire_active_le := old.option_inventaire_active_le;
+  new.option_inventaire_fin_le    := old.option_inventaire_fin_le;
+  new.created_at                  := old.created_at;
+  return new;
+end $$;
+
+-- ---- L'option est active si cochée ET pas encore arrivée à sa fin ----
+create or replace function public.fn_module_inventaire() returns boolean
+language sql stable security definer set search_path = public as $fn$
+  select coalesce(
+    (select e.option_inventaire
+            and (e.option_inventaire_fin_le is null
+                 or e.option_inventaire_fin_le >= (now() at time zone 'America/Toronto')::date)
+       from entreprises e where e.id = public.entreprise_du_jeton()),
+    false)
+$fn$;
+
+-- ---- ACTIVER (ou annuler une désactivation programmée) ----
+create or replace function public.option_inventaire_activer(p_prix_vu numeric, p_version text, p_texte text)
+returns text
+language plpgsql security definer set search_path = public as $$
+declare
+  e text := public.entreprise_du_jeton();
+  courriel text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  ajd date := (now() at time zone 'America/Toronto')::date;
+  f entreprises%rowtype;
+  action_faite text;
+begin
+  if (select auth.uid()) is null or e is null then raise exception 'Connexion requise.'; end if;
+  if public.fn_mon_role() is distinct from 'Admin principal' then raise exception 'Seul l''Admin principal peut activer une option.'; end if;
+  select * into f from entreprises where id = e;
+  if f.id is null then raise exception 'Entreprise introuvable.'; end if;
+  if coalesce(f.suspendue, false) then raise exception 'Abonnement suspendu — aucune option ne peut être activée.'; end if;
+  if coalesce(trim(p_version), '') = '' or coalesce(trim(p_texte), '') = '' then raise exception 'Les conditions doivent être acceptées.'; end if;
+  if p_prix_vu is distinct from coalesce(f.prix_option_inventaire, 50) then
+    raise exception 'Le prix a changé — recharge la page pour voir le nouveau prix avant d''accepter.';
+  end if;
+  perform set_config('fluxya.option_abonnement', '1', true);
+  if f.option_inventaire and f.option_inventaire_fin_le is not null and f.option_inventaire_fin_le >= ajd then
+    update entreprises set option_inventaire_fin_le = null where id = e;
+    action_faite := 'annulation_desactivation';
+  elsif f.option_inventaire and f.option_inventaire_fin_le is null then
+    raise exception 'L''option est déjà active.';
+  else
+    update entreprises
+       set option_inventaire = true, option_inventaire_active_le = now(), option_inventaire_fin_le = null
+     where id = e;
+    action_faite := 'activation';
+  end if;
+  insert into options_consentements (entreprise_id, option, action, prix, conditions_version, conditions_texte, par_email)
+    values (e, 'inventaire', action_faite, coalesce(f.prix_option_inventaire, 50), left(p_version, 100), left(p_texte, 10000), courriel);
+  return action_faite;
+end $$;
+
+-- ---- DÉSACTIVER : effet à la fin du mois en cours ----
+create or replace function public.option_inventaire_desactiver()
+returns date
+language plpgsql security definer set search_path = public as $$
+declare
+  e text := public.entreprise_du_jeton();
+  courriel text := lower(coalesce(auth.jwt() ->> 'email', ''));
+  ajd date := (now() at time zone 'America/Toronto')::date;
+  fin date := (date_trunc('month', (now() at time zone 'America/Toronto')::date) + interval '1 month - 1 day')::date;
+  f entreprises%rowtype;
+begin
+  if (select auth.uid()) is null or e is null then raise exception 'Connexion requise.'; end if;
+  if public.fn_mon_role() is distinct from 'Admin principal' then raise exception 'Seul l''Admin principal peut désactiver une option.'; end if;
+  select * into f from entreprises where id = e;
+  if not coalesce(f.option_inventaire, false) or (f.option_inventaire_fin_le is not null and f.option_inventaire_fin_le < ajd) then
+    raise exception 'L''option n''est pas active.';
+  end if;
+  if f.option_inventaire_fin_le is not null then raise exception 'La désactivation est déjà programmée.'; end if;
+  perform set_config('fluxya.option_abonnement', '1', true);
+  update entreprises set option_inventaire_fin_le = fin where id = e;
+  insert into options_consentements (entreprise_id, option, action, prix, conditions_version, par_email)
+    values (e, 'inventaire', 'desactivation', coalesce(f.prix_option_inventaire, 50), null, courriel);
+  return fin;
+end $$;
+
+revoke all on function public.option_inventaire_activer(numeric, text, text) from public, anon;
+revoke all on function public.option_inventaire_desactiver() from public, anon;
+grant execute on function public.option_inventaire_activer(numeric, text, text) to authenticated;
+grant execute on function public.option_inventaire_desactiver() to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- Vérification : 4 lignes, toutes à true.
+select 'colonnes activation / fin (2)' as quoi, (select count(*) = 2 from information_schema.columns where table_name = 'entreprises' and column_name in ('option_inventaire_active_le', 'option_inventaire_fin_le')) as ok
+union all
+select 'consentements avec RLS', (select relrowsecurity from pg_class where relname = 'options_consentements')
+union all
+select 'fonctions (2)', (select count(*) = 2 from pg_proc where proname in ('option_inventaire_activer', 'option_inventaire_desactiver'))
+union all
+select 'garde : dates protégées', position('option_inventaire_fin_le' in pg_get_functiondef('public.fn_proteger_fiche_entreprise()'::regprocedure)) > 0;

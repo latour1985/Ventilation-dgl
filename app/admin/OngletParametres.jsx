@@ -14,6 +14,9 @@ import { etatQuickbooks, synchroniserClientsQbo } from "@/lib/quickbooksClient";
 import { etatSage, demarrerConnexionSage } from "@/lib/sageClient";
 import { listerCompteurs, reglerProchainNumero } from "@/lib/supabase/compteurs";
 import { Button, tauxAffiche } from "./partage";
+import OptionsAbonnement from "./OptionsAbonnement";
+import { useLangue } from "@/lib/i18n";
+import { INVENTAIRE_EN_ESSAI } from "@/lib/supabase/inventaireModule";
 
 export function ChampParametre({ brouillon, champ, estAdminPrincipal, cle, libelle, aide, placeholder, type = "text", pas, unite }) {
   return (
@@ -413,9 +416,10 @@ function BlocNumerotation({ estAdminPrincipal, ajouterJournal }) {
   );
 }
 
-export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJournal }) {
+export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajouterJournal, onConfigOptions = null }) {
   const [brouillon, setBrouillon] = useState(config);
   const [ongletActif, setOngletActif] = useState("entreprise");
+  const { t: trO } = useLangue();
   const [etat, setEtat] = useState(""); // "" | "enregistrement" | "ok" | "erreur"
   const [messageErreur, setMessageErreur] = useState("");
   const [confirmationOuverte, setConfirmationOuverte] = useState(false);
@@ -458,6 +462,8 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
     { id: "taxes", label: "Taxes & facturation" },
     { id: "paie", label: "Paie & heures" },
     { id: "connexions", label: "Connexions" },
+    // 📦 Options payantes activées par l'entreprise (2026-10-08) — 🧪 essai.
+    ...(INVENTAIRE_EN_ESSAI ? [{ id: "options", label: "Options" }] : []),
   ];
 
   return (
@@ -480,7 +486,7 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
               ongletActif === o.id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
           >
-            {o.label}
+            {trO(o.label)}
           </button>
         ))}
       </div>
@@ -940,6 +946,10 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
       )}
 
       {/* ---------------- 4. CONNEXIONS ---------------- */}
+      {ongletActif === "options" && INVENTAIRE_EN_ESSAI && (
+        <OptionsAbonnement config={config} estAdminPrincipal={estAdminPrincipal} ajouterJournal={ajouterJournal} onConfigOptions={onConfigOptions} />
+      )}
+
       {ongletActif === "connexions" && (
         <div className="space-y-3">
           {/* 🧮 SYSTÈME COMPTABLE (chantier Sage, 2026-09-07) — chaque
