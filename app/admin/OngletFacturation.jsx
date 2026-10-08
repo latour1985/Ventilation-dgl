@@ -3285,7 +3285,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         await validerRetrait({ ...b, retraitRaison: raison, retraitNote: note || "" }, true);
         return;
       }
-      ajouterJournal(`🕓 Retrait de facturation DEMANDÉ — ${b.client} : ${RAISONS_RETRAIT[raison] || raison}. Un Admin principal doit valider.`);
+      ajouterJournal(`🕓 Retrait de facturation DEMANDÉ — ${b.client} : ${RAISONS_RETRAIT[raison] || raison}${note ? ` — note : « ${note} »` : ""}. Un Admin principal doit valider.`);
     } catch {
       ajouterJournal("⚠️ Demande de retrait NON enregistrée — réessaie.");
     }
@@ -3304,7 +3304,7 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
         approuve
           ? b.retraitRaison === "travaux_en_cours"
             ? `🔄 Report APPROUVÉ — ${b.client} (« ${b.projet} ») ${b.reporteTacheId ? `attend la fermeture de la visite « ${infoVisite?.(b.reporteTacheId)?.titre || b.reporteTacheId} »${infoVisite?.(b.reporteTacheId)?.date ? ` du ${infoVisite(b.reporteTacheId).date}` : ""}` : b.reporteJusquAu ? `revient dans « Prêts à facturer » le ${b.reporteJusquAu}` : "reste reporté sans date"} — rien ne sera facturé d'ici là.`
-            : `🗂️ Retrait APPROUVÉ — ${b.client} sort de la facturation (${RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison}). Ses coûts restent comptés dans l'analyse.`
+            : `🗂️ Retrait APPROUVÉ — ${b.client} sort de la facturation (${RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison})${b.retraitNote ? ` — note : « ${b.retraitNote} »` : ""}. Ses coûts restent comptés dans l'analyse.`
           : `↩️ Retrait REFUSÉ — le bon de ${b.client} reste à facturer.`
       );
     } catch {
@@ -5265,8 +5265,13 @@ export function OngletFacturation({ bons, setBons, ajouterJournal, devisListe, c
                 })()}
                 {b.statutQb === "retire" && (
                   <p className="mt-1 rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-bold text-slate-600">
-                    🗂️ Retiré de la facturation — {RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison}
-                    {b.retraitValidePar ? ` · approuvé par ${b.retraitValidePar}` : ""}. Ses coûts restent comptés dans l'analyse.
+                    🗂️ {tr("Retiré de la facturation")} — {tr(RAISONS_RETRAIT[b.retraitRaison] || b.retraitRaison || "")}
+                    {b.retraitValidePar ? ` · ${tr("approuvé par")} ${b.retraitValidePar}` : ""}
+                    {b.retraitValideLe ? ` ${tr("le {date}", { date: new Date(b.retraitValideLe).toLocaleDateString("fr-CA") })}` : ""}. {tr("Ses coûts restent comptés dans l'analyse.")}
+                    {/* 📝 La note du retrait (2026-10-08, demande du propriétaire :
+                        « est-ce que cette information est retrouvable ? ») —
+                        enregistrée depuis toujours, jamais réaffichée. */}
+                    {b.retraitNote ? <span className="mt-0.5 block font-semibold text-slate-700">📝 {tr("Note :")} {b.retraitNote}</span> : null}
                   </p>
                 )}
                 {b.clientAbsent ? (

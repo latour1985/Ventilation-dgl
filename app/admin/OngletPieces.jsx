@@ -1634,6 +1634,14 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                     ) : bcNonEnvoye(a2) ? (
                       <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-700" title="Ce bon n'a pas été envoyé au fournisseur par Fluxya">⚠️ Non envoyé</span>
                     ) : null}
+                    {/* 📦 REÇU visible (2026-10-08) — avant, la ligne perdait
+                        simplement son bouton : rien ne disait qu'elle était
+                        reçue, ni comment revenir en arrière (fiche du bon). */}
+                    {a2.recuLe && (
+                      <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600" title={trP("Ouvre la fiche pour annuler une réception appuyée par erreur")}>
+                        ✓ {trP("reçu")} {new Date(a2.recuLe).toLocaleDateString("fr-CA", { day: "numeric", month: "short" })}
+                      </span>
+                    )}
                   </span>
                   <span className="shrink-0 tabular-nums">{a2.montantHT.toFixed(2)} $</span>
                 </button>
@@ -1725,6 +1733,30 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
                 </div>
                 <button onClick={() => !f.enCours && setBcProjetOuvert(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
               </div>
+              {/* ↩️ Annuler une réception — même principe que les bons libres
+                  (2026-10-08) : le bon redevient « En attente ». */}
+              {f.bc.statut === "Reçu" && (
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <p className="text-xs font-bold text-emerald-800">
+                    ✓ {trP("Reçu le")} {f.bc.recuLe ? new Date(f.bc.recuLe).toLocaleString("fr-CA", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" }) : "—"}
+                  </p>
+                  {peutCommander && onMajBcProjet && (
+                    <button
+                      type="button"
+                      disabled={f.enCours}
+                      onClick={async () => {
+                        if (!window.confirm(trP("Annuler la réception de {bc} ? Le bon revient dans « Livraisons attendues ».").replace("{bc}", f.bc.numeroBC || ""))) return;
+                        const ok = await onMajBcProjet(f.bc.numeroBC, { statut: "En attente", recuLe: null }, "↩️ réception annulée (« Reçu » appuyé par erreur)");
+                        if (ok) setBcProjetOuvert((x) => (x ? { ...x, bc: { ...x.bc, statut: "En attente", recuLe: null } } : x));
+                        else maj({ erreur: trP("Enregistrement impossible — réessaie.") });
+                      }}
+                      className="min-h-[36px] rounded-lg border border-emerald-300 bg-white px-2.5 text-[11px] font-bold text-emerald-800 hover:border-emerald-500 active:scale-95"
+                    >
+                      ↩️ {trP("Annuler la réception")}
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="space-y-2.5">
                 <div>
                   <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">{trP("Fournisseur")}</label>
@@ -1813,6 +1845,36 @@ export function OngletPieces({ employesRamassage = [], pieces, peutCommander, on
               </div>
               <button onClick={() => setBcOuvert(null)} aria-label="Fermer"><X size={18} className="text-slate-400" /></button>
             </div>
+            {/* ↩️ ANNULER UNE RÉCEPTION (2026-10-08, demande du propriétaire :
+                « 📦 Reçu » appuyé par erreur sur BC-1086). Le bon revient dans
+                « Livraisons attendues » ; la trace reste au journal. Le stock
+                ajouté par « 📦➕ » n'est PAS retiré tout seul : il se corrige
+                dans l'inventaire courant (le message le rappelle). */}
+            {bcOuvert.recuLe && (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                <p className="text-xs font-bold text-emerald-800">
+                  ✓ {trP("Reçu le")} {new Date(bcOuvert.recuLe).toLocaleString("fr-CA", { day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}
+                </p>
+                {peutCommander && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const stock = (bcOuvert.description || "").includes("Pour l'inventaire courant");
+                      const ok = window.confirm(
+                        trP("Annuler la réception de {bc} ? Le bon revient dans « Livraisons attendues ».").replace("{bc}", bcOuvert.numeroBc || "") +
+                          (stock ? "\n\n" + trP("Si son contenu a été ajouté au stock (📦➕), corrige aussi les quantités dans l'inventaire courant.") : "")
+                      );
+                      if (!ok) return;
+                      const fait = await onMajBcLibre?.(bcOuvert, { recuLe: null }, "↩️ réception annulée (« Reçu » appuyé par erreur)");
+                      if (fait !== false) setBcOuvert((b) => (b ? { ...b, recuLe: null } : b));
+                    }}
+                    className="min-h-[36px] rounded-lg border border-emerald-300 bg-white px-2.5 text-[11px] font-bold text-emerald-800 hover:border-emerald-500 active:scale-95"
+                  >
+                    ↩️ {trP("Annuler la réception")}
+                  </button>
+                )}
+              </div>
+            )}
             <div className="space-y-2.5">
               <div>
                 <label className="mb-0.5 block text-[10px] font-bold uppercase text-slate-400">Fournisseur</label>
