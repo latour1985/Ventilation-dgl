@@ -6880,12 +6880,22 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
               if (empId === tacheDetailOuverte.employe.id) return;
               const sien = equipeActuelle.find((x) => x.employeId === empId);
               if (!sien) return;
+              // 🐞 (2026-10-09, vécu JF : Raphaël en « journée bloquée » de
+              // 11 h et 15 h quand Charles avait 3 h). `nbJours` compte les
+              // DATES (1 pour une tâche d'un jour), alors que `jours: 0` veut
+              // dire « tâche à l'heure ». On garde donc le `jours` de SA
+              // propre instance — une tâche de 3 h reste une tâche de 3 h.
+              const instanceSienne = Object.entries(planning)
+                .filter(([cle]) => cle.split("|")[1] === String(empId))
+                .map(([, v]) => listeCellule(v).find((x) => x?.id === tacheDetailOuverte.tache.id))
+                .find(Boolean);
+              const joursSiens = instanceSienne && instanceSienne.jours != null && Number.isFinite(Number(instanceSienne.jours)) ? Number(instanceSienne.jours) : sien.nbJours;
               modifierTachePlanifiee(tacheDetailOuverte.tache, empId, {
                 ...champs,
                 employeId: empId,
                 date: champs.dateParTechnicien?.[empId] ?? (modifies.date ? champs.date : sien.premiereDate),
                 heureDebut: modifies.heure ? champs.heureDebut : sien.premiereHeure,
-                jours: champs.joursParTechnicien?.[empId] ?? (modifies.jours ? champs.jours : sien.nbJours),
+                jours: champs.joursParTechnicien?.[empId] ?? (modifies.jours ? champs.jours : joursSiens),
               });
             });
             setTacheDetailOuverte(null);
