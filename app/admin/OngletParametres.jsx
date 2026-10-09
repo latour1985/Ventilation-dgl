@@ -15,6 +15,7 @@ import { etatSage, demarrerConnexionSage } from "@/lib/sageClient";
 import { listerCompteurs, reglerProchainNumero } from "@/lib/supabase/compteurs";
 import { Button, tauxAffiche } from "./partage";
 import OptionsAbonnement from "./OptionsAbonnement";
+import BoutonSauvegarde from "@/components/BoutonSauvegarde";
 import { useLangue } from "@/lib/i18n";
 import { INVENTAIRE_EN_ESSAI } from "@/lib/supabase/inventaireModule";
 
@@ -952,6 +953,8 @@ export function OngletParametres({ config, onSauvegarder, estAdminPrincipal, ajo
 
       {ongletActif === "connexions" && (
         <div className="space-y-3">
+          {/* 💾 Sauvegarde à la demande (2026-10-09) — Admin principal de DGL. */}
+          {estAdminPrincipal && (config?.id || "dgl") === "dgl" && <BoutonSauvegarde />}
           {/* 🧮 SYSTÈME COMPTABLE (chantier Sage, 2026-09-07) — chaque
               entreprise choisit SA comptabilité, exactement comme le
               propriétaire l'a demandé (« en sélection selon le système

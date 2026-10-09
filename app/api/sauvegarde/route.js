@@ -11,11 +11,9 @@
 // SÉCURITÉ :
 //   • la route n'EXPOSE jamais les données — elle les range dans un
 //     bucket privé et ne répond que par un résumé (nombre de lignes) ;
-//   • si CRON_SECRET est défini dans Vercel, seul le cron (qui envoie
-//     « Authorization: Bearer <CRON_SECRET> ») ou un ADMIN connecté
-//     peuvent la déclencher ; sans CRON_SECRET, le garde-fou reste le
-//     verrou 20 h (au pire, un anonyme déclenche une sauvegarde de
-//     plus — aucune donnée ne sort) ;
+//   • seul le cron (qui envoie « Authorization: Bearer <CRON_SECRET> »)
+//     ou un ADMIN connecté peuvent la déclencher — partout, y compris
+//     sur la version d'essai où CRON_SECRET n'existe pas (2026-10-09) ;
 //   • verrou anti-rafale : s'il existe déjà une sauvegarde de moins de
 //     20 heures, on ne refait rien.
 //
@@ -23,6 +21,7 @@
 // voit la ceinture se boucler sans ouvrir Supabase.
 
 import { clientSupabaseService, utilisateurDepuisJeton, entrepriseDuCompte, roleServeur } from "@/lib/quickbooksServeur";
+import { jourQuebec } from "@/lib/jourQuebec";
 
 // TOUTES les tables applicatives — la liste de l'export Loi 25
 // (lib/supabase/plateforme.js) PLUS les tables arrivées depuis
@@ -38,6 +37,16 @@ const TABLES = [
   "photos_legendes", "push_abonnements",
   // Oubliées jusqu'au 2026-09-22 (revue complète) :
   "semaines_paie", "factures_maison", "factures_libres", "inventaire_articles", "modeles_etapes", "entreprises",
+  // Oubliées jusqu'au 2026-10-09 (vérification de la sauvegarde) : notes
+  // personnelles, registre des incidents et preuves de consentement (Loi 25),
+  // demandes du site de vente, retours, module Inventaire, archive du journal.
+  // (Volontairement EXCLUES : quickbooks_connexion et sage_connexion — des
+  // jetons d'accès, qui ne doivent jamais dormir dans un fichier ; on
+  // rebranche en 30 secondes. Et les compteurs techniques envois_courriel,
+  // connexion_echecs.)
+  "notes_perso", "incidents_confidentialite", "options_consentements", "demandes_fluxya",
+  "retours_logiciel", "plateforme_config", "journal_archive",
+  "inv_emplacements", "inv_stock", "inv_mouvements",
 ];
 
 const BUCKET = "sauvegardes";
@@ -59,8 +68,9 @@ export async function GET(request) {
       !!utilisateur &&
       (await roleServeur(utilisateur)) !== "Technicien" &&
       (entrepriseDuCompte(utilisateur) === "dgl" || utilisateur.app_metadata?.plateforme === true);
-    // CRON_SECRET défini = porte fermée à tout le reste.
-    if (secretCron && !estAdmin) {
+    // 🛡️ (2026-10-09) Porte fermée à tout le reste, PARTOUT : avant, sans
+    // CRON_SECRET (la version d'essai), n'importe qui pouvait la déclencher.
+    if (!estAdmin) {
       return Response.json({ erreur: "Accès refusé." }, { status: 401 });
     }
   }
@@ -103,8 +113,8 @@ export async function GET(request) {
   }
 
   // ---- Rangement dans le bucket privé (créé au premier passage) ----
-  const n = new Date();
-  const nomFichier = `sauvegarde-${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}.json`;
+  // Le jour du QUÉBEC (le serveur est en UTC — le soir, c'était déjà demain).
+  const nomFichier = `sauvegarde-${jourQuebec()}.json`;
   const corps = JSON.stringify(contenu);
   try {
     await admin.storage.createBucket(BUCKET, { public: false });
@@ -136,13 +146,18 @@ export async function GET(request) {
 
   // ---- Trace au journal — la ceinture se boucle, le bureau le voit ----
   const tailleKo = Math.round(corps.length / 1024);
+  // 🧾 Bilan par table (2026-10-09) — des COMPTES seulement, jamais de contenu.
+  const parTable = Object.fromEntries(
+    Object.entries(contenu.tables).map(([t, v]) => [t, Array.isArray(v) ? v.length : "illisible"])
+  );
+  const illisibles = Object.keys(parTable).filter((t) => parTable[t] === "illisible");
   try {
     await admin.from("journal_activite").insert({
-      texte: `💾 Sauvegarde hebdomadaire créée : ${nomFichier} — ${totalLignes} lignes, ${tailleKo} Ko (8 copies conservées${effacees ? `, ${effacees} ancienne${effacees > 1 ? "s" : ""} effacée${effacees > 1 ? "s" : ""}` : ""}).`,
+      texte: `💾 Sauvegarde créée : ${nomFichier} — ${Object.keys(parTable).length} tables, ${totalLignes} lignes, ${tailleKo} Ko (8 copies conservées${effacees ? `, ${effacees} ancienne${effacees > 1 ? "s" : ""} effacée${effacees > 1 ? "s" : ""}` : ""})${illisibles.length ? `. ⚠️ Tables illisibles : ${illisibles.join(", ")}` : ""}.`,
     });
   } catch {
     // journal indisponible — la sauvegarde, elle, est faite
   }
 
-  return Response.json({ fait: true, fichier: nomFichier, lignes: totalLignes, tailleKo, effacees });
+  return Response.json({ fait: true, fichier: nomFichier, lignes: totalLignes, tailleKo, effacees, parTable, illisibles });
 }
