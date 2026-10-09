@@ -1592,7 +1592,33 @@ export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, ta
           {/* RETRAIT DE L'HORAIRE — le même geste que « Laisser en
               attente » du menu déroulant, mais VISIBLE : personne ne
               devine qu'une option de menu sert de bouton Retirer. */}
-          {dejaPlanifiee && onRetirerHoraire && (
+          {/* 👥 ÉQUIPE (2026-10-09, vécu JF : « Installation roof top »
+              remise en attente 3 fois — seuls 3 des 5 techniciens
+              étaient retirés, la tâche restait chez les 2 autres et
+              semblait disparaître). Avec plusieurs techniciens, on CHOISIT :
+              toute l'équipe (la tâche retourne dans « en attente ») ou
+              seulement celui-ci (les autres la gardent). */}
+          {dejaPlanifiee && onRetirerHoraire && (techniciensSurTache || []).length > 1 ? (
+            <div className="space-y-1.5">
+              <Button
+                variant="outline"
+                onClick={() => onRetirerHoraire({ heures: Math.max(0, heures), jours: Math.max(0, jours), sauterWeekend, sauterFeries, description }, { equipe: true })}
+                className="min-h-0 w-full py-2 text-xs"
+              >
+                ↩️ {tr("Retirer toute l'équipe de l'horaire — la tâche retourne dans « Tâches en attente »")}
+              </Button>
+              <button
+                type="button"
+                onClick={() => onRetirerHoraire({ heures: Math.max(0, heures), jours: Math.max(0, jours), sauterWeekend, sauterFeries, description }, { equipe: false })}
+                className="min-h-[40px] w-full rounded-xl text-[11px] font-bold text-slate-500 hover:bg-slate-50"
+              >
+                {tr("Retirer seulement {nom} — la tâche reste à l'horaire de {autres}", {
+                  nom: nomTechOuvert,
+                  autres: (techniciensSurTache || []).filter((t) => t.employeId !== employeIdInitial).map((t) => t.nom).join(", "),
+                })}
+              </button>
+            </div>
+          ) : dejaPlanifiee && onRetirerHoraire ? (
             <Button
               variant="outline"
               onClick={() => onRetirerHoraire({ heures: Math.max(0, heures), jours: Math.max(0, jours), sauterWeekend, sauterFeries, description })}
@@ -1600,7 +1626,7 @@ export function ModalEditionTache({ bonsEnAttente = [], onLeverReport = null, ta
             >
               ↩️ Retirer de l&apos;horaire — la tâche retourne dans « Tâches en attente »
             </Button>
-          )}
+          ) : null}
 
           {/* ANNULATION DÉFINITIVE — lien discret (pas un gros bouton
               rouge à côté d'Enregistrer), mais parcours en 2 étapes. */}

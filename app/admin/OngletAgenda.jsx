@@ -2489,11 +2489,54 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
         else retirerTacheSupabase(tache.id, ancienEmployeChange.courriel).catch(() => {});
       }
     } else {
-      // Technicien retiré — la tâche retourne dans "Tâches en attente"
-      // plutôt que de disparaître.
-      setTachesAttente((prev) => [tacheMiseAJour, ...prev]);
-      ajouterJournal(`↩️ "${tache.titre || tache.clientNom}" retirée de l'horaire — retour dans les tâches en attente`);
+      // Technicien retiré. 👥 (2026-10-09) Si d'AUTRES techniciens ont
+      // encore la tâche, elle reste à leur horaire : on le DIT, au lieu
+      // de la glisser dans « en attente » d'où le rechargement la retirait
+      // aussitôt (vécu : elle semblait disparaître).
+      const restants = techniciensPourTache(planning, tache.id, employes).filter((x) => x.employeId !== ancienEmployeId);
+      if (restants.length > 0) {
+        const nomAncien = employes.find((e) => e.id === ancienEmployeId)?.nom || "le technicien";
+        ajouterJournal(`↩️ "${tache.titre || tache.clientNom}" retirée de l'horaire de ${nomAncien} — elle reste planifiée pour ${restants.map((r) => r.nom).join(", ")}`);
+      } else {
+        // Une seule fois dans la file (pas de doublon), marquée « remise en
+        // attente » : le rechargement de l'agenda ne la retire pas pendant
+        // que la suppression de l'assignation voyage encore (course).
+        setTachesAttente((prev) => [{ ...tacheMiseAJour, remisEnAttenteLe: Date.now() }, ...prev.filter((t) => t.id !== tache.id)]);
+        ajouterJournal(`↩️ "${tache.titre || tache.clientNom}" retirée de l'horaire — retour dans les tâches en attente`);
+      }
     }
+  };
+
+  // 👥 RETIRER TOUTE L'ÉQUIPE DE L'HORAIRE (2026-10-09, vécu JF) — chaque
+  // technicien perd la tâche (toutes ses journées) et elle retourne UNE
+  // fois dans « Tâches en attente », avec sa durée et sa description.
+  const retirerEquipeDeLHoraire = (tache, champs) => {
+    if (lectureSeule) return;
+    const equipe = techniciensPourTache(planning, tache.id, employes);
+    equipe.forEach((t) => {
+      const emp = employes.find((e) => e.id === t.employeId);
+      if (emp?.courriel) retirerTacheSupabase(tache.id, emp.courriel).catch(() => {});
+    });
+    setPlanning((prev) => {
+      const copie = { ...prev };
+      Object.keys(copie).forEach((cle) => {
+        const restants = listeCellule(copie[cle]).filter((x) => x.id !== tache.id);
+        if (restants.length) copie[cle] = restants;
+        else delete copie[cle];
+      });
+      return recalculerTransports(copie, sansTransportAgendaRef.current);
+    });
+    const tacheMiseAJour = {
+      ...tache,
+      heures: champs.heures,
+      jours: champs.jours,
+      sauterWeekend: champs.sauterWeekend,
+      ...(champs.sauterFeries !== undefined ? { sauterFeries: champs.sauterFeries } : {}),
+      description: champs.description,
+      remisEnAttenteLe: Date.now(),
+    };
+    setTachesAttente((prev) => [tacheMiseAJour, ...prev.filter((t) => t.id !== tache.id)]);
+    ajouterJournal(`↩️ "${tache.titre || tache.clientNom}" retirée de l'horaire pour toute l'équipe (${equipe.map((t) => t.nom).join(", ") || "—"}) — retour dans les tâches en attente`);
   };
 
   // 🔁 CORRECTION DE LA ZONE D'UN APPEL (2026-10-05, demande du
@@ -6850,13 +6893,15 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
           onRetirerHoraire={
             lectureSeule
               ? undefined
-              : (champs) => {
-                  modifierTachePlanifiee(tacheDetailOuverte.tache, tacheDetailOuverte.employe.id, {
-                    ...champs,
-                    employeId: null,
-                    date: tacheDetailOuverte.date,
-                    heureDebut: tacheDetailOuverte.heure,
-                  });
+              : (champs, options) => {
+                  if (options?.equipe) retirerEquipeDeLHoraire(tacheDetailOuverte.tache, champs);
+                  else
+                    modifierTachePlanifiee(tacheDetailOuverte.tache, tacheDetailOuverte.employe.id, {
+                      ...champs,
+                      employeId: null,
+                      date: tacheDetailOuverte.date,
+                      heureDebut: tacheDetailOuverte.heure,
+                    });
                   setTacheDetailOuverte(null);
                 }
           }

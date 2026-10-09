@@ -1581,7 +1581,13 @@ function AppAdmin() {
           ];
           setPlanning((prev) => fusionnerPlanningServeur(prev, rows, employesRef, configEntreprise));
           // Les tâches déjà planifiées ne restent pas dans « en attente ».
-          setTachesAttente((prev) => prev.filter((t) => !rows.some((r) => r.tache_id === t.id)));
+          // ⏱️ (2026-10-09) Sauf une tâche REMISE en attente il y a moins de
+          // 20 s : la lecture a pu partir avant que la suppression de ses
+          // assignations n'arrive — sans ce délai de grâce, elle était
+          // retirée de la file pour rien et semblait disparaître.
+          setTachesAttente((prev) =>
+            prev.filter((t) => (t.remisEnAttenteLe && Date.now() - t.remisEnAttenteLe < 20000) || !rows.some((r) => r.tache_id === t.id))
+          );
         })
         .catch(() => {
           // table absente — l'agenda local continue seul
