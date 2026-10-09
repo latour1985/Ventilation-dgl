@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionAdmin from "@/components/ConnexionAdmin";
+import GardeDoubleAuth from "@/components/DoubleAuth";
 import Logo from "@/components/Logo";
 import InputNombreDecimal from "@/components/InputNombreDecimal";
 import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
@@ -1169,7 +1170,10 @@ export default function App() {
   return (
     <LangueProvider>
       <SansZoomAutoIos />
-      <AppAdmin />
+      {/* 🔐 Double authentification obligatoire : Admin principal et Admin régulier (2026-10-09). */}
+      <GardeDoubleAuth mode="admins">
+        <AppAdmin />
+      </GardeDoubleAuth>
     </LangueProvider>
   );
 }

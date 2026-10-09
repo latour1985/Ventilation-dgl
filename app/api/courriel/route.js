@@ -26,7 +26,7 @@
 // posée dans Vercel, tout se met à envoyer pour vrai — aucun autre
 // changement.
 
-import { clientSupabaseService, roleServeur } from "@/lib/quickbooksServeur";
+import { clientSupabaseService, roleServeur, niveauConnexionSuffisant } from "@/lib/quickbooksServeur";
 
 const MAX_DESTINATAIRES = 10;
 // 🛡️ (audit 2026-10-05) Le TECHNICIEN n'envoie que les courriels de
@@ -54,7 +54,8 @@ async function utilisateurDepuisJeton(jeton) {
     });
     if (!reponse.ok) return null;
     const u = await reponse.json();
-    return u?.email ? u : null;
+    // 🔐 Double authentification activée = code exigé (2026-10-09).
+    return u?.email && niveauConnexionSuffisant(u, jeton) ? u : null;
   } catch {
     return null;
   }

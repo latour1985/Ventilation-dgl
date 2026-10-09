@@ -8564,3 +8564,76 @@ union all
 select 'fonctions (2)', (select count(*) = 2 from pg_proc where proname in ('option_inventaire_activer', 'option_inventaire_desactiver'))
 union all
 select 'garde : dates protégées', position('option_inventaire_fin_le' in pg_get_functiondef('public.fn_proteger_fiche_entreprise()'::regprocedure)) > 0;
+
+-- ============================================================
+-- 172 - DOUBLE AUTHENTIFICATION : LA BASE EXIGE LE CODE (2026-10-09)
+-- ------------------------------------------------------------
+-- Décision du propriétaire : double authentification (mot de passe +
+-- code de 6 chiffres d'une application comme Google Authenticator)
+-- OBLIGATOIRE pour l'Admin principal et les Admins réguliers.
+-- L'écran la demande ; ce snippet la fait respecter par la BASE ELLE-MÊME :
+-- un compte qui a activé la double authentification mais ne s'est connecté
+-- qu'avec son mot de passe (niveau « aal1 ») ne voit et ne modifie RIEN —
+-- un pirate qui aurait volé le mot de passe reste devant une porte close.
+--  1. fn_aal_ok() : vrai si le compte n'a PAS de double authentification
+--     activée, ou s'il a bien entré son code (niveau « aal2 »).
+--  2. Une règle RESTRICTIVE sur chaque table protégée : elle s'ajoute aux
+--     règles existantes (qui ne changent pas) et exige fn_aal_ok().
+--  3. fn_mon_role() : un compte au niveau insuffisant est traité comme un
+--     simple Technicien — les fonctions réservées au bureau le refusent.
+-- Sans effet pour les comptes sans double authentification (techniciens,
+-- clients via leurs liens publics, routes serveur avec la clé de service).
+-- ============================================================
+
+-- ---- 1. Le niveau de connexion est-il suffisant ? ----
+create or replace function public.fn_aal_ok() returns boolean
+language sql stable security definer
+set search_path = public, auth
+as $fn$
+  select coalesce((select auth.jwt()) ->> 'aal', 'aal1') = 'aal2'
+      or not exists (
+        select 1 from auth.mfa_factors f
+         where f.user_id = (select auth.uid())
+           and f.status = 'verified'
+      )
+$fn$;
+revoke execute on function public.fn_aal_ok() from public, anon;
+grant execute on function public.fn_aal_ok() to authenticated;
+
+-- ---- 2. Une règle restrictive sur chaque table protégée ----
+do $$
+declare t record;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' and rowsecurity loop
+    execute format('drop policy if exists double_auth_exigee on public.%I', t.tablename);
+    execute format(
+      'create policy double_auth_exigee on public.%I as restrictive for all to authenticated
+         using ((select public.fn_aal_ok())) with check ((select public.fn_aal_ok()))',
+      t.tablename);
+  end loop;
+end $$;
+
+-- ---- 3. Le rôle : niveau insuffisant = Technicien ----
+create or replace function public.fn_mon_role() returns text
+language sql stable security definer
+set search_path = public, extensions
+as $fn$
+  select case when not public.fn_aal_ok() then 'Technicien' else coalesce(
+    (select role from permissions_utilisateurs
+       where lower(email) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
+         and entreprise_id = coalesce(public.entreprise_du_jeton(), 'dgl')
+       limit 1),
+    'Technicien') end
+$fn$;
+revoke execute on function fn_mon_role() from public, anon;
+grant execute on function fn_mon_role() to authenticated;
+
+notify pgrst, 'reload schema';
+
+-- Vérification : 2 lignes à true.
+select 'règle sur toutes les tables protégées' as verification,
+       (select count(*) from pg_tables where schemaname = 'public' and rowsecurity)
+     = (select count(distinct tablename) from pg_policies where schemaname = 'public' and policyname = 'double_auth_exigee') as ok
+union all
+select 'rôle lié au niveau de connexion',
+       position('fn_aal_ok' in pg_get_functiondef('public.fn_mon_role()'::regprocedure)) > 0;

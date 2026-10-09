@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import TermesConditions from "@/components/TermesConditions";
 import ConnexionTechnicien from "@/components/ConnexionTechnicien";
+import GardeDoubleAuth from "@/components/DoubleAuth";
 import { supabase, transporterSessionPourBascule } from "@/lib/supabase/client";
 import { permissionsEffectives } from "@/lib/permissions";
 import { enregistrerInspection, inspectionDejaEnregistree } from "@/lib/supabase/inspections";
@@ -6379,7 +6380,10 @@ export default function App() {
     <LangueProvider>
     <ContexteEntreprise.Provider value={configEntreprise}>
       <SansZoomAutoIos />
-      <AppTechnicien />
+      {/* 🔐 Le code n'est demandé qu'aux comptes qui ont activé la double authentification (2026-10-09). */}
+      <GardeDoubleAuth mode="si-active">
+        <AppTechnicien />
+      </GardeDoubleAuth>
     </ContexteEntreprise.Provider>
     </LangueProvider>
   );

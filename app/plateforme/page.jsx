@@ -22,6 +22,7 @@ import { useEffect, useState } from "react";
 import { Building2, Lock, LogOut, Plus, ShieldAlert, Download, Pause, Play, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { seConnecterSurveille } from "@/lib/connexionSurveillee";
+import GardeDoubleAuth from "@/components/DoubleAuth";
 import ChampMotDePasse from "@/components/ChampMotDePasse";
 import { INVENTAIRE_EN_ESSAI, listerConsentementsOptions } from "@/lib/supabase/inventaireModule";
 import {
@@ -98,7 +99,16 @@ function joursAvant(dateStr) {
   return Math.round((cible - aujourdhui) / 86400000);
 }
 
+// 🔐 Double authentification obligatoire pour les comptes de la console (2026-10-09).
 export default function Plateforme() {
+  return (
+    <GardeDoubleAuth mode="plateforme">
+      <PlateformeContenu />
+    </GardeDoubleAuth>
+  );
+}
+
+function PlateformeContenu() {
   const [session, setSession] = useState(null);
   const [authVerifie, setAuthVerifie] = useState(false);
   const [courriel, setCourriel] = useState("");

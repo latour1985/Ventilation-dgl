@@ -672,6 +672,31 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
     await journaliserInvitation(r, u, `Lien de connexion pour ${u.nom}`);
   };
 
+  // 🔐 TÉLÉPHONE PERDU (2026-10-09) : l'Admin principal efface la double
+  // authentification d'un employé ; à sa prochaine connexion, il en active
+  // une nouvelle (code QR). Le serveur vérifie tout (rôle, entreprise).
+  const reinitialiserDoubleAuth = async (u) => {
+    if (!u?.courriel) return;
+    if (!window.confirm(`Réinitialiser la double authentification de ${u.nom} ?
+
+À sa prochaine connexion, il devra scanner un nouveau code QR avec son téléphone.`)) return;
+    try {
+      const { data } = await supabase.auth.getSession();
+      const jeton = data?.session?.access_token;
+      const r = await fetch("/api/utilisateurs/double-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jeton}` },
+        body: JSON.stringify({ courriel: u.courriel, action: "reinitialiser" }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (j.reinitialisee) ajouterJournal(`🔐 Double authentification de ${u.nom} réinitialisée — il activera un nouveau code à sa prochaine connexion.`);
+      else if (j.etat === "aucun-compte") ajouterJournal(`⚠️ ${u.nom} n'a pas encore de compte de connexion — rien à réinitialiser.`);
+      else ajouterJournal(`⚠️ Double authentification de ${u.nom} NON réinitialisée — ${j.erreur || "refus du serveur"}.`);
+    } catch {
+      ajouterJournal(`⚠️ Double authentification de ${u.nom} NON réinitialisée — réseau indisponible.`);
+    }
+  };
+
   const reinitialiserMotDePasse = async (id) => {
     setUtilisateurs((prev) => prev.map((u) => (u.id === id ? { ...u, motDePasseCree: false } : u)));
     const u = utilisateurs.find((x) => x.id === id);
@@ -914,6 +939,15 @@ export function OngletUtilisateurs({ utilisateurs, setUtilisateurs, ajouterJourn
                     <Send size={12} /> Lien
                   </Button>
                 </div>
+                {estAdminPrincipal && u.courriel && (
+                  <button
+                    type="button"
+                    onClick={() => reinitialiserDoubleAuth(u)}
+                    className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-slate-400 underline hover:text-slate-700"
+                  >
+                    <ShieldCheck size={11} /> Téléphone perdu ? Réinitialiser sa double authentification
+                  </button>
+                )}
               </div>
             )}
           </div>
