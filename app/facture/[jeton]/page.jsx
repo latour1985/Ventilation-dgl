@@ -182,7 +182,7 @@ function ContenuFacture({ params }) {
           </div>
         )}
 
-        {/* 📞 Une question sur la facture ? (audit Copilot 2026-09-10) */}
+        {/* 📞 Une question sur la facture ? (audit externe 2026-09-10) */}
         <ContactEntreprise nom={e.nom} telephone={e.telephone} courriel={e.courriel} jeton={jeton} type="facture" />
 
         {/* IMPRESSION / PDF — l'impression du navigateur donne la copie

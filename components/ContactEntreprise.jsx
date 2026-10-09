@@ -2,7 +2,7 @@
 
 // components/ContactEntreprise.jsx
 //
-// 📞 « CONTACTER L'ENTREPRISE » (2026-09-10, audit Copilot — retenu par
+// 📞 « CONTACTER L'ENTREPRISE » (2026-09-10, audit externe — retenu par
 // le propriétaire) : sur chaque page publique (devis, bon de travail,
 // facture), le client peut appeler ou écrire à l'entreprise — sans
 // chercher les coordonnées en petit dans l'en-tête.

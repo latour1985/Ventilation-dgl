@@ -3,7 +3,7 @@
 // app/admin/OngletInventaire.jsx
 //
 // 📦 MODULE INVENTAIRE — OPTION PAYANTE (2026-10-08, demande du
-// propriétaire ; démo validée : https://claude.ai/artifact/Mv2QoUkJB8ZNAjmYQo2B7r).
+// propriétaire ; maquette validée par le propriétaire).
 //
 // ÉTAPE 1 (bureau) :
 //   • emplacements : l'entrepôt, un camion par technicien, des chantiers ;

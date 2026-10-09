@@ -5549,7 +5549,7 @@ create trigger trg_entreprise_modeles_etapes before insert on modeles_etapes
 
 -- ============================================================
 -- 141 - TRANSACTIONS ATOMIQUES (blindage des ecritures multi-tables)
--- (2026-09-09, GO du proprietaire apres l audit croise avec Gemini)
+-- (2026-09-09, GO du proprietaire apres un audit croise externe)
 -- ------------------------------------------------------------
 -- Six procedures « tout ou rien » : chaque geste critique (facturation
 -- groupee, facture maison, ajustements de paie, bascule de version de

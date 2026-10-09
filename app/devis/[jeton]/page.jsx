@@ -652,7 +652,7 @@ function ContenuDevis({ params }) {
         )}
 
         {/* 📞 Une question sur le devis ? Le client nous joint en un
-            geste (audit Copilot 2026-09-10, retenu par le propriétaire). */}
+            geste (audit externe 2026-09-10, retenu par le propriétaire). */}
         <ContactEntreprise nom={config.nomLegal} telephone={config.telephone} courriel={config.courriel} jeton={jeton} type="devis" />
 
         <p className="pb-6 pt-4 text-center text-[10px] text-slate-400">

@@ -267,7 +267,7 @@ function ContenuBon({ params }) {
             <BoutonPDFPublic bon={bon} />
           </div>
 
-          {/* 📞 Une question sur les travaux ? (audit Copilot 2026-09-10) */}
+          {/* 📞 Une question sur les travaux ? (audit externe 2026-09-10) */}
           <ContactEntreprise
             nom={bon.entreprise.nomCommercial || bon.entreprise.nomLegal}
             telephone={bon.entreprise.telephone}

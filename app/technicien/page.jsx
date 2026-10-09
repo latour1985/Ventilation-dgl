@@ -99,10 +99,10 @@ const CLIENTS = [];
 const PRODUITS_CATALOGUE = [];
 
 // Clé utilisée pour la persistance locale des tâches (mode hors-ligne).
-// ⚠️ localStorage n'est pas disponible dans l'aperçu Artifact de
-// Claude.ai (bac à sable) — ces fonctions échouent silencieusement
-// (try/catch) dans ce contexte et l'app retombe sur les données de
-// démo. Elles fonctionnent normalement une fois le fichier exécuté
+// ⚠️ localStorage peut être indisponible dans un aperçu en bac à sable
+// (navigation privée, page intégrée) — ces fonctions échouent
+// silencieusement (try/catch) dans ce contexte et l'app retombe sur les
+// données de démo. Elles fonctionnent normalement une fois le fichier exécuté
 // dans un vrai navigateur (PWA déployée sur le domaine de l'entreprise).
 const CLE_STOCKAGE = "ventilationdgl_taches_v2";
 const CLE_INSPECTION = "ventilationdgl_inspection_v1";
@@ -2192,7 +2192,7 @@ function Accueil({ session, taches, dateSelectionnee, setDateSelectionnee, modeV
           </div>
         </div>
         <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-white">{t("Bonjour,")} {nomTechnicien || t("technicien")}</h1>
-        {/* 📶 HORS-LIGNE BIEN VISIBLE (2026-09-10, audit Copilot — retenu
+        {/* 📶 HORS-LIGNE BIEN VISIBLE (2026-09-10, audit externe — retenu
             par le propriétaire) : la petite ligne grise passait inaperçue
             sur un chantier. La bannière rassure d'un coup d'œil : tout
             est gardé, rien à refaire, ça partira tout seul. */}

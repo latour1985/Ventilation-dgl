@@ -122,7 +122,7 @@
 - **Snippets SQL passés jusqu'au nº 46** (40-42 RLS · 43 qbo_depot_doc_number · 44 vue annuaire ·
   45 reverrouillage répertoire · 46 attributions QB).
 
-### Ordre de bataille (améliorations proposées par Claude, validées avec le propriétaire)
+### Ordre de bataille (améliorations validées avec le propriétaire)
 1. ✅ Facture de dépôt QuickBooks. 2. ✅ Durcissement RLS. 3. ✅ Attributions QB + virgule.
 4. ⏸️ EN PAUSE (pendant les tests employés) : découpage de `app/admin/page.jsx` (~16 500 lignes,
    un onglet = un fichier, zéro changement visible). 5. À venir : tests automatiques des calculs

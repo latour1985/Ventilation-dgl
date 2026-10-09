@@ -18,8 +18,7 @@ environnement. Ce qui a été fait :
   migration prête à appliquer sans relecture.
 
 **Avant la mise en prod**, fais relire le schéma par quelqu'un de ton
-équipe (ou par Claude Code, qui peut exécuter du SQL contre une vraie
-instance Supabase de test) et lance chaque fonction manuellement une
+équipe (idéalement contre une vraie instance Supabase de test) et lance chaque fonction manuellement une
 première fois.
 
 ## Étapes de branchement
