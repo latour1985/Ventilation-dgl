@@ -1,3 +1,6 @@
+> ⚠️ **REMPLACÉ** par l'EFVP du 9 octobre 2026 (dossier « envoi-avocate-2026-10-09 »). Cette version d'août indiquait
+> Supabase aux États-Unis ; la vérification du 9 octobre a établi que la base est à Montréal (AWS ca-central-1).
+
 # Évaluation des facteurs relatifs à la vie privée (EFVP)
 ## Communication de renseignements personnels hors Québec — hébergement infonuagique
 
