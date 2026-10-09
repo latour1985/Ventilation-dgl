@@ -466,15 +466,19 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
   // Il faut maintenant tenir ½ seconde : le bloc s'entoure d'orange (✋),
   // puis il se déplace. Bouger plus tôt = rien ne bouge ; le clic simple
   // ouvre toujours la fiche. Les cartes « en attente » restent instantanées.
-  const DELAI_DEPLACEMENT_MS = 500;
-  const appuiBlocRef = useRef({ cle: null, t: 0 });
+  // 🖱️ (2026-10-09, demande du propriétaire) : à la SOURIS (ordinateur),
+  // le déplacement est de nouveau immédiat ; le délai ne vaut plus qu'au
+  // TOUCHER (cellulaire, tablette), et passe à 1 seconde.
+  const DELAI_DEPLACEMENT_TACTILE_MS = 1000;
+  const appuiBlocRef = useRef({ cle: null, t: 0, souris: false });
   const minuterieAppuiRef = useRef(null);
   const [blocArme, setBlocArme] = useState(null);
   const gestesDeplacement = (cle) => ({
-    onPointerDown: () => {
-      appuiBlocRef.current = { cle, t: Date.now() };
+    onPointerDown: (ev) => {
+      const souris = ev.pointerType === "mouse";
+      appuiBlocRef.current = { cle, t: Date.now(), souris };
       clearTimeout(minuterieAppuiRef.current);
-      minuterieAppuiRef.current = setTimeout(() => setBlocArme(cle), DELAI_DEPLACEMENT_MS);
+      if (!souris) minuterieAppuiRef.current = setTimeout(() => setBlocArme(cle), DELAI_DEPLACEMENT_TACTILE_MS);
     },
     onPointerUp: () => {
       clearTimeout(minuterieAppuiRef.current);
@@ -482,7 +486,8 @@ export function OngletAgenda({ onDevisJoints = null, bonsEnAttenteParVisite = nu
     },
     onDragEnd: () => setBlocArme(null),
   });
-  const appuiAssezLong = (cle) => appuiBlocRef.current.cle === cle && Date.now() - appuiBlocRef.current.t >= DELAI_DEPLACEMENT_MS;
+  const appuiAssezLong = (cle) =>
+    appuiBlocRef.current.cle === cle && (appuiBlocRef.current.souris || Date.now() - appuiBlocRef.current.t >= DELAI_DEPLACEMENT_TACTILE_MS);
   // 📅 TÂCHES « PLANIFIER MAINTENANT » (2026-10-06) — créées depuis
   // « Traiter le devis » avec date + équipe : placées ici, par le MÊME
   // chemin que la fenêtre d'édition (dépôt non payé = reste en attente).
